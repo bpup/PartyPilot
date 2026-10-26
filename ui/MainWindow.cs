@@ -42,6 +42,7 @@ public sealed class MainWindow : Window
     private readonly TextBox _followCatchup = new();
     private readonly TextBox _followMaxAge = new();
     private readonly TextBox _followLogAge = new();
+    private readonly TextBox _followLeaderName = new();
     private readonly Button _startFollow = new();
     private readonly Button _stopFollow = new();
     private readonly TextBlock _followStatus = new();
@@ -271,6 +272,12 @@ public sealed class MainWindow : Window
             box.TextChanged += (_, _) => UpdateFollowControls();
             panel.Children.Add(box);
         }
+        panel.Children.Add(Label("队长角色名（可选，用于识别离队）", 12, MutedBrush));
+        _followLeaderName.Watermark = "角色名";
+        _followLeaderName.Width = 190;
+        _followLeaderName.HorizontalAlignment = HorizontalAlignment.Left;
+        _followLeaderName.TextChanged += (_, _) => UpdateFollowControls();
+        panel.Children.Add(_followLeaderName);
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
         _startFollow.Content = "开始跟随";
         _startFollow.Click += async (_, _) => await StartFollowAsync();
@@ -362,7 +369,7 @@ public sealed class MainWindow : Window
     private void UpdateFollowControls()
     {
         var valid = LiveFollowPlan.TryCreate(_followStop.Text, _followResume.Text, _followCatchup.Text,
-            _followMaxAge.Text, _followLogAge.Text, out _);
+            _followMaxAge.Text, _followLogAge.Text, _followLeaderName.Text, out _);
         _startFollow.IsEnabled = OperatingSystem.IsWindows() && !_busy && !_followStopping && _follow is null &&
             _bridge is not null && _pairingSettled && _selectedTopology?.Id == "2-split" &&
             _launchedClients.Count == 2 && valid;
@@ -554,7 +561,7 @@ public sealed class MainWindow : Window
     {
         if (_bridge is null || !_pairingSettled || _selectedTopology is null || _follow is not null || _followStopping ||
             !LiveFollowPlan.TryCreate(_followStop.Text, _followResume.Text, _followCatchup.Text,
-                _followMaxAge.Text, _followLogAge.Text, out var plan) || plan is null) return;
+                _followMaxAge.Text, _followLogAge.Text, _followLeaderName.Text, out var plan) || plan is null) return;
         var executable = LiveFollowSession.FindExecutable();
         if (executable is null)
         {
@@ -572,7 +579,7 @@ public sealed class MainWindow : Window
             session.Ended += FollowEnded;
             _follow = session;
             session.StartReading();
-            FollowStatusChanged(session.Status);
+            FollowStatusChanged(session.Current);
         }
         catch (Exception error)
         {
@@ -585,13 +592,19 @@ public sealed class MainWindow : Window
         }
     }
 
-    private void FollowStatusChanged(string status)
+    private void FollowStatusChanged(FollowBridgeFrame frame)
     {
-        _followStatus.Text = status switch
+        _followStatus.Text = (frame.Status, frame.Reason) switch
         {
-            "following" => "已输出跟随方向；游戏内移动效果待验证。",
-            "catching_up" => "已输出追赶方向；游戏内移动效果待验证。",
-            "holding" => "跟随者已停靠，自动方向已停止。",
+            ("following", _) => "已输出跟随方向；游戏内移动效果待验证。",
+            ("catching_up", _) => "已输出追赶方向；游戏内移动效果待验证。",
+            ("holding", _) => "跟随者已停靠，自动方向已停止。",
+            ("waiting", "missing position") => "缺少角色位置样本；请检查两端传感器与进程绑定。自动方向已停止。",
+            ("waiting", "different or unknown instance") => "两端尚无可用的同一区域实例证据；自动方向已停止。",
+            ("waiting", "stale position") => "角色位置样本已过期；自动方向已停止。",
+            ("waiting", "party disbanded") => "日志报告队伍解散，本次跟随已锁定停止；重新组队后再启动。",
+            ("waiting", "local client left party") => "日志报告本地角色离队，本次跟随已锁定停止；重新组队后再启动。",
+            ("waiting", "followed member left party") => "日志报告所跟随角色离队，本次跟随已锁定停止；重新组队后再启动。",
             _ => "等待新鲜位置、区域日志与队伍状态；自动方向已停止。"
         };
     }

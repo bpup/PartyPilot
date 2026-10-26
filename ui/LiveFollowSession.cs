@@ -13,18 +13,18 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     private Task _readFrames = Task.CompletedTask;
     private bool _stopping;
 
-    public string Status { get; private set; }
-    public event Action<string>? StatusChanged;
+    public FollowBridgeFrame Current { get; private set; }
+    public event Action<FollowBridgeFrame>? StatusChanged;
     public event Action<string>? Ended;
 
     private LiveFollowSession(Process process, BridgeSession bridge, int followerPad,
-        Task<string> readError, string initialStatus)
+        Task<string> readError, FollowBridgeFrame initialFrame)
     {
         _process = process;
         _bridge = bridge;
         _followerPad = followerPad;
         _readError = readError;
-        Status = initialStatus;
+        Current = initialFrame;
     }
 
     public static async Task<LiveFollowSession> StartAsync(string executable, PartyTopology topology,
@@ -51,6 +51,11 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             "-catchup", plan.Catchup.ToString("R", CultureInfo.InvariantCulture),
             "-max-age", plan.MaxAge, "-log-max-age", plan.LogMaxAge
         }) start.ArgumentList.Add(argument);
+        if (plan.LeaderName.Length > 0)
+        {
+            start.ArgumentList.Add("-leader-name");
+            start.ArgumentList.Add(plan.LeaderName);
+        }
         var process = Process.Start(start) ?? throw new InvalidOperationException("Live follow did not start.");
         var readError = process.StandardError.ReadToEndAsync();
         try
@@ -59,7 +64,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             if (first is null) throw new InvalidDataException("Live follow exited without a decision frame.");
             var frame = LiveFollowFrame.Parse(first, 2, 3);
             await bridge.SendAutomationAsync(frame);
-            return new LiveFollowSession(process, bridge, 3, readError, frame.Status);
+            return new LiveFollowSession(process, bridge, 3, readError, frame);
         }
         catch (Exception error)
         {
@@ -90,9 +95,9 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 var frame = LiveFollowFrame.Parse(line, 2, _followerPad);
                 if (_stopping) break;
                 await _bridge.SendAutomationAsync(frame);
-                if (Status == frame.Status) continue;
-                Status = frame.Status;
-                Dispatcher.UIThread.Post(() => StatusChanged?.Invoke(frame.Status));
+                if (Current.Status == frame.Status && Current.Reason == frame.Reason) continue;
+                Current = frame;
+                Dispatcher.UIThread.Post(() => StatusChanged?.Invoke(frame));
             }
         }
         catch (Exception error)

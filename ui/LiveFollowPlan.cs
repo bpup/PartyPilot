@@ -4,10 +4,11 @@ using System.Text.RegularExpressions;
 
 namespace PartyPilot.Desktop;
 
-public sealed record LiveFollowPlan(double Stop, double Resume, double Catchup, string MaxAge, string LogMaxAge)
+public sealed record LiveFollowPlan(double Stop, double Resume, double Catchup,
+    string MaxAge, string LogMaxAge, string LeaderName)
 {
     public static bool TryCreate(string? stopText, string? resumeText, string? catchupText,
-        string? maxAgeText, string? logMaxAgeText, out LiveFollowPlan? plan)
+        string? maxAgeText, string? logMaxAgeText, string? leaderNameText, out LiveFollowPlan? plan)
     {
         plan = null;
         if (!double.TryParse(stopText, NumberStyles.Float, CultureInfo.InvariantCulture, out var stop) ||
@@ -15,8 +16,10 @@ public sealed record LiveFollowPlan(double Stop, double Resume, double Catchup, 
             !double.TryParse(catchupText, NumberStyles.Float, CultureInfo.InvariantCulture, out var catchup) ||
             !double.IsFinite(stop) || !double.IsFinite(resume) || !double.IsFinite(catchup) ||
             stop < 0 || resume <= stop || catchup <= resume ||
-            !DurationIsPositive(maxAgeText) || !DurationIsPositive(logMaxAgeText)) return false;
-        plan = new LiveFollowPlan(stop, resume, catchup, maxAgeText!.Trim(), logMaxAgeText!.Trim());
+            !DurationIsPositive(maxAgeText) || !DurationIsPositive(logMaxAgeText) ||
+            (leaderNameText?.Length ?? 0) > 128) return false;
+        plan = new LiveFollowPlan(stop, resume, catchup, maxAgeText!.Trim(), logMaxAgeText!.Trim(),
+            leaderNameText?.Trim() ?? string.Empty);
         return true;
     }
 
@@ -24,14 +27,14 @@ public sealed record LiveFollowPlan(double Stop, double Resume, double Catchup, 
         Regex.IsMatch(value.Trim(), @"^[1-9][0-9]*(ms|s|m|h)$", RegexOptions.CultureInvariant);
 }
 
-public sealed record FollowBridgeFrame(string Command, string Status);
+public sealed record FollowBridgeFrame(string Command, string Status, string? Reason);
 
 public static class LiveFollowFrame
 {
     public static FollowBridgeFrame Waiting(int followerPad)
     {
         if (followerPad is < 1 or > 4) throw new ArgumentOutOfRangeException(nameof(followerPad));
-        return new FollowBridgeFrame(JsonSerializer.Serialize(new { slot = followerPad, state = "waiting" }), "waiting");
+        return new FollowBridgeFrame(JsonSerializer.Serialize(new { slot = followerPad, state = "waiting" }), "waiting", null);
     }
 
     // The current live sensor has exactly one follower per client and no multi-role coordinates.
@@ -50,14 +53,21 @@ public static class LiveFollowFrame
             !follower.TryGetProperty("state", out var stateValue) || stateValue.ValueKind != JsonValueKind.String)
             throw new InvalidDataException("Live follow returned an unexpected role or command shape.");
         var state = stateValue.GetString();
+        string? reason = null;
+        if (follower.TryGetProperty("reason", out var reasonValue))
+        {
+            if (reasonValue.ValueKind != JsonValueKind.String)
+                throw new InvalidDataException("Live follow returned an invalid reason value.");
+            reason = reasonValue.GetString();
+        }
         if (state is "waiting" or "holding")
-            return new FollowBridgeFrame(JsonSerializer.Serialize(new { slot = followerPad, state }), state);
+            return new FollowBridgeFrame(JsonSerializer.Serialize(new { slot = followerPad, state }), state, reason);
         if (state is not ("following" or "catching_up") ||
             !follower.TryGetProperty("x", out var xValue) || !xValue.TryGetDouble(out var x) ||
             !follower.TryGetProperty("y", out var yValue) || !yValue.TryGetDouble(out var y) ||
             !double.IsFinite(x) || !double.IsFinite(y) ||
             Math.Sqrt(x * x + y * y) is < 0.001 or > 1.001)
             throw new InvalidDataException("Live follow returned an invalid movement direction.");
-        return new FollowBridgeFrame(JsonSerializer.Serialize(new { slot = followerPad, state, x, y }), state);
+        return new FollowBridgeFrame(JsonSerializer.Serialize(new { slot = followerPad, state, x, y }), state, reason);
     }
 }
