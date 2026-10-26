@@ -51,11 +51,13 @@ internal static partial class PartyLeaveLogParser
 
 internal sealed class PartyLeaveLogMonitor : IDisposable
 {
-    private sealed class Tail(int client, string path, long offset)
+    private sealed class Tail(int client, string path, long offset, Encoding textEncoding)
     {
         internal int Client { get; } = client;
         internal string Path { get; } = path;
         internal long Offset = offset;
+        internal Encoding TextEncoding = textEncoding;
+        internal bool AwaitingFirstOpen;
         internal List<byte> Pending { get; } = [];
         internal bool DiscardLine;
     }
@@ -71,10 +73,15 @@ internal sealed class PartyLeaveLogMonitor : IDisposable
         if (clients.Count is < 2 or > 3) throw new ArgumentException("Two or three bound clients are required.");
         var paths = clients.Select(client => Path.GetFullPath(Path.Combine(
             Path.GetDirectoryName(client.Executable) ?? string.Empty, "logs", "Client.txt"))).ToArray();
-        if (paths.Distinct(StringComparer.OrdinalIgnoreCase).Count() != paths.Length ||
-            paths.Any(path => !File.Exists(path)))
-            throw new InvalidOperationException("Every client needs a separate, existing logs/Client.txt file.");
-        _tails = paths.Select((path, index) => new Tail(index + 1, path, new FileInfo(path).Length)).ToArray();
+        if (paths.Distinct(StringComparer.OrdinalIgnoreCase).Count() != paths.Length)
+            throw new InvalidOperationException("Every client needs a separate logs/Client.txt path.");
+        _tails = paths.Select((path, index) =>
+        {
+            if (!File.Exists(path))
+                return new Tail(index + 1, path, 0, Encoding.UTF8) { AwaitingFirstOpen = true };
+            using var stream = OpenLog(path);
+            return new Tail(index + 1, path, stream.Length, DetectEncoding(stream));
+        }).ToArray();
         _loop = Task.Run(RunAsync);
     }
 
@@ -98,14 +105,19 @@ internal sealed class PartyLeaveLogMonitor : IDisposable
 
     private void ReadTail(Tail tail)
     {
-        using var stream = new FileStream(tail.Path, FileMode.Open, FileAccess.Read,
-            FileShare.ReadWrite | FileShare.Delete);
+        if (!File.Exists(tail.Path)) return;
+        using var stream = OpenLog(tail.Path);
+        if (tail.AwaitingFirstOpen)
+        {
+            tail.TextEncoding = DetectEncoding(stream);
+            tail.AwaitingFirstOpen = false;
+        }
         if (stream.Length < tail.Offset)
         {
-            tail.Offset = stream.Length;
+            tail.Offset = 0;
             tail.Pending.Clear();
             tail.DiscardLine = false;
-            return;
+            tail.TextEncoding = DetectEncoding(stream);
         }
         if (stream.Length == tail.Offset) return;
         stream.Seek(tail.Offset, SeekOrigin.Begin);
@@ -117,18 +129,51 @@ internal sealed class PartyLeaveLogMonitor : IDisposable
             for (var index = 0; index < read; index++)
             {
                 var value = buffer[index];
-                if (value == (byte)'\n')
+                tail.Pending.Add(value);
+                var newlineLength = tail.TextEncoding.CodePage == 65001 ? 1 : 2;
+                if (EndsWithNewline(tail.Pending, tail.TextEncoding))
                 {
-                    var line = tail.DiscardLine ? null : Encoding.UTF8.GetString(tail.Pending.ToArray()).TrimEnd('\r');
+                    var bytes = tail.Pending.ToArray();
+                    var line = tail.DiscardLine ? null : tail.TextEncoding
+                        .GetString(bytes, 0, bytes.Length - newlineLength).TrimStart('\uFEFF').TrimEnd('\r');
                     tail.Pending.Clear();
                     tail.DiscardLine = false;
                     var signal = PartyLeaveLogParser.Parse(line, tail.Client);
                     if (signal is not null) Signal?.Invoke(signal);
                 }
-                else if (!tail.DiscardLine && tail.Pending.Count < 65536) tail.Pending.Add(value);
-                else { tail.Pending.Clear(); tail.DiscardLine = true; }
+                else if (tail.Pending.Count > 65536 || tail.DiscardLine)
+                {
+                    tail.DiscardLine = true;
+                    if (tail.Pending.Count > newlineLength - 1)
+                        tail.Pending.RemoveRange(0, tail.Pending.Count - (newlineLength - 1));
+                }
             }
         }
+    }
+
+    private static FileStream OpenLog(string path) => new(path, FileMode.Open, FileAccess.Read,
+        FileShare.ReadWrite | FileShare.Delete);
+
+    private static Encoding DetectEncoding(FileStream stream)
+    {
+        Span<byte> bom = stackalloc byte[4];
+        stream.Position = 0;
+        var count = stream.Read(bom);
+        stream.Position = 0;
+        if (count >= 2 && bom[0] == 0xFF && bom[1] == 0xFE) return Encoding.Unicode;
+        if (count >= 2 && bom[0] == 0xFE && bom[1] == 0xFF) return Encoding.BigEndianUnicode;
+        return Encoding.UTF8;
+    }
+
+    private static bool EndsWithNewline(List<byte> bytes, Encoding encoding)
+    {
+        var count = bytes.Count;
+        return encoding.CodePage switch
+        {
+            1200 => count >= 2 && bytes[count - 2] == 0x0A && bytes[count - 1] == 0,
+            1201 => count >= 2 && bytes[count - 2] == 0 && bytes[count - 1] == 0x0A,
+            _ => count >= 1 && bytes[count - 1] == 0x0A
+        };
     }
 
     public void Dispose()

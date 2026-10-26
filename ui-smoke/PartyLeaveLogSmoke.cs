@@ -1,4 +1,5 @@
 using PartyPilot.Desktop;
+using System.Text;
 
 internal static class PartyLeaveLogSmoke
 {
@@ -27,7 +28,8 @@ internal static class PartyLeaveLogSmoke
             foreach (var path in paths)
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                File.WriteAllText(path, "Historical has left the party.\n");
+                File.WriteAllText(path, "Historical has left the party.\n",
+                    path == paths[0] ? Encoding.Unicode : Encoding.UTF8);
             }
             var clients = paths.Select((path, index) => new LaunchedClient(index + 1, index + 1,
                 Path.Combine(Directory.GetParent(Path.GetDirectoryName(path)!)!.FullName, "PathOfExile.exe"))).ToArray();
@@ -45,7 +47,42 @@ internal static class PartyLeaveLogSmoke
             lock (observed) if (observed.Count != 1 ||
                 observed[0] != new PartyLeaveSignal(PartyLeaveKind.MemberLeft, "Fresh", 2))
                 throw new Exception("Fresh completed party line was not attributed to Client 2.");
+            File.AppendAllText(paths[0], "Wide has left the party.\n", Encoding.Unicode);
+            await WaitForCountAsync(observed, 2);
+            lock (observed) if (observed[1] != new PartyLeaveSignal(PartyLeaveKind.MemberLeft, "Wide", 1))
+                throw new Exception("A UTF-16 party log line was not decoded for Client 1.");
+            File.WriteAllText(paths[1], "Rotated has left the party.\n", Encoding.UTF8);
+            await WaitForCountAsync(observed, 3);
+            lock (observed) if (observed[2] != new PartyLeaveSignal(PartyLeaveKind.MemberLeft, "Rotated", 2))
+                throw new Exception("A truncated replacement log was not read from its beginning.");
+
+            var delayedGame = Path.Combine(root, "delayed", "PathOfExile.exe");
+            var otherGame = Path.Combine(root, "other", "PathOfExile.exe");
+            var delayedClients = new[]
+            {
+                new LaunchedClient(3, 3, delayedGame),
+                new LaunchedClient(4, 4, otherGame)
+            };
+            using var delayed = new PartyLeaveLogMonitor(delayedClients);
+            var created = new TaskCompletionSource<PartyLeaveSignal>(TaskCreationOptions.RunContinuationsAsynchronously);
+            delayed.Signal += signal => created.TrySetResult(signal);
+            var delayedPath = Path.Combine(root, "delayed", "logs", "Client.txt");
+            Directory.CreateDirectory(Path.GetDirectoryName(delayedPath)!);
+            File.WriteAllText(delayedPath, "Created has left the party.\n");
+            if (await created.Task.WaitAsync(TimeSpan.FromSeconds(3)) !=
+                new PartyLeaveSignal(PartyLeaveKind.MemberLeft, "Created", 1))
+                throw new Exception("A log created after monitoring began was not read.");
         }
         finally { Directory.Delete(root, recursive: true); }
+    }
+
+    private static async Task WaitForCountAsync(List<PartyLeaveSignal> observed, int expected)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        while (true)
+        {
+            lock (observed) if (observed.Count >= expected) return;
+            await Task.Delay(25, timeout.Token);
+        }
     }
 }
