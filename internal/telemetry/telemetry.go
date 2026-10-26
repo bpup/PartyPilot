@@ -139,16 +139,19 @@ type VisiblePlayer struct {
 // RadarEntity is a path-and-position observation; category does not assert
 // hostility, loot value, quest state, allocation, or interaction availability.
 type RadarEntity struct {
-	EntityID uint64  `json:"EntityId"`
-	Category string  `json:"Category"`
-	Path     string  `json:"Path"`
-	Label    *string `json:"Label,omitempty"`
-	ItemPath *string `json:"ItemPath,omitempty"`
-	Stack    *int    `json:"Stack,omitempty"`
-	Rarity   *string `json:"Rarity,omitempty"`
-	X        float64 `json:"X"`
-	Y        float64 `json:"Y"`
-	Z        float64 `json:"Z"`
+	EntityID                uint64  `json:"EntityId"`
+	Category                string  `json:"Category"`
+	Path                    string  `json:"Path"`
+	Label                   *string `json:"Label,omitempty"`
+	ItemPath                *string `json:"ItemPath,omitempty"`
+	Stack                   *int    `json:"Stack,omitempty"`
+	Rarity                  *string `json:"Rarity,omitempty"`
+	MonsterComponentPresent *bool   `json:"MonsterComponentPresent,omitempty"`
+	MonsterLifeCurrent      *int    `json:"MonsterLifeCurrent,omitempty"`
+	MonsterLifeMaximum      *int    `json:"MonsterLifeMaximum,omitempty"`
+	X                       float64 `json:"X"`
+	Y                       float64 `json:"Y"`
+	Z                       float64 `json:"Z"`
 }
 
 // LocalSlotCandidates are read-only hints from an unverified memory anchor.
@@ -420,7 +423,8 @@ func validRadar(entities []RadarEntity, status string, seen *time.Time) bool {
 		if entity.Category == "player" {
 			if !strings.HasPrefix(entity.Path, "Metadata/Characters/") || entity.Label == nil ||
 				strings.TrimSpace(*entity.Label) == "" || len(*entity.Label) > 64 || entity.ItemPath != nil ||
-				entity.Stack != nil || entity.Rarity != nil {
+				entity.Stack != nil || entity.Rarity != nil || entity.MonsterComponentPresent != nil ||
+				entity.MonsterLifeCurrent != nil || entity.MonsterLifeMaximum != nil {
 				return false
 			}
 		} else if entity.Category == "loot" {
@@ -435,7 +439,22 @@ func validRadar(entities []RadarEntity, status string, seen *time.Time) bool {
 			if entity.Rarity != nil && !validLootRarity(*entity.Rarity) {
 				return false
 			}
-		} else if entity.Label != nil || entity.ItemPath != nil || entity.Stack != nil || entity.Rarity != nil {
+			if entity.MonsterComponentPresent != nil || entity.MonsterLifeCurrent != nil || entity.MonsterLifeMaximum != nil {
+				return false
+			}
+		} else if entity.Category == "monster" {
+			if entity.Label != nil || entity.ItemPath != nil || entity.Stack != nil || entity.Rarity != nil ||
+				entity.MonsterComponentPresent != nil && !*entity.MonsterComponentPresent ||
+				(entity.MonsterLifeCurrent != nil) != (entity.MonsterLifeMaximum != nil) {
+				return false
+			}
+			if entity.MonsterLifeCurrent != nil && (entity.MonsterComponentPresent == nil ||
+				*entity.MonsterLifeCurrent < 0 || *entity.MonsterLifeMaximum <= 0 ||
+				*entity.MonsterLifeCurrent > *entity.MonsterLifeMaximum) {
+				return false
+			}
+		} else if entity.Label != nil || entity.ItemPath != nil || entity.Stack != nil || entity.Rarity != nil ||
+			entity.MonsterComponentPresent != nil || entity.MonsterLifeCurrent != nil || entity.MonsterLifeMaximum != nil {
 			return false
 		}
 		ids[entity.EntityID] = true

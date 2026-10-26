@@ -640,6 +640,30 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             }
             var category = lootName != null ? "loot" : isPlayer ? "player" : RadarClassifier.Category(path);
             if (category == null) continue;
+            bool? monsterComponentPresent = null;
+            int? monsterLifeCurrent = null;
+            int? monsterLifeMaximum = null;
+            if (category == "monster")
+            {
+                try
+                {
+                    if (entity.GetComponent<Monster>() != null)
+                    {
+                        monsterComponentPresent = true;
+                        var life = entity.GetComponent<Life>();
+                        var values = RadarMonsterVitals.Read(life?.CurHP, life?.MaxHP);
+                        if (values.HasValue)
+                        {
+                            monsterLifeCurrent = values.Value.Current;
+                            monsterLifeMaximum = values.Value.Maximum;
+                        }
+                    }
+                }
+                catch
+                {
+                    // Keep the path-only marker when a component cannot be read.
+                }
+            }
             var pos = entity.Pos;
             if (!float.IsFinite(pos.X) || !float.IsFinite(pos.Y) || !float.IsFinite(pos.Z)) continue;
             var dx = (double)pos.X - localX;
@@ -653,6 +677,9 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 ItemPath = itemPath,
                 Stack = lootStack,
                 Rarity = lootRarity,
+                MonsterComponentPresent = monsterComponentPresent,
+                MonsterLifeCurrent = monsterLifeCurrent,
+                MonsterLifeMaximum = monsterLifeMaximum,
                 X = pos.X,
                 Y = pos.Y,
                 Z = pos.Z

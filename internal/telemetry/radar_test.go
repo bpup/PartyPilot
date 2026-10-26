@@ -76,6 +76,29 @@ func TestRadarPlayerRequiresObservedNameAndCharacterPath(t *testing.T) {
 	}
 }
 
+func TestRadarMonsterLifeRemainsBoundedEvidence(t *testing.T) {
+	base := `{"ProcessId":123,"SeenUtc":"2026-10-26T00:00:00Z","X":1,"Y":2,"Z":3,` +
+		`"RadarSeenUtc":"2026-10-26T00:00:00Z","RadarStatus":"ok",` +
+		`"RadarEntities":[{"EntityId":7,"Category":"monster","Path":"Metadata/Monsters/Beast",` +
+		`"MonsterComponentPresent":true,"MonsterLifeCurrent":0,"MonsterLifeMaximum":100,` +
+		`"X":4,"Y":5,"Z":6}]}`
+	if sample, err := Decode([]byte(base)); err != nil || sample.RadarEntities[0].MonsterLifeCurrent == nil ||
+		*sample.RadarEntities[0].MonsterLifeCurrent != 0 {
+		t.Fatalf("zero monster HP observation must not be discarded or treated as death: %+v, %v", sample, err)
+	}
+	for _, changed := range []string{
+		strings.Replace(base, `"MonsterLifeMaximum":100`, `"MonsterLifeMaximum":0`, 1),
+		strings.Replace(base, `"MonsterLifeCurrent":0`, `"MonsterLifeCurrent":101`, 1),
+		strings.Replace(base, `"MonsterComponentPresent":true,`, ``, 1),
+		strings.Replace(base, `"MonsterLifeMaximum":100,`, ``, 1),
+		strings.Replace(base, `"Category":"monster"`, `"Category":"chest"`, 1),
+	} {
+		if _, err := Decode([]byte(changed)); err == nil {
+			t.Fatalf("invalid monster life evidence accepted: %s", changed)
+		}
+	}
+}
+
 func TestRadarLootRequiresResolvedWorldItem(t *testing.T) {
 	base := `{"ProcessId":123,"SeenUtc":"2026-10-26T00:00:00Z","X":1,"Y":2,"Z":3,` +
 		`"RadarSeenUtc":"2026-10-26T00:00:00Z","RadarStatus":"ok",` +

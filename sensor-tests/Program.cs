@@ -399,6 +399,12 @@ Require(RadarLootMetadata.Stack(1) == 1 && RadarLootMetadata.Stack(999_999) == 9
     RadarLootMetadata.Rarity("Unique") == "unique" &&
     RadarLootMetadata.Rarity("Currency") == null && RadarLootMetadata.Rarity(null) == null,
     "Loot stack or rarity admitted an unsupported value.");
+Require(RadarMonsterVitals.Read(0, 100) == (0, 100) &&
+    RadarMonsterVitals.Read(75, 100) == (75, 100) &&
+    RadarMonsterVitals.Read(null, 100) == null &&
+    RadarMonsterVitals.Read(101, 100) == null &&
+    RadarMonsterVitals.Read(1, 0) == null,
+    "Monster life evidence must be complete and bounded.");
 Console.WriteLine("Sensor diagnostics passed.");
 UiItemCardTreeScannerTests.Run();
 UiItemCardVtableLocatorTests.Run();
