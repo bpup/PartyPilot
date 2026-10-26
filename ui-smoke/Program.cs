@@ -7,6 +7,7 @@ using Avalonia.Threading;
 using PartyPilot.Desktop;
 
 PartyRosterCounterSmoke.Run();
+FollowTargetChoicesSmoke.Run();
 AccountProfileSmoke.Run();
 LoginCalibrationSmoke.Run();
 await AutoLoginFillSmoke.RunAsync();
@@ -482,6 +483,11 @@ var variant = window.GetLogicalDescendants().OfType<ComboBox>()
     .Single(item => item.PlaceholderText == "选择角色分布");
 variant.SelectedIndex = 2;
 Dispatcher.UIThread.RunJobs();
+var p2Target = window.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(item => item.Name == "follow-target-2");
+if (!p2Target.IsEffectivelyVisible ||
+    !p2Target.ItemsSource!.Cast<string>().SequenceEqual(["Current MAIN", "P1", "P3"]))
+    throw new Exception("Three independent clients did not expose P2's active follow targets.");
 if (pathFields.Any(field => !field.IsEffectivelyVisible))
 {
     throw new Exception("The three-single-client 3P option did not request three game windows.");
@@ -502,6 +508,8 @@ clientCount.SelectedIndex = 1;
 Dispatcher.UIThread.RunJobs();
 variant.SelectedIndex = 0;
 Dispatcher.UIThread.RunJobs();
+if (p2Target.IsEffectivelyVisible)
+    throw new Exception("Couch layout exposed unsupported live follow targets.");
 if (prepare.IsEnabled) throw new Exception("Bridge preparation ignored missing device and game paths.");
 deviceInstance.Text = @"HID\VID_1234&PID_5678\DEVICE";
 pathFields[0].Text = "C:/GameA.exe";

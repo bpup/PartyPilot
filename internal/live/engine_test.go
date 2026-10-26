@@ -133,6 +133,41 @@ func TestManualFocusChangesLiveMainAndFormerLeaderFollows(t *testing.T) {
 	}
 }
 
+func TestLiveFollowUsesConfiguredTargetAndCurrentMainFallback(t *testing.T) {
+	now := time.Now().UTC()
+	config := follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}
+	engine, err := New(map[int]int{1: 101, 2: 202, 3: 303}, 1, config, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for slot, pid := range map[int]int{1: 101, 2: 202, 3: 303} {
+		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
+			ObservedAt: now, Origin: "live"})
+		engine.ObserveSample(telemetry.Sample{ProcessID: pid, SeenUTC: now.Add(time.Millisecond),
+			X: map[int]float64{1: 0, 2: 20, 3: 30}[slot]})
+	}
+	at := now.Add(time.Millisecond)
+	if command := engine.Step(at)[2]; command.X >= 0 {
+		t.Fatalf("default MAIN route: %+v", command)
+	}
+	if err := engine.SetFollowTarget(2, 3); err != nil {
+		t.Fatal(err)
+	}
+	if command := engine.Step(at)[2]; command.X <= 0 {
+		t.Fatalf("selected P3 route: %+v", command)
+	}
+	if err := engine.SetFollowTarget(2, 2); err != nil {
+		t.Fatal(err)
+	}
+	engine.SetLastFocusedLeads(true)
+	if err := engine.ObserveManualFocus(3); err != nil {
+		t.Fatal(err)
+	}
+	if command := engine.Step(at)[2]; command.X <= 0 {
+		t.Fatalf("self choice did not follow new MAIN P3: %+v", command)
+	}
+}
+
 func TestNamedDepartureTracksCurrentManualMain(t *testing.T) {
 	config := follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}
 	engine, err := New(map[int]int{1: 101, 2: 202}, 1, config, time.Minute)

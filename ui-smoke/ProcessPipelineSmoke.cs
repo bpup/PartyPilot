@@ -95,6 +95,7 @@ internal static class ProcessPipelineSmoke
             File.WriteAllText(tripleFollowExe, "#!/usr/bin/env python3\nimport sys,json,time\n" +
                 "if '-roster' not in sys.argv or sys.argv[sys.argv.index('-roster')+1] != '1:101,2:102,3:103': sys.exit(2)\n" +
                 "if '-last-focused-leads' not in sys.argv: sys.exit(2)\n" +
+                "if '-follow-target' not in sys.argv or sys.argv[sys.argv.index('-follow-target')+1] != '2=3': sys.exit(2)\n" +
                 "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0},\"3\":{\"state\":\"following\",\"x\":0,\"y\":1}}}', flush=True)\n" +
                 "focus=json.loads(sys.stdin.readline())\n" +
                 "if focus != {'type':'manual_focus','slot':3}: sys.exit(2)\n" +
@@ -228,7 +229,8 @@ internal static class ProcessPipelineSmoke
             {
                 tripleBridge.StartReading();
                 await using (var tripleFollow = await LiveFollowSession.StartAsync(tripleFollowExe,
-                    triple, tripleClients, tripleBridge, plan))
+                    triple, tripleClients, tripleBridge, plan,
+                    followTargets: new Dictionary<int, int> { [2] = 3 }))
                 {
                     tripleFollow.StartReading();
                     var tripleDeadline = DateTime.UtcNow.AddSeconds(5);

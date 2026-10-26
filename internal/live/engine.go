@@ -58,6 +58,10 @@ func (e *Engine) SetLastFocusedLeads(enabled bool) {
 	e.coordinator.SetLastFocusedLeads(enabled)
 }
 
+func (e *Engine) SetFollowTarget(slot, target int) error {
+	return e.coordinator.SetFollowTarget(slot, target)
+}
+
 func (e *Engine) Leader() int { return e.leader }
 
 func (e *Engine) ObserveManualFocus(slot int) error {

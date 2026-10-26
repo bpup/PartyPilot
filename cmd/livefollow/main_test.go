@@ -53,6 +53,23 @@ func TestMemberNamesRequireExplicitKnownSlots(t *testing.T) {
 	}
 }
 
+func TestFollowTargetArguments(t *testing.T) {
+	var targets followTargets
+	for _, value := range []string{"2=3", "3=0", "1=7"} {
+		if err := targets.Set(value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if targets[2] != 3 || targets[3] != 0 || targets[1] != 7 {
+		t.Fatalf("target choices changed: %+v", targets)
+	}
+	for _, value := range []string{"2=1", "7=1", "1", "1=bad", "1=2147483648"} {
+		if err := targets.Set(value); err == nil {
+			t.Fatalf("accepted ambiguous or invalid target %q", value)
+		}
+	}
+}
+
 func TestMenuInputRequiresBoundPlayerAndOpenStream(t *testing.T) {
 	session, err := live.NewFlaskSession(map[int]int{1: 101, 2: 202}, time.Second)
 	if err != nil {

@@ -28,6 +28,26 @@ type sources map[int]string
 
 type memberNames map[int]string
 
+type followTargets map[int]int
+
+func (targets *followTargets) String() string { return fmt.Sprint(map[int]int(*targets)) }
+func (targets *followTargets) Set(value string) error {
+	slotText, targetText, ok := strings.Cut(value, "=")
+	slot, slotErr := strconv.Atoi(slotText)
+	targetValue, targetErr := strconv.ParseInt(targetText, 10, 32)
+	if !ok || slotErr != nil || targetErr != nil || slot < 1 || slot > 6 {
+		return errors.New("follow target must be SLOT=TARGET, with 0 for Current MAIN")
+	}
+	if *targets == nil {
+		*targets = make(followTargets)
+	}
+	if _, exists := (*targets)[slot]; exists {
+		return fmt.Errorf("duplicate follow target for slot %d", slot)
+	}
+	(*targets)[slot] = int(targetValue)
+	return nil
+}
+
 func (names *memberNames) String() string { return fmt.Sprint(map[int]string(*names)) }
 func (names *memberNames) Set(value string) error {
 	slotText, name, ok := strings.Cut(value, "=")
@@ -284,9 +304,11 @@ func main() {
 	address := flag.String("listen", "127.0.0.1:47617", "loopback sensor address")
 	var logs, exes sources
 	var names memberNames
+	var targets followTargets
 	flag.Var(&logs, "log", "SLOT=Client.txt path")
 	flag.Var(&exes, "exe", "SLOT=game executable path")
 	flag.Var(&names, "member-name", "SLOT=confirmed character name for departure detection")
+	flag.Var(&targets, "follow-target", "SLOT=TARGET; 0 means Current MAIN")
 	flag.Parse()
 	roster, err := parseRoster(*rosterText)
 	if err != nil {
@@ -316,6 +338,12 @@ func main() {
 		}
 	}
 	engine.SetLastFocusedLeads(*lastFocusedLeads)
+	for slot, target := range targets {
+		if err := engine.SetFollowTarget(slot, target); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	}
 	var flaskSession *live.FlaskSession
 	var menuCommands <-chan menuInput
 	if *autoFlask {

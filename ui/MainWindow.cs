@@ -80,6 +80,8 @@ public sealed class MainWindow : Window
     private readonly TextBox _followMaxAge = new();
     private readonly TextBox _followLogAge = new();
     private readonly TextBox _followLeaderName = new();
+    private readonly ComboBox[] _followTargets = new ComboBox[6];
+    private readonly StackPanel[] _followTargetRows = new StackPanel[6];
     private readonly Button _startFollow = new();
     private readonly Button _stopFollow = new();
     private readonly TextBlock _followStatus = new();
@@ -596,6 +598,18 @@ public sealed class MainWindow : Window
         _followLeaderName.HorizontalAlignment = HorizontalAlignment.Left;
         _followLeaderName.TextChanged += (_, _) => UpdateFollowControls();
         panel.Children.Add(_followLeaderName);
+        for (var index = 0; index < _followTargets.Length; index++)
+        {
+            var row = new StackPanel { Spacing = 4, IsVisible = false };
+            row.Children.Add(Label($"P{index + 1} 跟随目标", 12, MutedBrush));
+            var choice = new ComboBox { Name = $"follow-target-{index + 1}", Width = 190,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                ItemsSource = new[] { FollowTargetChoices.CurrentMain }, SelectedIndex = 0 };
+            _followTargets[index] = choice;
+            _followTargetRows[index] = row;
+            row.Children.Add(choice);
+            panel.Children.Add(row);
+        }
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
         _startFollow.Content = "开始跟随";
         _startFollow.Click += async (_, _) => await StartFollowAsync();
@@ -811,6 +825,7 @@ public sealed class MainWindow : Window
         _check.IsEnabled = !_busy && !_pairingHasStarted && _bridge is null && count > 0;
         _launch.IsEnabled = _check.IsEnabled;
         _attach.IsEnabled = _check.IsEnabled;
+        UpdateFollowTargetChoices();
         UpdateRosterControls();
         UpdateAutoPartyControls();
         UpdateBridgeControls();
@@ -818,6 +833,22 @@ public sealed class MainWindow : Window
         UpdatePrivacyControls();
         UpdateFpsControls();
         UpdateResourceControls();
+    }
+
+    private void UpdateFollowTargetChoices()
+    {
+        var supported = _selectedTopology?.Id is "2-split" or "3-three-singles";
+        for (var index = 0; index < _followTargets.Length; index++)
+        {
+            if (_followTargets[index] is null) continue;
+            var player = index + 1;
+            var options = supported ? FollowTargetChoices.For(_selectedTopology!, player) : [];
+            var previous = _followTargets[index].SelectedItem as string;
+            _followTargetRows[index].IsVisible = options.Length > 0;
+            _followTargets[index].ItemsSource = options;
+            _followTargets[index].SelectedItem = options.Contains(previous)
+                ? previous : options.FirstOrDefault();
+        }
     }
 
     private void ClearLaunchedClients()
@@ -1508,6 +1539,8 @@ public sealed class MainWindow : Window
 
     private void UpdateFollowControls()
     {
+        foreach (var choice in _followTargets)
+            if (choice is not null) choice.IsEnabled = _follow is null && !_busy;
         var valid = LiveFollowPlan.TryCreate(_followStop.Text, _followResume.Text, _followCatchup.Text,
             _followMaxAge.Text, _followLogAge.Text, _followLeaderName.Text, out _);
         _startFollow.IsEnabled = OperatingSystem.IsWindows() && !_busy && !_followStopping && _follow is null &&
@@ -1806,6 +1839,14 @@ public sealed class MainWindow : Window
         _followStatus.Text = "正在核对进程、日志与传感器输入…";
         try
         {
+            var followTargets = new Dictionary<int, int>();
+            foreach (var slot in _selectedTopology.Slots)
+            {
+                if (!FollowTargetChoices.TryRead(_selectedTopology, slot.PartyPlayer,
+                        _followTargets[slot.PartyPlayer - 1].SelectedItem as string, out var target))
+                    throw new InvalidOperationException($"P{slot.PartyPlayer} 的跟随目标不属于当前布局。");
+                if (target != 0) followTargets[slot.PartyPlayer] = target;
+            }
             IReadOnlyDictionary<int, string>? memberNames = null;
             if (AutoPartyInviteNames.TryCreate(_selectedTopology,
                     _inviteNames.Take(_selectedTopology.PlayerCount).Select(box => box.Text).ToArray(),
@@ -1818,7 +1859,7 @@ public sealed class MainWindow : Window
                 memberNames = confirmed;
             }
             var session = await LiveFollowSession.StartAsync(executable, _selectedTopology,
-                _launchedClients, _bridge, plan, memberNames);
+                _launchedClients, _bridge, plan, memberNames, followTargets);
             session.StatusChanged += FollowStatusChanged;
             session.Ended += FollowEnded;
             _follow = session;
