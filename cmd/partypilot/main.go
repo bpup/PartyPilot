@@ -15,11 +15,24 @@ import (
 )
 
 type frame struct {
-	Now      time.Time        `json:"now"`
-	Leader   follow.Position  `json:"leader"`
-	Follower follow.Position  `json:"follower"`
-	Reset    bool             `json:"reset,omitempty"`
-	Terrain  *navigation.Grid `json:"terrain,omitempty"`
+	Now           time.Time        `json:"now"`
+	Leader        follow.Position  `json:"leader"`
+	Follower      follow.Position  `json:"follower"`
+	Reset         bool             `json:"reset,omitempty"`
+	Terrain       *navigation.Grid `json:"terrain,omitempty"`
+	PackedTerrain *packedTerrain   `json:"packed_terrain,omitempty"`
+}
+
+// Packed terrain is accepted only in controlled replay. JSON byte slices use
+// base64 encoding; the caller must supply independently checked coordinates.
+type packedTerrain struct {
+	Area        string  `json:"area"`
+	OriginX     float64 `json:"origin_x"`
+	OriginY     float64 `json:"origin_y"`
+	CellSize    float64 `json:"cell_size"`
+	BytesPerRow int     `json:"bytes_per_row"`
+	Rows        int     `json:"rows"`
+	Data        []byte  `json:"data"`
 }
 
 func replay(reader io.Reader, writer io.Writer, config follow.Config) error {
@@ -39,6 +52,18 @@ func replay(reader io.Reader, writer io.Writer, config follow.Config) error {
 		}
 		if item.Now.IsZero() {
 			return fmt.Errorf("line %d: missing now", line)
+		}
+		if item.PackedTerrain != nil {
+			if item.Terrain != nil {
+				return fmt.Errorf("line %d: two terrain sources", line)
+			}
+			p := item.PackedTerrain
+			var err error
+			item.Terrain, err = navigation.GridFromPacked(p.Area, p.OriginX, p.OriginY,
+				p.CellSize, p.Data, p.BytesPerRow, p.Rows)
+			if err != nil {
+				return fmt.Errorf("line %d: %w", line, err)
+			}
 		}
 		if item.Reset {
 			engine.Reset()

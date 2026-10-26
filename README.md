@@ -160,4 +160,4 @@ PartyPilot-LiveFollow.exe -roster 1:1234,2:5678 -leader 1 -leader-name Leader -m
 
 状态：**implementation-aligned / integration-pending**。
 
-地形绕行仍缺游戏数据映射。传感器新增默认关闭的 `DiagnoseTerrain`，仅输出原始 `RawPathfindingData` 的有界统计供实测核对，不用于移动决策；证据与待验证步骤见[地形与绕行取证](TERRAIN_RESEARCH.md)。
+地形绕行仍缺游戏数据映射。传感器默认关闭的 `DiagnoseTerrain` 仅输出原始 `RawPathfindingData` 的有界统计供实测核对，不用于移动决策。受控回放现支持目标版每字节双格的 `packed_terrain` 输入，在调用者明确提供实例与坐标映射后可测试绕障决策；此格式尚未接入实时传感器。证据与待验证步骤见[地形与绕行取证](TERRAIN_RESEARCH.md)。
