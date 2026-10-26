@@ -353,7 +353,7 @@ public sealed class MainWindow : Window
 
     private Border BuildAutoPartyStep()
     {
-        var panel = Step("3A", "AUTO PARTY · 组队邀请", "按角色填写游戏中的准确名称。自动恢复依次向其他客户端发出全新邀请，按目标版菜单顺序接受，并检查 Current Party 画面候选人数。Windows 游戏内效果待验证。");
+        var panel = Step("3A", "AUTO PARTY · 组队邀请", "按角色填写游戏中的准确名称。自动恢复向其他客户端发出全新邀请，按目标版菜单顺序接受，并检查 Current Party 画面候选人数。Windows 游戏内效果待验证。");
         for (var player = 1; player <= 6; player++)
         {
             var row = new StackPanel { Spacing = 4 };

@@ -220,6 +220,15 @@ internal sealed class BridgeRouter
 
     public bool PulseAutoParty(int slot, ushort buttons, int holdMilliseconds, DateTime nowUtc)
     {
+        if (_autoPartyActive && nowUtc.Kind == DateTimeKind.Utc &&
+            _autoPartyButtons != 0 && nowUtc >= _autoPartyButtonsUntilUtc)
+        {
+            var releasedSlot = _autoPartySlot;
+            _autoPartySlot = 0;
+            _autoPartyButtons = 0;
+            _autoPartyButtonsUntilUtc = default;
+            Render(releasedSlot, _routes[releasedSlot]);
+        }
         if (!_autoPartyActive || !_routes.ContainsKey(slot) ||
             nowUtc.Kind != DateTimeKind.Utc || nowUtc >= _autoPartyExpiresUtc ||
             !BridgeProtocol.ValidAutoPartyPulse(buttons, holdMilliseconds) ||

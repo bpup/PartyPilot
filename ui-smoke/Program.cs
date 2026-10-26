@@ -10,6 +10,7 @@ PartyRosterCounterSmoke.Run();
 AutoPartyCoordinatorSmoke.Run();
 AutoPartyInviteSmoke.Run();
 AutoPartyRecoverySmoke.Run();
+await AutoPartyRecoverySchedulerSmoke.RunAsync();
 await PartyLeaveLogSmoke.RunAsync();
 
 if (args.Contains("--client3-plan-only"))

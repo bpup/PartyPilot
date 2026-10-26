@@ -273,9 +273,12 @@ if (!partyRouter.PulseAutoParty(2, 0x0010, 100, now.AddMilliseconds(3)) ||
 if (!partyRouter.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", now.AddMilliseconds(5)) ||
     partyPad2.Report.Buttons != 0x0010 || partyPad2.X != 0)
     throw new Exception("Follow input interrupted Auto Party ownership.");
-partyRouter.Tick(now.AddMilliseconds(104));
-if (partyPad2.Report != default ||
-    !partyRouter.PulseAutoParty(2, 0x1000, 80, now.AddMilliseconds(105)) ||
+if (!partyRouter.PulseAutoParty(1, 0x1000, 80, now.AddMilliseconds(104)) ||
+    partyPad2.Report != default || partyPad1.Report.Buttons != 0x1000)
+    throw new Exception("Auto Party did not hand off an expired pulse between client pads.");
+partyRouter.Tick(now.AddMilliseconds(185));
+if (partyPad1.Report != default ||
+    !partyRouter.PulseAutoParty(2, 0x1000, 80, now.AddMilliseconds(186)) ||
     partyPad2.Report.Buttons != 0x1000)
     throw new Exception("Auto Party did not release before the next menu pulse.");
 partyRouter.EndAutoParty();

@@ -17,6 +17,7 @@ internal sealed class AutoPartyRecoverySession
     private readonly IReadOnlyList<LaunchedClient> _clients;
     private readonly AutoPartyInviteNames _names;
     private readonly Action<string> _status;
+    private readonly SemaphoreSlim _focusGate = new(1, 1);
     internal int FailedClient { get; private set; }
 
     internal AutoPartyRecoverySession(BridgeSession bridge, PartyTopology topology,
@@ -42,22 +43,11 @@ internal sealed class AutoPartyRecoverySession
         {
             await _bridge.BeginAutoPartyAsync(token);
             began = true;
-            var stableClients = requestedTargetClient == 0
-                ? new HashSet<int> { 1 }
-                : Enumerable.Range(1, _topology.ClientCount).Where(client => client != requestedTargetClient).ToHashSet();
-            IEnumerable<int> targets = requestedTargetClient == 0
-                ? Enumerable.Range(2, _topology.ClientCount - 1)
-                : [requestedTargetClient];
-            foreach (var targetClient in targets)
-            {
-                if (!await RecoverClientAsync(targetClient, stableClients, token))
-                {
-                    FailedClient = targetClient;
-                    return false;
-                }
-                stableClients.Add(targetClient);
-            }
-            return true;
+            var result = await AutoPartyRecoveryScheduler.RunAsync(_topology.ClientCount,
+                requestedTargetClient, (client, stable, cancellation) =>
+                    RecoverClientAsync(client, stable, cancellation), token);
+            FailedClient = result.FailedClient;
+            return result.Complete;
         }
         finally
         {
@@ -72,7 +62,7 @@ internal sealed class AutoPartyRecoverySession
         }
     }
 
-    private async Task<bool> RecoverClientAsync(int targetClient, HashSet<int> stableClients, CancellationToken token)
+    private async Task<bool> RecoverClientAsync(int targetClient, IReadOnlySet<int> stableClients, CancellationToken token)
     {
         var coordinator = new AutoPartyCoordinator();
         var receiver = _clients[targetClient - 1];
@@ -92,7 +82,15 @@ internal sealed class AutoPartyRecoverySession
                 throw new InvalidOperationException("An exact inviter or receiver window is unavailable.");
             var attempt = coordinator.BeginAttempt(inviterClient, DateTimeOffset.UtcNow);
             _status($"客户端 {targetClient}：第 {attempt.Attempt}/10 次全新邀请。");
-            var sent = await PoeChatInviteService.SendInviteAsync(inviter, _names.ForClient(targetClient), token);
+            (bool Ok, string Detail) sent;
+            await _focusGate.WaitAsync(token);
+            try
+            {
+                sent = await PoeChatInviteService.SendInviteAsync(inviter, _names.ForClient(targetClient), token);
+                if (sent.Ok)
+                    await PulseUnderFocusAsync(inviter, inviterSlot, 0x2000, 60, 140, token);
+            }
+            finally { _focusGate.Release(); }
             if (!sent.Ok)
             {
                 _status($"客户端 {targetClient} 邀请未发送：{sent.Detail}");
@@ -100,10 +98,7 @@ internal sealed class AutoPartyRecoverySession
                 await Task.Delay(coordinator.CurrentRetryDelayMilliseconds, token);
                 continue;
             }
-            await PulseAsync(inviter, inviterSlot, 0x2000, 60, 140, token);
             coordinator.Accepting(DateTimeOffset.UtcNow);
-            if (!await PoeChatInviteService.FocusExactWindowAsync(receiver, token))
-                throw new InvalidOperationException($"Client {targetClient} window could not be focused.");
             foreach (var step in AcceptSequence)
                 await PulseAsync(receiver, receiverSlot, step.Buttons,
                     step.HoldMilliseconds, step.DelayAfterMilliseconds, token);
@@ -126,9 +121,7 @@ internal sealed class AutoPartyRecoverySession
         CancellationToken token)
     {
         await Task.Delay(450, token);
-        if (!await PoeChatInviteService.FocusExactWindowAsync(receiver, token))
-            throw new InvalidOperationException("Receiver window was unavailable during roster verification.");
-        var initial = await CaptureCountAsync(receiver, token);
+        var initial = await CaptureFocusedCountAsync(receiver, token);
         _status(initial is int firstCount
             ? $"客户端画面候选人数 {firstCount}/{expected}。"
             : "客户端画面无法读取，暂不能核验人数。");
@@ -144,7 +137,7 @@ internal sealed class AutoPartyRecoverySession
             while (DateTimeOffset.UtcNow < deadline)
             {
                 token.ThrowIfCancellationRequested();
-                var count = await CaptureCountAsync(receiver, token);
+                var count = await CaptureFocusedCountAsync(receiver, token);
                 _status(count is int value
                     ? $"客户端画面候选人数 {value}/{expected}。"
                     : "客户端画面无法读取，暂不能核验人数。");
@@ -155,7 +148,8 @@ internal sealed class AutoPartyRecoverySession
         }
         finally
         {
-            await PulseAsync(receiver, slot, 0x2000, 60, 100, CancellationToken.None);
+            if (!token.IsCancellationRequested)
+                await PulseAsync(receiver, slot, 0x2000, 60, 100, CancellationToken.None);
         }
     }
 
@@ -165,7 +159,33 @@ internal sealed class AutoPartyRecoverySession
         return await Task.Run<int?>(() => PartyRosterProbe.TryCount(client, out var count) ? count : null, token);
     }
 
+    private async Task<int?> CaptureFocusedCountAsync(LaunchedClient client, CancellationToken token)
+    {
+        await _focusGate.WaitAsync(token);
+        try
+        {
+            if (!await PoeChatInviteService.FocusExactWindowAsync(client, token))
+                throw new InvalidOperationException("Receiver window was unavailable during roster verification.");
+            return await CaptureCountAsync(client, token);
+        }
+        finally { _focusGate.Release(); }
+    }
+
     private async Task PulseAsync(LaunchedClient client, int slot, ushort buttons,
+        int holdMilliseconds, int delayAfterMilliseconds, CancellationToken token)
+    {
+        await _focusGate.WaitAsync(token);
+        try
+        {
+            if (!await PoeChatInviteService.FocusExactWindowAsync(client, token))
+                throw new InvalidOperationException("Exact game window was unavailable during Auto Party input.");
+            await PulseUnderFocusAsync(client, slot, buttons, holdMilliseconds, 20, token);
+        }
+        finally { _focusGate.Release(); }
+        await Task.Delay(Math.Max(0, delayAfterMilliseconds - 20), token);
+    }
+
+    private async Task PulseUnderFocusAsync(LaunchedClient client, int slot, ushort buttons,
         int holdMilliseconds, int delayAfterMilliseconds, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
