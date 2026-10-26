@@ -4,7 +4,8 @@ using System.Text.Json;
 
 namespace PartyPilot.Desktop;
 
-public sealed record RadarMarker(uint Id, string Category, string Path, string? Label, double X, double Y);
+public sealed record RadarMarker(uint Id, string Category, string Path, string? Label,
+    string? ItemPath, double X, double Y);
 
 public sealed record RadarFrame(int ProcessId, DateTime SeenUtc, double PlayerX, double PlayerY,
     IReadOnlyList<RadarMarker> Markers);
@@ -50,12 +51,23 @@ public static class RadarFrames
                     if (labelValue.ValueKind != JsonValueKind.String) return false;
                     label = labelValue.GetString();
                 }
-                if (category == "player"
-                    ? !path.StartsWith("Metadata/Characters/", StringComparison.OrdinalIgnoreCase) ||
-                      string.IsNullOrWhiteSpace(label) || Encoding.UTF8.GetByteCount(label) > 64
-                    : label != null)
+                string? itemPath = null;
+                if (item.TryGetProperty("ItemPath", out var itemPathValue) && itemPathValue.ValueKind != JsonValueKind.Null)
+                {
+                    if (itemPathValue.ValueKind != JsonValueKind.String) return false;
+                    itemPath = itemPathValue.GetString();
+                }
+                if (category == "player" &&
+                    (!path.StartsWith("Metadata/Characters/", StringComparison.OrdinalIgnoreCase) ||
+                     string.IsNullOrWhiteSpace(label) || Encoding.UTF8.GetByteCount(label) > 64 || itemPath != null))
                     return false;
-                markers.Add(new RadarMarker(id, category, path, label, x, y));
+                if (category == "loot" &&
+                    (!WorldItemWrapperPath(path) || string.IsNullOrWhiteSpace(label) ||
+                     Encoding.UTF8.GetByteCount(label) > 96 ||
+                     itemPath?.StartsWith("Metadata/Items/", StringComparison.OrdinalIgnoreCase) != true ||
+                     Encoding.UTF8.GetByteCount(itemPath) > 256)) return false;
+                if (category is not ("player" or "loot") && (label != null || itemPath != null)) return false;
+                markers.Add(new RadarMarker(id, category, path, label, itemPath, x, y));
             }
             frame = new RadarFrame(pid, seenUtc, playerX, playerY, markers);
             return true;
@@ -73,7 +85,15 @@ public static class RadarFrames
     }
 
     private static bool KnownCategory(string value) => value is
-        "monster" or "checkpoint" or "waypoint" or "portal" or "transition" or "npc" or "chest" or "shrine" or "player" or "league";
+        "monster" or "checkpoint" or "waypoint" or "portal" or "transition" or "npc" or "chest" or "shrine" or "player" or "league" or "loot";
+
+    private static bool WorldItemWrapperPath(string path)
+    {
+        var name = path.TrimEnd('/').Split('/').Last();
+        var suffix = name.IndexOf('@');
+        if (suffix >= 0) name = name[..suffix];
+        return name.Equals("WorldItem", StringComparison.OrdinalIgnoreCase);
+    }
 }
 
 public static class RadarProjection

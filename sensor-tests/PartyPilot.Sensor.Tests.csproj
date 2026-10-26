@@ -8,5 +8,6 @@
   <ItemGroup>
     <Compile Include="../sensor/LocalSlotCandidateScanner.cs" Link="LocalSlotCandidateScanner.cs" />
     <Compile Include="../sensor/RadarClassifier.cs" Link="RadarClassifier.cs" />
+    <Compile Include="../sensor/RadarPacketBudget.cs" Link="RadarPacketBudget.cs" />
   </ItemGroup>
 </Project>

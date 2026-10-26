@@ -48,12 +48,13 @@ type VisiblePlayer struct {
 }
 
 // RadarEntity is a path-and-position observation; category does not assert
-// hostility, loot value, quest state, or interaction availability.
+// hostility, loot value, quest state, allocation, or interaction availability.
 type RadarEntity struct {
 	EntityID uint64  `json:"EntityId"`
 	Category string  `json:"Category"`
 	Path     string  `json:"Path"`
 	Label    *string `json:"Label,omitempty"`
+	ItemPath *string `json:"ItemPath,omitempty"`
 	X        float64 `json:"X"`
 	Y        float64 `json:"Y"`
 	Z        float64 `json:"Z"`
@@ -119,10 +120,16 @@ func validRadar(entities []RadarEntity, status string, seen *time.Time) bool {
 		}
 		if entity.Category == "player" {
 			if !strings.HasPrefix(entity.Path, "Metadata/Characters/") || entity.Label == nil ||
-				strings.TrimSpace(*entity.Label) == "" || len(*entity.Label) > 64 {
+				strings.TrimSpace(*entity.Label) == "" || len(*entity.Label) > 64 || entity.ItemPath != nil {
 				return false
 			}
-		} else if entity.Label != nil {
+		} else if entity.Category == "loot" {
+			if !worldItemWrapperPath(entity.Path) || entity.ItemPath == nil ||
+				!strings.HasPrefix(*entity.ItemPath, "Metadata/Items/") || len(*entity.ItemPath) > 256 ||
+				entity.Label == nil || strings.TrimSpace(*entity.Label) == "" || len(*entity.Label) > 96 {
+				return false
+			}
+		} else if entity.Label != nil || entity.ItemPath != nil {
 			return false
 		}
 		ids[entity.EntityID] = true
@@ -130,9 +137,18 @@ func validRadar(entities []RadarEntity, status string, seen *time.Time) bool {
 	return true
 }
 
+func worldItemWrapperPath(path string) bool {
+	trimmed := strings.TrimRight(path, "/")
+	leaf := trimmed[strings.LastIndexByte(trimmed, '/')+1:]
+	if index := strings.IndexByte(leaf, '@'); index >= 0 {
+		leaf = leaf[:index]
+	}
+	return strings.EqualFold(leaf, "WorldItem")
+}
+
 func validRadarCategory(category string) bool {
 	switch category {
-	case "monster", "checkpoint", "waypoint", "portal", "transition", "npc", "chest", "shrine", "player", "league":
+	case "monster", "checkpoint", "waypoint", "portal", "transition", "npc", "chest", "shrine", "player", "league", "loot":
 		return true
 	default:
 		return false

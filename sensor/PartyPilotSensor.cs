@@ -155,6 +155,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         {
             var component = entity?.GetComponent<Player>();
             if (component == null || string.IsNullOrWhiteSpace(component.PlayerName)) continue;
+            if (Encoding.UTF8.GetByteCount(component.PlayerName) > 64 ||
+                Encoding.UTF8.GetByteCount(entity!.Path ?? "") > 256) continue;
             var position = entity!.Pos;
             if (entity.Id == 0 || !seen.Add(entity.Id) || !float.IsFinite(position.X) ||
                 !float.IsFinite(position.Y) || !float.IsFinite(position.Z))
@@ -191,7 +193,29 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             var playerName = playerComponent?.PlayerName?.Trim();
             var isPlayer = RadarClassifier.IsPlayerPath(path) &&
                 !string.IsNullOrWhiteSpace(playerName) && Encoding.UTF8.GetByteCount(playerName) <= 64;
-            var category = isPlayer ? "player" : RadarClassifier.Category(path);
+            string? itemPath = null;
+            string? lootName = null;
+            if (RadarClassifier.IsWorldItemWrapperPath(path))
+            {
+                try
+                {
+                    var item = entity.GetComponent<WorldItem>()?.ItemEntity;
+                    var candidatePath = item?.Path;
+                    var candidateName = item?.GetComponent<Base>()?.Name?.Trim();
+                    if (candidatePath?.StartsWith("Metadata/Items/", StringComparison.OrdinalIgnoreCase) == true &&
+                        Encoding.UTF8.GetByteCount(candidatePath) <= 256 &&
+                        !string.IsNullOrWhiteSpace(candidateName) && Encoding.UTF8.GetByteCount(candidateName) <= 96)
+                    {
+                        itemPath = candidatePath;
+                        lootName = candidateName;
+                    }
+                }
+                catch
+                {
+                    // An unreadable wrapper must not become an asserted loot marker.
+                }
+            }
+            var category = lootName != null ? "loot" : isPlayer ? "player" : RadarClassifier.Category(path);
             if (category == null) continue;
             var pos = entity.Pos;
             if (!float.IsFinite(pos.X) || !float.IsFinite(pos.Y) || !float.IsFinite(pos.Z)) continue;
@@ -202,13 +226,14 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 EntityId = entity.Id,
                 Category = category,
                 Path = path,
-                Label = isPlayer ? playerName : null,
+                Label = lootName ?? (isPlayer ? playerName : null),
+                ItemPath = itemPath,
                 X = pos.X,
                 Y = pos.Y,
                 Z = pos.Z
             }, RadarClassifier.IsNavigation(category), dx * dx + dy * dy));
         }
-        return candidates.OrderByDescending(item => item.Navigation)
-            .ThenBy(item => item.Distance).Take(96).Select(item => item.Value).ToArray();
+        return RadarPacketBudget.Select(candidates.OrderByDescending(item => item.Navigation)
+            .ThenBy(item => item.Distance).Select(item => item.Value));
     }
 }

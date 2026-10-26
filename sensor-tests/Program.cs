@@ -80,6 +80,23 @@ Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
     RadarClassifier.Category("Metadata/Monsters/LeagueExpedition/Expedition2EncounterMonster") == "monster" &&
     RadarClassifier.IsPlayerPath("Metadata/Characters/Player") &&
     RadarClassifier.Category("Metadata/Characters/Player") == null &&
+    RadarClassifier.IsWorldItemWrapperPath("Metadata/MiscellaneousObjects/WorldItem@123") &&
+    !RadarClassifier.IsWorldItemWrapperPath("Metadata/Items/Weapons/Sword") &&
     RadarClassifier.IsNavigation("waypoint") && !RadarClassifier.IsNavigation("monster"),
     "Path-only radar categories admitted unsupported entities or lost navigation markers.");
+var largeLoot = Enumerable.Range(1, 96).Select(index => (object)new
+{
+    EntityId = index,
+    Category = "loot",
+    Path = "Metadata/MiscellaneousObjects/" + new string('A', 180) + "/WorldItem",
+    ItemPath = "Metadata/Items/" + new string('B', 240),
+    Label = new string('中', 30),
+    X = 1.0,
+    Y = 2.0,
+    Z = 3.0
+}).ToArray();
+var selectedLoot = RadarPacketBudget.Select(largeLoot);
+Require(selectedLoot.Length is > 0 and < 96 &&
+    selectedLoot.Sum(item => System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(item).Length + 1) <= 48_000,
+    "Large loot labels exceeded the radar packet budget.");
 Console.WriteLine("Sensor diagnostics passed.");

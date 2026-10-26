@@ -75,3 +75,27 @@ func TestRadarPlayerRequiresObservedNameAndCharacterPath(t *testing.T) {
 		}
 	}
 }
+
+func TestRadarLootRequiresResolvedWorldItem(t *testing.T) {
+	base := `{"ProcessId":123,"SeenUtc":"2026-10-26T00:00:00Z","X":1,"Y":2,"Z":3,` +
+		`"RadarSeenUtc":"2026-10-26T00:00:00Z","RadarStatus":"ok",` +
+		`"RadarEntities":[{"EntityId":9,"Category":"loot",` +
+		`"Path":"Metadata/MiscellaneousObjects/WorldItem@123",` +
+		`"ItemPath":"Metadata/Items/Currency/CurrencyIdentification",` +
+		`"Label":"Scroll of Wisdom","X":4,"Y":5,"Z":6}]}`
+	if sample, err := Decode([]byte(base)); err != nil || sample.RadarEntities[0].ItemPath == nil ||
+		*sample.RadarEntities[0].ItemPath != "Metadata/Items/Currency/CurrencyIdentification" {
+		t.Fatalf("resolved loot observation rejected: %+v, %v", sample, err)
+	}
+	for _, changed := range []string{
+		strings.Replace(base, `"ItemPath":"Metadata/Items/Currency/CurrencyIdentification"`, `"ItemPath":null`, 1),
+		strings.Replace(base, `"ItemPath":"Metadata/Items/Currency/CurrencyIdentification"`, `"ItemPath":"Metadata/Monsters/Beast"`, 1),
+		strings.Replace(base, `"Label":"Scroll of Wisdom"`, `"Label":null`, 1),
+		strings.Replace(base, `"Path":"Metadata/MiscellaneousObjects/WorldItem@123"`, `"Path":"Metadata/MiscellaneousObjects/Chest"`, 1),
+		strings.Replace(base, `"Category":"loot"`, `"Category":"chest"`, 1),
+	} {
+		if _, err := Decode([]byte(changed)); err == nil {
+			t.Fatalf("unresolved loot marker accepted: %s", changed)
+		}
+	}
+}

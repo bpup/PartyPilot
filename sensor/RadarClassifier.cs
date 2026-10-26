@@ -33,6 +33,15 @@ public static class RadarClassifier
     public static bool IsPlayerPath(string path) =>
         path.StartsWith("Metadata/Characters/", StringComparison.OrdinalIgnoreCase);
 
+    public static bool IsWorldItemWrapperPath(string path)
+    {
+        if (!path.StartsWith("Metadata/", StringComparison.OrdinalIgnoreCase)) return false;
+        var name = path.TrimEnd('/').Split('/').Last();
+        var suffix = name.IndexOf('@');
+        if (suffix >= 0) name = name[..suffix];
+        return name.Equals("WorldItem", StringComparison.OrdinalIgnoreCase);
+    }
+
     // Only explicit world-object anchors observed in the supplied 0.6.17 code.
     // Nearby monsters and visual effects are not league markers.
     private static bool IsPrimaryWorldObject(string path)
