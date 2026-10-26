@@ -69,7 +69,8 @@ internal sealed class AutoPartyRecoverySession
         var receiverSlot = _topology.Slots.First(slot => slot.Client == targetClient).RuntimePad;
         var expected = stableClients.Sum(client => _topology.Clients[client - 1].Count) +
             _topology.Clients[targetClient - 1].Count;
-        var initialLeader = AutoPartyInviterSelection.DefaultLeaderPlayer(_topology, _bridge.LastManualFocusedSlot);
+        var initialLeader = AutoPartyInviterSelection.DefaultLeaderPlayer(_topology,
+            _bridge.LastManualFocusedSlot, _bridge.LastFocusedLeadsEnabled);
         var initialInviter = AutoPartyInviterSelection.Select(_topology, stableClients,
             initialLeader, _bridge.LastFocusedSlot);
         coordinator.Begin(targetClient, initialInviter, DateTimeOffset.UtcNow);
@@ -77,7 +78,8 @@ internal sealed class AutoPartyRecoverySession
         {
             token.ThrowIfCancellationRequested();
             if (coordinator.Snapshot.Attempt > 0) await _bridge.RenewAutoPartyAsync(token);
-            var leader = AutoPartyInviterSelection.DefaultLeaderPlayer(_topology, _bridge.LastManualFocusedSlot);
+            var leader = AutoPartyInviterSelection.DefaultLeaderPlayer(_topology,
+                _bridge.LastManualFocusedSlot, _bridge.LastFocusedLeadsEnabled);
             var inviterClient = AutoPartyInviterSelection.Select(_topology, stableClients,
                 leader, _bridge.LastFocusedSlot);
             var inviter = _clients[inviterClient - 1];

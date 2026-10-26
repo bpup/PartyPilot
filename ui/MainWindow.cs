@@ -51,6 +51,10 @@ public sealed class MainWindow : Window
     private readonly CheckBox _isolationConfirmed = new();
     private readonly CheckBox _rightStickFollowerOverride = new();
     private readonly CheckBox _autoFlask = new();
+    private readonly CheckBox _lastFocusedLeads = new();
+    private readonly TextBlock _leadershipPreferenceStatus = new();
+    private readonly LeadershipPreferenceStore _leadershipPreferences = new();
+    private bool _leadershipPreferenceReady;
     private readonly Button _prepareBridge = new();
     private readonly Button _armPairing = new();
     private readonly Button _confirmRole = new();
@@ -251,6 +255,31 @@ public sealed class MainWindow : Window
         panel.Children.Add(_rightStickFollowerOverride);
         _autoFlask.Content = "随实时跟随启用自动药剂（仅双客户端各一名角色；生命/魔力须绑定手柄十字键左/右）";
         panel.Children.Add(_autoFlask);
+        var leadership = _leadershipPreferences.Load();
+        _leadershipPreferenceReady = leadership.Success;
+        _lastFocusedLeads.Content = "最近手动聚焦的角色成为 MAIN";
+        _lastFocusedLeads.IsThreeState = true;
+        _lastFocusedLeads.IsChecked = leadership.Success ? leadership.LastFocusedPlayerLeads : null;
+        _leadershipPreferenceStatus.Text = leadership.Message;
+        _leadershipPreferenceStatus.Foreground = MutedBrush;
+        _leadershipPreferenceStatus.TextWrapping = TextWrapping.Wrap;
+        _lastFocusedLeads.IsCheckedChanged += (_, _) =>
+        {
+            if (_lastFocusedLeads.IsChecked is not bool enabled)
+            {
+                _leadershipPreferenceReady = false;
+                _leadershipPreferenceStatus.Text = "请选择 MAIN 规则。";
+            }
+            else
+            {
+                var saved = _leadershipPreferences.Save(enabled);
+                _leadershipPreferenceReady = saved.Success;
+                _leadershipPreferenceStatus.Text = saved.Message;
+            }
+            UpdateBridgeControls();
+        };
+        panel.Children.Add(_lastFocusedLeads);
+        panel.Children.Add(_leadershipPreferenceStatus);
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12, LineSpacing = 8 };
         _prepareBridge.Content = "准备虚拟手柄";
         _prepareBridge.Click += async (_, _) => await PrepareBridgeAsync();
@@ -1061,6 +1090,7 @@ public sealed class MainWindow : Window
             Enumerable.Range(0, _selectedTopology.ClientCount)
                 .All(index => !string.IsNullOrWhiteSpace(_paths[index]?.Text));
         _prepareBridge.IsEnabled = !_busy && _bridge is null && supported &&
+            _leadershipPreferenceReady && _lastFocusedLeads.IsChecked is bool &&
             (useWgi || _physicalIndex.SelectedIndex is >= 0 and <= 3) &&
             _isolationConfirmed.IsChecked == true &&
             !string.IsNullOrWhiteSpace(_physicalDevice.Text) && gamePathsReady;
@@ -1075,6 +1105,7 @@ public sealed class MainWindow : Window
         _physicalDevice.IsEnabled = _bridge is null && !_busy;
         _isolationConfirmed.IsEnabled = _bridge is null && !_busy;
         _rightStickFollowerOverride.IsEnabled = _bridge is null && !_busy;
+        _lastFocusedLeads.IsEnabled = _bridge is null && !_busy;
         _autoFlask.IsEnabled = _bridge is null && !_busy && _selectedTopology?.Id == "2-split";
         for (var index = 0; index < _paths.Length; index++)
         {
@@ -1323,7 +1354,7 @@ public sealed class MainWindow : Window
             var session = await BridgeSession.StartAsync(executable, _selectedTopology.Slots, _physicalIndex.SelectedIndex,
                 _physicalDevice.Text.Trim(), gameExecutables, _rightStickFollowerOverride.IsChecked == true,
                 _selectedTopology.Id == "2-split" && _autoFlask.IsChecked == true,
-                useWgi, privatePlan, lastFocusedLeads: true);
+                useWgi, privatePlan, lastFocusedLeads: _lastFocusedLeads.IsChecked == true);
             session.AReleased += BridgeAReleased;
             session.PairingArmed += BridgePairingArmed;
             session.PairingCompleted += BridgePairingCompleted;

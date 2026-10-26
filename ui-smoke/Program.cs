@@ -8,6 +8,7 @@ using PartyPilot.Desktop;
 
 PartyRosterCounterSmoke.Run();
 AccountProfileSmoke.Run();
+LeadershipPreferenceSmoke.Run();
 AutoPartyCoordinatorSmoke.Run();
 AutoPartyInviteSmoke.Run();
 AutoPartyRecoverySmoke.Run();
@@ -39,6 +40,15 @@ if (window.GetLogicalDescendants().OfType<TextBox>().Count(field =>
     window.GetLogicalDescendants().OfType<TextBox>().Count(field =>
         field.Watermark?.ToString() == "密码" && field.PasswordChar == '•') != 3)
     throw new Exception("The desktop did not expose one protected account profile per client.");
+if (window.GetLogicalDescendants().OfType<CheckBox>().Count(box =>
+        box.Content?.ToString() == "最近手动聚焦的角色成为 MAIN") != 1)
+    throw new Exception("The desktop did not expose the observed MAIN preference.");
+if (args.Contains("--ui-controls-only"))
+{
+    Console.WriteLine("Account and MAIN preference controls created in the headless desktop.");
+    window.Close();
+    return;
+}
 var radarPayload = System.Text.Encoding.UTF8.GetBytes(
     "{\"ProcessId\":123,\"RadarStatus\":\"ok\",\"RadarSeenUtc\":\"" + DateTime.UtcNow.ToString("O") +
     "\",\"X\":100,\"Y\":200,\"RadarEntities\":[" +
