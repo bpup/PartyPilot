@@ -65,7 +65,7 @@ func TestPadMapRequiresFullUnambiguousMapping(t *testing.T) {
 	if err := mapping.Set("1:1"); err != nil {
 		t.Fatal(err)
 	}
-	for _, invalid := range []string{"1:2", "2:1", "2:5", "0:2", "x:2"} {
+	for _, invalid := range []string{"1:2", "2:1", "0:2", "7:5", "2:7", "x:2"} {
 		if err := mapping.Set(invalid); err == nil {
 			t.Fatalf("accepted invalid mapping %q", invalid)
 		}
@@ -76,5 +76,30 @@ func TestPadMapRequiresFullUnambiguousMapping(t *testing.T) {
 	}
 	if output.Len() != 0 {
 		t.Fatalf("invalid frame emitted a partial focus command: %q", output.String())
+	}
+}
+
+func TestPrivateRolesRequireExplicitRuntimePads(t *testing.T) {
+	input := "{\"focused\":5,\"commands\":{\"4\":{\"state\":\"waiting\"},\"5\":{\"state\":\"following\",\"x\":1,\"y\":0}}}\n"
+	var output strings.Builder
+	if err := selectCommandsMapped(strings.NewReader(input), &output, 0, nil); err == nil || output.Len() != 0 {
+		t.Fatalf("private role crossed without an explicit mapping: %v, %q", err, output.String())
+	}
+	mapping := padMap{1: 1, 4: 5, 5: 6}
+	if err := selectCommandsMapped(strings.NewReader(input), &output, 0, mapping); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	if len(lines) != 3 || !strings.Contains(lines[0], `"type":"focus","slot":6`) ||
+		!strings.Contains(lines[1], `"slot":5,"state":"waiting"`) ||
+		!strings.Contains(lines[2], `"slot":6,"state":"following"`) {
+		t.Fatalf("private roles did not use explicit runtime pads: %q", output.String())
+	}
+	var duplicate padMap
+	if err := duplicate.Set("4:5"); err != nil {
+		t.Fatal(err)
+	}
+	if err := duplicate.Set("5:5"); err == nil {
+		t.Fatal("one private runtime pad was assigned to two party players")
 	}
 }

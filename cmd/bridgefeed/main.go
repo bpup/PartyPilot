@@ -37,8 +37,8 @@ func (m *padMap) Set(value string) error {
 	partyText, padText, ok := strings.Cut(value, ":")
 	party, partyError := strconv.Atoi(partyText)
 	pad, padError := strconv.Atoi(padText)
-	if !ok || partyError != nil || padError != nil || party < 1 || party > 6 || pad < 1 || pad > 4 {
-		return fmt.Errorf("pad mapping must be PARTY:PAD with party 1–6 and system pad 1–4")
+	if !ok || partyError != nil || padError != nil || party < 1 || party > 6 || pad < 1 || pad > 6 {
+		return fmt.Errorf("pad mapping must be PARTY:PAD with party and runtime pad 1–6")
 	}
 	if *m == nil {
 		*m = make(padMap)
@@ -48,7 +48,7 @@ func (m *padMap) Set(value string) error {
 	}
 	for _, existing := range *m {
 		if existing == pad {
-			return fmt.Errorf("system pad %d assigned twice", pad)
+			return fmt.Errorf("runtime pad %d assigned twice", pad)
 		}
 	}
 	(*m)[party] = pad
@@ -57,6 +57,9 @@ func (m *padMap) Set(value string) error {
 
 func (m padMap) resolve(party int) (int, error) {
 	if len(m) == 0 {
+		if party > 4 {
+			return 0, fmt.Errorf("private party player %d requires an explicit runtime pad mapping", party)
+		}
 		return party, nil
 	}
 	pad, ok := m[party]
