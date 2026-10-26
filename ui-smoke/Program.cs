@@ -103,12 +103,38 @@ var radarOutput = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(args.First
     "PartyPilot-radar-preview.png");
 radarScreenshot.Save(radarOutput);
 radarWindow.Close();
+if (!PrivacyMaskPlan.TryParse("1,10,5,20,6\n2,70,80,15,10", 2, out var privacyBoxes))
+    throw new Exception("Valid privacy box plan did not parse.");
+var maskRect = privacyBoxes[0].InClient(1000, 500);
+if (privacyBoxes.Count != 2 ||
+    Math.Abs(maskRect.X - 100) > 0.001 || Math.Abs(maskRect.Y - 25) > 0.001 ||
+    Math.Abs(maskRect.Width - 200) > 0.001 || Math.Abs(maskRect.Height - 30) > 0.001 ||
+    PrivacyMaskPlan.TryParse("1,90,5,20,6", 2, out _) ||
+    PrivacyMaskPlan.TryParse("3,10,5,20,6", 2, out _) ||
+    PrivacyMaskPlan.TryParse("1,10,5,0,6", 2, out _) ||
+    PrivacyMaskPlan.TryParse("1,10,5,20,6\n2,70,80,15,10", 1, out _) ||
+    !PrivacyMaskPlan.TryParse(string.Join('\n', Enumerable.Repeat("1,10,5,20,6", 16)), 1, out _) ||
+    PrivacyMaskPlan.TryParse(string.Join('\n', Enumerable.Repeat("1,10,5,20,6", 17)), 1, out _))
+    throw new Exception("Privacy box geometry or client binding validation failed.");
+var privacyWindow = new PrivacyMaskOverlayWindow(new LaunchedClient(123, 1, "C:/Game.exe"),
+    privacyBoxes.Where(box => box.Client == 1).ToArray());
+privacyWindow.Show();
+privacyWindow.UpdateLayout();
+var renderedMask = privacyWindow.GetLogicalDescendants().OfType<Border>().SingleOrDefault();
+if (renderedMask is null || renderedMask.Width != 160 || renderedMask.Height != 36 ||
+    Canvas.GetLeft(renderedMask) != 80 || Canvas.GetTop(renderedMask) != 30)
+    throw new Exception("Manual privacy mask did not render a region.");
+var privacyOutput = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(args.FirstOrDefault() ?? "../PartyPilot-ui-preview.png"))!,
+    "PartyPilot-privacy-preview.png");
+(privacyWindow.CaptureRenderedFrame() ?? throw new Exception("Privacy mask preview did not render.")).Save(privacyOutput);
+privacyWindow.Close();
 var labels = window.GetLogicalDescendants().OfType<TextBlock>().Select(item => item.Text).ToArray();
 if (!labels.Contains("PLAY") || !labels.Any(item => item?.Contains("HOW MANY CHARACTERS") == true) ||
     !labels.Any(item => item?.Contains("PREPARE & START") == true) ||
     !labels.Any(item => item?.Contains("FOLLOW · 跟随") == true) ||
     !labels.Any(item => item?.Contains("RADAR · 雷达") == true) ||
-    !labels.Any(item => item?.Contains("PERFORMANCE · FPS") == true))
+    !labels.Any(item => item?.Contains("PERFORMANCE · FPS") == true) ||
+    !labels.Any(item => item?.Contains("PRIVACY · 游戏画面遮挡") == true))
 {
     throw new Exception("The launcher steps were not created in the window tree.");
 }

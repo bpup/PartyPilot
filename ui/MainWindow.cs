@@ -54,6 +54,10 @@ public sealed class MainWindow : Window
     private readonly Button _startRadar = new();
     private readonly Button _stopRadar = new();
     private readonly TextBlock _radarStatus = new();
+    private readonly TextBox _privacyBoxes = new();
+    private readonly Button _startPrivacy = new();
+    private readonly Button _stopPrivacy = new();
+    private readonly TextBlock _privacyStatus = new();
     private readonly StackPanel[] _fpsRows = new StackPanel[3];
     private readonly TextBox[] _fpsPaths = new TextBox[3];
     private readonly TextBox[] _fpsForeground = new TextBox[3];
@@ -77,6 +81,7 @@ public sealed class MainWindow : Window
     private BridgeSession? _bridge;
     private LiveFollowSession? _follow;
     private RadarSession? _radar;
+    private PrivacyMaskSession? _privacy;
     private PairingGuide? _pairing;
     private IReadOnlyList<LaunchedClient> _launchedClients = [];
     private bool _pairingHasStarted;
@@ -119,6 +124,7 @@ public sealed class MainWindow : Window
         content.Children.Add(BuildLaunchStep());
         content.Children.Add(BuildFollowStep());
         content.Children.Add(BuildRadarStep());
+        content.Children.Add(BuildPrivacyStep());
         content.Children.Add(BuildFpsStep());
         content.Children.Add(BuildResourceStep());
         content.Children.Add(BuildStatusCard());
@@ -137,6 +143,7 @@ public sealed class MainWindow : Window
             _closing = true;
             await StopAllResourcesAsync();
             await StopRadarAsync();
+            StopPrivacy();
             await StopBridgeAsync();
         };
         NamePrivacy.Changed += UpdateNamePrivacy;
@@ -379,6 +386,31 @@ public sealed class MainWindow : Window
         return Card(panel);
     }
 
+    private Border BuildPrivacyStep()
+    {
+        var panel = Step("6", "PRIVACY · 游戏画面遮挡",
+            "在已绑定游戏窗口的指定区域显示黑色遮挡；仅当前游戏窗口在前台时显示。此阶段不识别姓名牌，也不提供目标版的画面模糊效果。");
+        panel.Children.Add(Label("每行：客户端编号, 左边距%, 上边距%, 宽%, 高%；最多 16 行，例如 1,10,5,20,6。", 12, MutedBrush));
+        _privacyBoxes.AcceptsReturn = true;
+        _privacyBoxes.MinHeight = 76;
+        _privacyBoxes.Watermark = "1,10,5,20,6";
+        _privacyBoxes.TextChanged += (_, _) => UpdatePrivacyControls();
+        panel.Children.Add(_privacyBoxes);
+        var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
+        _startPrivacy.Content = "显示遮挡";
+        _startPrivacy.Click += (_, _) => StartPrivacy();
+        _stopPrivacy.Content = "关闭遮挡";
+        _stopPrivacy.Click += (_, _) => StopPrivacy();
+        actions.Children.Add(_startPrivacy);
+        actions.Children.Add(_stopPrivacy);
+        panel.Children.Add(actions);
+        _privacyStatus.Text = "等待已绑定的游戏窗口与明确指定的遮挡区域。";
+        _privacyStatus.Foreground = MutedBrush;
+        _privacyStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_privacyStatus);
+        return Card(panel);
+    }
+
     private Border BuildFpsStep()
     {
         var panel = Step("6", "PERFORMANCE · FPS", "按客户端分别预览前台与后台帧率配置。仅修改明确指定的 PoE2 配置文件；应用前需关闭所有游戏窗口。");
@@ -487,6 +519,7 @@ public sealed class MainWindow : Window
         {
             _launchedClients = [];
             _ = StopRadarAsync();
+            StopPrivacy();
             _ = StopAllResourcesAsync();
         }
         _selectedTopology = selection;
@@ -511,6 +544,7 @@ public sealed class MainWindow : Window
         _attach.IsEnabled = !_busy && !_pairingHasStarted && count > 0;
         UpdateBridgeControls();
         UpdateRadarControls();
+        UpdatePrivacyControls();
         UpdateFpsControls();
         UpdateResourceControls();
     }
@@ -519,10 +553,12 @@ public sealed class MainWindow : Window
     {
         _launchedClients = [];
         _ = StopRadarAsync();
+        StopPrivacy();
         _ = StopAllResourcesAsync();
         if (_pairing is not null) ShowCurrentPairingStep();
         UpdateBridgeControls();
         UpdateRadarControls();
+        UpdatePrivacyControls();
         UpdateResourceControls();
     }
 
@@ -534,6 +570,46 @@ public sealed class MainWindow : Window
         _startRadar.IsEnabled = OperatingSystem.IsWindows() && !_busy && !_radarStopping &&
             _radar is null && ready;
         _stopRadar.IsEnabled = _radar is not null;
+    }
+
+    private void UpdatePrivacyControls()
+    {
+        var ready = _selectedTopology is not null &&
+            _launchedClients.Count == _selectedTopology.ClientCount &&
+            PrivacyMaskPlan.TryParse(_privacyBoxes.Text, _selectedTopology.ClientCount, out _);
+        _startPrivacy.IsEnabled = OperatingSystem.IsWindows() && !_busy && _privacy is null && ready;
+        _stopPrivacy.IsEnabled = _privacy is not null;
+    }
+
+    private void StartPrivacy()
+    {
+        if (_privacy is not null || _busy || !OperatingSystem.IsWindows() ||
+            _selectedTopology is null || _launchedClients.Count != _selectedTopology.ClientCount ||
+            !PrivacyMaskPlan.TryParse(_privacyBoxes.Text, _selectedTopology.ClientCount, out var boxes)) return;
+        try
+        {
+            _privacy = PrivacyMaskSession.Start(_launchedClients, boxes);
+            _privacy.Ended += PrivacyEnded;
+            _privacyStatus.Text = $"已显示 {boxes.Count} 个手动遮挡区域；失焦时隐藏。";
+        }
+        catch (Exception error) { _privacyStatus.Text = $"遮挡未能打开：{error.Message}"; }
+        UpdatePrivacyControls();
+    }
+
+    private void PrivacyEnded(string reason)
+    {
+        StopPrivacy();
+        _privacyStatus.Text = $"遮挡已停止：{reason}";
+    }
+
+    private void StopPrivacy()
+    {
+        if (_privacy is null) return;
+        _privacy.Ended -= PrivacyEnded;
+        _privacy.Dispose();
+        _privacy = null;
+        _privacyStatus.Text = "遮挡已关闭。";
+        UpdatePrivacyControls();
     }
 
     private void UpdateFpsControls()
@@ -1190,6 +1266,7 @@ public sealed class MainWindow : Window
         {
             _fpsGamesClosed.IsChecked = false;
             await StopRadarAsync();
+            StopPrivacy();
             await StopAllResourcesAsync();
         }
         _busy = true;
