@@ -6,6 +6,25 @@ internal readonly record struct BridgeCommand(int Slot, short X, short Y, bool A
 
 internal static class BridgeProtocol
 {
+    public static bool TryParseFocus(string line, out int slot)
+    {
+        slot = 0;
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("type", out var type) || type.GetString() != "focus" ||
+                !root.TryGetProperty("slot", out var value) || !value.TryGetInt32(out slot))
+                return false;
+            return slot is >= 1 and <= 6;
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
     public static bool TryParse(string line, out BridgeCommand command)
     {
         command = default;

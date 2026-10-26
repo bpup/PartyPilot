@@ -6,6 +6,11 @@ if (args.Contains("--stdin"))
     string? line;
     while ((line = Console.ReadLine()) is not null)
     {
+        if (BridgeProtocol.TryParseFocus(line, out var focused))
+        {
+            Console.WriteLine($"focus={focused}");
+            continue;
+        }
         if (!BridgeProtocol.TryParse(line, out var command))
             throw new Exception($"Invalid bridge command: {line}");
         Console.WriteLine($"slot={command.Slot} active={command.Active} x={command.X} y={command.Y}");
@@ -45,6 +50,31 @@ if (router.ApplyLine("{\"slot\":6,\"state\":\"following\",\"x\":1,\"y\":0}", now
     throw new Exception("Unknown slot was not rejected safely.");
 if (Marshal.SizeOf<XInputGamepad>() != 12 || Marshal.SizeOf<XInputState>() != 16)
     throw new Exception("XInput native structure sizes do not match the Windows API.");
+if (!router.ConfigurePhysical(2) ||
+    !router.ApplyLine("{\"slot\":3,\"state\":\"following\",\"x\":1,\"y\":0}", now) ||
+    pad3.X != 32767)
+    throw new Exception("Unfocused automation did not move.");
+router.SetPhysical(new XInputGamepad { Buttons = 0x1000, LeftTrigger = 42, LeftX = 111 });
+if (pad2.Report.Buttons != 0x1000 || pad2.Report.LeftTrigger != 42 || pad2.X != 111 || pad3.X != 32767)
+    throw new Exception("Physical input did not reach focused pad independently.");
+if (!router.ApplyLine("{\"type\":\"focus\",\"slot\":3}", now) ||
+    pad3.Report.Buttons != 0x1000 || pad2.Report.Buttons != 0)
+    throw new Exception("Focus did not move physical input.");
+router.PhysicalDisconnected();
+if (pad3.Report != default || pad2.Report != default)
+    throw new Exception("Disconnect did not neutralize focused pad.");
+if (router.ApplyLine("{\"type\":\"focus\",\"slot\":6}", now) || pad3.Report != default)
+    throw new Exception("Unassigned focus was not rejected safely.");
+var pad1 = new FakePad();
+var pad2ForHotkey = new FakePad();
+var hotkeyRouter = new BridgeRouter(new Dictionary<int, IPadOutput> { [1] = pad1, [2] = pad2ForHotkey });
+hotkeyRouter.ConfigurePhysical(1);
+hotkeyRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080 | 0x1000, LeftX = 222 });
+if (pad1.Report != default || pad2ForHotkey.Report.Buttons != 0x1000 || pad2ForHotkey.X != 222)
+    throw new Exception("R3 focus switch or key suppression failed.");
+hotkeyRouter.SetPhysical(new XInputGamepad { Buttons = 0x0040 });
+if (pad1.Report.Buttons != 0 || pad2ForHotkey.Report != default)
+    throw new Exception("L3 focus switch or key suppression failed.");
 Console.WriteLine("Bridge protocol checks passed.");
 
 static void Expect(string line, bool expectedValid, int expectedSlot, bool expectedActive)
@@ -58,7 +88,8 @@ static void Expect(string line, bool expectedValid, int expectedSlot, bool expec
 
 internal sealed class FakePad : IPadOutput
 {
-    public short X { get; private set; }
-    public short Y { get; private set; }
-    public void SetStick(short x, short y) { X = x; Y = y; }
+    public PadReport Report { get; private set; }
+    public short X => Report.LeftX;
+    public short Y => Report.LeftY;
+    public void SetReport(PadReport report) => Report = report;
 }
