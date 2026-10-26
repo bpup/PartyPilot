@@ -18,5 +18,12 @@ internal static class AutoPartyRecoverySmoke
             BridgeSession.ValidAutoPartyPulse(0x1000, 60) ||
             BridgeSession.ValidAutoPartyPulse(0x2000, 80))
             throw new Exception("The target-version invite acceptance or roster menu sequence changed.");
+
+        var topology = PartyTopologies.DefaultFor(5);
+        if (AutoPartyInviterSelection.Select(topology, new HashSet<int> { 1, 2 }, 1, 5) != 1 ||
+            AutoPartyInviterSelection.Select(topology, new HashSet<int> { 2, 3 }, 1, 5) != 3 ||
+            AutoPartyInviterSelection.Select(topology, new HashSet<int> { 2, 3 }, 1, 1) != 2 ||
+            AutoPartyInviterSelection.Select(topology, new HashSet<int> { 1, 3 }, 5, 1) != 3)
+            throw new Exception("Auto Party inviter priority differs from the supplied build.");
     }
 }

@@ -16,9 +16,11 @@ internal sealed class BridgeSession : IAsyncDisposable
     private readonly SemaphoreSlim _inputGate = new(1, 1);
     private readonly SemaphoreSlim _partyGate = new(1, 1);
     private AutoPartyPending? _pendingAutoParty;
+    private int _lastFocusedSlot;
     private bool _stopping;
 
     public bool AutoFlaskEnabled { get; }
+    internal int LastFocusedSlot => Volatile.Read(ref _lastFocusedSlot);
 
     public event Action<int>? AReleased;
     public event Action<int, int, long>? PairingArmed;
@@ -39,6 +41,7 @@ internal sealed class BridgeSession : IAsyncDisposable
         AutoFlaskEnabled = autoFlaskEnabled;
         _slots = slots.ToHashSet();
         _allSlots = allSlots.ToHashSet();
+        _lastFocusedSlot = slots[0];
     }
 
     public static async Task<BridgeSession> StartAsync(string executable, IReadOnlyList<PartySlot> partySlots, int physicalIndex,
@@ -323,6 +326,10 @@ internal sealed class BridgeSession : IAsyncDisposable
                         _menuStates.Clear();
                         Dispatcher.UIThread.Post(() => PairingCompleted?.Invoke());
                     }
+                    else if (kind.GetString() == "focus_changed" &&
+                        root.TryGetProperty("slot", out var focusedSlot) &&
+                        focusedSlot.TryGetInt32(out var focusedPad) && _allSlots.Contains(focusedPad))
+                        Volatile.Write(ref _lastFocusedSlot, focusedPad);
                     else if (kind.GetString() == "login_status" &&
                         root.TryGetProperty("source", out var source) && source.ValueKind == JsonValueKind.String &&
                         source.GetString() is { } sourceName &&

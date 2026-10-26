@@ -75,18 +75,19 @@ internal sealed class AutoPartyRecoverySession
     private async Task<bool> RecoverClientAsync(int targetClient, HashSet<int> stableClients, CancellationToken token)
     {
         var coordinator = new AutoPartyCoordinator();
-        var inviterClient = stableClients.Min();
-        var inviter = _clients[inviterClient - 1];
         var receiver = _clients[targetClient - 1];
-        var inviterSlot = _topology.Slots.First(slot => slot.Client == inviterClient).RuntimePad;
         var receiverSlot = _topology.Slots.First(slot => slot.Client == targetClient).RuntimePad;
         var expected = stableClients.Sum(client => _topology.Clients[client - 1].Count) +
             _topology.Clients[targetClient - 1].Count;
-        coordinator.Begin(targetClient, inviterClient, DateTimeOffset.UtcNow);
+        var initialInviter = AutoPartyInviterSelection.Select(_topology, stableClients, 1, _bridge.LastFocusedSlot);
+        coordinator.Begin(targetClient, initialInviter, DateTimeOffset.UtcNow);
         while (coordinator.Snapshot.Attempt < AutoPartyCoordinator.MaximumAttempts)
         {
             token.ThrowIfCancellationRequested();
             if (coordinator.Snapshot.Attempt > 0) await _bridge.RenewAutoPartyAsync(token);
+            var inviterClient = AutoPartyInviterSelection.Select(_topology, stableClients, 1, _bridge.LastFocusedSlot);
+            var inviter = _clients[inviterClient - 1];
+            var inviterSlot = _topology.Slots.First(slot => slot.Client == inviterClient).RuntimePad;
             if (!PoeChatInviteService.IsWindowOwned(inviter) || !PoeChatInviteService.IsWindowOwned(receiver))
                 throw new InvalidOperationException("An exact inviter or receiver window is unavailable.");
             var attempt = coordinator.BeginAttempt(inviterClient, DateTimeOffset.UtcNow);

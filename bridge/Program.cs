@@ -416,6 +416,7 @@ try
                     Console.Error.WriteLine("Physical controller disconnected; restart after checking its identity and isolation.");
                     return 1;
                 }
+                var previousFocusedSlot = router.FocusedSlot;
                 if (pairingGate is not null)
                 {
                     var observedAt = DateTime.UtcNow;
@@ -484,6 +485,8 @@ try
                     if (pairedSlot != 0)
                         Console.WriteLine(JsonSerializer.Serialize(new { @event = "a_release", slot = pairedSlot }));
                 }
+                if (router.FocusedSlot != previousFocusedSlot)
+                    Console.WriteLine(JsonSerializer.Serialize(new { @event = "focus_changed", slot = router.FocusedSlot }));
             }
             var autoPartyWasActive = router.AutoPartyActive;
             router.Tick(DateTime.UtcNow);
