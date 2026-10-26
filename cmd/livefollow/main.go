@@ -32,6 +32,41 @@ type followTargets map[int]int
 
 type stopDistances map[int]float64
 
+type roleBindings []live.RoleBinding
+
+func (bindings *roleBindings) String() string { return fmt.Sprint([]live.RoleBinding(*bindings)) }
+func (bindings *roleBindings) Set(value string) error {
+	parts := strings.Split(value, ":")
+	if len(parts) != 4 {
+		return errors.New("role binding must be ROLE:CLIENT:LOCAL:PID")
+	}
+	values := [4]int{}
+	for index, part := range parts {
+		parsed, err := strconv.Atoi(part)
+		if err != nil || parsed <= 0 {
+			return errors.New("role binding must contain positive integers")
+		}
+		values[index] = parsed
+	}
+	*bindings = append(*bindings, live.RoleBinding{Slot: values[0], Client: values[1],
+		LocalPlayer: values[2], ProcessID: values[3]})
+	return nil
+}
+
+func clientRoster(bindings []live.RoleBinding) (map[int]int, error) {
+	clients := make(map[int]int)
+	for _, binding := range bindings {
+		if existing := clients[binding.Client]; existing != 0 && existing != binding.ProcessID {
+			return nil, fmt.Errorf("client %d has multiple processes", binding.Client)
+		}
+		clients[binding.Client] = binding.ProcessID
+	}
+	if len(clients) < 1 || len(clients) > 3 {
+		return nil, errors.New("ordered role bindings need 1–3 clients")
+	}
+	return clients, nil
+}
+
 func (distances *stopDistances) String() string { return fmt.Sprint(map[int]float64(*distances)) }
 func (distances *stopDistances) Set(value string) error {
 	slotText, distanceText, ok := strings.Cut(value, "=")
@@ -125,6 +160,11 @@ func parseRoster(value string) (map[int]int, error) {
 }
 
 func resolveLogs(roster map[int]int, logs, exes sources) (map[int]string, error) {
+	return resolveLogPaths(roster, logs, exes, arealog.ValidatePaths)
+}
+
+func resolveLogPaths(roster map[int]int, logs, exes sources,
+	validate func(map[int]string) error) (map[int]string, error) {
 	paths := make(map[int]string, len(roster))
 	for slot := range roster {
 		if path, exists := logs[slot]; exists {
@@ -143,7 +183,7 @@ func resolveLogs(roster map[int]int, logs, exes sources) (map[int]string, error)
 	if len(logs)+len(exes) != len(roster) {
 		return nil, errors.New("log source slot is not in roster")
 	}
-	return paths, arealog.ValidatePaths(paths)
+	return paths, validate(paths)
 }
 
 func verifyProcessBindings(roster map[int]int, paths map[int]string) error {
@@ -227,7 +267,7 @@ func applyMenuInput(session *live.FlaskSession, engine *live.Engine, input <-cha
 }
 
 func run(address string, roster map[int]int, paths map[int]string, leader int, engine *live.Engine,
-	flasks *live.FlaskSession, menuInput <-chan menuInput) error {
+	flasks *live.FlaskSession, menuInput <-chan menuInput, ordered bool) error {
 	endpoint, err := net.ResolveUDPAddr("udp", address)
 	if err != nil || endpoint.IP == nil || !endpoint.IP.IsLoopback() {
 		return errors.New("listen address must be loopback")
@@ -273,7 +313,11 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 		_ = conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 		count, _, err := conn.ReadFromUDP(data)
 		if err == nil {
-			if sample, decodeErr := telemetry.Decode(data[:count]); decodeErr == nil {
+			if ordered {
+				if orderedFrame, decodeErr := live.DecodeOrderedClient(data[:count], time.Now().UTC()); decodeErr == nil {
+					engine.ObserveOrderedClient(orderedFrame)
+				}
+			} else if sample, decodeErr := telemetry.Decode(data[:count]); decodeErr == nil {
 				sample.ReceivedAt = time.Now().UTC()
 				if engine.ObserveSample(sample) && flasks != nil {
 					activations, err = flasks.ObserveSample(sample, time.Now().UTC())
@@ -285,7 +329,13 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 		} else if timeout, ok := err.(net.Error); !ok || !timeout.Timeout() {
 			return fail("sensor read failed", err)
 		}
-		if err := arealog.ValidatePaths(paths); err != nil {
+		var pathErr error
+		if ordered {
+			pathErr = arealog.ValidateClientPaths(paths)
+		} else {
+			pathErr = arealog.ValidatePaths(paths)
+		}
+		if err := pathErr; err != nil {
 			return fail("log source changed", err)
 		}
 		if err := verifyProcessBindings(roster, paths); err != nil {
@@ -309,6 +359,7 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 
 func main() {
 	rosterText := flag.String("roster", "", "explicit slot:process pairs, one player per client")
+	orderedInput := flag.Bool("experimental-ordered-input", false, "explicit ordered 1–2 player frames; requires independently verified source")
 	leader := flag.Int("leader", 0, "leader slot")
 	stop := flag.Float64("stop", -1, "stop distance")
 	catchup := flag.Float64("catchup", -1, "catch-up distance")
@@ -322,6 +373,8 @@ func main() {
 	var names memberNames
 	var targets followTargets
 	var playerStops stopDistances
+	var bindings roleBindings
+	flag.Var(&bindings, "role-bind", "ROLE:CLIENT:LOCAL:PID; ordered input only, repeat for every role")
 	flag.Var(&logs, "log", "SLOT=Client.txt path")
 	flag.Var(&exes, "exe", "SLOT=game executable path")
 	flag.Var(&terrainBindings, "terrain-binding", "SLOT=JSON path with explicit capture and live instance mapping")
@@ -329,12 +382,28 @@ func main() {
 	flag.Var(&targets, "follow-target", "SLOT=TARGET; 0 means Current MAIN")
 	flag.Var(&playerStops, "stop-player", "SLOT=VALUE; individual stop distance from 0 to 200")
 	flag.Parse()
-	roster, err := parseRoster(*rosterText)
+	if *orderedInput != (len(bindings) > 0) || *orderedInput && *rosterText != "" ||
+		!(*orderedInput) && *rosterText == "" || *orderedInput && *autoFlask {
+		fmt.Fprintln(os.Stderr, "choose either -roster or -experimental-ordered-input with -role-bind; ordered auto-flask is unavailable")
+		os.Exit(2)
+	}
+	var roster map[int]int
+	var err error
+	if *orderedInput {
+		roster, err = clientRoster(bindings)
+	} else {
+		roster, err = parseRoster(*rosterText)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	paths, err := resolveLogs(roster, logs, exes)
+	var paths map[int]string
+	if *orderedInput {
+		paths, err = resolveLogPaths(roster, logs, exes, arealog.ValidateClientPaths)
+	} else {
+		paths, err = resolveLogs(roster, logs, exes)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -345,7 +414,12 @@ func main() {
 	}
 	config := follow.Config{StopDistance: *stop, ResumeDistance: *stop + 3, CatchUpDistance: *catchup,
 		MaxAge: *maxAge, TargetTrail: true, AsyncTargetPath: true}
-	engine, err := live.New(roster, *leader, config, *logAge)
+	var engine *live.Engine
+	if *orderedInput {
+		engine, err = live.NewWithBindings(bindings, *leader, config, *logAge)
+	} else {
+		engine, err = live.New(roster, *leader, config, *logAge)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -397,7 +471,7 @@ func main() {
 		go readMenuInput(os.Stdin, commands)
 	}
 	fmt.Fprintln(os.Stderr, "Live follow decision stream; Windows controller and PoE2 behavior remain unverified.")
-	if err := run(*address, roster, paths, *leader, engine, flaskSession, menuCommands); err != nil {
+	if err := run(*address, roster, paths, *leader, engine, flaskSession, menuCommands, *orderedInput); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

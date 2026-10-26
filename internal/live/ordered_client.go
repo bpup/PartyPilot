@@ -1,6 +1,10 @@
 package live
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
 	"math"
 	"strings"
 	"time"
@@ -21,24 +25,53 @@ type RoleBinding struct {
 // local-player vector. The current ExileCore2 candidate scan does not produce
 // this frame and must not be promoted into it without game validation.
 type OrderedClientFrame struct {
-	ProcessID           int
-	SeenUTC             time.Time
-	ReceivedAt          time.Time
-	TickMS              int64
-	AreaName            string
-	AreaHash            uint32
-	CoordinateSpace     string
-	PlayerOrderReliable bool
-	PlayerOrderSource   string
-	Players             []OrderedLocalPlayer
+	ProcessID           int                  `json:"ProcessId"`
+	SeenUTC             time.Time            `json:"SeenUtc"`
+	ReceivedAt          time.Time            `json:"-"`
+	TickMS              int64                `json:"TickMs"`
+	AreaName            string               `json:"AreaName"`
+	AreaHash            uint32               `json:"AreaHash"`
+	CoordinateSpace     string               `json:"CoordinateSpace"`
+	PlayerOrderReliable bool                 `json:"PlayerOrderReliable"`
+	PlayerOrderSource   string               `json:"PlayerOrderSource"`
+	Players             []OrderedLocalPlayer `json:"Players"`
 }
 
 type OrderedLocalPlayer struct {
-	LocalPlayer                   int
-	X, Y, Z                       float64
-	Life, LifeMax                 *float64
-	Mana, ManaMax                 *float64
-	EnergyShield, EnergyShieldMax *float64
+	LocalPlayer     int      `json:"LocalPlayer"`
+	X               float64  `json:"X"`
+	Y               float64  `json:"Y"`
+	Z               float64  `json:"Z"`
+	Life            *float64 `json:"Life"`
+	LifeMax         *float64 `json:"LifeMax"`
+	Mana            *float64 `json:"Mana"`
+	ManaMax         *float64 `json:"ManaMax"`
+	EnergyShield    *float64 `json:"EnergyShield"`
+	EnergyShieldMax *float64 `json:"EnergyShieldMax"`
+}
+
+// DecodeOrderedClient is an explicit, opt-in transport boundary. The wire
+// claim of reliable order is not proof that its producer read the game correctly.
+func DecodeOrderedClient(data []byte, receivedAt time.Time) (OrderedClientFrame, error) {
+	var wire struct {
+		Kind string `json:"Kind"`
+		OrderedClientFrame
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&wire); err != nil {
+		return OrderedClientFrame{}, err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return OrderedClientFrame{}, errors.New("ordered frame has trailing data")
+	}
+	if wire.Kind != "ordered_client" || receivedAt.IsZero() || wire.ProcessID <= 0 ||
+		wire.SeenUTC.IsZero() || wire.TickMS <= 0 || len(wire.Players) > 2 {
+		return OrderedClientFrame{}, errors.New("invalid ordered client frame")
+	}
+	wire.ReceivedAt = receivedAt
+	return wire.OrderedClientFrame, nil
 }
 
 // ObserveOrderedClient commits a complete 1–2 player frame atomically. Missing,

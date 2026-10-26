@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"partypilot/internal/arealog"
 	"partypilot/internal/follow"
 	"partypilot/internal/live"
 )
@@ -38,6 +39,45 @@ func TestSourcesAndRoster(t *testing.T) {
 	}
 	if _, err := resolveLogs(roster, sources{1: first}, nil); err == nil {
 		t.Fatal("missing log accepted")
+	}
+}
+
+func TestOrderedRoleBindingsUseClientLogs(t *testing.T) {
+	var bindings roleBindings
+	for _, value := range []string{"1:1:1:101", "2:1:2:101", "3:2:1:202", "4:2:2:202"} {
+		if err := bindings.Set(value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, value := range []string{"1:2:3", "a:1:1:101", "1:1:1:0"} {
+		if err := bindings.Set(value); err == nil {
+			t.Fatalf("invalid role binding accepted: %q", value)
+		}
+	}
+	clients, err := clientRoster(bindings)
+	if err != nil || len(clients) != 2 || clients[1] != 101 || clients[2] != 202 {
+		t.Fatalf("role clients were not preserved: %+v %v", clients, err)
+	}
+	directory := t.TempDir()
+	first := filepath.Join(directory, "one.txt")
+	second := filepath.Join(directory, "two.txt")
+	for _, path := range []string{first, second} {
+		if err := os.WriteFile(path, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	paths, err := resolveLogPaths(clients, sources{1: first, 2: second}, nil,
+		arealog.ValidateClientPaths)
+	if err != nil || len(paths) != 2 {
+		t.Fatalf("client logs were rejected: %+v %v", paths, err)
+	}
+	if _, err := resolveLogPaths(clients, sources{1: first, 2: first}, nil,
+		arealog.ValidateClientPaths); err == nil {
+		t.Fatal("two clients shared one log")
+	}
+	if got, err := clientRoster([]live.RoleBinding{{Slot: 1, Client: 1, LocalPlayer: 1, ProcessID: 101},
+		{Slot: 2, Client: 1, LocalPlayer: 2, ProcessID: 202}}); err == nil || got != nil {
+		t.Fatal("one client mapped to two processes")
 	}
 }
 

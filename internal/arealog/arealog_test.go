@@ -72,6 +72,12 @@ func TestDistinctLogPaths(t *testing.T) {
 	if err := ValidatePaths(map[int]string{1: first, 2: second}); err != nil {
 		t.Fatal(err)
 	}
+	if err := ValidateClientPaths(map[int]string{1: first}); err != nil {
+		t.Fatalf("one dual-local client log was rejected: %v", err)
+	}
+	if err := ValidateClientPaths(map[int]string{1: first, 2: second}); err != nil {
+		t.Fatal(err)
+	}
 	if err := ValidatePaths(map[int]string{1: first, 2: first}); err == nil {
 		t.Fatal("accepted shared path")
 	}
@@ -81,6 +87,9 @@ func TestDistinctLogPaths(t *testing.T) {
 	}
 	if err := ValidatePaths(map[int]string{1: first, 2: link}); err == nil {
 		t.Fatal("accepted alias to same log")
+	}
+	if err := ValidateClientPaths(map[int]string{1: first, 2: link}); err == nil {
+		t.Fatal("ordered clients shared a log")
 	}
 }
 

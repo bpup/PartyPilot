@@ -71,8 +71,18 @@ func fresh(now, seen time.Time, maxAge time.Duration) bool {
 }
 
 func ValidatePaths(paths map[int]string) error {
-	if len(paths) < 2 || len(paths) > 6 {
-		return fmt.Errorf("configure 2–6 distinct player logs")
+	return validatePaths(paths, 2, 6)
+}
+
+// ValidateClientPaths checks one log per game process, including a single
+// process that hosts two local players.
+func ValidateClientPaths(paths map[int]string) error {
+	return validatePaths(paths, 1, 3)
+}
+
+func validatePaths(paths map[int]string, minCount, maxCount int) error {
+	if len(paths) < minCount || len(paths) > maxCount {
+		return fmt.Errorf("configure %d–%d distinct logs", minCount, maxCount)
 	}
 	seen := make(map[string]int)
 	files := make(map[int]os.FileInfo)

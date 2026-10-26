@@ -1,6 +1,7 @@
 package live
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -9,6 +10,51 @@ import (
 	"partypilot/internal/partylog"
 	"partypilot/internal/telemetry"
 )
+
+func TestOrderedWireIsSeparateFromCandidateSensorPacket(t *testing.T) {
+	now := time.Now().UTC()
+	encoded, err := json.Marshal(struct {
+		Kind string `json:"Kind"`
+		OrderedClientFrame
+	}{Kind: "ordered_client", OrderedClientFrame: OrderedClientFrame{
+		ProcessID: 101, SeenUTC: now, TickMS: now.UnixMilli(),
+		CoordinateSpace: "world", PlayerOrderReliable: true,
+		PlayerOrderSource: "verified test fixture",
+		Players: []OrderedLocalPlayer{{LocalPlayer: 1, Life: floatPtr(100), LifeMax: floatPtr(100)},
+			{LocalPlayer: 2, X: 10, Life: floatPtr(100), LifeMax: floatPtr(100)}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := DecodeOrderedClient(encoded, now.Add(time.Millisecond))
+	if err != nil || frame.ProcessID != 101 || len(frame.Players) != 2 ||
+		!frame.ReceivedAt.Equal(now.Add(time.Millisecond)) {
+		t.Fatalf("ordered packet rejected: %+v %v", frame, err)
+	}
+	invalidCurrent := frame
+	invalidCurrent.PlayerOrderReliable = false
+	invalidBytes, err := json.Marshal(struct {
+		Kind string `json:"Kind"`
+		OrderedClientFrame
+	}{Kind: "ordered_client", OrderedClientFrame: invalidCurrent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded, err := DecodeOrderedClient(invalidBytes, now.Add(2*time.Millisecond)); err != nil ||
+		decoded.PlayerOrderReliable {
+		t.Fatalf("current loss-of-order frame must reach the engine to revoke old positions: %v", err)
+	}
+	for _, packet := range [][]byte{
+		[]byte(`{"ProcessId":101,"SeenUtc":"2026-10-27T00:00:00Z","TickMs":1,"VisiblePlayers":[]}`),
+		[]byte(`{"Kind":"ordered_client","ProcessId":101,"PlayerOrderReliable":false}`),
+		append(append([]byte{}, encoded...), []byte(` {}`)...),
+		append(append([]byte{}, encoded[:len(encoded)-1]...), []byte(`,"LocalSlotCandidates":{}}`)...),
+	} {
+		if _, err := DecodeOrderedClient(packet, now); err == nil {
+			t.Fatalf("unverified or malformed packet accepted: %s", packet)
+		}
+	}
+}
 
 func TestDualLocalClientUsesOneAreaAndPartyLog(t *testing.T) {
 	now := time.Now().UTC()
