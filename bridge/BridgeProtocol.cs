@@ -18,10 +18,10 @@ internal static class BridgeProtocol
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object ||
                 !root.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String ||
-                type.GetString() is not ("auto_party_begin" or "auto_party_pulse" or "auto_party_end"))
+                type.GetString() is not ("auto_party_begin" or "auto_party_pulse" or "auto_party_renew" or "auto_party_end"))
                 return false;
             var name = type.GetString()!;
-            if (name is "auto_party_begin" or "auto_party_end")
+            if (name is "auto_party_begin" or "auto_party_renew" or "auto_party_end")
             {
                 command = new AutoPartyControl(name, 0, 0, 0);
                 return true;

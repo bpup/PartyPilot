@@ -232,6 +232,14 @@ internal sealed class BridgeRouter
         return true;
     }
 
+    public bool RenewAutoParty(DateTime nowUtc)
+    {
+        if (!_autoPartyActive || nowUtc.Kind != DateTimeKind.Utc || nowUtc >= _autoPartyExpiresUtc)
+            return false;
+        _autoPartyExpiresUtc = nowUtc.AddSeconds(10);
+        return true;
+    }
+
     public void EndAutoParty()
     {
         if (!_autoPartyActive) return;

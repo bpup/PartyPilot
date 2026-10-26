@@ -25,18 +25,18 @@ internal static class PoeChatInviteService
     {
         inviteName = inviteName.Trim();
         if (!IsValidInviteName(inviteName)) return (false, "The invite name is invalid.");
-        if (!OperatingSystem.IsWindows() || inviter.WindowHandle <= 0 || inviter.Pid <= 0 ||
-            !OwnsWindow(inviter) || !SetForegroundWindow((nint)inviter.WindowHandle))
+        if (!await FocusExactWindowAsync(inviter, cancellationToken).ConfigureAwait(false))
             return (false, "The exact inviter window could not be focused.");
-
-        await Task.Delay(120, cancellationToken).ConfigureAwait(false);
         var handle = (nint)inviter.WindowHandle;
+        cancellationToken.ThrowIfCancellationRequested();
         if (GetForegroundWindow() != handle || !SendVirtualKey(Return))
             return (false, "The inviter chat field could not be opened safely.");
         await Task.Delay(80, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
         if (GetForegroundWindow() != handle || !SendUnicodeText("/invite " + inviteName) ||
             GetForegroundWindow() != handle)
             return (false, "The fresh invite command could not be entered safely.");
+        cancellationToken.ThrowIfCancellationRequested();
         if (!SendVirtualKey(Return)) return (false, "The fresh invite command was not submitted.");
         await Task.Delay(200, cancellationToken).ConfigureAwait(false);
         if (GetForegroundWindow() != handle)
@@ -44,8 +44,21 @@ internal static class PoeChatInviteService
         return (true, "Fresh /invite sent from the exact inviter window.");
     }
 
-    private static bool OwnsWindow(LaunchedClient client)
+    internal static async Task<bool> FocusExactWindowAsync(LaunchedClient client, CancellationToken token)
     {
+        if (!OperatingSystem.IsWindows() || client.WindowHandle <= 0 || client.Pid <= 0 ||
+            !IsWindowOwned(client) || !SetForegroundWindow((nint)client.WindowHandle)) return false;
+        await Task.Delay(120, token).ConfigureAwait(false);
+        return IsExactForeground(client);
+    }
+
+    internal static bool IsExactForeground(LaunchedClient client) =>
+        OperatingSystem.IsWindows() && IsWindowOwned(client) &&
+        GetForegroundWindow() == (nint)client.WindowHandle;
+
+    internal static bool IsWindowOwned(LaunchedClient client)
+    {
+        if (!OperatingSystem.IsWindows() || client.WindowHandle <= 0 || client.Pid <= 0) return false;
         GetWindowThreadProcessId((nint)client.WindowHandle, out var pid);
         if (pid != client.Pid) return false;
         try

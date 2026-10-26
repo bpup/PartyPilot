@@ -37,6 +37,9 @@ public sealed class MainWindow : Window
     private readonly ComboBox _inviteTarget = new();
     private readonly Button _sendInvite = new();
     private readonly TextBlock _inviteStatus = new();
+    private readonly Button _runAutoParty = new();
+    private readonly Button _stopAutoParty = new();
+    private readonly TextBlock _autoPartyStatus = new();
     private readonly TextBlock _status = new();
     private readonly ComboBox _physicalIndex = new();
     private readonly TextBox _physicalDevice = new();
@@ -102,6 +105,8 @@ public sealed class MainWindow : Window
     private bool _rosterBusy;
     private bool _inviteBusy;
     private CancellationTokenSource? _inviteCancellation;
+    private CancellationTokenSource? _autoPartyCancellation;
+    private bool _autoPartyRunning;
     private bool _closing;
     private string _loginStatus = "waiting";
     private bool _busy;
@@ -345,7 +350,7 @@ public sealed class MainWindow : Window
 
     private Border BuildAutoPartyStep()
     {
-        var panel = Step("3A", "AUTO PARTY · 组队邀请", "按角色填写游戏中的准确名称。当前仅能从客户端 1 向所选客户端发送一次邀请；受邀方仍需手动接受。");
+        var panel = Step("3A", "AUTO PARTY · 组队邀请", "按角色填写游戏中的准确名称。自动恢复依次向其他客户端发出全新邀请，按目标版菜单顺序接受，并检查 Current Party 画面候选人数。Windows 游戏内效果待验证。");
         for (var player = 1; player <= 6; player++)
         {
             var row = new StackPanel { Spacing = 4 };
@@ -363,11 +368,23 @@ public sealed class MainWindow : Window
         panel.Children.Add(_inviteTarget);
         _sendInvite.Content = "发送一次邀请";
         _sendInvite.Click += async (_, _) => await SendOneInviteAsync();
-        panel.Children.Add(_sendInvite);
+        _runAutoParty.Content = "运行自动组队";
+        _runAutoParty.Click += async (_, _) => await RunAutoPartyAsync();
+        _stopAutoParty.Content = "取消自动组队";
+        _stopAutoParty.Click += (_, _) => _autoPartyCancellation?.Cancel();
+        var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12, LineSpacing = 8 };
+        actions.Children.Add(_sendInvite);
+        actions.Children.Add(_runAutoParty);
+        actions.Children.Add(_stopAutoParty);
+        panel.Children.Add(actions);
         _inviteStatus.Text = "需要已绑定窗口、完成配对和每个客户端至少一个准确角色名。";
         _inviteStatus.Foreground = MutedBrush;
         _inviteStatus.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(_inviteStatus);
+        _autoPartyStatus.Text = "自动组队未运行；截图候选人数不能证明角色身份。";
+        _autoPartyStatus.Foreground = MutedBrush;
+        _autoPartyStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_autoPartyStatus);
         return Card(panel);
     }
 
@@ -568,6 +585,7 @@ public sealed class MainWindow : Window
         if (topologyChanged)
         {
             _inviteCancellation?.Cancel();
+            _autoPartyCancellation?.Cancel();
             _launchedClients = [];
             _rosterStatus.Text = "绑定窗口后，可在游戏内打开 Current Party 面板再检查；结果仅是画面候选行数。";
             _ = StopRadarAsync();
@@ -614,6 +632,7 @@ public sealed class MainWindow : Window
     private void ClearLaunchedClients()
     {
         _inviteCancellation?.Cancel();
+        _autoPartyCancellation?.Cancel();
         _launchedClients = [];
         _rosterStatus.Text = "窗口绑定已清除；请重新绑定后检查 Current Party。";
         UpdateRosterControls();
@@ -1020,10 +1039,61 @@ public sealed class MainWindow : Window
         var namesReady = _selectedTopology is not null && AutoPartyInviteNames.TryCreate(
             _selectedTopology, _inviteNames.Take(_selectedTopology.PlayerCount)
                 .Select(box => box?.Text).ToArray(), out _);
-        _sendInvite.IsEnabled = OperatingSystem.IsWindows() && !_busy && !_inviteBusy &&
+        var ready = OperatingSystem.IsWindows() && !_busy && !_inviteBusy && !_autoPartyRunning &&
             _bridge is not null && _pairingSettled && _selectedTopology is { ClientCount: > 1 } &&
             _launchedClients.Count == _selectedTopology.ClientCount &&
             _inviteTarget.SelectedIndex is >= 0 && namesReady;
+        _sendInvite.IsEnabled = ready;
+        _runAutoParty.IsEnabled = ready;
+        _stopAutoParty.IsEnabled = _autoPartyRunning;
+    }
+
+    private async Task RunAutoPartyAsync()
+    {
+        if (!_runAutoParty.IsEnabled || _selectedTopology is null || _bridge is null ||
+            !AutoPartyInviteNames.TryCreate(_selectedTopology,
+                _inviteNames.Take(_selectedTopology.PlayerCount).Select(box => box.Text).ToArray(), out var names) ||
+            names is null) return;
+        var bridge = _bridge;
+        var topology = _selectedTopology;
+        var clients = _launchedClients.ToArray();
+        using var cancellation = new CancellationTokenSource();
+        _autoPartyCancellation = cancellation;
+        _autoPartyRunning = true;
+        UpdateAutoPartyControls();
+        var expired = false;
+        void OnExpired() { expired = true; cancellation.Cancel(); }
+        bridge.AutoPartyExpired += OnExpired;
+        try
+        {
+            await StopFollowAsync();
+            cancellation.Token.ThrowIfCancellationRequested();
+            if (!ReferenceEquals(_bridge, bridge)) throw new OperationCanceledException();
+            var recovery = new AutoPartyRecoverySession(bridge, topology,
+                clients, names, status => _autoPartyStatus.Text = status);
+            _autoPartyStatus.Text = "自动组队恢复已开始；正在等待桥接确认。";
+            var observed = await recovery.RunAsync(cancellation.Token);
+            _autoPartyStatus.Text = observed
+                ? "所有客户端画面候选人数达到所选布局；角色身份及游戏内组队结果仍待核对。"
+                : $"客户端 {recovery.FailedClient} 的自动组队尝试结束，画面候选人数未达到所选布局。";
+        }
+        catch (OperationCanceledException)
+        {
+            _autoPartyStatus.Text = expired
+                ? "桥接的自动组队输入独占已超时，流程停止。"
+                : "自动组队已取消，菜单输入已停止。";
+        }
+        catch (Exception error)
+        {
+            _autoPartyStatus.Text = $"自动组队已停止：{error.Message}";
+        }
+        finally
+        {
+            bridge.AutoPartyExpired -= OnExpired;
+            if (ReferenceEquals(_autoPartyCancellation, cancellation)) _autoPartyCancellation = null;
+            _autoPartyRunning = false;
+            UpdateAutoPartyControls();
+        }
     }
 
     private async Task SendOneInviteAsync()
@@ -1280,6 +1350,7 @@ public sealed class MainWindow : Window
     private async Task StopBridgeAsync()
     {
         _inviteCancellation?.Cancel();
+        _autoPartyCancellation?.Cancel();
         await StopFollowAsync();
         var session = _bridge;
         _bridge = null;

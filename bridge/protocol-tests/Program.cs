@@ -81,6 +81,8 @@ if (!BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_begin\"}", out var
     beginParty.Type != "auto_party_begin" ||
     !BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":5,\"buttons\":4096,\"hold_ms\":80}", out var pulseParty) ||
     pulseParty != new AutoPartyControl("auto_party_pulse", 5, 4096, 80) ||
+    !BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_renew\"}", out var renewParty) ||
+    renewParty.Type != "auto_party_renew" ||
     !BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_end\"}", out _) ||
     BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":7,\"buttons\":4096,\"hold_ms\":80}", out _) ||
     BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":2,\"buttons\":4096,\"hold_ms\":1000}", out _) ||
@@ -282,11 +284,18 @@ if (partyRouter.AutoPartyActive || partyPad1.Report != default || partyPad2.Repo
 if (!partyRouter.BeginAutoParty(now.AddSeconds(1)) ||
     !partyRouter.PulseAutoParty(2, 0x2000, 60, now.AddSeconds(1).AddMilliseconds(1)))
     throw new Exception("Auto Party could not restart after stopping.");
+if (!partyRouter.RenewAutoParty(now.AddSeconds(9)) ||
+    !partyRouter.AutoPartyActive ||
+    partyRouter.RenewAutoParty(now.AddSeconds(20)))
+    throw new Exception("Auto Party lease renewal accepted an expired session.");
 partyRouter.Tick(now.AddSeconds(12));
+if (!partyRouter.AutoPartyActive || partyPad2.Report != default)
+    throw new Exception("A renewed Auto Party session did not remain neutral and owned.");
+partyRouter.Tick(now.AddSeconds(20));
 if (partyRouter.AutoPartyActive || partyPad2.Report != default)
     throw new Exception("Auto Party timeout failed to neutralize a stale session.");
-if (!partyRouter.BeginAutoParty(now.AddSeconds(13)) ||
-    partyRouter.ApplyLine("{\"type\":\"auto_party_pulse\",\"slot\":2,\"buttons\":16384,\"hold_ms\":80}", now.AddSeconds(13)) ||
+if (!partyRouter.BeginAutoParty(now.AddSeconds(21)) ||
+    partyRouter.ApplyLine("{\"type\":\"auto_party_pulse\",\"slot\":2,\"buttons\":16384,\"hold_ms\":80}", now.AddSeconds(21)) ||
     partyRouter.AutoPartyActive || partyPad2.Report != default)
     throw new Exception("Malformed input survived Auto Party exclusive ownership.");
 var pairingSignals = new PairingSignalTracker();

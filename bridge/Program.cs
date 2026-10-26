@@ -356,6 +356,7 @@ try
                 {
                     if (!physicalMode || pairingGate?.Phase != ProtectedPairingPhase.Complete ||
                         (partyControl.Type == "auto_party_begin" && !router.BeginAutoParty(DateTime.UtcNow)) ||
+                        (partyControl.Type == "auto_party_renew" && !router.RenewAutoParty(DateTime.UtcNow)) ||
                         (partyControl.Type == "auto_party_pulse" &&
                          !router.PulseAutoParty(partyControl.Slot, partyControl.Buttons,
                              partyControl.HoldMilliseconds, DateTime.UtcNow)))

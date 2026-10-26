@@ -12,6 +12,10 @@ internal sealed class BridgeSession : IAsyncDisposable
     private readonly Task<string> _readError;
     private readonly ConcurrentDictionary<int, string> _menuStates = new();
     private readonly HashSet<int> _slots;
+    private readonly HashSet<int> _allSlots;
+    private readonly SemaphoreSlim _inputGate = new(1, 1);
+    private readonly SemaphoreSlim _partyGate = new(1, 1);
+    private AutoPartyPending? _pendingAutoParty;
     private bool _stopping;
 
     public bool AutoFlaskEnabled { get; }
@@ -22,13 +26,19 @@ internal sealed class BridgeSession : IAsyncDisposable
     public event Action<string>? LoginStatusChanged;
     public event Action<int, string>? MenuGuardChanged;
     public event Action<string>? Ended;
+    public event Action? AutoPartyExpired;
 
-    private BridgeSession(Process process, Task<string> readError, bool autoFlaskEnabled, int[] slots)
+    private sealed record AutoPartyPending(string Type, int Slot, ushort Buttons,
+        TaskCompletionSource Completion);
+
+    private BridgeSession(Process process, Task<string> readError, bool autoFlaskEnabled,
+        int[] slots, int[] allSlots)
     {
         _process = process;
         _readError = readError;
         AutoFlaskEnabled = autoFlaskEnabled;
         _slots = slots.ToHashSet();
+        _allSlots = allSlots.ToHashSet();
     }
 
     public static async Task<BridgeSession> StartAsync(string executable, IReadOnlyList<PartySlot> partySlots, int physicalIndex,
@@ -114,7 +124,8 @@ internal sealed class BridgeSession : IAsyncDisposable
             {
                 throw new InvalidOperationException("Virtual controller bridge did not confirm the requested pad slots.");
             }
-            return new BridgeSession(process, readError, autoFlaskEnabled, slots);
+            return new BridgeSession(process, readError, autoFlaskEnabled, slots,
+                partySlots.Select(item => item.RuntimePad).ToArray());
         }
         catch (Exception error)
         {
@@ -177,11 +188,10 @@ internal sealed class BridgeSession : IAsyncDisposable
         {
             throw new InvalidOperationException("Virtual controller bridge is no longer running.");
         }
-        await _process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new
+        await WriteCommandAsync(JsonSerializer.Serialize(new
         {
             type = "arm_pairing", slot, pid = client.Pid, window_handle = client.WindowHandle
         }));
-        await _process.StandardInput.FlushAsync();
     }
 
     public async Task FinishPairingAsync()
@@ -190,16 +200,14 @@ internal sealed class BridgeSession : IAsyncDisposable
         {
             throw new InvalidOperationException("Virtual controller bridge is no longer running.");
         }
-        await _process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new { type = "finish_pairing" }));
-        await _process.StandardInput.FlushAsync();
+        await WriteCommandAsync(JsonSerializer.Serialize(new { type = "finish_pairing" }));
     }
 
     internal async Task SendAutomationAsync(FollowBridgeFrame frame)
     {
         if (_stopping || _process.HasExited)
             throw new InvalidOperationException("Virtual controller bridge is no longer running.");
-        await _process.StandardInput.WriteLineAsync(frame.Command);
-        await _process.StandardInput.FlushAsync();
+        await WriteCommandAsync(frame.Command);
     }
 
     internal string GetMenuGuardState(int slot) => _menuStates.TryGetValue(slot, out var state) ? state : "clear";
@@ -209,8 +217,68 @@ internal sealed class BridgeSession : IAsyncDisposable
         if (!AutoFlaskEnabled || !_slots.Contains(slot) || resource is not ("life" or "mana") ||
             _stopping || _process.HasExited)
             throw new InvalidOperationException("Automatic flask input is unavailable for this pad.");
-        await _process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new { type = "flask", slot, resource }));
-        await _process.StandardInput.FlushAsync();
+        await WriteCommandAsync(JsonSerializer.Serialize(new { type = "flask", slot, resource }));
+    }
+
+    internal Task BeginAutoPartyAsync(CancellationToken token) =>
+        SendAutoPartyControlAsync("auto_party_begin", 0, 0, 0, token);
+
+    internal Task RenewAutoPartyAsync(CancellationToken token) =>
+        SendAutoPartyControlAsync("auto_party_renew", 0, 0, 0, token);
+
+    internal Task PulseAutoPartyAsync(int slot, ushort buttons, int holdMilliseconds, CancellationToken token)
+    {
+        if (!_allSlots.Contains(slot) || !ValidAutoPartyPulse(buttons, holdMilliseconds))
+            throw new ArgumentOutOfRangeException(nameof(slot), "Auto Party requires an assigned menu pad and a target-version pulse.");
+        return SendAutoPartyControlAsync("auto_party_pulse", slot, buttons, holdMilliseconds, token);
+    }
+
+    internal Task EndAutoPartyAsync(CancellationToken token) =>
+        SendAutoPartyControlAsync("auto_party_end", 0, 0, 0, token);
+
+    internal static bool ValidAutoPartyPulse(ushort buttons, int duration) => buttons switch
+    {
+        0x0010 => duration is 80 or 100,
+        0x0004 or 0x1000 => duration == 80,
+        0x2000 => duration == 60,
+        _ => false
+    };
+
+    private async Task SendAutoPartyControlAsync(string type, int slot, ushort buttons,
+        int holdMilliseconds, CancellationToken token)
+    {
+        await _partyGate.WaitAsync(token);
+        try
+        {
+            if (_stopping || _process.HasExited)
+                throw new InvalidOperationException("Virtual controller bridge is no longer running.");
+            var pending = new AutoPartyPending(type, slot, buttons,
+                new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+            Volatile.Write(ref _pendingAutoParty, pending);
+            var command = type == "auto_party_pulse"
+                ? JsonSerializer.Serialize(new { type, slot, buttons, hold_ms = holdMilliseconds })
+                : JsonSerializer.Serialize(new { type });
+            await WriteCommandAsync(command, token);
+            await pending.Completion.Task.WaitAsync(TimeSpan.FromSeconds(2), token);
+        }
+        finally
+        {
+            Volatile.Write(ref _pendingAutoParty, null);
+            _partyGate.Release();
+        }
+    }
+
+    private async Task WriteCommandAsync(string command, CancellationToken token = default)
+    {
+        await _inputGate.WaitAsync(token);
+        try
+        {
+            if (_stopping || _process.HasExited)
+                throw new InvalidOperationException("Virtual controller bridge is no longer running.");
+            await _process.StandardInput.WriteLineAsync(command);
+            await _process.StandardInput.FlushAsync();
+        }
+        finally { _inputGate.Release(); }
     }
 
     private async Task ReadEventsAsync()
@@ -260,6 +328,22 @@ internal sealed class BridgeSession : IAsyncDisposable
                         source.GetString() is { } sourceName &&
                         sourceName is "waiting" or "visual" or "fallback_timeout")
                         Dispatcher.UIThread.Post(() => LoginStatusChanged?.Invoke(sourceName));
+                    else if (kind.GetString() == "auto_party_control" &&
+                        root.TryGetProperty("type", out var partyType) && partyType.ValueKind == JsonValueKind.String &&
+                        root.TryGetProperty("slot", out var partySlot) && partySlot.TryGetInt32(out var ackSlot) &&
+                        root.TryGetProperty("buttons", out var partyButtons) && partyButtons.TryGetUInt16(out var ackButtons))
+                    {
+                        var pending = Volatile.Read(ref _pendingAutoParty);
+                        if (pending is not null && partyType.GetString() == pending.Type &&
+                            ackSlot == pending.Slot && ackButtons == pending.Buttons)
+                            pending.Completion.TrySetResult();
+                    }
+                    else if (kind.GetString() == "auto_party_expired")
+                    {
+                        Volatile.Read(ref _pendingAutoParty)?.Completion.TrySetException(
+                            new InvalidOperationException("Auto Party controller ownership expired."));
+                        Dispatcher.UIThread.Post(() => AutoPartyExpired?.Invoke());
+                    }
                 }
                 catch (Exception error) when (error is JsonException or InvalidOperationException)
                 {
@@ -270,6 +354,8 @@ internal sealed class BridgeSession : IAsyncDisposable
         catch (Exception error) { failure = error.Message; }
         finally
         {
+            Volatile.Read(ref _pendingAutoParty)?.Completion.TrySetException(
+                new InvalidOperationException("Virtual controller bridge exited."));
             if (!_stopping)
             {
                 Dispatcher.UIThread.Post(() => Ended?.Invoke(failure ?? "Virtual controller bridge exited."));
