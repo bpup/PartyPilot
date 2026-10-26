@@ -82,6 +82,11 @@ if (pathFields.Length != 3 || !pathFields[0].IsEffectivelyVisible || !pathFields
 var configured = Path.Combine(Path.GetDirectoryName(output)!, Path.GetFileNameWithoutExtension(output) + "-configured.png");
 (window.CaptureRenderedFrame() ?? throw new Exception("The configured window did not render.")).Save(configured);
 Console.WriteLine($"Four-player, two-client preview saved to {configured}.");
+window.Width = 760;
+window.UpdateLayout();
+var compact = Path.Combine(Path.GetDirectoryName(output)!, Path.GetFileNameWithoutExtension(output) + "-compact.png");
+(window.CaptureRenderedFrame() ?? throw new Exception("The compact window did not render.")).Save(compact);
+Console.WriteLine($"Minimum-width preview saved to {compact}.");
 clientCount.SelectedIndex = 2;
 Dispatcher.UIThread.RunJobs();
 var variant = window.GetLogicalDescendants().OfType<ComboBox>()
@@ -102,9 +107,10 @@ if (!pathFields[0].IsEffectivelyVisible || pathFields[1].IsEffectivelyVisible)
     throw new Exception("The default couch 2P option did not request one game window.");
 }
 var guide = new PairingGuide(PartyTopologies.DefaultFor(2));
-if (guide.ObserveARelease(2) || guide.AReleased || !guide.ObserveARelease(1) ||
+if (guide.ObserveARelease(1) || guide.Arm(2) || !guide.Arm(1) ||
+    guide.ObserveARelease(2) || guide.AReleased || !guide.ObserveARelease(1) ||
     guide.Current?.PartyPlayer != 1 || guide.ConfirmInGame()?.RuntimePad != 2 ||
-    !guide.ObserveARelease(2) || guide.ConfirmInGame() is not null || !guide.IsComplete)
+    !guide.Arm(2) || !guide.ObserveARelease(2) || guide.ConfirmInGame() is not null || !guide.IsComplete)
 {
     throw new Exception("Pairing guide accepted a wrong slot or skipped a user confirmation.");
 }

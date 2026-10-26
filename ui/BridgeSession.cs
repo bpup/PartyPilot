@@ -12,6 +12,8 @@ internal sealed class BridgeSession : IAsyncDisposable
     private bool _stopping;
 
     public event Action<int>? AReleased;
+    public event Action<int>? PairingArmed;
+    public event Action? PairingCompleted;
     public event Action<string>? Ended;
 
     private BridgeSession(Process process, Task<string> readError)
@@ -40,7 +42,7 @@ internal sealed class BridgeSession : IAsyncDisposable
         {
             "--enable-controller", "--slots", string.Join(',', slots),
             "--physical-index", physicalIndex.ToString(), "--main-slot", slots[0].ToString(),
-            "--physical-hidden-confirmed"
+            "--physical-hidden-confirmed", "--pairing-protected"
         })
         {
             start.ArgumentList.Add(argument);
@@ -81,6 +83,7 @@ internal sealed class BridgeSession : IAsyncDisposable
             var root = json.RootElement;
             return root.TryGetProperty("event", out var kind) && kind.GetString() == "ready" &&
                    root.TryGetProperty("physical_mode", out var mode) && mode.GetBoolean() &&
+                   root.TryGetProperty("pairing_protected", out var protectedMode) && protectedMode.GetBoolean() &&
                    root.TryGetProperty("slots", out var selected) &&
                    selected.EnumerateArray().Select(value => value.GetInt32()).SequenceEqual(slots.Order());
         }
@@ -90,18 +93,29 @@ internal sealed class BridgeSession : IAsyncDisposable
         }
     }
 
-    public async Task FocusAsync(int slot)
+    public async Task ArmPairingAsync(int slot)
     {
         if (_stopping || _process.HasExited)
         {
             throw new InvalidOperationException("Virtual controller bridge is no longer running.");
         }
-        await _process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new { type = "focus", slot }));
+        await _process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new { type = "arm_pairing", slot }));
+        await _process.StandardInput.FlushAsync();
+    }
+
+    public async Task FinishPairingAsync()
+    {
+        if (_stopping || _process.HasExited)
+        {
+            throw new InvalidOperationException("Virtual controller bridge is no longer running.");
+        }
+        await _process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new { type = "finish_pairing" }));
         await _process.StandardInput.FlushAsync();
     }
 
     private async Task ReadEventsAsync()
     {
+        string? failure = null;
         try
         {
             string? line;
@@ -111,24 +125,31 @@ internal sealed class BridgeSession : IAsyncDisposable
                 {
                     using var json = JsonDocument.Parse(line);
                     var root = json.RootElement;
-                    if (root.TryGetProperty("event", out var kind) && kind.GetString() == "a_release" &&
+                    if (!root.TryGetProperty("event", out var kind) || kind.ValueKind != JsonValueKind.String)
+                        continue;
+                    if ((kind.GetString() is "a_release" or "pairing_armed") &&
                         root.TryGetProperty("slot", out var value) && value.TryGetInt32(out var slot))
                     {
-                        Dispatcher.UIThread.Post(() => AReleased?.Invoke(slot));
+                        if (kind.GetString() == "a_release")
+                            Dispatcher.UIThread.Post(() => AReleased?.Invoke(slot));
+                        else
+                            Dispatcher.UIThread.Post(() => PairingArmed?.Invoke(slot));
                     }
+                    else if (kind.GetString() == "pairing_complete")
+                        Dispatcher.UIThread.Post(() => PairingCompleted?.Invoke());
                 }
-                catch (JsonException)
+                catch (Exception error) when (error is JsonException or InvalidOperationException)
                 {
                     // An unrecognized diagnostic line is not a pairing event.
                 }
             }
         }
-        catch (Exception error) when (error is IOException or ObjectDisposedException) { }
+        catch (Exception error) { failure = error.Message; }
         finally
         {
             if (!_stopping)
             {
-                Dispatcher.UIThread.Post(() => Ended?.Invoke("Virtual controller bridge exited."));
+                Dispatcher.UIThread.Post(() => Ended?.Invoke(failure ?? "Virtual controller bridge exited."));
             }
         }
     }

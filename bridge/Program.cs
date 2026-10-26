@@ -36,20 +36,21 @@ if (args.Length == 4 && args[0] == "--probe-xinput" && args[2] == "--samples" &&
 
 if (!args.Contains("--enable-controller") || !BridgeSlots.TryParse(args, out var slots))
 {
-    Console.Error.WriteLine("Usage: PartyPilot.Bridge --enable-controller --slots 1,2 [--physical-index 0 --main-slot 1 --physical-hidden-confirmed]");
+    Console.Error.WriteLine("Usage: PartyPilot.Bridge --enable-controller --slots 1,2 [--physical-index 0 --main-slot 1 --physical-hidden-confirmed [--pairing-protected]]");
     return 2;
 }
 var physicalMode = args.Contains("--physical-index") || args.Contains("--main-slot") ||
     args.Contains("--physical-hidden-confirmed");
+var protectedPairing = args.Contains("--pairing-protected");
 var physicalIndexPosition = Array.IndexOf(args, "--physical-index");
 var mainSlotPosition = Array.IndexOf(args, "--main-slot");
 uint physicalIndex = 0;
 int mainSlot = 0;
-if (physicalMode && (physicalIndexPosition < 0 || physicalIndexPosition + 1 >= args.Length ||
+if ((protectedPairing && !physicalMode) || (physicalMode && (physicalIndexPosition < 0 || physicalIndexPosition + 1 >= args.Length ||
     !uint.TryParse(args[physicalIndexPosition + 1], out physicalIndex) || physicalIndex > 3 ||
     mainSlotPosition < 0 || mainSlotPosition + 1 >= args.Length ||
     !int.TryParse(args[mainSlotPosition + 1], out mainSlot) || !slots.Contains(mainSlot) ||
-    !args.Contains("--physical-hidden-confirmed")))
+    !args.Contains("--physical-hidden-confirmed"))))
 {
     Console.Error.WriteLine("Physical mode requires a connected physical XInput index, a configured main slot, and confirmed game input isolation.");
     return 2;
@@ -90,7 +91,8 @@ try
             entry => (IPadOutput)new ViGEmPadOutput(entry.Value)));
         if (physicalMode) router.ConfigurePhysical(mainSlot);
         var pairingSignals = new PairingSignalTracker();
-        Console.WriteLine(JsonSerializer.Serialize(new { @event = "ready", slots, physical_mode = physicalMode }));
+        var pairingGate = protectedPairing ? new ProtectedPairingGate() : null;
+        Console.WriteLine(JsonSerializer.Serialize(new { @event = "ready", slots, physical_mode = physicalMode, pairing_protected = protectedPairing }));
 
         Task<string?> pendingLine = Console.In.ReadLineAsync();
         while (true)
@@ -101,7 +103,31 @@ try
                 var line = await pendingLine;
                 if (line is null) break;
                 pendingLine = Console.In.ReadLineAsync();
-                if (!router.ApplyLine(line, DateTime.UtcNow))
+                if (pairingGate is not null && BridgeProtocol.TryParsePairingControl(line, out var control))
+                {
+                    if (control.Type == "arm_pairing" && slots.Contains(control.Slot) &&
+                        pairingGate.Arm(control.Slot, DateTime.UtcNow))
+                    {
+                        router.NeutralAll();
+                        router.ApplyLine(JsonSerializer.Serialize(new { type = "focus", slot = control.Slot }), DateTime.UtcNow);
+                        Console.WriteLine(JsonSerializer.Serialize(new { @event = "pairing_armed", slot = control.Slot }));
+                    }
+                    else if (control.Type == "finish_pairing" && pairingGate.Finish())
+                    {
+                        router.NeutralAll();
+                        router.ApplyLine(JsonSerializer.Serialize(new { type = "focus", slot = mainSlot }), DateTime.UtcNow);
+                        Console.WriteLine(JsonSerializer.Serialize(new { @event = "pairing_settling" }));
+                    }
+                    else
+                    {
+                        Console.Error.WriteLine("Invalid pairing transition; all controllers neutral.");
+                        router.NeutralAll();
+                        return 1;
+                    }
+                    continue;
+                }
+                if ((pairingGate is not null && pairingGate.Phase != ProtectedPairingPhase.Complete) ||
+                    !router.ApplyLine(line, DateTime.UtcNow))
                 {
                     Console.Error.WriteLine("Invalid or unassigned command; all controllers neutral.");
                     return 1;
@@ -123,10 +149,22 @@ try
                     Console.Error.WriteLine("Physical controller disconnected; restart after checking its identity and isolation.");
                     return 1;
                 }
-                router.SetPhysical(state.Gamepad);
-                var pairedSlot = pairingSignals.Observe((state.Gamepad.Buttons & 0x1000) != 0, router.FocusedSlot);
-                if (pairedSlot != 0)
-                    Console.WriteLine(JsonSerializer.Serialize(new { @event = "a_release", slot = pairedSlot }));
+                if (pairingGate is not null)
+                {
+                    var observation = pairingGate.Observe(state.Gamepad, DateTime.UtcNow);
+                    router.SetPhysical(observation.Forwarded);
+                    if (observation.ReleasedSlot != 0)
+                        Console.WriteLine(JsonSerializer.Serialize(new { @event = "a_release", slot = observation.ReleasedSlot }));
+                    if (observation.Completed)
+                        Console.WriteLine(JsonSerializer.Serialize(new { @event = "pairing_complete" }));
+                }
+                else
+                {
+                    router.SetPhysical(state.Gamepad);
+                    var pairedSlot = pairingSignals.Observe((state.Gamepad.Buttons & 0x1000) != 0, router.FocusedSlot);
+                    if (pairedSlot != 0)
+                        Console.WriteLine(JsonSerializer.Serialize(new { @event = "a_release", slot = pairedSlot }));
+                }
             }
             router.Tick(DateTime.UtcNow);
         }

@@ -92,6 +92,43 @@ if (pairingSignals.Observe(true, 2) != 0 ||
     pairingSignals.Observe(true, 2) != 0 ||
     pairingSignals.Observe(false, 2) != 2)
     throw new Exception("Pairing signal survived a disconnect.");
+var gate = new ProtectedPairingGate();
+var heldA = new XInputGamepad { Buttons = 0x1000 };
+if (gate.Observe(heldA, now).Forwarded.Buttons != 0 || gate.Finish() || !gate.Arm(1, now) ||
+    gate.Arm(2, now) || gate.Observe(default, now).Forwarded.Buttons != 0 ||
+    gate.Observe(heldA, now.AddMilliseconds(100)).Forwarded.Buttons != 0)
+    throw new Exception("Protected pairing forwarded input before the login-ready and neutral gates.");
+gate.Observe(default, now.AddMilliseconds(120));
+var firstPulse = gate.Observe(heldA, now.AddMilliseconds(880));
+if (firstPulse.Forwarded.Buttons != 0x1000 || gate.Phase != ProtectedPairingPhase.Pulsing ||
+    gate.Observe(heldA, now.AddMilliseconds(1100)).ReleasedSlot != 0)
+    throw new Exception("First local player did not receive a single protected A pulse.");
+var firstRelease = gate.Observe(heldA, now.AddMilliseconds(1231));
+if (firstRelease.ReleasedSlot != 1 || firstRelease.Forwarded.Buttons != 0 ||
+    gate.Observe(heldA, now.AddMilliseconds(1240)).Forwarded.Buttons != 0)
+    throw new Exception("Held physical A leaked beyond the first virtual pulse.");
+gate.Observe(default, now.AddMilliseconds(1250));
+if (gate.Observe(heldA, now.AddMilliseconds(1260)).Forwarded.Buttons != 0x1000 ||
+    !gate.Arm(2, now.AddMilliseconds(1300)))
+    throw new Exception("In-game character input did not resume after the physical release.");
+if (gate.Observe(heldA, now.AddMilliseconds(1300)).Forwarded.Buttons != 0)
+    throw new Exception("Held A leaked into the next player after rearming.");
+gate.Observe(default, now.AddMilliseconds(1320));
+if (gate.Observe(heldA, now.AddMilliseconds(2100)).Forwarded.Buttons != 0x1000 ||
+    gate.Observe(heldA, now.AddMilliseconds(2115)).ReleasedSlot != 0 ||
+    gate.Observe(heldA, now.AddMilliseconds(2125)).ReleasedSlot != 2 || !gate.Finish())
+    throw new Exception("Second local player did not receive its shorter join pulse.");
+gate.Observe(default, now.AddMilliseconds(2200));
+gate.Observe(new XInputGamepad { LeftX = 9000 }, now.AddMilliseconds(2450));
+gate.Observe(default, now.AddMilliseconds(2500));
+if (gate.Observe(default, now.AddMilliseconds(2899)).Completed ||
+    !gate.Observe(default, now.AddMilliseconds(2900)).Completed ||
+    gate.Phase != ProtectedPairingPhase.Complete)
+    throw new Exception("Final neutral settling did not reset and complete after 400 ms.");
+if (!BridgeProtocol.TryParsePairingControl("{\"type\":\"arm_pairing\",\"slot\":3}", out var arm) ||
+    arm.Slot != 3 || !BridgeProtocol.TryParsePairingControl("{\"type\":\"finish_pairing\"}", out _) ||
+    BridgeProtocol.TryParsePairingControl("{\"type\":\"arm_pairing\",\"slot\":5}", out _))
+    throw new Exception("Protected pairing command validation failed.");
 var pad1 = new FakePad();
 var pad2ForHotkey = new FakePad();
 var hotkeyRouter = new BridgeRouter(new Dictionary<int, IPadOutput> { [1] = pad1, [2] = pad2ForHotkey });

@@ -3,9 +3,38 @@ using System.Text.Json;
 namespace PartyPilot.Bridge;
 
 internal readonly record struct BridgeCommand(int Slot, short X, short Y, bool Active);
+internal readonly record struct PairingControl(string Type, int Slot);
 
 internal static class BridgeProtocol
 {
+    public static bool TryParsePairingControl(string line, out PairingControl control)
+    {
+        control = default;
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String)
+                return false;
+            var name = type.GetString();
+            if (name == "finish_pairing")
+            {
+                control = new PairingControl(name, 0);
+                return true;
+            }
+            if (name != "arm_pairing" || !root.TryGetProperty("slot", out var slot) ||
+                !slot.TryGetInt32(out var value) || value is < 1 or > 4)
+                return false;
+            control = new PairingControl(name, value);
+            return true;
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
     public static bool TryParseFocus(string line, out int slot)
     {
         slot = 0;

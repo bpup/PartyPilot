@@ -7,6 +7,7 @@ public sealed class PairingGuide
     private int _index;
     public PartySlot? Current => _index < _slots.Length ? _slots[_index] : null;
     public bool AReleased { get; private set; }
+    public bool Armed { get; private set; }
     public bool IsComplete => Current is null;
 
     public PairingGuide(PartyTopology topology)
@@ -16,8 +17,16 @@ public sealed class PairingGuide
 
     public bool ObserveARelease(int runtimePad)
     {
-        if (Current?.RuntimePad != runtimePad || AReleased) return false;
+        if (Current?.RuntimePad != runtimePad || AReleased || !Armed) return false;
         AReleased = true;
+        Armed = false;
+        return true;
+    }
+
+    public bool Arm(int runtimePad)
+    {
+        if (Current?.RuntimePad != runtimePad || AReleased || Armed) return false;
+        Armed = true;
         return true;
     }
 
@@ -26,6 +35,7 @@ public sealed class PairingGuide
         if (!AReleased || IsComplete) throw new InvalidOperationException("Wait for the A release before confirming the in-game role.");
         _index++;
         AReleased = false;
+        Armed = false;
         return Current;
     }
 }

@@ -12,5 +12,6 @@
     <Compile Include="../XInputNative.cs" Link="XInputNative.cs" />
     <Compile Include="../PhysicalSlotGuard.cs" Link="PhysicalSlotGuard.cs" />
     <Compile Include="../PairingSignalTracker.cs" Link="PairingSignalTracker.cs" />
+    <Compile Include="../ProtectedPairingGate.cs" Link="ProtectedPairingGate.cs" />
   </ItemGroup>
 </Project>

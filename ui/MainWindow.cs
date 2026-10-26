@@ -31,12 +31,16 @@ public sealed class MainWindow : Window
     private readonly ComboBox _physicalIndex = new();
     private readonly CheckBox _isolationConfirmed = new();
     private readonly Button _prepareBridge = new();
+    private readonly Button _armPairing = new();
     private readonly Button _confirmRole = new();
     private readonly Button _stopBridge = new();
     private readonly TextBlock _pairingStatus = new();
     private PartyTopology? _selectedTopology;
     private BridgeSession? _bridge;
     private PairingGuide? _pairing;
+    private bool _armRequested;
+    private bool _pairingSettling;
+    private bool _pairingSettled;
     private bool _busy;
 
     public MainWindow()
@@ -137,14 +141,17 @@ public sealed class MainWindow : Window
         panel.Children.Add(_physicalIndex);
         _isolationConfirmed.Content = "我已确认实体手柄对游戏隐藏，仅由桥接读取";
         panel.Children.Add(_isolationConfirmed);
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12, LineSpacing = 8 };
         _prepareBridge.Content = "准备虚拟手柄";
         _prepareBridge.Click += async (_, _) => await PrepareBridgeAsync();
+        _armPairing.Content = "当前登录画面已就绪，允许 A 键";
+        _armPairing.Click += async (_, _) => await ArmPairingAsync();
         _stopBridge.Content = "停止手柄桥接";
         _stopBridge.Click += async (_, _) => await StopBridgeAsync();
         _confirmRole.Content = "已在游戏内确认此角色";
         _confirmRole.Click += async (_, _) => await ConfirmRoleAsync();
         actions.Children.Add(_prepareBridge);
+        actions.Children.Add(_armPairing);
         actions.Children.Add(_stopBridge);
         actions.Children.Add(_confirmRole);
         panel.Children.Add(actions);
@@ -271,6 +278,8 @@ public sealed class MainWindow : Window
         _prepareBridge.IsEnabled = !_busy && _bridge is null && supported &&
             _physicalIndex.SelectedIndex is >= 0 and <= 3 && _isolationConfirmed.IsChecked == true;
         _stopBridge.IsEnabled = _bridge is not null;
+        _armPairing.IsEnabled = _bridge is not null && _pairing?.Current is not null &&
+            _pairing.Armed == false && _pairing.AReleased == false && !_armRequested && !_busy;
         _confirmRole.IsEnabled = _bridge is not null && _pairing?.AReleased == true;
         _playerCount.IsEnabled = _bridge is null;
         _topologyVariant.IsEnabled = _bridge is null;
@@ -307,6 +316,8 @@ public sealed class MainWindow : Window
         {
             var session = await BridgeSession.StartAsync(executable, slots, _physicalIndex.SelectedIndex);
             session.AReleased += BridgeAReleased;
+            session.PairingArmed += BridgePairingArmed;
+            session.PairingCompleted += BridgePairingCompleted;
             session.Ended += BridgeEnded;
             _bridge = session;
             _pairing = new PairingGuide(_selectedTopology);
@@ -331,6 +342,45 @@ public sealed class MainWindow : Window
         UpdateBridgeControls();
     }
 
+    private async Task ArmPairingAsync()
+    {
+        var current = _pairing?.Current;
+        if (_bridge is null || current is null || _armRequested || _pairing!.Armed || _pairing.AReleased) return;
+        _armRequested = true;
+        UpdateBridgeControls();
+        _pairingStatus.Text = "已发送当前角色的配对准备请求；等待桥接确认。";
+        try
+        {
+            await _bridge.ArmPairingAsync(current.RuntimePad);
+        }
+        catch (Exception error)
+        {
+            await StopBridgeAsync();
+            _pairingStatus.Text = $"无法准备配对：{error.Message}";
+        }
+    }
+
+    private async void BridgePairingArmed(int slot)
+    {
+        _armRequested = false;
+        if (_pairing?.Arm(slot) != true)
+        {
+            await StopBridgeAsync();
+            _pairingStatus.Text = "桥接报告了非当前角色的配对槽位，已停止。";
+            return;
+        }
+        ShowCurrentPairingStep();
+        UpdateBridgeControls();
+    }
+
+    private void BridgePairingCompleted()
+    {
+        if (_pairing?.IsComplete != true || !_pairingSettling) return;
+        _pairingSettling = false;
+        _pairingSettled = true;
+        ShowCurrentPairingStep();
+    }
+
     private async void BridgeEnded(string reason)
     {
         await StopBridgeAsync();
@@ -343,7 +393,11 @@ public sealed class MainWindow : Window
         try
         {
             var next = _pairing.ConfirmInGame();
-            if (next is not null) await _bridge.FocusAsync(next.RuntimePad);
+            if (next is null)
+            {
+                _pairingSettling = true;
+                await _bridge.FinishPairingAsync();
+            }
             ShowCurrentPairingStep();
         }
         catch (Exception error)
@@ -358,10 +412,14 @@ public sealed class MainWindow : Window
     {
         var current = _pairing?.Current;
         _pairingStatus.Text = current is null
-            ? "所有角色步骤已由用户确认；软件尚未验证游戏内实际配对。手柄桥接仍在运行。"
+            ? _pairingSettled
+                ? "已观察到 400 毫秒手柄回中，且所有角色步骤由用户确认；软件尚未验证游戏内实际配对。手柄桥接仍在运行。"
+                : "所有角色步骤已由用户确认；请松开所有手柄输入，等待 400 毫秒回中。"
             : _pairing!.AReleased
-                ? $"已观察到 P{current.PartyPlayer} 对应手柄 A 键松开。请在游戏中确认角色已加入，再点“已在游戏内确认此角色”。"
-                : $"请打开客户端 {current.Client} 的角色界面，为 P{current.PartyPlayer}（本地角色 {current.LocalPlayer}）按下并松开 A 键。";
+                ? $"已观察到 P{current.PartyPlayer} 对应虚拟手柄 A 键松开。请在游戏中选角并确认角色已加入，再继续。"
+                : _pairing.Armed
+                    ? $"P{current.PartyPlayer} 输入已准备。请让客户端 {current.Client} 保持前台、松开所有输入；等待稳定后按一次 A 键。"
+                    : $"请打开客户端 {current.Client} 的登录/角色画面，确认就绪后点“当前登录画面已就绪，允许 A 键”。";
     }
 
     private async Task StopBridgeAsync()
@@ -369,9 +427,14 @@ public sealed class MainWindow : Window
         var session = _bridge;
         _bridge = null;
         _pairing = null;
+        _armRequested = false;
+        _pairingSettling = false;
+        _pairingSettled = false;
         UpdateBridgeControls();
         if (session is null) return;
         session.AReleased -= BridgeAReleased;
+        session.PairingArmed -= BridgePairingArmed;
+        session.PairingCompleted -= BridgePairingCompleted;
         session.Ended -= BridgeEnded;
         await session.DisposeAsync();
         _pairingStatus.Text = "手柄桥接已停止，虚拟手柄已释放。";
