@@ -4,13 +4,17 @@ namespace PartyPilot.Sensor;
 // evidence of the active runtime profile or of this reader's anchor address.
 public static class LocalSlotCandidateScanner
 {
+    private sealed record VectorMatch(long HeaderAddress, long[] Ordered, int Delta, int StructOffset);
     private static readonly int[] ReferenceStructOffsets = [1408, 2552];
     private const int ReferenceAreaPointerOffset = 656;
     private const int ReferenceVectorOffset = 72;
 
     public sealed record Result(string Status, string Anchor, string OffsetProfile,
         string[] OrderedAddresses, int MatchingHeaders, string? StatePointerAreaAddress,
-        bool? StatePointerMatchesDataAddress, string[] CandidateAreaAddresses);
+        bool? StatePointerMatchesDataAddress, string[] CandidateAreaAddresses)
+    {
+        public string? VectorHeaderAddress { get; init; }
+    }
 
     public static Result Scan(long ingameStateAddress, long dataAddress, long observedLocalAddress,
         IReadOnlyDictionary<long, string> visiblePaths, Func<long, int, byte[]?> read,
@@ -36,17 +40,17 @@ public static class LocalSlotCandidateScanner
             return new Result("missing_anchor_or_local", anchor, profile, [], 0,
                 statePointerText, pointerMatchesData, []);
 
-        var orders = new Dictionary<string, long[]>(StringComparer.Ordinal);
+        var matches = new List<VectorMatch>();
         var matchedAreas = new HashSet<long>();
         var matchingHeaders = 0;
         var areas = new HashSet<long>();
         if (Plausible(dataAddress)) areas.Add(dataAddress);
         if (statePointerAreaAddress != 0) areas.Add(statePointerAreaAddress);
-        foreach (var areaAddress in areas)
+        foreach (var areaAddress in areas.Order())
         {
             foreach (var structOffset in ReferenceStructOffsets)
             {
-                for (var delta = -128; delta <= 128; delta += 8)
+                foreach (var delta in SearchDeltas())
                 {
                     var vectorOffset = ReferenceVectorOffset + delta;
                     if (vectorOffset < 0) continue;
@@ -56,21 +60,52 @@ public static class LocalSlotCandidateScanner
                         continue;
                     matchingHeaders++;
                     matchedAreas.Add(areaAddress);
-                    var key = string.Join(",", order.Select(value => value.ToString("X")));
-                    orders.TryAdd(key, order);
+                    matches.Add(new VectorMatch(headerAddress, order, delta, structOffset));
                 }
             }
         }
 
         var candidateAreas = matchedAreas.Order().Select(value => $"0x{value:X}").ToArray();
-        if (orders.Count == 0) return new Result("no_candidate", anchor, profile, [], 0,
+        if (matches.Count == 0) return new Result("no_candidate", anchor, profile, [], 0,
             statePointerText, pointerMatchesData, candidateAreas);
-        if (orders.Count > 1) return new Result("conflicting_candidates", anchor, profile, [], matchingHeaders,
+        if (matches.Select(match => string.Join(",", match.Ordered.Select(value => value.ToString("X"))))
+            .Distinct(StringComparer.Ordinal).Skip(1).Any())
+            return new Result("conflicting_candidates", anchor, profile, [], matchingHeaders,
             statePointerText, pointerMatchesData, candidateAreas);
-        var only = orders.Values.Single();
-        return new Result(only.Length == 2 ? "two_slot_candidate" : "single_slot_candidate",
-            anchor, profile, only.Select(value => $"0x{value:X}").ToArray(), matchingHeaders,
-            statePointerText, pointerMatchesData, candidateAreas);
+        var selected = matches.OrderBy(match => Math.Abs(match.Delta))
+            .ThenBy(match => match.StructOffset == ReferenceStructOffsets[0] ? 0 : 1)
+            .ThenBy(match => match.HeaderAddress).First();
+        return new Result(selected.Ordered.Length == 2 ? "two_slot_candidate" : "single_slot_candidate",
+            anchor, profile, selected.Ordered.Select(value => $"0x{value:X}").ToArray(), matchingHeaders,
+            statePointerText, pointerMatchesData, candidateAreas)
+        { VectorHeaderAddress = $"0x{selected.HeaderAddress:X}" };
+    }
+
+    public static bool Revalidate(Result candidate, long observedLocalAddress,
+        IReadOnlyDictionary<long, string> visiblePaths, Func<long, int, byte[]?> read,
+        Func<long, string?>? readMissingPath = null)
+    {
+        if (candidate.Status is not ("single_slot_candidate" or "two_slot_candidate") ||
+            candidate.VectorHeaderAddress is null ||
+            !candidate.VectorHeaderAddress.StartsWith("0x", StringComparison.Ordinal) ||
+            candidate.VectorHeaderAddress.Length <= 2 ||
+            !long.TryParse(candidate.VectorHeaderAddress.AsSpan(2),
+                System.Globalization.NumberStyles.HexNumber,
+                System.Globalization.CultureInfo.InvariantCulture, out var headerAddress) ||
+            !Plausible(headerAddress) ||
+            !TryReadOrder(headerAddress, observedLocalAddress, visiblePaths, read,
+                readMissingPath, out var ordered)) return false;
+        return ordered.Select(value => $"0x{value:X}").SequenceEqual(candidate.OrderedAddresses);
+    }
+
+    private static IEnumerable<int> SearchDeltas()
+    {
+        yield return 0;
+        for (var distance = 8; distance <= 128; distance += 8)
+        {
+            yield return distance;
+            yield return -distance;
+        }
     }
 
     private static bool TryReadOrder(long headerAddress, long observedLocalAddress,

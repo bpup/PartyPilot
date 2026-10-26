@@ -37,6 +37,20 @@ Require(two.StatePointerAreaAddress == "0x100000" && two.StatePointerMatchesData
     "State pointer and data address relationship was not reported.");
 Require(two.CandidateAreaAddresses.SequenceEqual(["0x100000"]),
     "The candidate area address was not reported.");
+Require(two.VectorHeaderAddress == "0x1005C8" &&
+    LocalSlotCandidateScanner.Revalidate(two, local, paths, Read),
+    "The selected vector header was not revalidated.");
+var vectorStart = BitConverter.ToInt64(memory[data + 1408 + 72], 0);
+memory[vectorStart] = new[] { other, local }.SelectMany(BitConverter.GetBytes).ToArray();
+Require(!LocalSlotCandidateScanner.Revalidate(two, local, paths, Read),
+    "A reordered vector was accepted from a cached candidate.");
+memory[vectorStart] = new[] { local, other }.SelectMany(BitConverter.GetBytes).ToArray();
+paths[other] = "Metadata/Monsters/Player";
+Require(!LocalSlotCandidateScanner.Revalidate(two, local, paths, Read),
+    "A changed character path was accepted from a cached candidate.");
+paths[other] = "Metadata/Characters/Player";
+Require(!LocalSlotCandidateScanner.Revalidate(two with { VectorHeaderAddress = "bad" }, local, paths, Read),
+    "An invalid cached vector address was accepted.");
 AddVector(data + 2552 + 72, other, local);
 var conflict = LocalSlotCandidateScanner.Scan(state, data, local, paths, Read);
 Require(conflict.Status == "conflicting_candidates" && conflict.OrderedAddresses.Length == 0,

@@ -180,6 +180,25 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                                 _lastSlotScanDataAddress == GameController.IngameState.Data.Address &&
                                 _lastSlotScanLocalAddress == (player?.Address ?? 0)
                                     ? _slotCandidates : null;
+                            if (slotCandidate != null)
+                            {
+                                var paths = new Dictionary<long, string>();
+                                foreach (var entity in GameController.Entities)
+                                {
+                                    if (entity?.GetComponent<Player>() == null || entity.Address <= 0) continue;
+                                    paths.TryAdd(entity.Address, entity.Path ?? "");
+                                    if (paths.Count == 256) break;
+                                }
+                                byte[]? ReadCandidate(long address, int size)
+                                {
+                                    try { return GameController.IngameState.Data.M.ReadMem(address, size); }
+                                    catch { return null; }
+                                }
+                                if (!LocalSlotCandidateScanner.Revalidate(slotCandidate, player?.Address ?? 0,
+                                        paths, ReadCandidate,
+                                        address => RawCharacterPathReader.Read(address, ReadCandidate)))
+                                    slotCandidate = null;
+                            }
                             itemCards = result.Cards.Select(card =>
                             {
                                 var match = UiItemCardCorrelator.Resolve(card, players, loot, slotCandidate);
