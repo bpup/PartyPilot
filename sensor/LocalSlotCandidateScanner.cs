@@ -5,41 +5,70 @@ namespace PartyPilot.Sensor;
 public static class LocalSlotCandidateScanner
 {
     private static readonly int[] ReferenceStructOffsets = [1408, 2552];
+    private const int ReferenceAreaPointerOffset = 656;
     private const int ReferenceVectorOffset = 72;
 
     public sealed record Result(string Status, string Anchor, string OffsetProfile,
-        string[] OrderedAddresses, int MatchingHeaders);
+        string[] OrderedAddresses, int MatchingHeaders, string? StatePointerAreaAddress,
+        bool? StatePointerMatchesDataAddress, string[] CandidateAreaAddresses);
 
-    public static Result Scan(long dataAddress, long observedLocalAddress,
+    public static Result Scan(long ingameStateAddress, long dataAddress, long observedLocalAddress,
         IReadOnlyDictionary<long, string> visiblePaths, Func<long, int, byte[]?> read)
     {
-        const string anchor = "ExileCore2.IngameState.Data.Address (unverified area anchor)";
+        const string anchor = "ExileCore2.IngameState.Address + static area pointer / IngameState.Data.Address";
         const string profile = "supplied-build static defaults (active offsets unverified)";
-        if (!Plausible(dataAddress) || !Plausible(observedLocalAddress))
-            return new Result("missing_anchor_or_local", anchor, profile, [], 0);
+        long statePointerAreaAddress = 0;
+        if (Plausible(ingameStateAddress))
+        {
+            var pointerBytes = read(ingameStateAddress + ReferenceAreaPointerOffset, 8);
+            if (pointerBytes is { Length: 8 })
+            {
+                var pointer = BitConverter.ToInt64(pointerBytes, 0);
+                if (Plausible(pointer)) statePointerAreaAddress = pointer;
+            }
+        }
+        var statePointerText = statePointerAreaAddress == 0 ? null : $"0x{statePointerAreaAddress:X}";
+        bool? pointerMatchesData = statePointerAreaAddress == 0 || !Plausible(dataAddress)
+            ? null : statePointerAreaAddress == dataAddress;
+        if (!Plausible(observedLocalAddress) ||
+            (statePointerAreaAddress == 0 && !Plausible(dataAddress)))
+            return new Result("missing_anchor_or_local", anchor, profile, [], 0,
+                statePointerText, pointerMatchesData, []);
 
         var orders = new Dictionary<string, long[]>(StringComparer.Ordinal);
+        var matchedAreas = new HashSet<long>();
         var matchingHeaders = 0;
-        foreach (var structOffset in ReferenceStructOffsets)
+        var areas = new HashSet<long>();
+        if (Plausible(dataAddress)) areas.Add(dataAddress);
+        if (statePointerAreaAddress != 0) areas.Add(statePointerAreaAddress);
+        foreach (var areaAddress in areas)
         {
-            for (var delta = -128; delta <= 128; delta += 8)
+            foreach (var structOffset in ReferenceStructOffsets)
             {
-                var vectorOffset = ReferenceVectorOffset + delta;
-                if (vectorOffset < 0) continue;
-                var headerAddress = dataAddress + structOffset + vectorOffset;
-                if (!TryReadOrder(headerAddress, observedLocalAddress, visiblePaths, read, out var order))
-                    continue;
-                matchingHeaders++;
-                var key = string.Join(",", order.Select(value => value.ToString("X")));
-                orders.TryAdd(key, order);
+                for (var delta = -128; delta <= 128; delta += 8)
+                {
+                    var vectorOffset = ReferenceVectorOffset + delta;
+                    if (vectorOffset < 0) continue;
+                    var headerAddress = areaAddress + structOffset + vectorOffset;
+                    if (!TryReadOrder(headerAddress, observedLocalAddress, visiblePaths, read, out var order))
+                        continue;
+                    matchingHeaders++;
+                    matchedAreas.Add(areaAddress);
+                    var key = string.Join(",", order.Select(value => value.ToString("X")));
+                    orders.TryAdd(key, order);
+                }
             }
         }
 
-        if (orders.Count == 0) return new Result("no_candidate", anchor, profile, [], 0);
-        if (orders.Count > 1) return new Result("conflicting_candidates", anchor, profile, [], matchingHeaders);
+        var candidateAreas = matchedAreas.Order().Select(value => $"0x{value:X}").ToArray();
+        if (orders.Count == 0) return new Result("no_candidate", anchor, profile, [], 0,
+            statePointerText, pointerMatchesData, candidateAreas);
+        if (orders.Count > 1) return new Result("conflicting_candidates", anchor, profile, [], matchingHeaders,
+            statePointerText, pointerMatchesData, candidateAreas);
         var only = orders.Values.Single();
         return new Result(only.Length == 2 ? "two_slot_candidate" : "single_slot_candidate",
-            anchor, profile, only.Select(value => $"0x{value:X}").ToArray(), matchingHeaders);
+            anchor, profile, only.Select(value => $"0x{value:X}").ToArray(), matchingHeaders,
+            statePointerText, pointerMatchesData, candidateAreas);
     }
 
     private static bool TryReadOrder(long headerAddress, long observedLocalAddress,

@@ -47,11 +47,14 @@ type VisiblePlayer struct {
 // LocalSlotCandidates are read-only hints from an unverified memory anchor.
 // They must never be used as a controller or party slot assignment.
 type LocalSlotCandidates struct {
-	Status           string   `json:"Status"`
-	Anchor           string   `json:"Anchor"`
-	OffsetProfile    string   `json:"OffsetProfile"`
-	OrderedAddresses []string `json:"OrderedAddresses"`
-	MatchingHeaders  int      `json:"MatchingHeaders"`
+	Status                         string   `json:"Status"`
+	Anchor                         string   `json:"Anchor"`
+	OffsetProfile                  string   `json:"OffsetProfile"`
+	OrderedAddresses               []string `json:"OrderedAddresses"`
+	MatchingHeaders                int      `json:"MatchingHeaders"`
+	StatePointerAreaAddress        string   `json:"StatePointerAreaAddress,omitempty"`
+	StatePointerMatchesDataAddress *bool    `json:"StatePointerMatchesDataAddress,omitempty"`
+	CandidateAreaAddresses         []string `json:"CandidateAreaAddresses"`
 }
 
 var ErrInvalidSample = errors.New("invalid telemetry sample")
@@ -66,14 +69,15 @@ func Decode(data []byte) (Sample, error) {
 		!validPool(item.Life, item.LifeMax) || !validPool(item.Mana, item.ManaMax) ||
 		!validPool(item.EnergyShield, item.EnergyShieldMax) ||
 		!validAddress(item.IngameDataAddress) || !validAddress(item.ObservedLocalAddress) ||
-		!validLocalSlotCandidates(item.LocalSlotCandidates, item.LocalSlotCandidateStatus, item.ObservedLocalAddress) ||
+		!validLocalSlotCandidates(item.LocalSlotCandidates, item.LocalSlotCandidateStatus,
+			item.ObservedLocalAddress, item.IngameDataAddress) ||
 		!validVisiblePlayers(item.VisiblePlayers, item.ObservedLocalAddress) {
 		return Sample{}, ErrInvalidSample
 	}
 	return item, nil
 }
 
-func validLocalSlotCandidates(candidate *LocalSlotCandidates, scanStatus, observed string) bool {
+func validLocalSlotCandidates(candidate *LocalSlotCandidates, scanStatus, observed, dataAddress string) bool {
 	if scanStatus != "" && scanStatus != "ok" && scanStatus != "scan_failed" {
 		return false
 	}
@@ -81,8 +85,14 @@ func validLocalSlotCandidates(candidate *LocalSlotCandidates, scanStatus, observ
 		return scanStatus != "ok"
 	}
 	if scanStatus != "ok" || candidate.Anchor == "" || candidate.OffsetProfile == "" ||
-		candidate.MatchingHeaders < 0 {
+		candidate.MatchingHeaders < 0 || !validAddress(candidate.StatePointerAreaAddress) {
 		return false
+	}
+	if candidate.StatePointerMatchesDataAddress != nil {
+		if candidate.StatePointerAreaAddress == "" || dataAddress == "" ||
+			*candidate.StatePointerMatchesDataAddress != (candidate.StatePointerAreaAddress == dataAddress) {
+			return false
+		}
 	}
 	want := 0
 	switch candidate.Status {
@@ -103,6 +113,19 @@ func validLocalSlotCandidates(candidate *LocalSlotCandidates, scanStatus, observ
 	}
 	if len(candidate.OrderedAddresses) != want || (want > 0 && candidate.MatchingHeaders < 1) {
 		return false
+	}
+	if (candidate.MatchingHeaders == 0 && len(candidate.CandidateAreaAddresses) != 0) ||
+		(candidate.MatchingHeaders > 0 && len(candidate.CandidateAreaAddresses) == 0) ||
+		len(candidate.CandidateAreaAddresses) > 2 {
+		return false
+	}
+	seenAreas := make(map[string]bool, len(candidate.CandidateAreaAddresses))
+	for _, area := range candidate.CandidateAreaAddresses {
+		if area == "" || !validAddress(area) || seenAreas[area] ||
+			(area != dataAddress && area != candidate.StatePointerAreaAddress) {
+			return false
+		}
+		seenAreas[area] = true
 	}
 	seen := make(map[string]bool, want)
 	localSeen := false

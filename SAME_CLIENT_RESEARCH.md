@@ -12,6 +12,8 @@
 
 另一个默认关闭的 `DiagnoseLocalSlotCandidates` 选项每秒只读扫描一次：以 ExileCore2 的上述数据地址为实验基址，在所提供版本静态公开默认结构偏移 1408/2552、向量偏移 72 的 ±128 字节内寻找 1–2 项指针向量。它只接纳指向已观察到的角色实体、包含当前角色且顺序无冲突的候选；结果明确标为 `single_slot_candidate` / `two_slot_candidate`，而不是可靠 P1/P2。偏移来自静态默认值，目标运行时配置可能不同；实验基址与目标 `areaInstance` 的关系也未经实机证明。合成内存测试覆盖有序双角色、冲突向量、未观察实体、非角色路径及过长向量。该诊断不会改变跟随或手柄输入。
 
+进一步反查目标 `NoddPilot.Offsets.Reading.AreaEntityListReader.TryResolveAreaInstance`，可见其先在游戏状态对象加上 `InGameStateAreaInstanceOffset` 读取指针；该偏移的公开静态默认值是 656。诊断现在也从 ExileCore2 的 `IngameState.Address + 656` 只读取得第二个实验区域基址，与 `IngameState.Data.Address` 分别扫描、去重并比较。输出包含状态指针解析出的区域地址、两种基址是否相等、实际产生候选的区域地址；两种基址若给出相互冲突的角色顺序，结果为 `conflicting_candidates`。目标运行时可能启用了不同偏移，当前没有 PoE2 实机证据证明两种基址任何一个等于目标的真实 `areaInstance`；即便候选相同，也不会自动绑定 P2。
+
 ## 待确认
 
 - Windows/PoE2 实机上，同一窗口的两个本地角色是否都出现在 ExileCore2 可见实体集合中，以及名字、实体 ID 和位置是否稳定。

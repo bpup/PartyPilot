@@ -1,10 +1,12 @@
 using PartyPilot.Sensor;
 
 var data = 0x100000L;
+var state = 0x800000L;
 var local = 0x200000L;
 var other = 0x300000L;
 var vector = 0x400000L;
 var memory = new Dictionary<long, byte[]>();
+memory[state + 656] = BitConverter.GetBytes(data);
 var paths = new Dictionary<long, string>
 {
     [local] = "Metadata/Characters/Player",
@@ -25,27 +27,45 @@ void Require(bool condition, string reason)
     if (!condition) throw new Exception(reason);
 }
 
-var empty = LocalSlotCandidateScanner.Scan(data, local, paths, Read);
+var empty = LocalSlotCandidateScanner.Scan(state, data, local, paths, Read);
 Require(empty.Status == "no_candidate", "Missing vector was accepted.");
 AddVector(data + 1408 + 72, local, other);
-var two = LocalSlotCandidateScanner.Scan(data, local, paths, Read);
+var two = LocalSlotCandidateScanner.Scan(state, data, local, paths, Read);
 Require(two.Status == "two_slot_candidate" && two.OrderedAddresses.SequenceEqual(["0x200000", "0x300000"]),
     "Ordered two-player candidate was not reported.");
+Require(two.StatePointerAreaAddress == "0x100000" && two.StatePointerMatchesDataAddress == true,
+    "State pointer and data address relationship was not reported.");
+Require(two.CandidateAreaAddresses.SequenceEqual(["0x100000"]),
+    "The candidate area address was not reported.");
 AddVector(data + 2552 + 72, other, local);
-var conflict = LocalSlotCandidateScanner.Scan(data, local, paths, Read);
+var conflict = LocalSlotCandidateScanner.Scan(state, data, local, paths, Read);
 Require(conflict.Status == "conflicting_candidates" && conflict.OrderedAddresses.Length == 0,
     "Conflicting vector orders were accepted.");
 memory.Remove(data + 2552 + 72);
 paths.Remove(other);
-Require(LocalSlotCandidateScanner.Scan(data, local, paths, Read).Status == "no_candidate",
+Require(LocalSlotCandidateScanner.Scan(state, data, local, paths, Read).Status == "no_candidate",
     "Unobserved candidate player was accepted.");
 paths[other] = "Metadata/Monsters/Player";
-Require(LocalSlotCandidateScanner.Scan(data, local, paths, Read).Status == "no_candidate",
+Require(LocalSlotCandidateScanner.Scan(state, data, local, paths, Read).Status == "no_candidate",
     "Non-character entity was accepted.");
 paths[other] = "Metadata/Characters/Player";
 memory[data + 1408 + 72] = BitConverter.GetBytes(vector)
     .Concat(BitConverter.GetBytes(vector + 24))
     .Concat(BitConverter.GetBytes(vector + 24)).ToArray();
-Require(LocalSlotCandidateScanner.Scan(data, local, paths, Read).Status == "no_candidate",
+Require(LocalSlotCandidateScanner.Scan(state, data, local, paths, Read).Status == "no_candidate",
     "Three-player vector was accepted.");
+var alternativeArea = 0x900000L;
+memory.Remove(data + 1408 + 72);
+memory[state + 656] = BitConverter.GetBytes(alternativeArea);
+AddVector(alternativeArea + 1408 + 72, local, other);
+var divergent = LocalSlotCandidateScanner.Scan(state, data, local, paths, Read);
+Require(divergent.Status == "two_slot_candidate" && divergent.StatePointerAreaAddress == "0x900000" &&
+    divergent.StatePointerMatchesDataAddress == false &&
+    divergent.CandidateAreaAddresses.SequenceEqual(["0x900000"]),
+    "A distinct state-derived area candidate was lost or mislabeled.");
+AddVector(data + 1408 + 72, other, local);
+var crossAreaConflict = LocalSlotCandidateScanner.Scan(state, data, local, paths, Read);
+Require(crossAreaConflict.Status == "conflicting_candidates" &&
+    crossAreaConflict.CandidateAreaAddresses.SequenceEqual(["0x100000", "0x900000"]),
+    "Conflicting orders from different area anchors were accepted.");
 Console.WriteLine("Local slot candidate diagnostics passed.");

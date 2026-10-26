@@ -13,6 +13,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     private readonly UdpClient _udp = new();
     private DateTime _lastSentUtc;
     private DateTime _lastSlotScanUtc;
+    private long _lastSlotScanStateAddress;
     private long _lastSlotScanDataAddress;
     private long _lastSlotScanLocalAddress;
     private LocalSlotCandidateScanner.Result? _slotCandidates;
@@ -54,10 +55,12 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             try
             {
                 var data = GameController.IngameState.Data;
+                var stateAddress = GameController.IngameState.Address;
                 var localAddress = player?.Address ?? 0;
                 ingameDataAddress ??= FormatAddress(data.Address);
                 observedLocalAddress ??= FormatAddress(localAddress);
-                if (_slotCandidates == null || data.Address != _lastSlotScanDataAddress ||
+                if (_slotCandidates == null || stateAddress != _lastSlotScanStateAddress ||
+                    data.Address != _lastSlotScanDataAddress ||
                     localAddress != _lastSlotScanLocalAddress || now - _lastSlotScanUtc >= TimeSpan.FromSeconds(1))
                 {
                     var paths = new Dictionary<long, string>();
@@ -67,12 +70,13 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                         paths.TryAdd(entity.Address, entity.Path ?? "");
                         if (paths.Count == 256) break;
                     }
-                    _slotCandidates = LocalSlotCandidateScanner.Scan(data.Address, localAddress, paths,
+                    _slotCandidates = LocalSlotCandidateScanner.Scan(stateAddress, data.Address, localAddress, paths,
                         (address, size) =>
                         {
                             try { return data.M.ReadMem(address, size); }
                             catch { return null; } // An unreadable candidate is not an overall scan failure.
                         });
+                    _lastSlotScanStateAddress = stateAddress;
                     _lastSlotScanDataAddress = data.Address;
                     _lastSlotScanLocalAddress = localAddress;
                     _lastSlotScanUtc = now;
