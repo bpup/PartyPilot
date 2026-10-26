@@ -121,6 +121,32 @@ try
     throw new Exception("FPS apply result was accepted as a preview.");
 }
 catch (InvalidDataException) { }
+if (!ResourcePolicyPlan.TryCreate(123, "25", "0x3", "1024", "2048", out var resourcePlan) ||
+    resourcePlan is null || ResourcePolicyPlan.TryCreate(0, "25", "0", "0", "0", out _) ||
+    ResourcePolicyPlan.TryCreate(123, "101", "0", "0", "0", out _) ||
+    ResourcePolicyPlan.TryCreate(123, "0", "0", "0", "0", out _) ||
+    ResourcePolicyPlan.TryCreate(123, "0", "0xG", "1024", "0", out _))
+    throw new Exception("Resource policy accepted an unbound client or invalid explicit limits.");
+var resourceArgs = ResourcePolicyTool.StartInfo(
+    Path.Combine(Path.GetTempPath(), "PartyPilot-ResourceWatch.exe"), resourcePlan, true).ArgumentList.ToArray();
+if (!resourceArgs.SequenceEqual(new[] { "-pids", "123", "-cpu", "25", "-affinity", "0x3",
+        "-ram-warning", "1024", "-ram-limit", "2048", "-apply", "-control-stdin" }))
+    throw new Exception("Resource manager command lost its stop channel or selected limits.");
+var resourceReply = System.Text.Json.JsonSerializer.Serialize(new
+{
+    pids = new[] { 123 },
+    policy = new { background_cpu_percent = 25, background_affinity_mask = 3,
+        ram_warning_mb = 1024, background_ram_limit_mb = 2048 },
+    applied = false
+});
+ResourcePolicyTool.VerifyPreview(resourceReply, resourcePlan);
+try
+{
+    ResourcePolicyTool.VerifyPreview(resourceReply.Replace("\"background_cpu_percent\":25",
+        "\"background_cpu_percent\":40"), resourcePlan);
+    throw new Exception("Resource preview accepted mismatched CPU limits.");
+}
+catch (InvalidDataException) { }
 var movement = LiveFollowFrame.Parse(
     "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0}}}", 2, 3);
 var waiting = LiveFollowFrame.Parse(
@@ -226,6 +252,11 @@ var fpsPathFields = window.GetLogicalDescendants().OfType<TextBox>()
 if (fpsPathFields.Length != 3 || !fpsPathFields[0].IsEffectivelyVisible ||
     !fpsPathFields[1].IsEffectivelyVisible || fpsPathFields[2].IsEffectivelyVisible)
     throw new Exception("FPS config rows did not follow the selected client count.");
+var resourceCpuFields = window.GetLogicalDescendants().OfType<TextBox>()
+    .Where(item => item.Watermark?.ToString() == "0–100").ToArray();
+if (resourceCpuFields.Length != 3 || !resourceCpuFields[0].IsEffectivelyVisible ||
+    !resourceCpuFields[1].IsEffectivelyVisible || resourceCpuFields[2].IsEffectivelyVisible)
+    throw new Exception("Resource policy rows did not follow the selected client count.");
 var configured = Path.Combine(Path.GetDirectoryName(output)!, Path.GetFileNameWithoutExtension(output) + "-configured.png");
 (window.CaptureRenderedFrame() ?? throw new Exception("The configured window did not render.")).Save(configured);
 Console.WriteLine($"Four-player, two-client preview saved to {configured}.");
@@ -246,6 +277,8 @@ if (pathFields.Any(field => !field.IsEffectivelyVisible))
 }
 if (fpsPathFields.Any(field => !field.IsEffectivelyVisible))
     throw new Exception("Three-client layout did not show all FPS rows.");
+if (resourceCpuFields.Any(field => !field.IsEffectivelyVisible))
+    throw new Exception("Three-client layout did not show all resource rows.");
 clientCount.SelectedIndex = 1;
 Dispatcher.UIThread.RunJobs();
 variant.SelectedIndex = 0;
@@ -328,6 +361,29 @@ if (args.Length > 1)
     finally
     {
         folder.Delete(true);
+    }
+}
+if (args.Length > 2)
+{
+    await ResourcePolicyTool.PreviewAsync(args[2], resourcePlan).ConfigureAwait(false);
+    Console.WriteLine("Desktop resource policy preview checked against the native tool.");
+}
+if (!OperatingSystem.IsWindows())
+{
+    var fakeResource = Path.Combine(Path.GetTempPath(), $"partypilot-resource-control-{Guid.NewGuid():N}.sh");
+    try
+    {
+        File.WriteAllText(fakeResource,
+            "#!/bin/sh\nIFS= read -r command\n[ \"$command\" = stop ] || exit 5\nexit 0\n");
+        File.SetUnixFileMode(fakeResource, UnixFileMode.UserRead | UnixFileMode.UserWrite |
+            UnixFileMode.UserExecute);
+        await using var session = await ResourcePolicySession.StartAsync(fakeResource, resourcePlan);
+        if (session.HasExited) throw new Exception("Resource manager control test exited before stop.");
+        Console.WriteLine("Desktop resource manager stop channel checked with a local fake process.");
+    }
+    finally
+    {
+        File.Delete(fakeResource);
     }
 }
 await Task.Run(ProcessPipelineSmoke.RunAsync).ConfigureAwait(false);

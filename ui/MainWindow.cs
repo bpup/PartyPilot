@@ -61,6 +61,17 @@ public sealed class MainWindow : Window
     private readonly Button[] _fpsApply = new Button[3];
     private readonly TextBlock[] _fpsResults = new TextBlock[3];
     private readonly CheckBox _fpsGamesClosed = new();
+    private readonly StackPanel[] _resourceRows = new StackPanel[3];
+    private readonly TextBox[] _resourceCpu = new TextBox[3];
+    private readonly TextBox[] _resourceAffinity = new TextBox[3];
+    private readonly TextBox[] _resourceRamWarning = new TextBox[3];
+    private readonly TextBox[] _resourceRamLimit = new TextBox[3];
+    private readonly Button[] _resourcePreview = new Button[3];
+    private readonly Button[] _resourceStart = new Button[3];
+    private readonly Button[] _resourceStop = new Button[3];
+    private readonly TextBlock[] _resourceResults = new TextBlock[3];
+    private readonly ResourcePolicySession?[] _resourceSessions = new ResourcePolicySession?[3];
+    private readonly bool[] _resourceBusy = new bool[3];
     private PartyTopology? _selectedTopology;
     private BridgeSession? _bridge;
     private LiveFollowSession? _follow;
@@ -74,6 +85,7 @@ public sealed class MainWindow : Window
     private bool _followStopping;
     private bool _radarStopping;
     private bool _fpsBusy;
+    private bool _closing;
     private string _loginStatus = "waiting";
     private bool _busy;
 
@@ -102,6 +114,7 @@ public sealed class MainWindow : Window
         content.Children.Add(BuildFollowStep());
         content.Children.Add(BuildRadarStep());
         content.Children.Add(BuildFpsStep());
+        content.Children.Add(BuildResourceStep());
         content.Children.Add(BuildStatusCard());
 
         shell.Children.Add(new ScrollViewer { Content = content });
@@ -114,6 +127,8 @@ public sealed class MainWindow : Window
         _physicalDevice.TextChanged += (_, _) => UpdateBridgeControls();
         Closed += async (_, _) =>
         {
+            _closing = true;
+            await StopAllResourcesAsync();
             await StopRadarAsync();
             await StopBridgeAsync();
         };
@@ -401,6 +416,54 @@ public sealed class MainWindow : Window
         return Card(panel);
     }
 
+    private Border BuildResourceStep()
+    {
+        var panel = Step("7", "PERFORMANCE · RESOURCES",
+            "按已绑定客户端预览并显式启用后台资源策略；切回前台时恢复。0 表示不设置该项。");
+        for (var index = 0; index < 3; index++)
+        {
+            var client = index;
+            var row = new StackPanel { Spacing = 7, Margin = new Thickness(0, 8, 0, 0) };
+            row.Children.Add(Label($"客户端 {index + 1} · 后台资源", 13, Brushes.White, FontWeight.SemiBold));
+            var fields = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
+            TextBox Field(string title, string watermark, int width)
+            {
+                var box = new TextBox { Text = "0", Width = width, Watermark = watermark };
+                box.TextChanged += (_, _) => UpdateResourceControls();
+                var container = new StackPanel { Spacing = 4 };
+                container.Children.Add(Label(title, 12, MutedBrush));
+                container.Children.Add(box);
+                fields.Children.Add(container);
+                return box;
+            }
+            _resourceCpu[index] = Field("后台 CPU %", "0–100", 110);
+            _resourceAffinity[index] = Field("处理器掩码", "0 或 0x3", 130);
+            _resourceRamWarning[index] = Field("RAM 提醒 MB", "0", 130);
+            _resourceRamLimit[index] = Field("后台 RAM 上限 MB", "0", 155);
+            row.Children.Add(fields);
+            var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
+            var preview = new Button { Content = "预览策略" };
+            var start = new Button { Content = "启用后台策略" };
+            var stop = new Button { Content = "停止并恢复" };
+            preview.Click += async (_, _) => await RunResourceAsync(client, false);
+            start.Click += async (_, _) => await RunResourceAsync(client, true);
+            stop.Click += async (_, _) => await StopResourceAsync(client);
+            actions.Children.Add(preview);
+            actions.Children.Add(start);
+            actions.Children.Add(stop);
+            row.Children.Add(actions);
+            var result = Label("等待已绑定游戏进程和明确的策略。", 12, MutedBrush);
+            row.Children.Add(result);
+            _resourceRows[index] = row;
+            _resourcePreview[index] = preview;
+            _resourceStart[index] = start;
+            _resourceStop[index] = stop;
+            _resourceResults[index] = result;
+            panel.Children.Add(row);
+        }
+        return Card(panel);
+    }
+
     private void UpdateClientRows()
     {
         var selection = _topologyVariant.SelectedItem as PartyTopology;
@@ -409,6 +472,7 @@ public sealed class MainWindow : Window
         {
             _launchedClients = [];
             _ = StopRadarAsync();
+            _ = StopAllResourcesAsync();
         }
         _selectedTopology = selection;
         if (_bridge is null && topologyChanged) _autoFlask.IsChecked = selection?.Id == "2-split";
@@ -420,6 +484,7 @@ public sealed class MainWindow : Window
         {
             _clientRows[index].IsVisible = index < count;
             _fpsRows[index].IsVisible = index < count;
+            _resourceRows[index].IsVisible = index < count;
             if (index < count)
             {
                 var players = _selectedTopology!.Clients[index];
@@ -432,15 +497,18 @@ public sealed class MainWindow : Window
         UpdateBridgeControls();
         UpdateRadarControls();
         UpdateFpsControls();
+        UpdateResourceControls();
     }
 
     private void ClearLaunchedClients()
     {
         _launchedClients = [];
         _ = StopRadarAsync();
+        _ = StopAllResourcesAsync();
         if (_pairing is not null) ShowCurrentPairingStep();
         UpdateBridgeControls();
         UpdateRadarControls();
+        UpdateResourceControls();
     }
 
     private void UpdateRadarControls()
@@ -464,6 +532,123 @@ public sealed class MainWindow : Window
                 _fpsRows[index].IsVisible && ready;
             _fpsApply[index].IsEnabled = _fpsPreview[index].IsEnabled && _fpsGamesClosed.IsChecked == true;
         }
+    }
+
+    private void UpdateResourceControls()
+    {
+        for (var index = 0; index < _resourceRows.Length; index++)
+        {
+            if (_resourceRows[index] is null) continue;
+            var bound = _selectedTopology is not null &&
+                _launchedClients.Count == _selectedTopology.ClientCount &&
+                index < _launchedClients.Count;
+            var ready = bound && ResourcePolicyPlan.TryCreate(_launchedClients[index].Pid,
+                _resourceCpu[index].Text, _resourceAffinity[index].Text,
+                _resourceRamWarning[index].Text, _resourceRamLimit[index].Text, out _);
+            var idle = !_resourceBusy[index] && _resourceSessions[index] is null;
+            _resourcePreview[index].IsEnabled = OperatingSystem.IsWindows() && !_busy &&
+                !_closing && _resourceRows[index].IsVisible && idle && ready;
+            _resourceStart[index].IsEnabled = _resourcePreview[index].IsEnabled;
+            _resourceStop[index].IsEnabled = _resourceSessions[index] is not null && !_resourceBusy[index];
+        }
+    }
+
+    private async Task RunResourceAsync(int index, bool apply)
+    {
+        if (!OperatingSystem.IsWindows() || _busy || _closing || index < 0 || index >= 3 ||
+            _resourceBusy[index] || _resourceSessions[index] is not null ||
+            _selectedTopology is null || _launchedClients.Count != _selectedTopology.ClientCount ||
+            index >= _launchedClients.Count ||
+            !ResourcePolicyPlan.TryCreate(_launchedClients[index].Pid,
+                _resourceCpu[index].Text, _resourceAffinity[index].Text,
+                _resourceRamWarning[index].Text, _resourceRamLimit[index].Text, out var plan) ||
+            plan is null) return;
+        var tool = FindTool("PartyPilot-ResourceWatch.exe");
+        if (tool is null)
+        {
+            _resourceResults[index].Text = "找不到 PartyPilot-ResourceWatch.exe；请使用完整预览包。";
+            return;
+        }
+        _resourceBusy[index] = true;
+        UpdateResourceControls();
+        _resourceResults[index].Text = apply ? "正在预检并启动后台资源管理…" : "正在预览后台资源策略…";
+        try
+        {
+            await ResourcePolicyTool.PreviewAsync(tool, plan);
+            if (_closing) throw new InvalidOperationException("窗口已关闭。");
+            if (apply)
+            {
+                if (_launchedClients.Count <= index || _launchedClients[index].Pid != plan.Pid)
+                    throw new InvalidOperationException("游戏进程绑定已变化。");
+                var session = await ResourcePolicySession.StartAsync(tool, plan);
+                if (_closing || _launchedClients.Count <= index || _launchedClients[index].Pid != plan.Pid)
+                {
+                    await session.DisposeAsync();
+                    throw new InvalidOperationException("游戏进程绑定已变化。");
+                }
+                _resourceSessions[index] = session;
+                _resourceResults[index].Text = $"已启动 PID {plan.Pid} 的后台资源管理；实际限制与恢复待 Windows 游戏实测。";
+                _ = ObserveResourceEndAsync(index, session);
+            }
+            else
+            {
+                _resourceResults[index].Text = $"预览通过：PID {plan.Pid}；CPU {plan.CpuPercent}%、掩码 0x{plan.AffinityMask:X}、RAM 提醒 {plan.RamWarningMb} MB、后台上限 {plan.RamLimitMb} MB。未应用。";
+            }
+        }
+        catch (Exception exception)
+        {
+            _resourceResults[index].Text = $"资源策略未完成：{exception.Message}";
+        }
+        finally
+        {
+            _resourceBusy[index] = false;
+            UpdateResourceControls();
+        }
+    }
+
+    private async Task ObserveResourceEndAsync(int index, ResourcePolicySession session)
+    {
+        var (code, detail) = await session.Completion;
+        if (!ReferenceEquals(_resourceSessions[index], session)) return;
+        _resourceSessions[index] = null;
+        _resourceResults[index].Text = code == 0
+            ? $"PID {session.Pid} 的资源管理已结束；恢复流程已返回。"
+            : $"PID {session.Pid} 的资源管理异常结束（{code}）：{detail ?? "无诊断信息"}";
+        UpdateResourceControls();
+        try { await session.DisposeAsync(); }
+        catch (Exception exception)
+        {
+            _resourceResults[index].Text += $" 关闭结果待核对：{exception.Message}";
+        }
+    }
+
+    private async Task StopResourceAsync(int index)
+    {
+        if (index < 0 || index >= 3 || _resourceBusy[index]) return;
+        var session = _resourceSessions[index];
+        if (session is null) return;
+        _resourceBusy[index] = true;
+        _resourceSessions[index] = null;
+        UpdateResourceControls();
+        try
+        {
+            await session.DisposeAsync();
+            _resourceResults[index].Text = "资源管理进程已停止并完成恢复流程；Windows 实际限制仍待实测。";
+        }
+        catch (Exception exception)
+        {
+            _resourceResults[index].Text = $"资源管理停止状态待核对：{exception.Message}";
+        }
+        finally
+        {
+            _resourceBusy[index] = false;
+            UpdateResourceControls();
+        }
+    }
+
+    private async Task StopAllResourcesAsync()
+    {
+        for (var index = 0; index < 3; index++) await StopResourceAsync(index);
     }
 
     private async Task RunFpsAsync(int index, bool apply)
@@ -990,6 +1175,7 @@ public sealed class MainWindow : Window
         {
             _fpsGamesClosed.IsChecked = false;
             await StopRadarAsync();
+            await StopAllResourcesAsync();
         }
         _busy = true;
         if (action != ClientAction.Check) _launchedClients = [];

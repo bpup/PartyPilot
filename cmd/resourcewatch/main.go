@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -45,6 +46,7 @@ func main() {
 	ramWarning := flag.Int("ram-warning", 0, "advisory working-set threshold in MB")
 	ramLimit := flag.Int("ram-limit", 0, "background hard process memory limit in MB; 0 disables")
 	apply := flag.Bool("apply", false, "manage the selected game processes until interrupted")
+	controlStdin := flag.Bool("control-stdin", false, "stop and restore when stdin closes or receives stop")
 	flag.Parse()
 	pids, err := parsePIDs(*pidsText)
 	if err != nil {
@@ -67,9 +69,23 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	if *controlStdin {
+		go stopOnControl(os.Stdin, stop)
+	}
 	if err := resourcepolicy.Run(ctx, pids, policy); err != nil {
 		fatal(err)
 	}
+}
+
+func stopOnControl(input *os.File, stop context.CancelFunc) {
+	scanner := bufio.NewScanner(input)
+	for scanner.Scan() {
+		if strings.TrimSpace(scanner.Text()) == "stop" {
+			stop()
+			return
+		}
+	}
+	stop() // Parent closed, crashed, or the control stream failed.
 }
 
 func fatal(err error) {

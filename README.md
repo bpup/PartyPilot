@@ -102,7 +102,7 @@ PartyPilot-ResourceWatch.exe -pids 1234,5678 -cpu 25 -affinity 0x3 -ram-warning 
 PartyPilot-ResourceWatch.exe -pids 1234,5678 -cpu 25 -affinity 0x3 -ram-warning 4096 -ram-limit 8192 -apply
 ```
 
-该工具已通过策略单元测试、配置预览和 Windows 目标编译；尚未在 Windows 或 PoE2 上执行。Job Object 分配、现有作业嵌套、前后台切换和限制恢复都需要 Windows 实机验证。它目前是独立命令行工具，尚未接入启动器或设置界面。
+桌面入口现按已绑定的每个游戏客户端提供独立的 CPU、处理器掩码、RAM 提醒和后台内存上限字段，可先预览，再显式启用或停止。它仅向启动器已核对进程与窗口的 PID 启动管理进程；切换布局、重新启动游戏或关闭桌面时发送停止指令。桌面使用 `-control-stdin`，控制通道关闭也会触发工具的恢复流程。命令行直接使用时仍可按 Ctrl+C 停止。该链路已通过策略测试、本机工具预览、模拟管理进程停止通道和 Windows 目标编译；尚未在 Windows 或 PoE2 上执行。Job Object 分配、现有作业嵌套、前后台切换和限制恢复都需要 Windows 实机验证。
 
 `release/PartyPilot-FpsConfig.exe` 为明确指定的 PoE2 配置文件分别设置前台和后台帧率。两项都必须显式填写：`keep` 保留对应原值，`unlimited` 或 `0` 只关闭该项限制，正整数开启限制并写入该帧率。默认只预览将变动的 `DISPLAY` 键；关闭所有游戏客户端后加 `-apply` 才备份原文件并替换。它只改 `framerate_limit_enabled`、`framerate_limit`、`background_framerate_limit_enabled`、`background_framerate_limit` 中所需的键，不触碰输入模式或其他节。支持 UTF-8、带 BOM 的 UTF-8 与带 BOM 的 UTF-16；重复 `DISPLAY` 节或目标键会拒绝修改。示例路径和帧数仅用于说明，不代表目标版默认值：
 
