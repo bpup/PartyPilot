@@ -27,6 +27,26 @@ func (e *executables) Set(path string) error {
 
 type launchURIs map[int]string
 
+type attachPIDs map[int]int
+
+func (value *attachPIDs) String() string { return fmt.Sprint(map[int]int(*value)) }
+func (value *attachPIDs) Set(raw string) error {
+	slotText, pidText, found := strings.Cut(raw, "=")
+	slot, slotErr := strconv.Atoi(slotText)
+	pid, pidErr := strconv.Atoi(pidText)
+	if !found || slotErr != nil || pidErr != nil || slot < 1 || slot > 3 || pid <= 0 {
+		return errors.New("-pid requires SLOT=positive-PID for client 1–3")
+	}
+	if *value == nil {
+		*value = make(map[int]int)
+	}
+	if (*value)[slot] != 0 {
+		return fmt.Errorf("duplicate process selection for client %d", slot)
+	}
+	(*value)[slot] = pid
+	return nil
+}
+
 func (value *launchURIs) String() string { return fmt.Sprint(map[int]string(*value)) }
 func (value *launchURIs) Set(raw string) error {
 	slotText, uri, found := strings.Cut(raw, "=")
@@ -72,8 +92,10 @@ type output struct {
 func main() {
 	var paths executables
 	var uris launchURIs
+	var pids attachPIDs
 	flag.Var(&paths, "exe", "repeat for each game client in launch order")
 	flag.Var(&uris, "uri", "optional SLOT=Steam-or-Epic-launch-URI, bound to the matching -exe")
+	flag.Var(&pids, "pid", "optional SLOT=PID for -attach; required when clients share one installation")
 	check := flag.Bool("check", false, "validate paths and layout without launching")
 	attach := flag.Bool("attach", false, "bind one existing game window to each configured executable")
 	timeout := flag.Duration("timeout", 60*time.Second, "time to wait for each game window")
@@ -87,9 +109,23 @@ func main() {
 	if *attach && (*check || len(uris) != 0) {
 		fail(errors.New("-attach cannot be combined with -check or -uri"))
 	}
-	validated, err := clientlaunch.Validate(paths, *timeout)
+	if len(pids) != 0 && !*attach {
+		fail(errors.New("-pid requires -attach"))
+	}
+	var validated []string
+	var err error
+	if *attach {
+		validated, err = clientlaunch.ValidateAttach(paths, *timeout)
+	} else {
+		validated, err = clientlaunch.Validate(paths, *timeout)
+	}
 	if err != nil {
 		fail(err)
+	}
+	if *attach {
+		if err := clientlaunch.ValidateAttachPIDs(validated, pids); err != nil {
+			fail(err)
+		}
 	}
 	if err := clientlaunch.ValidateURIs(validated, uris); err != nil {
 		fail(err)
@@ -136,7 +172,7 @@ func main() {
 	}
 	var bound clientlaunch.Result
 	if *attach {
-		bound, err = clientlaunch.Attach(validated)
+		bound, err = clientlaunch.Attach(validated, pids)
 	} else {
 		bound, err = clientlaunch.Start(validated, uris, *timeout)
 	}

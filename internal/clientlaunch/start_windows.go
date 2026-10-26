@@ -18,11 +18,15 @@ import (
 
 var shellExecute = syscall.NewLazyDLL("shell32.dll").NewProc("ShellExecuteW")
 
-func Attach(paths []string) (Result, error) {
+func Attach(paths []string, selected map[int]int) (Result, error) {
 	if len(paths) < 1 || len(paths) > 3 {
 		return Result{}, fmt.Errorf("select 1–3 configured game executables")
 	}
+	if err := ValidateAttachPIDs(paths, selected); err != nil {
+		return Result{}, err
+	}
 	result := Result{Clients: make([]Client, 0, len(paths))}
+	usedPIDs := make(map[int]bool)
 	for index, path := range paths {
 		ids, err := gameProcessIDs(filepath.Base(path))
 		if err != nil {
@@ -30,16 +34,28 @@ func Attach(paths []string) (Result, error) {
 		}
 		processes := make(map[int]string, len(ids))
 		for pid := range ids {
+			if selected[index+1] != 0 && pid != selected[index+1] {
+				continue
+			}
 			actual, readErr := clientprocess.ExecutablePath(pid)
 			if readErr != nil {
 				return Result{}, fmt.Errorf("client %d cannot verify same-name process %d: %w", index+1, pid, readErr)
 			}
 			processes[pid] = actual
 		}
-		pid, err := SelectAttachedProcess(path, processes)
+		var pid int
+		if selected[index+1] != 0 {
+			pid, err = SelectAttachedPID(path, selected[index+1], processes)
+		} else {
+			pid, err = SelectAttachedProcess(path, processes)
+		}
 		if err != nil {
 			return Result{}, fmt.Errorf("client %d: %w", index+1, err)
 		}
+		if usedPIDs[pid] {
+			return Result{}, fmt.Errorf("client %d resolves to a process already bound to another client", index+1)
+		}
+		usedPIDs[pid] = true
 		windows, err := windowlayout.DiscoverWindows([]int{pid})
 		if err != nil {
 			return Result{}, fmt.Errorf("client %d process %d has no unique usable game window: %w", index+1, pid, err)

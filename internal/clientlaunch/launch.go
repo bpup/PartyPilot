@@ -57,6 +57,16 @@ type Result struct {
 }
 
 func Validate(paths []string, timeout time.Duration) ([]string, error) {
+	return validate(paths, timeout, false)
+}
+
+// ValidateAttach permits repeated installation paths because callers can bind
+// each slot to a distinct, explicitly identified running process.
+func ValidateAttach(paths []string, timeout time.Duration) ([]string, error) {
+	return validate(paths, timeout, true)
+}
+
+func validate(paths []string, timeout time.Duration, allowShared bool) ([]string, error) {
 	if len(paths) < 1 || len(paths) > 3 || timeout <= 0 {
 		return nil, fmt.Errorf("configure 1–3 executables and a positive timeout")
 	}
@@ -83,7 +93,7 @@ func Validate(paths []string, timeout time.Duration) ([]string, error) {
 			return nil, err
 		}
 		for _, prior := range roots {
-			if os.SameFile(root, prior) {
+			if !allowShared && os.SameFile(root, prior) {
 				return nil, fmt.Errorf("multiple clients share one installation directory; independent multi-instance launch is not implemented")
 			}
 		}
