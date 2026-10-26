@@ -21,6 +21,8 @@ internal sealed class BridgeRouter
     private IReadOnlyDictionary<int, int> _focusPads = new Dictionary<int, int>();
     private bool _physicalMode;
     private bool _rightStickFollowerOverride;
+    private int _directRightStickSlot;
+    private bool _allowDirectRightStick;
     private int _mainSlot;
     private int _focusedSlot;
     private int _isolatedSlot;
@@ -40,9 +42,11 @@ internal sealed class BridgeRouter
     }
 
     public bool ConfigurePhysical(int mainSlot, bool rightStickFollowerOverride = false,
-        IReadOnlyDictionary<int, int>? focusPads = null)
+        IReadOnlyDictionary<int, int>? focusPads = null, int directRightStickSlot = 0)
     {
         if (!_routes.ContainsKey(mainSlot)) return false;
+        if (directRightStickSlot != 0 && (!rightStickFollowerOverride ||
+            directRightStickSlot == mainSlot || !_routes.ContainsKey(directRightStickSlot))) return false;
         var explicitFocusPads = focusPads is not null;
         focusPads ??= _routes.Keys.Where(slot => slot is >= 1 and <= 4)
             .ToDictionary(slot => slot, slot => slot);
@@ -53,6 +57,7 @@ internal sealed class BridgeRouter
         _focusPads = new Dictionary<int, int>(focusPads);
         _physicalMode = true;
         _rightStickFollowerOverride = rightStickFollowerOverride;
+        _directRightStickSlot = directRightStickSlot;
         _mainSlot = mainSlot;
         _focusedSlot = mainSlot;
         _isolatedSlot = 0;
@@ -90,7 +95,8 @@ internal sealed class BridgeRouter
         return true;
     }
 
-    public void SetPhysical(XInputGamepad gamepad, DateTime? observedAtUtc = null)
+    public void SetPhysical(XInputGamepad gamepad, DateTime? observedAtUtc = null,
+        bool allowDirectRightStick = true)
     {
         if (!_physicalMode) return;
         const ushort leftThumb = 0x0040;
@@ -125,6 +131,7 @@ internal sealed class BridgeRouter
         if (leftTrigger && ((left && leftRole == 3) || (right && rightRole == 4)))
             gamepad.LeftTrigger = 0;
         _physicalConnected = true;
+        _allowDirectRightStick = allowDirectRightStick;
         _manualX = gamepad.RightX;
         _manualY = gamepad.RightY;
         if (_rightStickFollowerOverride && _isolatedSlot == 0)
@@ -167,6 +174,7 @@ internal sealed class BridgeRouter
         _physicalReport = default;
         _manualX = 0;
         _manualY = 0;
+        _allowDirectRightStick = false;
         _previousButtons = 0;
         _previousLeftTrigger = 0;
         foreach (var route in _routes.Values)
@@ -196,7 +204,8 @@ internal sealed class BridgeRouter
             return;
         }
         if (_rightStickFollowerOverride && _physicalConnected && _isolatedSlot == 0 &&
-            route.EligibleForManualMovement &&
+            (route.EligibleForManualMovement ||
+             (_allowDirectRightStick && slot == _directRightStickSlot)) &&
             (Math.Abs((int)_manualX) > 8000 || Math.Abs((int)_manualY) > 8000))
         {
             route.Output.SetReport(PadReport.FromMovement(_manualX, _manualY));

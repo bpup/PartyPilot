@@ -36,6 +36,8 @@ internal sealed class BridgeSession : IAsyncDisposable
             throw new ArgumentException("The current bridge needs 1–3 P1–P4 pads, a selected HidHide device, and 1–3 game paths.");
         }
         var focusPadMap = string.Join(',', partySlots.Select(item => $"{item.PartyPlayer}:{item.RuntimePad}"));
+        var directRightStickSlot = rightStickFollowerOverride && partySlots.Count == 2 &&
+            partySlots[0].Client == partySlots[1].Client ? partySlots[1].RuntimePad : 0;
         var start = new ProcessStartInfo(executable)
         {
             WorkingDirectory = Path.GetDirectoryName(executable)!,
@@ -61,12 +63,18 @@ internal sealed class BridgeSession : IAsyncDisposable
             start.ArgumentList.Add(game);
         }
         if (rightStickFollowerOverride) start.ArgumentList.Add("--right-stick-follower-override");
+        if (directRightStickSlot != 0)
+        {
+            start.ArgumentList.Add("--direct-right-stick-slot");
+            start.ArgumentList.Add(directRightStickSlot.ToString());
+        }
         var process = Process.Start(start) ?? throw new InvalidOperationException("Virtual controller bridge did not start.");
         var readError = process.StandardError.ReadToEndAsync();
         try
         {
             var readyLine = await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15));
-            if (readyLine is null || !IsExpectedReady(readyLine, slots, focusPadMap, rightStickFollowerOverride))
+            if (readyLine is null || !IsExpectedReady(readyLine, slots, focusPadMap,
+                rightStickFollowerOverride, directRightStickSlot))
             {
                 throw new InvalidOperationException("Virtual controller bridge did not confirm the requested pad slots.");
             }
@@ -90,7 +98,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     }
 
     private static bool IsExpectedReady(string line, int[] slots, string focusPadMap,
-        bool rightStickFollowerOverride)
+        bool rightStickFollowerOverride, int directRightStickSlot)
     {
         try
         {
@@ -102,6 +110,8 @@ internal sealed class BridgeSession : IAsyncDisposable
                    root.TryGetProperty("hidhide_preflight", out var preflight) && preflight.GetBoolean() &&
                    root.TryGetProperty("right_stick_follower_override", out var rightStick) &&
                    rightStick.GetBoolean() == rightStickFollowerOverride &&
+                   root.TryGetProperty("direct_right_stick_slot", out var directSlot) &&
+                   directSlot.GetInt32() == directRightStickSlot &&
                    root.TryGetProperty("focus_pad_map", out var focusMap) &&
                    focusMap.GetString() == focusPadMap &&
                    root.TryGetProperty("slots", out var selected) &&

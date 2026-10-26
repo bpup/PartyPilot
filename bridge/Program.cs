@@ -74,12 +74,22 @@ if (args.Length == 4 && args[0] == "--probe-xinput" && args[2] == "--samples" &&
 if (!args.Contains("--enable-controller") || !BridgeSlots.TryParse(args, out var slots) ||
     !FocusPadMap.TryParse(args, slots, out var focusPads))
 {
-    Console.Error.WriteLine("Usage: PartyPilot.Bridge --enable-controller --slots 1,2 [--focus-pad-map 1:1,2:2] [--physical-index 0 --main-slot 1 --physical-hidden-confirmed --device-instance HID\\... --game-exe C:\\Game\\PathOfExile.exe [--pairing-protected] [--right-stick-follower-override]]");
+    Console.Error.WriteLine("Usage: PartyPilot.Bridge --enable-controller --slots 1,2 [--focus-pad-map 1:1,2:2] [--physical-index 0 --main-slot 1 --physical-hidden-confirmed --device-instance HID\\... --game-exe C:\\Game\\PathOfExile.exe [--pairing-protected] [--right-stick-follower-override --direct-right-stick-slot 2]]");
     return 2;
 }
 var physicalMode = args.Contains("--physical-index") || args.Contains("--main-slot") ||
     args.Contains("--physical-hidden-confirmed") || args.Contains("--right-stick-follower-override");
 var rightStickFollowerOverride = args.Contains("--right-stick-follower-override");
+var directSlotPosition = Array.IndexOf(args, "--direct-right-stick-slot");
+var directRightStickSlot = 0;
+if (directSlotPosition >= 0 && (args.Count(arg => arg == "--direct-right-stick-slot") != 1 ||
+    directSlotPosition + 1 >= args.Length ||
+    !int.TryParse(args[directSlotPosition + 1], out directRightStickSlot) ||
+    !rightStickFollowerOverride || !slots.Contains(directRightStickSlot)))
+{
+    Console.Error.WriteLine("Direct right-stick movement requires an enabled override and an assigned follower pad.");
+    return 2;
+}
 var protectedPairing = args.Contains("--pairing-protected");
 var physicalIndexPosition = Array.IndexOf(args, "--physical-index");
 var mainSlotPosition = Array.IndexOf(args, "--main-slot");
@@ -90,6 +100,15 @@ var gamePaths = args.Select((value, index) => (value, index))
     .ToArray();
 uint physicalIndex = 0;
 int mainSlot = 0;
+if (directRightStickSlot != 0 &&
+    (mainSlotPosition < 0 || mainSlotPosition + 1 >= args.Length ||
+     !int.TryParse(args[mainSlotPosition + 1], out var requestedMain) ||
+     !BridgeSlots.IsSingleClientDirectPair(slots, requestedMain, directRightStickSlot,
+         gamePaths.Length, protectedPairing, focusPads)))
+{
+    Console.Error.WriteLine("Direct right-stick movement is limited to a protected P1/P2 pair in one game client.");
+    return 2;
+}
 if ((protectedPairing && !physicalMode) || (physicalMode && (physicalIndexPosition < 0 || physicalIndexPosition + 1 >= args.Length ||
     !uint.TryParse(args[physicalIndexPosition + 1], out physicalIndex) || physicalIndex > 3 ||
     mainSlotPosition < 0 || mainSlotPosition + 1 >= args.Length ||
@@ -154,7 +173,8 @@ try
         var router = new BridgeRouter(pads.ToDictionary(
             entry => entry.Key,
             entry => (IPadOutput)new ViGEmPadOutput(entry.Value)));
-        if (physicalMode && !router.ConfigurePhysical(mainSlot, rightStickFollowerOverride, focusPads))
+        if (physicalMode && !router.ConfigurePhysical(mainSlot, rightStickFollowerOverride, focusPads,
+            directRightStickSlot))
             throw new InvalidOperationException("Focus pad mapping does not match the connected virtual controllers.");
         var pairingSignals = new PairingSignalTracker();
         var pairingGate = protectedPairing ? new ProtectedPairingGate() : null;
@@ -167,6 +187,7 @@ try
         Console.WriteLine(JsonSerializer.Serialize(new { @event = "ready", slots, physical_mode = physicalMode,
             pairing_protected = protectedPairing, hidhide_preflight = physicalMode,
             right_stick_follower_override = rightStickFollowerOverride,
+            direct_right_stick_slot = directRightStickSlot,
             focus_pad_map = focusPads is null ? "" : string.Join(',', focusPads.OrderBy(entry => entry.Key)
                 .Select(entry => $"{entry.Key}:{entry.Value}")) }));
 
@@ -270,7 +291,8 @@ try
                     }
                     var observation = pairingGate.Observe(state.Gamepad, observedAt,
                         stable && foreground, loginReadiness.Ready);
-                    router.SetPhysical(observation.Forwarded);
+                    router.SetPhysical(observation.Forwarded, observedAt,
+                        allowDirectRightStick: pairingGate.Phase == ProtectedPairingPhase.Complete);
                     if (observation.ReleasedSlot != 0)
                         Console.WriteLine(JsonSerializer.Serialize(new { @event = "a_release", slot = observation.ReleasedSlot }));
                     if (observation.Completed)

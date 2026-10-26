@@ -10,19 +10,26 @@ internal static class ProcessPipelineSmoke
         Directory.CreateDirectory(directory);
         var log = Path.Combine(directory, "bridge-input.jsonl");
         var bridgeExe = Path.Combine(directory, "fake-bridge");
+        var couchBridgeExe = Path.Combine(directory, "fake-couch-bridge");
         var followExe = Path.Combine(directory, "fake-follow");
         try
         {
             File.WriteAllText(bridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '--focus-pad-map' not in sys.argv or sys.argv[sys.argv.index('--focus-pad-map')+1] != '1:1,2:3': sys.exit(2)\n" +
-                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"right_stick_follower_override\":false,\"focus_pad_map\":\"1:1,2:3\"}', flush=True)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3\"}', flush=True)\n" +
                 $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(log)}, 'a') as out: out.write(line)\n");
             File.WriteAllText(followExe, "#!/usr/bin/env python3\nimport time\n" +
                 "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"reason\":\"missing position\"}}}', flush=True)\n" +
                 "time.sleep(0.05)\n" +
                 "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0,\"manual_override_eligible\":true}}}', flush=True)\n");
+            File.WriteAllText(couchBridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
+                "if '--focus-pad-map' not in sys.argv or sys.argv[sys.argv.index('--focus-pad-map')+1] != '1:1,2:2': sys.exit(2)\n" +
+                "if '--right-stick-follower-override' not in sys.argv or '--direct-right-stick-slot' not in sys.argv or sys.argv[sys.argv.index('--direct-right-stick-slot')+1] != '2': sys.exit(2)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,2],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"right_stick_follower_override\":true,\"direct_right_stick_slot\":2,\"focus_pad_map\":\"1:1,2:2\"}', flush=True)\n" +
+                "for line in sys.stdin: pass\n");
             File.SetUnixFileMode(bridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(followExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(couchBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             Console.WriteLine("Pipeline smoke: starting fake bridge.");
             var topology = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-split");
             await using var bridge = await BridgeSession.StartAsync(bridgeExe, topology.Slots, 0,
@@ -53,6 +60,13 @@ internal static class ProcessPipelineSmoke
                 !lines[^1].Contains("\"slot\":3,\"state\":\"waiting\""))
                 throw new Exception("Live follow did not hand off movement and neutralize on exit: " + string.Join(" | ", lines));
             Console.WriteLine("Desktop decision-to-bridge process handoff and stop checked with local fake executables.");
+            var couch = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-couch");
+            await using (var pairedBridge = await BridgeSession.StartAsync(couchBridgeExe, couch.Slots, 0,
+                @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe"], true))
+            {
+                pairedBridge.StartReading();
+            }
+            Console.WriteLine("Same-client right-stick bridge startup arguments checked with a local fake executable.");
         }
         finally
         {

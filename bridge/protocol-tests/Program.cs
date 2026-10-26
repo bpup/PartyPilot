@@ -40,6 +40,14 @@ if (!BridgeSlots.TryParse(["--slots", "3,2"], out var slots) ||
 {
     throw new Exception("Slot routing validation failed.");
 }
+if (!BridgeSlots.IsSingleClientDirectPair([1, 2], 1, 2, 1, true,
+        new Dictionary<int, int> { [1] = 1, [2] = 2 }) ||
+    BridgeSlots.IsSingleClientDirectPair([1, 3], 1, 3, 2, true,
+        new Dictionary<int, int> { [1] = 1, [2] = 3 }) ||
+    BridgeSlots.IsSingleClientDirectPair([1, 2], 1, 2, 1, false,
+        new Dictionary<int, int> { [1] = 1, [2] = 2 }) ||
+    BridgeSlots.IsSingleClientDirectPair([1, 2], 1, 2, 1, true, null))
+    throw new Exception("Direct right-stick routing was allowed outside a protected same-client pair.");
 if (!FocusPadMap.TryParse(["--focus-pad-map", "1:1,2:3"], [1, 3], out var splitFocus) ||
     splitFocus is null || splitFocus[2] != 3 ||
     FocusPadMap.TryParse(["--focus-pad-map", "1:1,2:1"], [1, 3], out _) ||
@@ -305,6 +313,27 @@ overrideRouter.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0,\"
 overrideRouter.PhysicalDisconnected();
 if (overrideMain.Report != default || overrideFollower.Report != default || overrideHolding.Report != default)
     throw new Exception("Physical disconnect did not neutralize right-stick and automated movement.");
+var couchMain = new FakePad();
+var couchFollower = new FakePad();
+var couchRouter = new BridgeRouter(new Dictionary<int, IPadOutput> { [1] = couchMain, [2] = couchFollower });
+if (couchRouter.ConfigurePhysical(1, directRightStickSlot: 2) ||
+    couchRouter.ConfigurePhysical(1, rightStickFollowerOverride: true, directRightStickSlot: 1) ||
+    !couchRouter.ConfigurePhysical(1, rightStickFollowerOverride: true, directRightStickSlot: 2))
+    throw new Exception("Direct right-stick routing accepted an unprotected or invalid pad.");
+couchRouter.SetPhysical(new XInputGamepad { LeftX = 100, RightX = 14000 }, now,
+    allowDirectRightStick: false);
+if (couchMain.X != 100 || couchMain.Report.RightX != 0 || couchFollower.Report != default)
+    throw new Exception("Direct movement escaped before protected pairing completed.");
+couchRouter.SetPhysical(new XInputGamepad { LeftX = 100, RightX = 14000 }, now.AddMilliseconds(10));
+if (couchFollower.X != 14000 || couchMain.Report.RightX != 0)
+    throw new Exception("A paired same-client follower did not receive right-stick movement without a follow frame.");
+couchRouter.SetPhysical(new XInputGamepad { RightX = 8000 }, now.AddMilliseconds(20));
+if (couchFollower.Report != default)
+    throw new Exception("Neutral right stick did not release the direct follower route.");
+couchRouter.SetPhysical(new XInputGamepad { RightX = 14000 }, now.AddMilliseconds(30));
+couchRouter.PhysicalDisconnected();
+if (couchFollower.Report != default || couchMain.Report != default)
+    throw new Exception("Direct right-stick movement survived physical disconnection.");
 Console.WriteLine("Bridge protocol checks passed.");
 
 static void Expect(string line, bool expectedValid, int expectedSlot, bool expectedActive)

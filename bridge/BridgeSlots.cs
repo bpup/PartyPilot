@@ -2,6 +2,13 @@ namespace PartyPilot.Bridge;
 
 internal static class BridgeSlots
 {
+    public static bool IsSingleClientDirectPair(IReadOnlyList<int> slots, int mainSlot, int directSlot,
+        int gameCount, bool protectedPairing, IReadOnlyDictionary<int, int>? focusPads) =>
+        protectedPairing && gameCount == 1 && mainSlot == 1 && directSlot == 2 &&
+        slots.SequenceEqual([1, 2]) && focusPads is { Count: 2 } &&
+        focusPads.TryGetValue(1, out var first) && first == 1 &&
+        focusPads.TryGetValue(2, out var second) && second == 2;
+
     public static bool TryParse(string[] args, out int[] slots)
     {
         slots = [];
