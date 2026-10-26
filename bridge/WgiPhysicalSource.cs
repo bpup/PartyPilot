@@ -39,11 +39,11 @@ internal sealed class WgiPhysicalSource
         try
         {
             var matches = CompatibleControllers(_vendor, _product);
-            if (matches.Count != 1 ||
-                !string.Equals(matches[0].Raw.NonRoamableId, _nonRoamableId,
-                    StringComparison.Ordinal)) return false;
-            _raw = matches[0].Raw;
-            _gamepad = matches[0].Pad;
+            var selected = WgiIdentitySelection.SelectClaimedIndex(
+                matches.Select(item => item.Raw.NonRoamableId).ToArray(), _nonRoamableId);
+            if (selected < 0) return false;
+            _raw = matches[selected].Raw;
+            _gamepad = matches[selected].Pad;
             var reading = _gamepad.GetCurrentReading();
             report = new XInputGamepad
             {
@@ -71,8 +71,15 @@ internal sealed class WgiPhysicalSource
         foreach (var raw in RawGameController.RawGameControllers)
         {
             if (raw.HardwareVendorId != vendor || raw.HardwareProductId != product) continue;
-            var pad = Gamepad.FromGameController(raw);
-            if (pad is not null) result.Add((raw, pad));
+            try
+            {
+                var pad = Gamepad.FromGameController(raw);
+                if (pad is not null) result.Add((raw, pad));
+            }
+            catch
+            {
+                // One incompatible raw device must not hide a readable claimant.
+            }
         }
         return result;
     }

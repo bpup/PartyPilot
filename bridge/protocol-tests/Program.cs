@@ -6,6 +6,11 @@ if (!ControllerDeviceId.TryReadVidPid(@"HID\VID_1234&PID_ABCD\DEVICE", out var v
     ControllerDeviceId.TryReadVidPid(@"HID\VID_123&PID_ABCD\DEVICE", out _, out _) ||
     ControllerDeviceId.TryReadVidPid("XInput 0", out _, out _))
     throw new Exception("WGI physical source accepted an unbound or invalid VID/PID.");
+if (WgiIdentitySelection.SelectClaimedIndex(["physical", "virtual-1", "virtual-2"], "physical") != 0 ||
+    WgiIdentitySelection.SelectClaimedIndex(["virtual-1", "physical", "virtual-2"], "physical") != 1 ||
+    WgiIdentitySelection.SelectClaimedIndex(["virtual-1", "virtual-2"], "physical") != -1 ||
+    WgiIdentitySelection.SelectClaimedIndex(["physical", "physical"], "physical") != -1)
+    throw new Exception("WGI physical identity changed or became ambiguous after virtual pads appeared.");
 var fourPublic = new Dictionary<int, int> { [1] = 0, [2] = 1, [3] = 2, [4] = 3 };
 if (!PublicSlotGuard.TryCreate(fourPublic, out var publicGuard) || publicGuard is null ||
     !publicGuard.Matches(new Dictionary<int, int> { [4] = 3, [2] = 1, [1] = 0, [3] = 2 }) ||
