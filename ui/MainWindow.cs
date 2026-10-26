@@ -81,6 +81,7 @@ public sealed class MainWindow : Window
     private readonly TextBox _followLogAge = new();
     private readonly TextBox _followLeaderName = new();
     private readonly ComboBox[] _followTargets = new ComboBox[6];
+    private readonly TextBox[] _followPlayerStops = new TextBox[6];
     private readonly StackPanel[] _followTargetRows = new StackPanel[6];
     private readonly FollowTargetPreferenceStore _followTargetPreferences;
     private int[] _configuredFollowTargets = new int[6];
@@ -619,6 +620,12 @@ public sealed class MainWindow : Window
             var player = index + 1;
             choice.SelectionChanged += (_, _) => SaveFollowTargetChoice(player);
             row.Children.Add(choice);
+            row.Children.Add(Label($"P{player} 停止距离（不填沿用上方值）", 12, MutedBrush));
+            var playerStop = new TextBox { Name = $"follow-stop-{player}", Width = 190,
+                HorizontalAlignment = HorizontalAlignment.Left, Watermark = "0–200" };
+            playerStop.TextChanged += (_, _) => UpdateFollowControls();
+            _followPlayerStops[index] = playerStop;
+            row.Children.Add(playerStop);
             panel.Children.Add(row);
         }
         var loadedTargets = _followTargetPreferences.Load();
@@ -1592,8 +1599,13 @@ public sealed class MainWindow : Window
     {
         foreach (var choice in _followTargets)
             if (choice is not null) choice.IsEnabled = _follow is null && !_busy;
+        foreach (var stop in _followPlayerStops)
+            if (stop is not null) stop.IsEnabled = _follow is null && !_busy;
         var valid = LiveFollowPlan.TryCreate(_followStop.Text, _followResume.Text, _followCatchup.Text,
             _followMaxAge.Text, _followLogAge.Text, _followLeaderName.Text, out _);
+        if (_selectedTopology?.Id is "2-split" or "3-three-singles")
+            valid &= _selectedTopology.Slots.All(slot =>
+                FollowPlayerStop.TryRead(_followPlayerStops[slot.PartyPlayer - 1].Text, out _));
         _startFollow.IsEnabled = OperatingSystem.IsWindows() && !_busy && !_followStopping && _follow is null &&
             _followTargetPreferenceReady && _bridge is not null && _pairingSettled &&
             _selectedTopology?.Id is "2-split" or "3-three-singles" &&
@@ -1892,12 +1904,17 @@ public sealed class MainWindow : Window
         try
         {
             var followTargets = new Dictionary<int, int>();
+            var playerStops = new Dictionary<int, double>();
             foreach (var slot in _selectedTopology.Slots)
             {
                 if (!FollowTargetChoices.TryRead(_selectedTopology, slot.PartyPlayer,
                         _followTargets[slot.PartyPlayer - 1].SelectedItem as string, out var target))
                     throw new InvalidOperationException($"P{slot.PartyPlayer} 的跟随目标不属于当前布局。");
                 if (target != 0) followTargets[slot.PartyPlayer] = target;
+                if (!FollowPlayerStop.TryRead(_followPlayerStops[slot.PartyPlayer - 1].Text,
+                        out var stop))
+                    throw new InvalidOperationException($"P{slot.PartyPlayer} 的停止距离必须在 0–200 之间。");
+                if (stop is double value) playerStops[slot.PartyPlayer] = value;
             }
             IReadOnlyDictionary<int, string>? memberNames = null;
             if (AutoPartyInviteNames.TryCreate(_selectedTopology,
@@ -1911,7 +1928,7 @@ public sealed class MainWindow : Window
                 memberNames = confirmed;
             }
             var session = await LiveFollowSession.StartAsync(executable, _selectedTopology,
-                _launchedClients, _bridge, plan, memberNames, followTargets);
+                _launchedClients, _bridge, plan, memberNames, followTargets, playerStops);
             session.StatusChanged += FollowStatusChanged;
             session.Ended += FollowEnded;
             _follow = session;

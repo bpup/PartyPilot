@@ -52,7 +52,7 @@ func (c Config) Valid() bool {
 		!math.IsInf(c.TrailSpacing, 0) && !math.IsInf(c.TrailMaxStep, 0) &&
 		c.StopDistance >= 0 &&
 		c.ResumeDistance > c.StopDistance &&
-		c.CatchUpDistance > c.ResumeDistance &&
+		c.CatchUpDistance > 0 &&
 		c.MaxAge > 0 &&
 		((c.TrailSpacing == 0 && c.TrailMaxStep == 0) ||
 			(c.TrailSpacing > 0 && c.TrailMaxStep > c.TrailSpacing))

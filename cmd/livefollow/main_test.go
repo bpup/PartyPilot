@@ -70,6 +70,18 @@ func TestFollowTargetArguments(t *testing.T) {
 	}
 }
 
+func TestIndividualStopArguments(t *testing.T) {
+	var distances stopDistances
+	if err := distances.Set("2=37.25"); err != nil || distances[2] != 37.25 {
+		t.Fatalf("valid player stop rejected: %+v %v", distances, err)
+	}
+	for _, value := range []string{"2=38", "7=10", "1", "1=NaN", "1=Inf", "1=-1", "1=201"} {
+		if err := distances.Set(value); err == nil {
+			t.Fatalf("invalid individual stop accepted: %q", value)
+		}
+	}
+}
+
 func TestMenuInputRequiresBoundPlayerAndOpenStream(t *testing.T) {
 	session, err := live.NewFlaskSession(map[int]int{1: 101, 2: 202}, time.Second)
 	if err != nil {

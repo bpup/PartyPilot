@@ -79,7 +79,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     public static async Task<LiveFollowSession> StartAsync(string executable, PartyTopology topology,
         IReadOnlyList<LaunchedClient> clients, BridgeSession bridge, LiveFollowPlan plan,
         IReadOnlyDictionary<int, string>? memberNames = null,
-        IReadOnlyDictionary<int, int>? followTargets = null)
+        IReadOnlyDictionary<int, int>? followTargets = null,
+        IReadOnlyDictionary<int, double>? playerStops = null)
     {
         if (topology.Id is not ("2-split" or "3-three-singles") ||
             clients.Count != topology.ClientCount ||
@@ -135,6 +136,17 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                     throw new ArgumentException("Live follow target must belong to a different active player.");
                 start.ArgumentList.Add("-follow-target");
                 start.ArgumentList.Add($"{player}={target}");
+            }
+        }
+        if (playerStops is not null)
+        {
+            foreach (var (player, stop) in playerStops.OrderBy(item => item.Key))
+            {
+                if (!topology.Slots.Any(slot => slot.PartyPlayer == player) ||
+                    !double.IsFinite(stop) || stop is < 0 or > 200)
+                    throw new ArgumentException("Individual stop distance needs an active player and a value from 0 to 200.");
+                start.ArgumentList.Add("-stop-player");
+                start.ArgumentList.Add($"{player}={stop.ToString("R", CultureInfo.InvariantCulture)}");
             }
         }
         if (bridge.AutoFlaskEnabled) start.ArgumentList.Add("-auto-flask");

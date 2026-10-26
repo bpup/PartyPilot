@@ -62,6 +62,10 @@ func (e *Engine) SetFollowTarget(slot, target int) error {
 	return e.coordinator.SetFollowTarget(slot, target)
 }
 
+func (e *Engine) SetStopDistance(slot int, distance float64) error {
+	return e.coordinator.SetStopDistance(slot, distance)
+}
+
 func (e *Engine) Leader() int { return e.leader }
 
 func (e *Engine) ObserveManualFocus(slot int) error {

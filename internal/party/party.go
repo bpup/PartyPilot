@@ -2,6 +2,8 @@ package party
 
 import (
 	"errors"
+	"fmt"
+	"math"
 	"sort"
 	"time"
 
@@ -16,6 +18,7 @@ type Coordinator struct {
 	router           *focus.Router
 	leader           int
 	followers        map[int]*follow.Engine
+	baseConfig       follow.Config
 	lastFocusedLeads bool
 	lastManualFocus  int
 	lastActiveLeader int
@@ -37,9 +40,31 @@ func New(players []focus.Player, leader int, config follow.Config) (*Coordinator
 		followers[player.Slot] = engine
 	}
 	return &Coordinator{
-		router: router, leader: leader, lastManualFocus: leader, followers: followers,
+		router: router, leader: leader, lastManualFocus: leader, followers: followers, baseConfig: config,
 		followTargets: make(map[int]int), lastTargets: make(map[int]int),
 	}, nil
+}
+
+// SetStopDistance applies the supplied build's per-player stop bubble and
+// three-unit release gap to one follower. The existing catch-up distance is
+// still a separate explicit setting.
+func (c *Coordinator) SetStopDistance(slot int, distance float64) error {
+	if _, exists := c.followers[slot]; !exists {
+		return errors.New("follower is not in roster")
+	}
+	if math.IsNaN(distance) || math.IsInf(distance, 0) || distance < 0 || distance > 200 {
+		return fmt.Errorf("invalid stop distance for player %d", slot)
+	}
+	config := c.baseConfig
+	config.StopDistance = distance
+	config.ResumeDistance = distance + 3
+	engine, ok := follow.New(config)
+	if !ok {
+		return fmt.Errorf("invalid follow configuration for player %d", slot)
+	}
+	c.followers[slot] = engine
+	delete(c.lastTargets, slot)
+	return nil
 }
 
 // SetFollowTarget assigns a specific player as one follower's target.

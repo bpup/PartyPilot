@@ -42,6 +42,37 @@ func TestManualFocusStopsOnlySelectedFollower(t *testing.T) {
 	}
 }
 
+func TestIndividualStopDistancesChangeOnlyTheirPlayer(t *testing.T) {
+	now := time.Unix(30, 0)
+	coordinator, err := New([]focus.Player{{Slot: 1, Client: 1}, {Slot: 2, Client: 2},
+		{Slot: 3, Client: 3}}, 1,
+		follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.SetStopDistance(2, 5); err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.SetStopDistance(3, 10); err != nil {
+		t.Fatal(err)
+	}
+	positions := map[int]follow.Position{
+		1: {X: 0, Area: "instance", Seen: now, Valid: true},
+		2: {X: 12, Area: "instance", Seen: now, Valid: true},
+		3: {X: -12, Area: "instance", Seen: now, Valid: true},
+	}
+	commands := coordinator.Step(now, positions)
+	if commands[2].State != follow.CatchingUp || commands[3].State != follow.Holding {
+		t.Fatalf("per-player stops were not applied independently: %+v", commands)
+	}
+	if err := coordinator.SetStopDistance(2, 201); err == nil {
+		t.Fatal("out-of-range stop distance accepted")
+	}
+	if err := coordinator.SetStopDistance(4, 5); err == nil {
+		t.Fatal("inactive player's stop distance accepted")
+	}
+}
+
 func TestUnknownInstanceStopsAllFollowers(t *testing.T) {
 	now := time.Unix(10, 0)
 	coordinator, err := New(

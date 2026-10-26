@@ -9,6 +9,7 @@ using PartyPilot.Desktop;
 PartyRosterCounterSmoke.Run();
 FollowTargetChoicesSmoke.Run();
 FollowTargetPreferenceSmoke.Run();
+FollowPlayerStopSmoke.Run();
 AccountProfileSmoke.Run();
 LoginCalibrationSmoke.Run();
 await AutoLoginFillSmoke.RunAsync();
@@ -496,6 +497,14 @@ p2Target.SelectedItem = "P3";
 Dispatcher.UIThread.RunJobs();
 if (followPreferenceStore.Load() is not { Success: true, Targets: [0, 3, 0, 0, 0, 0] })
     throw new Exception("P2's selected target was not saved by the desktop control.");
+var p2Stop = window.GetLogicalDescendants().OfType<TextBox>()
+    .Single(item => item.Name == "follow-stop-2");
+if (!p2Stop.IsEffectivelyVisible)
+    throw new Exception("Three independent clients did not expose P2's stop distance.");
+p2Stop.Text = "37.25";
+Dispatcher.UIThread.RunJobs();
+if (p2Stop.Text != "37.25")
+    throw new Exception("P2's individual stop distance was not editable.");
 if (pathFields.Any(field => !field.IsEffectivelyVisible))
 {
     throw new Exception("The three-single-client 3P option did not request three game windows.");

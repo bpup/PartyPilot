@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -29,6 +30,27 @@ type sources map[int]string
 type memberNames map[int]string
 
 type followTargets map[int]int
+
+type stopDistances map[int]float64
+
+func (distances *stopDistances) String() string { return fmt.Sprint(map[int]float64(*distances)) }
+func (distances *stopDistances) Set(value string) error {
+	slotText, distanceText, ok := strings.Cut(value, "=")
+	slot, slotErr := strconv.Atoi(slotText)
+	distance, distanceErr := strconv.ParseFloat(distanceText, 64)
+	if !ok || slotErr != nil || distanceErr != nil || slot < 1 || slot > 6 ||
+		math.IsNaN(distance) || math.IsInf(distance, 0) || distance < 0 || distance > 200 {
+		return errors.New("stop distance must be SLOT=VALUE, with VALUE from 0 to 200")
+	}
+	if *distances == nil {
+		*distances = make(stopDistances)
+	}
+	if _, exists := (*distances)[slot]; exists {
+		return fmt.Errorf("duplicate stop distance for slot %d", slot)
+	}
+	(*distances)[slot] = distance
+	return nil
+}
 
 func (targets *followTargets) String() string { return fmt.Sprint(map[int]int(*targets)) }
 func (targets *followTargets) Set(value string) error {
@@ -305,10 +327,12 @@ func main() {
 	var logs, exes sources
 	var names memberNames
 	var targets followTargets
+	var playerStops stopDistances
 	flag.Var(&logs, "log", "SLOT=Client.txt path")
 	flag.Var(&exes, "exe", "SLOT=game executable path")
 	flag.Var(&names, "member-name", "SLOT=confirmed character name for departure detection")
 	flag.Var(&targets, "follow-target", "SLOT=TARGET; 0 means Current MAIN")
+	flag.Var(&playerStops, "stop-player", "SLOT=VALUE; individual stop distance from 0 to 200")
 	flag.Parse()
 	roster, err := parseRoster(*rosterText)
 	if err != nil {
@@ -340,6 +364,12 @@ func main() {
 	engine.SetLastFocusedLeads(*lastFocusedLeads)
 	for slot, target := range targets {
 		if err := engine.SetFollowTarget(slot, target); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	}
+	for slot, distance := range playerStops {
+		if err := engine.SetStopDistance(slot, distance); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
