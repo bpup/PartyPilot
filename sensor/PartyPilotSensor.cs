@@ -31,6 +31,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             ProcessId = GameController.Window.Process.Id,
             SeenUtc = now,
             AreaName = GameController.Area.CurrentArea?.Name,
+            AreaHash = GameController.IngameState.Data.CurrentAreaHash,
             X = position.X,
             Y = position.Y,
             Z = position.Z

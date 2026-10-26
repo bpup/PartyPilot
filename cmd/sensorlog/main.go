@@ -14,6 +14,7 @@ type sample struct {
 	ProcessID int       `json:"ProcessId"`
 	SeenUTC   time.Time `json:"SeenUtc"`
 	AreaName  string    `json:"AreaName"`
+	AreaHash  uint32    `json:"AreaHash"`
 	X         float64   `json:"X"`
 	Y         float64   `json:"Y"`
 	Z         float64   `json:"Z"`
