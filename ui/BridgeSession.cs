@@ -12,7 +12,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     private bool _stopping;
 
     public event Action<int>? AReleased;
-    public event Action<int>? PairingArmed;
+    public event Action<int, int, long>? PairingArmed;
     public event Action? PairingCompleted;
     public event Action<string>? Ended;
 
@@ -93,13 +93,16 @@ internal sealed class BridgeSession : IAsyncDisposable
         }
     }
 
-    public async Task ArmPairingAsync(int slot)
+    public async Task ArmPairingAsync(int slot, LaunchedClient client)
     {
         if (_stopping || _process.HasExited)
         {
             throw new InvalidOperationException("Virtual controller bridge is no longer running.");
         }
-        await _process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new { type = "arm_pairing", slot }));
+        await _process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new
+        {
+            type = "arm_pairing", slot, pid = client.Pid, window_handle = client.WindowHandle
+        }));
         await _process.StandardInput.FlushAsync();
     }
 
@@ -127,14 +130,16 @@ internal sealed class BridgeSession : IAsyncDisposable
                     var root = json.RootElement;
                     if (!root.TryGetProperty("event", out var kind) || kind.ValueKind != JsonValueKind.String)
                         continue;
-                    if ((kind.GetString() is "a_release" or "pairing_armed") &&
+                    if (kind.GetString() == "a_release" &&
                         root.TryGetProperty("slot", out var value) && value.TryGetInt32(out var slot))
                     {
-                        if (kind.GetString() == "a_release")
-                            Dispatcher.UIThread.Post(() => AReleased?.Invoke(slot));
-                        else
-                            Dispatcher.UIThread.Post(() => PairingArmed?.Invoke(slot));
+                        Dispatcher.UIThread.Post(() => AReleased?.Invoke(slot));
                     }
+                    else if (kind.GetString() == "pairing_armed" &&
+                        root.TryGetProperty("slot", out var armedSlot) && armedSlot.TryGetInt32(out var armedSlotValue) &&
+                        root.TryGetProperty("pid", out var armedPid) && armedPid.TryGetInt32(out var pid) &&
+                        root.TryGetProperty("window_handle", out var armedWindow) && armedWindow.TryGetInt64(out var handle))
+                        Dispatcher.UIThread.Post(() => PairingArmed?.Invoke(armedSlotValue, pid, handle));
                     else if (kind.GetString() == "pairing_complete")
                         Dispatcher.UIThread.Post(() => PairingCompleted?.Invoke());
                 }

@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace PartyPilot.Bridge;
 
 internal readonly record struct BridgeCommand(int Slot, short X, short Y, bool Active);
-internal readonly record struct PairingControl(string Type, int Slot);
+internal readonly record struct PairingControl(string Type, int Slot, int Pid, long WindowHandle);
 
 internal static class BridgeProtocol
 {
@@ -20,13 +20,16 @@ internal static class BridgeProtocol
             var name = type.GetString();
             if (name == "finish_pairing")
             {
-                control = new PairingControl(name, 0);
+                control = new PairingControl(name, 0, 0, 0);
                 return true;
             }
             if (name != "arm_pairing" || !root.TryGetProperty("slot", out var slot) ||
-                !slot.TryGetInt32(out var value) || value is < 1 or > 4)
+                !slot.TryGetInt32(out var value) || value is < 1 or > 4 ||
+                !root.TryGetProperty("pid", out var pidElement) || !pidElement.TryGetInt32(out var pid) || pid <= 0 ||
+                !root.TryGetProperty("window_handle", out var handleElement) ||
+                !handleElement.TryGetInt64(out var handle) || handle <= 0)
                 return false;
-            control = new PairingControl(name, value);
+            control = new PairingControl(name, value, pid, handle);
             return true;
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException)

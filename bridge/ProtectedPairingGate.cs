@@ -14,7 +14,7 @@ internal sealed class ProtectedPairingGate
     private static readonly TimeSpan FinalSettle = TimeSpan.FromMilliseconds(400);
 
     private int _slot;
-    private DateTime _armedAt;
+    private DateTime? _foregroundSince;
     private DateTime? _neutralSince;
     private DateTime _pulseUntil;
     private bool _wasADown;
@@ -22,11 +22,11 @@ internal sealed class ProtectedPairingGate
 
     public ProtectedPairingPhase Phase { get; private set; } = ProtectedPairingPhase.Idle;
 
-    public bool Arm(int slot, DateTime nowUtc)
+    public bool Arm(int slot)
     {
         if (slot is < 1 or > 4 || Phase is not (ProtectedPairingPhase.Idle or ProtectedPairingPhase.InGame)) return false;
         _slot = slot;
-        _armedAt = nowUtc;
+        _foregroundSince = null;
         _neutralSince = null;
         _wasADown = false;
         _requireRelease = true;
@@ -42,7 +42,7 @@ internal sealed class ProtectedPairingGate
         return true;
     }
 
-    public ProtectedPairingObservation Observe(XInputGamepad physical, DateTime nowUtc)
+    public ProtectedPairingObservation Observe(XInputGamepad physical, DateTime nowUtc, bool targetForeground)
     {
         var aDown = (physical.Buttons & A) != 0;
         var neutral = IsNeutral(physical);
@@ -50,6 +50,15 @@ internal sealed class ProtectedPairingGate
         {
             case ProtectedPairingPhase.Preparing:
             {
+                if (!targetForeground)
+                {
+                    _foregroundSince = null;
+                    _neutralSince = null;
+                    if (aDown) _requireRelease = true;
+                    _wasADown = aDown;
+                    return default;
+                }
+                _foregroundSince ??= nowUtc;
                 if (_requireRelease)
                 {
                     if (neutral) { _requireRelease = false; _neutralSince = nowUtc; }
@@ -66,7 +75,7 @@ internal sealed class ProtectedPairingGate
                 var risingA = aDown && !_wasADown;
                 _wasADown = aDown;
                 if (risingA && !_requireRelease && _neutralSince.HasValue &&
-                    nowUtc - _armedAt >= ArmSettle && nowUtc - _neutralSince.Value >= NeutralSettle)
+                    nowUtc - _foregroundSince.Value >= ArmSettle && nowUtc - _neutralSince.Value >= NeutralSettle)
                 {
                     Phase = ProtectedPairingPhase.Pulsing;
                     _pulseUntil = nowUtc + TimeSpan.FromMilliseconds(_slot % 2 == 0 ? 24 : 350);
@@ -77,6 +86,15 @@ internal sealed class ProtectedPairingGate
                 return default;
             }
             case ProtectedPairingPhase.Pulsing:
+                if (!targetForeground)
+                {
+                    Phase = ProtectedPairingPhase.Preparing;
+                    _foregroundSince = null;
+                    _neutralSince = null;
+                    _requireRelease = true;
+                    _wasADown = aDown;
+                    return default;
+                }
                 _wasADown = aDown;
                 if (nowUtc < _pulseUntil)
                     return new ProtectedPairingObservation(new XInputGamepad { Buttons = A }, 0, false);
@@ -84,6 +102,12 @@ internal sealed class ProtectedPairingGate
                 var releasedSlot = _slot;
                 return new ProtectedPairingObservation(MaskHeldAAndFocus(physical), releasedSlot, false);
             case ProtectedPairingPhase.InGame:
+                if (!targetForeground)
+                {
+                    _requireRelease = true;
+                    _wasADown = aDown;
+                    return default;
+                }
                 if (!aDown) _requireRelease = false;
                 _wasADown = aDown;
                 return new ProtectedPairingObservation(MaskHeldAAndFocus(physical), 0, false);

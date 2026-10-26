@@ -114,6 +114,32 @@ if (guide.ObserveARelease(1) || guide.Arm(2) || !guide.Arm(1) ||
 {
     throw new Exception("Pairing guide accepted a wrong slot or skipped a user confirmation.");
 }
+const string launchJson = """
+{"checked_executables":["C:/GameA.exe","D:/GameB.exe"],"clients":[{"executable":"C:/GameA.exe","pid":101,"window":{"pid":101,"handle":201}},{"executable":"D:/GameB.exe","pid":102,"window":{"pid":102,"handle":202}}],"layout_applied":false}
+""";
+var launched = LaunchedClients.ParseSuccessfulLaunch(launchJson, 2);
+if (launched.Count != 2 || launched[0].Pid != 101 || launched[1].WindowHandle != 202)
+    throw new Exception("Launcher output did not bind client order to unique processes and windows.");
+try
+{
+    LaunchedClients.ParseSuccessfulLaunch(launchJson.Replace("\"pid\":102", "\"pid\":101"), 2);
+    throw new Exception("Duplicate launcher process was accepted.");
+}
+catch (InvalidOperationException error) when (error.Message.Contains("duplicate")) { }
+foreach (var invalid in new[]
+{
+    launchJson.Replace("\"handle\":202", "\"handle\":0"),
+    launchJson.Replace("\"layout_applied\":false", "\"error\":\"window lost\",\"layout_applied\":false"),
+    launchJson.Replace("\"window\":{\"pid\":102", "\"window\":{\"pid\":103")
+})
+{
+    try
+    {
+        LaunchedClients.ParseSuccessfulLaunch(invalid, 2);
+        throw new Exception("Incomplete launcher window binding was accepted.");
+    }
+    catch (InvalidOperationException) { }
+}
 window.Close();
 
 sealed class SmokeApp : Application

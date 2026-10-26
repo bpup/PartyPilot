@@ -92,6 +92,9 @@ try
         if (physicalMode) router.ConfigurePhysical(mainSlot);
         var pairingSignals = new PairingSignalTracker();
         var pairingGate = protectedPairing ? new ProtectedPairingGate() : null;
+        var windowStability = new WindowStabilityTracker();
+        var pairingTargetPid = 0;
+        long pairingTargetWindow = 0;
         Console.WriteLine(JsonSerializer.Serialize(new { @event = "ready", slots, physical_mode = physicalMode, pairing_protected = protectedPairing }));
 
         Task<string?> pendingLine = Console.In.ReadLineAsync();
@@ -106,14 +109,21 @@ try
                 if (pairingGate is not null && BridgeProtocol.TryParsePairingControl(line, out var control))
                 {
                     if (control.Type == "arm_pairing" && slots.Contains(control.Slot) &&
-                        pairingGate.Arm(control.Slot, DateTime.UtcNow))
+                        ForegroundWindowProbe.IsExistingTarget(control.Pid, control.WindowHandle) &&
+                        pairingGate.Arm(control.Slot))
                     {
+                        pairingTargetPid = control.Pid;
+                        pairingTargetWindow = control.WindowHandle;
                         router.NeutralAll();
                         router.ApplyLine(JsonSerializer.Serialize(new { type = "focus", slot = control.Slot }), DateTime.UtcNow);
-                        Console.WriteLine(JsonSerializer.Serialize(new { @event = "pairing_armed", slot = control.Slot }));
+                        Console.WriteLine(JsonSerializer.Serialize(new { @event = "pairing_armed", slot = control.Slot,
+                            pid = pairingTargetPid, window_handle = pairingTargetWindow }));
                     }
                     else if (control.Type == "finish_pairing" && pairingGate.Finish())
                     {
+                        pairingTargetPid = 0;
+                        pairingTargetWindow = 0;
+                        windowStability.Reset();
                         router.NeutralAll();
                         router.ApplyLine(JsonSerializer.Serialize(new { type = "focus", slot = mainSlot }), DateTime.UtcNow);
                         Console.WriteLine(JsonSerializer.Serialize(new { @event = "pairing_settling" }));
@@ -151,7 +161,11 @@ try
                 }
                 if (pairingGate is not null)
                 {
-                    var observation = pairingGate.Observe(state.Gamepad, DateTime.UtcNow);
+                    var observedAt = DateTime.UtcNow;
+                    var stable = windowStability.Observe(pairingTargetWindow,
+                        ForegroundWindowProbe.ReadBounds(pairingTargetPid, pairingTargetWindow), observedAt);
+                    var observation = pairingGate.Observe(state.Gamepad, observedAt,
+                        stable && ForegroundWindowProbe.IsExpectedForeground(pairingTargetPid, pairingTargetWindow));
                     router.SetPhysical(observation.Forwarded);
                     if (observation.ReleasedSlot != 0)
                         Console.WriteLine(JsonSerializer.Serialize(new { @event = "a_release", slot = observation.ReleasedSlot }));
