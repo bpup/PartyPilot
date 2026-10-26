@@ -42,6 +42,8 @@ GOOS=windows GOARCH=amd64 go build -o PartyPilot.exe ./cmd/partypilot
 
 ## 功能参照与证据
 
+新增 `release/PartyPilot-LootReplay.exe -replay <JSONL 文件>`，可用明确提供的物品卡片和安全条件离线检查拾取决策；它不会发送手柄输入，实际自动拾取仍未实现，详见[自动拾取取证](AUTO_PICKUP_RESEARCH.md)。
+
 用户指定的 MultiPilot 0.6.17 安装目录位于 `/Users/liuchang/Desktop/project/MultiPilotPoE2/current`。其随附快速指南描述了 1–6 人、最多三个游戏窗口、虚拟手柄、跟随、Smart Focus 等功能；这些是参照清单，不能证明本项目已实现。
 
 回放内核只根据最多六个角色的已知坐标计算方向。示例中的距离数字仅用于回放测试，不代表 0.6.17 的参数。独立窗口布局工具已提供 Windows 目标代码；整体仍没有独立的 PoE2 内存读取器、自动组队、战斗技能、拾取或完整图形设置界面；药剂按键新增有限实时路径，尚未在游戏内验证。坐标 `Area` 必须是实例标识；仅有地图名不足以证明两个角色位于同一实例。
