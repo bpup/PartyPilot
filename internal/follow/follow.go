@@ -60,6 +60,7 @@ func (c Config) Valid() bool {
 
 func (e *Engine) Reset() {
 	e.moving = false
+	e.catchingUp = false
 	e.trail = nil
 	e.hasLeader = false
 	e.trailArea = ""
@@ -72,6 +73,7 @@ type point struct{ x, y float64 }
 type Engine struct {
 	config       Config
 	moving       bool
+	catchingUp   bool
 	trail        []point
 	lastLeader   point
 	hasLeader    bool
@@ -141,6 +143,7 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 	if distance <= e.config.StopDistance ||
 		(!e.moving && distance < e.config.ResumeDistance) {
 		e.moving = false
+		e.catchingUp = false
 		if e.config.TrailSpacing > 0 {
 			e.trail = []point{{leader.X, leader.Y}}
 		}
@@ -172,7 +175,13 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 	}
 	e.moving = true
 	state := Following
-	if distance >= e.config.CatchUpDistance {
+	// The supplied build ships with ClassicSprintCatchUp enabled: the hold
+	// branch above releases catch-up only at the configured stop distance.
+	entryDistance := math.Max(e.config.StopDistance+1, e.config.CatchUpDistance)
+	if !e.catchingUp && distance >= entryDistance {
+		e.catchingUp = true
+	}
+	if e.catchingUp {
 		state = CatchingUp
 	}
 	return Command{

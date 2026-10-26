@@ -36,6 +36,31 @@ func TestFollowHysteresisAndCatchUp(t *testing.T) {
 	if got = engine.Step(now, leader, follower); got.State != CatchingUp {
 		t.Fatalf("catch up: %+v", got)
 	}
+	leader.X = 8
+	if got = engine.Step(now, leader, follower); got.State != CatchingUp {
+		t.Fatalf("catch up released above target threshold: %+v", got)
+	}
+	leader.X = 6.5
+	if got = engine.Step(now, leader, follower); got.State != CatchingUp {
+		t.Fatalf("classic catch up released before stop distance: %+v", got)
+	}
+	leader.X = 2
+	if got = engine.Step(now, leader, follower); got.State != Holding {
+		t.Fatalf("classic catch up did not end at stop distance: %+v", got)
+	}
+	leader.X = 9
+	if got = engine.Step(now, leader, follower); got.State != Following {
+		t.Fatalf("catch up restarted below entry threshold: %+v", got)
+	}
+	leader.X = 11
+	if got = engine.Step(now, leader, follower); got.State != CatchingUp {
+		t.Fatalf("catch up did not restart at entry threshold: %+v", got)
+	}
+	engine.Reset()
+	leader.X = 8
+	if got = engine.Step(now, leader, follower); got.State != Following {
+		t.Fatalf("reset retained catch up state: %+v", got)
+	}
 }
 
 func TestTerrainRouteTurnsAndMissingMapStops(t *testing.T) {
@@ -75,6 +100,24 @@ func TestTerrainRouteTurnsAndMissingMapStops(t *testing.T) {
 	}
 	if got := optional.StepWithTerrain(now, leader, follower, nil); got.State != Waiting {
 		t.Fatalf("missing terrain silently fell back to direct movement: %+v", got)
+	}
+}
+
+func TestClassicCatchUpEntryStaysBeyondStopDistance(t *testing.T) {
+	now := time.Unix(49, 0)
+	engine, ok := New(Config{StopDistance: 2, ResumeDistance: 2.2, CatchUpDistance: 2.5,
+		MaxAge: time.Second})
+	if !ok {
+		t.Fatal("invalid test config")
+	}
+	leader := Position{X: 2.5, Area: "instance", Seen: now, Valid: true}
+	follower := Position{Area: "instance", Seen: now, Valid: true}
+	if got := engine.Step(now, leader, follower); got.State != Following {
+		t.Fatalf("catch up began within one unit of stop distance: %+v", got)
+	}
+	leader.X = 3
+	if got := engine.Step(now, leader, follower); got.State != CatchingUp {
+		t.Fatalf("catch up did not begin at the classic entry distance: %+v", got)
 	}
 }
 
