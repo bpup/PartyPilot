@@ -14,6 +14,8 @@
 
 目标版的 `CombatDirectorDefaults.cs` 为各角色配置不同目标策略，`CombatDirectorTargetCoordinator.cs` 按威胁、距离、主号目标或多 Rare 分配目标，并保留 Normal/Magic 400 毫秒、Rare 800 毫秒、Unique 1200 毫秒的短期占用。本回放现可在连续 JSONL 帧上输出 `targetId`，并按这些默认策略保留与释放目标。目标分配只读，不代表技能条件或游戏中的选怪动作已验证。
 
+`CombatDirectorPacingScheduler.cs` 按默认 Natural 反应区间 110–230 毫秒、Natural 队伍间隔 45–110 毫秒、角色专属偏移区间，以及遭遇 ID 和角色 ID 的稳定哈希计算启动偏移。回放现在给 `planned_only` 候选输出 `scheduledOffsetMs`，候选被阻断时不占排序位置；该值尚未用于执行计时或按键。
+
 `CombatDirectorEncounterManager.cs` 的默认设置以 60 米和三只怪为普通怪群进入条件，单只 Rare/Unique 也可触发；进入确认 150 毫秒，退出半径 75 米，结束确认 800 毫秒。回放现在保留遭遇 ID 与 `approaching`、`engaged`、`active`、`winding-down`、`complete` 阶段，怪物离开时不立即视为新遭遇；处于结束阶段时不输出新连招。场景标签来自当前遭遇中的怪物，不会由视野外的 Boss 改写当前怪群计划。`encounter` 字段及时间行为仅在按时间顺序提供的合成帧上验证。
 
 回放现在还输出遭遇 `version`：初始管理器版本为 1，标签首次改变会再递增；后续阶段、怪物 ID 集合、稀有度计数或主要威胁改变时递增一次，标签集合改变时再递增一次。这与目标版管理器和引擎的两个更新点对应；尚未将版本用于技能执行协调。

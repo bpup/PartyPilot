@@ -49,12 +49,13 @@ type Monster struct {
 }
 
 type Plan struct {
-	Player   int    `json:"player"`
-	Status   string `json:"status"`
-	Behavior string `json:"behavior,omitempty"`
-	ComboID  string `json:"comboId,omitempty"`
-	TargetID string `json:"targetId,omitempty"`
-	Reason   string `json:"reason,omitempty"`
+	Player            int    `json:"player"`
+	Status            string `json:"status"`
+	Behavior          string `json:"behavior,omitempty"`
+	ComboID           string `json:"comboId,omitempty"`
+	TargetID          string `json:"targetId,omitempty"`
+	Reason            string `json:"reason,omitempty"`
+	ScheduledOffsetMS *int   `json:"scheduledOffsetMs,omitempty"`
 }
 
 func (w World) Validate() error {
@@ -160,6 +161,9 @@ func EvaluateEncounter(profile Profile, world World, encounter *Encounter) ([]Pl
 			}
 		}
 		plans = append(plans, plan)
+	}
+	if encounter != nil {
+		applyDefaultPacing(profile, encounter.ID, plans)
 	}
 	return plans, nil
 }

@@ -48,6 +48,11 @@ func TestDefaultProfileAndReadOnlyBehavior(t *testing.T) {
 		plans[5].ComboID != "safe-follow" || plans[0].Status != "planned_only" {
 		t.Fatalf("pack roles changed: %+v, %v", plans, err)
 	}
+	for index, want := range []int{219, 359, 459, 645, 720, 965} {
+		if plans[index].ScheduledOffsetMS == nil || *plans[index].ScheduledOffsetMS != want {
+			t.Fatalf("P%d default pacing differs from source: %+v", index+1, plans[index])
+		}
+	}
 	world.Monsters[0].Rarity = "rare"
 	plans, err = Evaluate(profile, world)
 	if err != nil || plans[0].ComboID != "rare-dps" || plans[3].ComboID != "rare-support" {
@@ -69,6 +74,20 @@ func TestDefaultProfileAndReadOnlyBehavior(t *testing.T) {
 	if err != nil || plans[0].ComboID != "emergency-defence" ||
 		plans[1].ComboID != "companion-recovery" {
 		t.Fatalf("emergency roles changed: %+v, %v", plans, err)
+	}
+}
+
+func TestPacingUsesCandidateOrderRatherThanPlayerNumber(t *testing.T) {
+	profile := DefaultProfile()
+	profile.Enabled = true
+	world := testWorld()
+	delete(world.Players, 1)
+	encounter := &Encounter{ID: "enc-1", State: "active", Tags: []string{"pack"}}
+	plans, err := EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[0].Status != "BLOCK_PLAYER_DATA_UNAVAILABLE" ||
+		plans[0].ScheduledOffsetMS != nil || plans[1].ScheduledOffsetMS == nil ||
+		*plans[1].ScheduledOffsetMS != 275 {
+		t.Fatalf("P2 should be first scheduled candidate: %+v, %v", plans, err)
 	}
 }
 

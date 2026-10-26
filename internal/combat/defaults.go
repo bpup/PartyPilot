@@ -19,14 +19,16 @@ type Safety struct {
 }
 
 type Role struct {
-	Player       int               `json:"player"`
-	Name         string            `json:"name"`
-	Kind         string            `json:"kind"`
-	Anchor       string            `json:"anchor"`
-	Behaviors    map[string]string `json:"behaviors"`
-	Targets      map[string]string `json:"targets"`
-	SkillButtons map[int]string    `json:"skillButtons"`
-	PressMS      int               `json:"pressMs"`
+	Player          int               `json:"player"`
+	Name            string            `json:"name"`
+	Kind            string            `json:"kind"`
+	Anchor          string            `json:"anchor"`
+	Behaviors       map[string]string `json:"behaviors"`
+	Targets         map[string]string `json:"targets"`
+	SkillButtons    map[int]string    `json:"skillButtons"`
+	PressMS         int               `json:"pressMs"`
+	RoleOffsetMinMS int               `json:"roleOffsetMinMs"`
+	RoleOffsetMaxMS int               `json:"roleOffsetMaxMs"`
 }
 
 type Combo struct {
@@ -53,22 +55,22 @@ func DefaultProfile() Profile {
 	roles := []Role{
 		{1, "Main DPS", "main-dps", "independent-in-combat",
 			map[string]string{"pack": "primary-clear", "rare": "rare-dps", "boss": "boss-engage", "emergency": "emergency-defence"},
-			map[string]string{"pack": "highest-threat", "rare": "highest-threat", "boss": "unique", "emergency": "none"}, buttons(), 85},
+			map[string]string{"pack": "highest-threat", "rare": "highest-threat", "boss": "unique", "emergency": "none"}, buttons(), 85, 0, 0},
 		{2, "Companion A", "companion-dps", "main",
 			map[string]string{"pack": "companion-rally-clear", "rare": "companion-rally-rare", "boss": "companion-rally-boss", "emergency": "companion-recovery"},
-			map[string]string{"pack": "nearest-valid", "rare": "assigned-target", "boss": "assigned-target", "emergency": "none"}, buttons(), 85},
+			map[string]string{"pack": "nearest-valid", "rare": "assigned-target", "boss": "assigned-target", "emergency": "none"}, buttons(), 85, 20, 80},
 		{3, "Companion B", "companion-dps", "main",
 			map[string]string{"pack": "companion-rally-clear", "rare": "companion-rally-rare", "boss": "companion-rally-boss", "emergency": "companion-recovery"},
-			map[string]string{"pack": "nearest-valid", "rare": "assigned-target", "boss": "assigned-target", "emergency": "none"}, buttons(), 85},
+			map[string]string{"pack": "nearest-valid", "rare": "assigned-target", "boss": "assigned-target", "emergency": "none"}, buttons(), 85, 35, 95},
 		{4, "Support", "support", "main",
 			map[string]string{"pack": "pack-support", "rare": "rare-support", "boss": "boss-support", "emergency": "emergency-support"},
-			map[string]string{"pack": "main-target", "rare": "main-target", "boss": "main-target", "emergency": "party-centre"}, buttons(), 85},
+			map[string]string{"pack": "main-target", "rare": "main-target", "boss": "main-target", "emergency": "party-centre"}, buttons(), 85, 90, 220},
 		{5, "Defence", "defence", "party-centre",
 			map[string]string{"pack": "defensive-standby", "rare": "defensive-setup", "boss": "boss-defence", "emergency": "emergency-defence"},
-			map[string]string{"pack": "party-centre", "rare": "party-centre", "boss": "party-centre", "emergency": "party-centre"}, buttons(), 85},
+			map[string]string{"pack": "party-centre", "rare": "party-centre", "boss": "party-centre", "emergency": "party-centre"}, buttons(), 85, 140, 280},
 		{6, "Rarity Finisher", "rarity-finisher", "main",
 			map[string]string{"pack": "safe-follow", "rare": "finisher-ready", "boss": "finisher-ready", "emergency": "escape-return"},
-			map[string]string{"pack": "none", "rare": "main-target", "boss": "main-target", "emergency": "none"}, buttons(), 85},
+			map[string]string{"pack": "none", "rare": "main-target", "boss": "main-target", "emergency": "none"}, buttons(), 85, 180, 360},
 	}
 	skill := func(id string, slot int, condition string, min, max int) Step {
 		return Step{ID: id, Action: "skill", SkillSlot: slot, Condition: condition, DelayMin: min, DelayMax: max}
