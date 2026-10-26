@@ -18,9 +18,11 @@ var radarPayload = System.Text.Encoding.UTF8.GetBytes(
     "{\"ProcessId\":123,\"RadarStatus\":\"ok\",\"RadarSeenUtc\":\"" + DateTime.UtcNow.ToString("O") +
     "\",\"X\":100,\"Y\":200,\"RadarEntities\":[" +
     "{\"EntityId\":7,\"Category\":\"monster\",\"Path\":\"Metadata/Monsters/Beast\",\"X\":103,\"Y\":198}," +
-    "{\"EntityId\":8,\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\",\"X\":95,\"Y\":205}]}"
+    "{\"EntityId\":8,\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\",\"X\":95,\"Y\":205}," +
+    "{\"EntityId\":9,\"Category\":\"player\",\"Path\":\"Metadata/Characters/Player\",\"Label\":\"Teammate\",\"X\":110,\"Y\":200}," +
+    "{\"EntityId\":10,\"Category\":\"league\",\"Path\":\"Metadata/MiscellaneousObjects/Expedition2/Expedition2Encounter\",\"X\":105,\"Y\":210}]}"
 );
-if (!RadarFrames.TryParse(radarPayload, 123, DateTime.UtcNow, out var radarFrame) || radarFrame?.Markers.Count != 2 ||
+if (!RadarFrames.TryParse(radarPayload, 123, DateTime.UtcNow, out var radarFrame) || radarFrame?.Markers.Count != 4 ||
     RadarFrames.TryParse(radarPayload, 124, DateTime.UtcNow, out _) ||
     RadarFrames.TryParse(radarPayload, 123, DateTime.UtcNow.AddSeconds(3), out _) ||
     RadarProjection.TryScale("0", out _) || !RadarProjection.TryScale("2", out var radarScale))
@@ -30,6 +32,9 @@ if (RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
         radarText.Replace("\"EntityId\":8", "\"EntityId\":7")), 123, DateTime.UtcNow, out _) ||
     RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
         radarText.Replace("\"RadarStatus\":\"ok\"", "\"RadarStatus\":\"scan_failed\"")),
+        123, DateTime.UtcNow, out _) ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        radarText.Replace("\"Label\":\"Teammate\"", "\"Label\":null")),
         123, DateTime.UtcNow, out _))
     throw new Exception("Radar accepted duplicate or failed diagnostic markers.");
 var projected = RadarProjection.Project(radarFrame.PlayerX, radarFrame.PlayerY,

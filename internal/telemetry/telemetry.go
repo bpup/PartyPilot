@@ -53,6 +53,7 @@ type RadarEntity struct {
 	EntityID uint64  `json:"EntityId"`
 	Category string  `json:"Category"`
 	Path     string  `json:"Path"`
+	Label    *string `json:"Label,omitempty"`
 	X        float64 `json:"X"`
 	Y        float64 `json:"Y"`
 	Z        float64 `json:"Z"`
@@ -116,6 +117,14 @@ func validRadar(entities []RadarEntity, status string, seen *time.Time) bool {
 			!finite(entity.X) || !finite(entity.Y) || !finite(entity.Z) {
 			return false
 		}
+		if entity.Category == "player" {
+			if !strings.HasPrefix(entity.Path, "Metadata/Characters/") || entity.Label == nil ||
+				strings.TrimSpace(*entity.Label) == "" || len(*entity.Label) > 64 {
+				return false
+			}
+		} else if entity.Label != nil {
+			return false
+		}
 		ids[entity.EntityID] = true
 	}
 	return true
@@ -123,7 +132,7 @@ func validRadar(entities []RadarEntity, status string, seen *time.Time) bool {
 
 func validRadarCategory(category string) bool {
 	switch category {
-	case "monster", "checkpoint", "waypoint", "portal", "transition", "npc", "chest", "shrine":
+	case "monster", "checkpoint", "waypoint", "portal", "transition", "npc", "chest", "shrine", "player", "league":
 		return true
 	default:
 		return false

@@ -74,11 +74,11 @@ public sealed class RadarOverlayWindow : Window
             if (!double.IsFinite(x) || !double.IsFinite(y) ||
                 x < 8 || y < 8 || x > Bounds.Width - 8 || y > Bounds.Height - 8) continue;
             AddDot(x, y, marker.Category == "monster" ? 7 : 10, MarkerBrush(marker.Category));
-            if (marker.Category is "checkpoint" or "waypoint" or "portal" or "transition")
+            if (marker.Category is "checkpoint" or "waypoint" or "portal" or "transition" or "player")
             {
                 var label = new TextBlock
                 {
-                    Text = marker.Path.Split('/').Last(),
+                    Text = marker.Category == "player" ? marker.Label : marker.Path.Split('/').Last(),
                     Foreground = Brushes.White,
                     Background = new SolidColorBrush(Color.FromArgb(190, 8, 12, 20)),
                     FontSize = 12
@@ -108,6 +108,8 @@ public sealed class RadarOverlayWindow : Window
     private static IBrush MarkerBrush(string category) => category switch
     {
         "monster" => Brushes.OrangeRed,
+        "player" => Brushes.Cyan,
+        "league" => Brushes.Magenta,
         "portal" => Brushes.MediumPurple,
         "waypoint" => Brushes.DeepSkyBlue,
         "checkpoint" => Brushes.LimeGreen,

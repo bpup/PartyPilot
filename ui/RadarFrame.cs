@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace PartyPilot.Desktop;
 
-public sealed record RadarMarker(uint Id, string Category, string Path, double X, double Y);
+public sealed record RadarMarker(uint Id, string Category, string Path, string? Label, double X, double Y);
 
 public sealed record RadarFrame(int ProcessId, DateTime SeenUtc, double PlayerX, double PlayerY,
     IReadOnlyList<RadarMarker> Markers);
@@ -44,7 +44,18 @@ public static class RadarFrames
                     !path.StartsWith("Metadata/", StringComparison.Ordinal) ||
                     !TryFinite(item, "X", out var x) || !TryFinite(item, "Y", out var y))
                     return false;
-                markers.Add(new RadarMarker(id, category, path, x, y));
+                string? label = null;
+                if (item.TryGetProperty("Label", out var labelValue) && labelValue.ValueKind != JsonValueKind.Null)
+                {
+                    if (labelValue.ValueKind != JsonValueKind.String) return false;
+                    label = labelValue.GetString();
+                }
+                if (category == "player"
+                    ? !path.StartsWith("Metadata/Characters/", StringComparison.OrdinalIgnoreCase) ||
+                      string.IsNullOrWhiteSpace(label) || Encoding.UTF8.GetByteCount(label) > 64
+                    : label != null)
+                    return false;
+                markers.Add(new RadarMarker(id, category, path, label, x, y));
             }
             frame = new RadarFrame(pid, seenUtc, playerX, playerY, markers);
             return true;
@@ -62,7 +73,7 @@ public static class RadarFrames
     }
 
     private static bool KnownCategory(string value) => value is
-        "monster" or "checkpoint" or "waypoint" or "portal" or "transition" or "npc" or "chest" or "shrine";
+        "monster" or "checkpoint" or "waypoint" or "portal" or "transition" or "npc" or "chest" or "shrine" or "player" or "league";
 }
 
 public static class RadarProjection

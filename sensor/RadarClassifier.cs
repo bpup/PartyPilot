@@ -11,6 +11,7 @@ public static class RadarClassifier
         if (path.StartsWith("Metadata/Effects/", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("Metadata/Projectiles/", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("Metadata/Items/", StringComparison.OrdinalIgnoreCase)) return null;
+        if (IsPrimaryWorldObject(path)) return "league";
         if (path.StartsWith("Metadata/Monsters/", StringComparison.OrdinalIgnoreCase)) return "monster";
         if (path.Contains("Checkpoint", StringComparison.OrdinalIgnoreCase)) return "checkpoint";
         if (path.Contains("Waypoint", StringComparison.OrdinalIgnoreCase)) return "waypoint";
@@ -28,4 +29,28 @@ public static class RadarClassifier
 
     public static bool IsNavigation(string category) =>
         category is "checkpoint" or "waypoint" or "portal" or "transition";
+
+    public static bool IsPlayerPath(string path) =>
+        path.StartsWith("Metadata/Characters/", StringComparison.OrdinalIgnoreCase);
+
+    // Only explicit world-object anchors observed in the supplied 0.6.17 code.
+    // Nearby monsters and visual effects are not league markers.
+    private static bool IsPrimaryWorldObject(string path)
+    {
+        if (path.EndsWith("/Expedition2Encounter", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith("/ExpeditionDetonator", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith("/Expedition/Detonator", StringComparison.OrdinalIgnoreCase))
+            return !path.StartsWith("Metadata/Monsters/", StringComparison.OrdinalIgnoreCase);
+        if (path.Contains("BreachHand", StringComparison.OrdinalIgnoreCase) ||
+            path.Contains("BrequelInitiator", StringComparison.OrdinalIgnoreCase) ||
+            path.Contains("BreachInitiator", StringComparison.OrdinalIgnoreCase) ||
+            path.Contains("/Breach/BreachObject", StringComparison.OrdinalIgnoreCase) ||
+            path.Contains("BreachInteractable", StringComparison.OrdinalIgnoreCase) ||
+            path.Contains("BreachOpening", StringComparison.OrdinalIgnoreCase)) return true;
+        return (path.Contains("Delirium", StringComparison.OrdinalIgnoreCase) ||
+                path.Contains("Affliction", StringComparison.OrdinalIgnoreCase)) &&
+               (path.Contains("DoodadDaemons/", StringComparison.OrdinalIgnoreCase) ||
+                path.Contains("DoodadDaemonShardPack", StringComparison.OrdinalIgnoreCase) ||
+                path.Contains("DeliriumSkillDaemon", StringComparison.OrdinalIgnoreCase));
+    }
 }

@@ -54,3 +54,24 @@ func TestRadarPacketCanCarryNinetySixMarkers(t *testing.T) {
 		t.Fatal("radar packet beyond the entity limit was accepted")
 	}
 }
+
+func TestRadarPlayerRequiresObservedNameAndCharacterPath(t *testing.T) {
+	base := `{"ProcessId":123,"SeenUtc":"2026-10-26T00:00:00Z","X":1,"Y":2,"Z":3,` +
+		`"RadarSeenUtc":"2026-10-26T00:00:00Z","RadarStatus":"ok",` +
+		`"RadarEntities":[{"EntityId":8,"Category":"player","Path":"Metadata/Characters/Player",` +
+		`"Label":"Teammate","X":4,"Y":5,"Z":6}]}`
+	if sample, err := Decode([]byte(base)); err != nil || sample.RadarEntities[0].Label == nil ||
+		*sample.RadarEntities[0].Label != "Teammate" {
+		t.Fatalf("visible player observation rejected: %+v, %v", sample, err)
+	}
+	for _, changed := range []string{
+		strings.Replace(base, `"Label":"Teammate"`, `"Label":null`, 1),
+		strings.Replace(base, `"Label":"Teammate"`, `"Label":" "`, 1),
+		strings.Replace(base, `"Path":"Metadata/Characters/Player"`, `"Path":"Metadata/Monsters/Player"`, 1),
+		strings.Replace(base, `"Category":"player"`, `"Category":"monster"`, 1),
+	} {
+		if _, err := Decode([]byte(changed)); err == nil {
+			t.Fatalf("unverified player marker accepted: %s", changed)
+		}
+	}
+}

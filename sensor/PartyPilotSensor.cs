@@ -187,7 +187,11 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 continue;
             var path = entity.Path;
             if (path == null || Encoding.UTF8.GetByteCount(path) > 256) continue;
-            var category = RadarClassifier.Category(path);
+            var playerComponent = entity.GetComponent<Player>();
+            var playerName = playerComponent?.PlayerName?.Trim();
+            var isPlayer = RadarClassifier.IsPlayerPath(path) &&
+                !string.IsNullOrWhiteSpace(playerName) && Encoding.UTF8.GetByteCount(playerName) <= 64;
+            var category = isPlayer ? "player" : RadarClassifier.Category(path);
             if (category == null) continue;
             var pos = entity.Pos;
             if (!float.IsFinite(pos.X) || !float.IsFinite(pos.Y) || !float.IsFinite(pos.Z)) continue;
@@ -198,6 +202,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 EntityId = entity.Id,
                 Category = category,
                 Path = path,
+                Label = isPlayer ? playerName : null,
                 X = pos.X,
                 Y = pos.Y,
                 Z = pos.Z

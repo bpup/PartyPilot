@@ -73,6 +73,13 @@ Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
     RadarClassifier.Category("Metadata/Effects/PortalFlash") == null &&
     RadarClassifier.Category("Metadata/Items/ChestPiece") == null &&
     RadarClassifier.Category("Metadata/Monsters/PortalGuardian") == "monster" &&
+    RadarClassifier.Category("Metadata/MiscellaneousObjects/Expedition2/Expedition2Encounter") == "league" &&
+    RadarClassifier.Category("Metadata/Monsters/Breach/BreachHand") == "league" &&
+    RadarClassifier.Category("Metadata/Monsters/LeagueDelirium/DoodadDaemons/DoodadDaemonShardPack1") == "league" &&
+    RadarClassifier.Category("Metadata/Monsters/LeagueDelirium/DeliriumMinion4") == "monster" &&
+    RadarClassifier.Category("Metadata/Monsters/LeagueExpedition/Expedition2EncounterMonster") == "monster" &&
+    RadarClassifier.IsPlayerPath("Metadata/Characters/Player") &&
+    RadarClassifier.Category("Metadata/Characters/Player") == null &&
     RadarClassifier.IsNavigation("waypoint") && !RadarClassifier.IsNavigation("monster"),
     "Path-only radar categories admitted unsupported entities or lost navigation markers.");
 Console.WriteLine("Sensor diagnostics passed.");
