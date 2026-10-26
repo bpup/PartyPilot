@@ -10,7 +10,7 @@
 
 `sensor/SkillBindTable.cs` 可对已采集的 148 字节表做只读解析，保留原始八位十六进制标识，识别技能石、固有动作和武器赋予技能。技能石名称只从显式提供的面板槽位证据关联；未知名称保持空值。无效长度、任一槽位缺少高位标记、玩家 owner 指针与预期角色不匹配时，整表拒绝。解析成功返回 `decoded_unverified_source`，因为传入地址相等本身不能证明采样文件来自当前游戏和当前区域。
 
-传感器启用现有 `DiagnoseLocalSlotCandidates` 后，每两秒尝试一次只读来源扫描。扫描要求 `IngameState + 656` 与当前区域地址一致，按目标版的有界区域指针范围查找直接或嵌套的玩家数据向量，核对一至两名角色的 owner 一一对应关系、各角色的 12×5 主背包结构及本地角色的绑定表，并在读取结束时复核区域、入口、玩家向量、owner、背包及绑定表。重复入口指向同一组玩家数据会合并；多条不同的有效数据链路会返回 `ambiguous_candidates`，不输出技能。区域、角色或顺序变化时传感器丢弃缓存结果。输出字段为 `SkillBindSource`、`SkillBindSourceStatus` 和 `SkillBindSourceSeenUtc`。这里使用的 `+72` 玩家向量、`+768` owner、`+800` 背包向量和 `+30792` 绑定表偏移，来自安装目录中的 `NoddPilot.Offsets.dll` 静态属性及所提供版本的读取流程；未证明当前游戏版本仍采用它们。
+传感器启用现有 `DiagnoseLocalSlotCandidates` 后，每两秒尝试一次只读来源扫描。扫描要求 `IngameState + 656` 与当前区域地址一致，按目标版的有界区域指针范围查找直接或嵌套的玩家数据向量，核对一至两名角色的 owner 一一对应关系、各角色的 12×5 主背包结构及绑定表，并在读取结束时复核区域、入口、玩家向量、owner、背包及绑定表。重复入口指向同一组玩家数据会合并；多条不同的有效数据链路会返回 `ambiguous_candidates`，不输出技能。区域、角色或顺序变化时传感器丢弃缓存结果。输出字段为 `SkillBindSource`、`SkillBindSourceStatus` 和 `SkillBindSourceSeenUtc`；候选结果中的 `Players` 按本地角色顺序分别列出绑定，原有顶层 `Entries` 仍仅表示当前本地角色。Go 遥测解码器现保留并检查这些字段的来源状态、时间、角色顺序、按键映射和原始 ID，仍不把候选结果当作可执行战斗绑定。这里使用的 `+72` 玩家向量、`+768` owner、`+800` 背包向量和 `+30792` 绑定表偏移，来自安装目录中的 `NoddPilot.Offsets.dll` 静态属性及所提供版本的读取流程；未证明当前游戏版本仍采用它们。
 
 `release/skillbind/PartyPilot.SkillBind.exe` 提供采样文件检查：
 
@@ -19,6 +19,8 @@ PartyPilot.SkillBind.exe bind-table.bin 0x<已观察 owner 地址> 0x<预期角�
 ```
 
 输入文件必须恰好 148 字节；两个地址参数只是额外一致性检查，不能替代采集时的来源验证。输出是 JSON；成功退出码 0，拒绝为 1，用法错误为 2。此工具不读取进程内存，也不发送游戏输入。
+
+Windows 上可单独运行 `release/PartyPilot-SensorLog.exe` 读取本机传感器的 UDP 遥测；只有在 ExileCore2 中启用 `DiagnoseLocalSlotCandidates` 且出现候选时，日志才会包含技能绑定字段。该接收器与其他占用 `127.0.0.1:47617` 的本机程序不能同时监听同一端口。输出仅供诊断，不能作为战斗启用条件。
 
 ## 待确认
 

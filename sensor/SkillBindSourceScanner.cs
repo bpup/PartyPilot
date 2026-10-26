@@ -15,7 +15,13 @@ public static class SkillBindSourceScanner
     private const int BindTableOffset = 30792;
 
     public sealed record Result(string Status, string? PlayerDataAddress,
-        int MatchingRoots, SkillBindTable.Entry[] Entries);
+        int MatchingRoots, SkillBindTable.Entry[] Entries)
+    {
+        public PlayerBinding[] Players { get; init; } = [];
+    }
+
+    public sealed record PlayerBinding(int LocalPlayerSlot, string EntityAddress,
+        string PlayerDataAddress, SkillBindTable.Entry[] Entries);
 
     public static Result Scan(long stateAddress, long areaAddress, long localPlayer,
         IReadOnlyList<long> orderedPlayers,
@@ -31,7 +37,8 @@ public static class SkillBindSourceScanner
         if (roots is not { Length: AreaPointerBytes })
             return new("area_unreadable", null, 0, []);
 
-        var matches = new Dictionary<string, (long LocalData, SkillBindTable.Entry[] Entries)>();
+        var matches = new Dictionary<string, (long LocalData, SkillBindTable.Entry[] Entries,
+            PlayerBinding[] Players)>();
         var matchingRoots = 0;
         var localIndex = Array.IndexOf(orderedPlayers.ToArray(), localPlayer);
         for (var offset = 0; offset < AreaPointerBytes; offset += 8)
@@ -49,7 +56,7 @@ public static class SkillBindSourceScanner
         if (matches.Count > 1) return new("ambiguous_candidates", null, matchingRoots, []);
         var match = matches.Single();
         return new("candidate_unverified_build", $"0x{match.Value.LocalData:X}",
-            matchingRoots, match.Value.Entries);
+            matchingRoots, match.Value.Entries) { Players = match.Value.Players };
 
         void TryCandidate(long root, long server, int offset, bool nested)
         {
@@ -57,29 +64,43 @@ public static class SkillBindSourceScanner
                     out var vectorHeader, out var playerData)) return;
             var localData = playerData[localIndex];
             if (playerData.Any(entry => !TryMainInventory(entry, read))) return;
-            var table = read(localData + BindTableOffset, 148);
-            if (table is not { Length: 148 }) return;
-            var decoded = SkillBindTable.DecodeForObservedOwner(table, localPlayer, localPlayer);
-            if (decoded.Status != "decoded_unverified_source") return;
+            var tables = new byte[playerData.Length][];
+            var players = new PlayerBinding[playerData.Length];
+            for (var index = 0; index < playerData.Length; index++)
+            {
+                var table = read(playerData[index] + BindTableOffset, 148);
+                if (table is not { Length: 148 }) return;
+                var decoded = SkillBindTable.DecodeForObservedOwner(
+                    table, orderedPlayers[index], orderedPlayers[index]);
+                if (decoded.Status is not ("decoded_unverified_source" or "no_bindings")) return;
+                tables[index] = table;
+                players[index] = new PlayerBinding(index + 1, $"0x{orderedPlayers[index]:X}",
+                    $"0x{playerData[index]:X}", decoded.Entries);
+            }
+            if (players[localIndex].Entries.Length == 0) return;
             var rootAgain = read(areaAddress + AreaPointerStart + offset, 8);
             var nestedAgain = nested ? read(root, 8) : null;
             var vectorAgain = read(server + PlayerVectorOffset, 24);
             var ownerAgain = read(localData + OwnerOffset, 8);
-            var tableAgain = read(localData + BindTableOffset, 148);
             if (!AreaMatches() || rootAgain is not { Length: 8 } ||
                 BinaryPrimitives.ReadInt64LittleEndian(rootAgain) != root ||
                 (nested && (nestedAgain is not { Length: 8 } ||
                     BinaryPrimitives.ReadInt64LittleEndian(nestedAgain) != server)) ||
                 vectorAgain == null || !vectorAgain.AsSpan().SequenceEqual(vectorHeader) ||
                 !TryPlayerVector(server, orderedPlayers, read, out _, out var playersAgain) ||
-                playersAgain[localIndex] != localData ||
+                !playersAgain.SequenceEqual(playerData) ||
                 ownerAgain is not { Length: 8 } ||
                 BinaryPrimitives.ReadInt64LittleEndian(ownerAgain) != localPlayer ||
-                playersAgain.Any(entry => !TryMainInventory(entry, read)) ||
-                tableAgain == null || !tableAgain.AsSpan().SequenceEqual(table)) return;
+                playersAgain.Any(entry => !TryMainInventory(entry, read))) return;
+            for (var index = 0; index < playerData.Length; index++)
+            {
+                var tableAgain = read(playerData[index] + BindTableOffset, 148);
+                if (tableAgain == null || !tableAgain.AsSpan().SequenceEqual(tables[index]))
+                    return;
+            }
             matchingRoots++;
             matches.TryAdd(string.Join(',', playerData.Select(value => value.ToString("X"))),
-                (localData, decoded.Entries));
+                (localData, players[localIndex].Entries, players));
         }
 
         bool AreaMatches()

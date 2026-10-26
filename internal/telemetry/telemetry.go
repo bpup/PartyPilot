@@ -30,6 +30,9 @@ type Sample struct {
 	ObservedLocalAddress       string               `json:"ObservedLocalAddress,omitempty"`
 	LocalSlotCandidates        *LocalSlotCandidates `json:"LocalSlotCandidates,omitempty"`
 	LocalSlotCandidateStatus   string               `json:"LocalSlotCandidateStatus,omitempty"`
+	SkillBindSource            *SkillBindSource     `json:"SkillBindSource,omitempty"`
+	SkillBindSourceStatus      string               `json:"SkillBindSourceStatus,omitempty"`
+	SkillBindSourceSeenUTC     *time.Time           `json:"SkillBindSourceSeenUtc,omitempty"`
 	RadarEntities              []RadarEntity        `json:"RadarEntities,omitempty"`
 	RadarStatus                string               `json:"RadarStatus,omitempty"`
 	RadarSeenUTC               *time.Time           `json:"RadarSeenUtc,omitempty"`
@@ -201,6 +204,9 @@ func Decode(data []byte) (Sample, error) {
 		!validAddress(item.IngameDataAddress) || !validAddress(item.ObservedLocalAddress) ||
 		!validLocalSlotCandidates(item.LocalSlotCandidates, item.LocalSlotCandidateStatus,
 			item.ObservedLocalAddress, item.IngameDataAddress, item.SeenUTC) ||
+		!validSkillBindSource(item.SkillBindSource, item.SkillBindSourceStatus,
+			item.SkillBindSourceSeenUTC, item.LocalSlotCandidates,
+			item.ObservedLocalAddress, item.SeenUTC) ||
 		!validRadar(item.RadarEntities, item.RadarStatus, item.RadarSeenUTC) ||
 		!validGroundHover(item.GroundHover, item.GroundHoverStatus, item.RadarSeenUTC) ||
 		!validRawItemCards(item.ItemCards, item.ItemCardStatus, item.ItemCardSeenUTC,

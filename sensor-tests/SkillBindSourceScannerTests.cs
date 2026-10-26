@@ -43,7 +43,8 @@ internal static class SkillBindSourceScannerTests
         var resolved = SkillBindSourceScanner.Scan(state, area, local, [local], Read);
         Require(resolved.Status == "candidate_unverified_build" &&
             resolved.PlayerDataAddress == "0x500000" && resolved.MatchingRoots == 1 &&
-            resolved.Entries.Length == 1 && resolved.Entries[0].Kind == "gem",
+            resolved.Entries.Length == 1 && resolved.Entries[0].Kind == "gem" &&
+            resolved.Players.Length == 1 && resolved.Players[0].EntityAddress == "0x600000",
             "A unique owner-joined candidate with a 12x5 main inventory was lost.");
         const long wrapper = 0x330000;
         BitConverter.GetBytes(wrapper).CopyTo(roots, 0);
@@ -64,10 +65,27 @@ internal static class SkillBindSourceScannerTests
         memory[otherData + 768] = BitConverter.GetBytes(other);
         memory[otherData + 800] = Vector(inventoryArray + 0x1000, 8, 24);
         memory[inventoryArray + 0x1000] = (byte[])inventoryEntries.Clone();
+        memory[otherData + 30792] = (byte[])memory[data + 30792].Clone();
         resolved = SkillBindSourceScanner.Scan(state, area, local, [other, local], Read);
         Require(resolved.Status == "candidate_unverified_build" &&
-            resolved.PlayerDataAddress == "0x500000",
+            resolved.PlayerDataAddress == "0x500000" && resolved.Players.Length == 2 &&
+            resolved.Players[0].EntityAddress == "0x610000" &&
+            resolved.Players[1].EntityAddress == "0x600000" &&
+            resolved.Players[0].Entries.Length == 1,
             "A local player in the second ordered slot was mapped to the wrong data object.");
+        const long alternateOtherData = 0x530000;
+        memory[alternateOtherData + 768] = BitConverter.GetBytes(other);
+        memory[alternateOtherData + 800] = Vector(inventoryArray + 0x1000, 8, 24);
+        var vectorReads = 0;
+        byte[]? ReadChangedSecondPlayer(long address, int size)
+        {
+            if (address == vector && size == 16 && ++vectorReads == 2)
+                return BitConverter.GetBytes(data).Concat(BitConverter.GetBytes(alternateOtherData)).ToArray();
+            return Read(address, size);
+        }
+        Require(SkillBindSourceScanner.Scan(state, area, local, [other, local],
+                ReadChangedSecondPlayer).Status == "no_valid_candidate",
+            "A changed second player-data pointer was accepted after revalidation.");
         memory[server + 72] = Vector(vector, 1, 8);
         memory[vector] = BitConverter.GetBytes(data);
         const long secondServer = 0x320000;
