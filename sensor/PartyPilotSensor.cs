@@ -23,6 +23,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     private DateTime _lastRadarSentUtc;
     private DateTime _lastCardSentUtc;
     private DateTime _lastTerrainSentUtc;
+    private readonly HashSet<string> _capturedTerrainKeys = new();
     private string? _cardModulePath;
     private Task<long>? _cardVtableTask;
 
@@ -251,6 +252,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         DateTime? terrainSeenUtc = null;
         PackedTerrainProbe.Observation? packedTerrainProbe = null;
         string? packedTerrainStatus = null;
+        string? packedTerrainCaptureStatus = null;
         if (Settings.DiagnoseTerrain.Value && now - _lastTerrainSentUtc >= TimeSpan.FromSeconds(5))
         {
             _lastTerrainSentUtc = now;
@@ -285,6 +287,23 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                     positionCandidate?.GridY ?? float.NaN, ReadTerrain);
                 packedTerrainProbe = result.Candidate;
                 packedTerrainStatus = result.Status;
+                if (result.Candidate is { } observation && result.Source is { } source)
+                {
+                    var areaHash = $"{GameController.IngameState.Data.CurrentAreaHash}";
+                    var processId = GameController.Window.Process.Id;
+                    var captureKey = $"{processId}:{areaHash}:{observation.AreaAddress}:{source.Start}:{source.BytesPerRow}:{source.Rows}";
+                    if (_capturedTerrainKeys.Contains(captureKey))
+                        packedTerrainCaptureStatus = "already_captured";
+                    else
+                    {
+                        var directory = Path.Combine(Environment.GetFolderPath(
+                            Environment.SpecialFolder.LocalApplicationData), "PartyPilot", "terrain");
+                        var capture = PackedTerrainCapture.Save(source, ReadTerrain, directory,
+                            processId, areaHash, observation.AreaAddress, observation.Anchor, now);
+                        packedTerrainCaptureStatus = capture.Status;
+                        if (capture.Status == "captured_local") _capturedTerrainKeys.Add(captureKey);
+                    }
+                }
             }
             catch
             {
@@ -327,6 +346,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             TerrainSeenUtc = terrainSeenUtc,
             PackedTerrainProbe = packedTerrainProbe,
             PackedTerrainStatus = packedTerrainStatus,
+            PackedTerrainCaptureStatus = packedTerrainCaptureStatus,
             VisiblePlayers = visiblePlayers,
             VisiblePlayersStatus = visiblePlayersStatus
         });

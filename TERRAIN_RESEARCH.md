@@ -12,7 +12,9 @@
 
 在每个 ExileCore2 实例中启用传感器后，可单独开启默认关闭的 `DiagnoseTerrain`。传感器最多每五秒读取一次 `RawPathfindingData`，只报告行数、最短和最长行、最多 65,536 个单元的原始整数频数；频数表至多保留 32 种值，并标明是否截断。
 
-同一开关现在还从当前 `IngameState` 的静态区域指针候选、`IngameData.Address` 和本地角色原始 Render 格坐标做只读扫描。候选需通过 tile 尺寸、缓存长度、坐标范围及压缩四位值分布检查；若仅有一个候选，最多回报玩家周围 9×9 格的 `1`/`0` 小块及其左上角、地图宽高、区域地址来源、采样数。多个布局或两个区域地址均成立时报告歧义，任何地址或小块读取失败都不输出地图。`PartyPilot-SensorLog.exe` 的本机诊断流可查看 `TerrainSummary`、`TerrainStatus`、`PackedTerrainProbe`、`PackedTerrainStatus` 和 `TerrainSeenUtc`。目标版静态偏移不等于当前游戏内验证；小块也不进入跟随输入。
+若压缩地形扫描只找到一个候选，传感器还会在 `%LOCALAPPDATA%\PartyPilot\terrain` 保存一次完整的 `.packed` 原始字节和同名 `.json` 元数据。JSON 记录候选宽高、每行字节数、区域哈希和地址、读取时间及 SHA-256。文件不是已确认的游戏地形：候选布局、区域实例与世界坐标映射仍须在 Windows 游戏中核对。短读或首尾块复读不一致时删除临时文件；同一进程、区域哈希和候选地址在本次传感器运行中不重复采集。完整采集可能一次读取最多 64 MiB，建议只在诊断时短暂启用。`PackedTerrainCaptureStatus` 回报 `captured_local`、`already_captured` 或失败原因；本机文件不会经 UDP 发送。
+
+同一开关现在还从当前 `IngameState` 的静态区域指针候选、`IngameData.Address` 和本地角色原始 Render 格坐标做只读扫描。候选需通过 tile 尺寸、缓存长度、坐标范围及压缩四位值分布检查；若仅有一个候选，最多回报玩家周围 9×9 格的 `1`/`0` 小块及其左上角、地图宽高、区域地址来源、采样数。多个布局或两个区域地址均成立时报告歧义，任何地址或小块读取失败都不输出地图。`PartyPilot-SensorLog.exe` 的本机诊断流可查看 `TerrainSummary`、`TerrainStatus`、`PackedTerrainProbe`、`PackedTerrainStatus`、`PackedTerrainCaptureStatus` 和 `TerrainSeenUtc`。目标版静态偏移不等于当前游戏内验证；小块也不进入跟随输入。
 
 ## 待游戏实测
 

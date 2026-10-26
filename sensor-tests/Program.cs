@@ -232,6 +232,40 @@ void TestPackedTerrainProbe()
     ], 10, 20, Read);
     Require(anchored.Candidate is { AreaAddress: "0x100000", Anchor: "ingame_data_address" },
         "A unique area anchor was not identified.");
+    Require(anchored.Source is { Start: packedStart, BytesPerRow: bytesPerRow, Rows: rows },
+        "The unique candidate lost its packed memory range.");
+    var captureDirectory = Path.Combine(Path.GetTempPath(), "partypilot-terrain-test-" + Guid.NewGuid());
+    try
+    {
+        var capture = PackedTerrainCapture.Save(anchored.Source!, Read, captureDirectory,
+            123, "test-area", anchored.Candidate!.AreaAddress, anchored.Candidate.Anchor, DateTime.UtcNow);
+        Require(capture.Status == "captured_local" && capture.DataFile != null &&
+            File.ReadAllBytes(capture.DataFile).SequenceEqual(packed) &&
+            File.Exists(Path.ChangeExtension(capture.DataFile, ".json")),
+            "A candidate full-map export was incomplete.");
+        byte[]? ShortRead(long address, int size) =>
+            address == packedStart ? new byte[size - 1] : Read(address, size);
+        var failed = PackedTerrainCapture.Save(anchored.Source!, ShortRead, captureDirectory,
+            123, "test-area", anchored.Candidate.AreaAddress, anchored.Candidate.Anchor, DateTime.UtcNow);
+        Require(failed.Status == "read_failed" &&
+            Directory.GetFiles(captureDirectory, "*.tmp").Length == 0 &&
+            Directory.GetFiles(captureDirectory, "*.packed").Length == 1,
+            "A partial packed export was retained after a short read.");
+        var reads = 0;
+        byte[]? ChangingRead(long address, int size)
+        {
+            var bytes = Read(address, size);
+            if (address == packedStart && ++reads == 2 && bytes != null) bytes[0] ^= 1;
+            return bytes;
+        }
+        var changed = PackedTerrainCapture.Save(anchored.Source!, ChangingRead, captureDirectory,
+            123, "test-area", anchored.Candidate.AreaAddress, anchored.Candidate.Anchor, DateTime.UtcNow);
+        Require(changed.Status == "changed_during_read" &&
+            Directory.GetFiles(captureDirectory, "*.tmp").Length == 0 &&
+            Directory.GetFiles(captureDirectory, "*.packed").Length == 1,
+            "A changing packed export was retained.");
+    }
+    finally { if (Directory.Exists(captureDirectory)) Directory.Delete(captureDirectory, true); }
     byte[]? ReadTwoAreas(long address, int size) =>
         address == area + 0x10000 && size == header.Length ? header : Read(address, size);
     Require(PackedTerrainProbe.ScanAnchors([

@@ -162,6 +162,6 @@ PartyPilot-LiveFollow.exe -roster 1:1234,2:5678 -leader 1 -leader-name Leader -m
 
 状态：**implementation-aligned / integration-pending**。
 
-地形绕行仍缺游戏数据映射。传感器默认关闭的 `DiagnoseTerrain` 输出原始 `RawPathfindingData` 的有界统计，并只读扫描目标版压缩地形候选；成功时仅回报玩家附近最多 9×9 格的小块和候选尺寸，不用于移动决策。受控回放支持每字节双格的 `packed_terrain` 输入，在调用者明确提供实例与坐标映射后可测试绕障决策。实时完整地形尚未接入跟随。证据与待验证步骤见[地形与绕行取证](TERRAIN_RESEARCH.md)。
+地形绕行仍缺游戏数据映射。传感器默认关闭的 `DiagnoseTerrain` 输出原始 `RawPathfindingData` 的有界统计，并只读扫描目标版压缩地形候选；成功时回报玩家附近最多 9×9 格的小块，并将候选压缩字节及尺寸、区域标识、SHA-256 元数据保存到 Windows `%LOCALAPPDATA%\PartyPilot\terrain`。同一进程、区域和候选地址只采集一次；短读或首尾块复读不一致时丢弃文件。此采集是诊断候选，不用于实时移动决策。受控回放支持每字节双格的 `packed_terrain` 输入，在调用者明确提供实例与坐标映射后可测试绕障决策。实时完整地形尚未接入跟随。证据与待验证步骤见[地形与绕行取证](TERRAIN_RESEARCH.md)。
 
 大型受控地图可把原始压缩字节保存为文件，在 `packed_terrain` 中指定 `data_file` 及尺寸；与 base64 `data` 互斥。回放器直接读取压缩格子并按需搜索，不再受旧的 256×256 展开网格上限限制。重新序列化后的网格若缺原始字节会拒绝作为有效地图，避免把障碍静默变成空地。

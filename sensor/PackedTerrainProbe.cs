@@ -16,13 +16,18 @@ internal static class PackedTerrainProbe
         public string AreaAddress { get; init; } = "";
         public string Anchor { get; init; } = "";
     }
-    internal sealed record Result(string Status, Observation? Candidate);
+    internal sealed record PackedSource(long Start, int BytesPerRow, int Rows);
+    internal sealed record Result(string Status, Observation? Candidate)
+    {
+        public PackedSource? Source { get; init; }
+    }
     internal sealed record AreaCandidate(string Anchor, long Address);
 
     internal static Result ScanAnchors(IEnumerable<AreaCandidate> anchors,
         float gridX, float gridY, Func<long, int, byte[]?> read)
     {
         Observation? selected = null;
+        PackedSource? selectedSource = null;
         var attempted = false;
         var unreadable = false;
         var seen = new HashSet<long>();
@@ -39,8 +44,12 @@ internal static class PackedTerrainProbe
             {
                 AreaAddress = $"0x{anchor.Address:X}", Anchor = anchor.Anchor
             };
+            selectedSource = result.Source;
         }
-        if (selected != null) return new Result("candidate_patch_observed", selected);
+        if (selected != null) return new Result("candidate_patch_observed", selected)
+        {
+            Source = selectedSource
+        };
         if (!attempted || !float.IsFinite(gridX) || !float.IsFinite(gridY))
             return new Result("missing_anchor_or_grid", null);
         return new Result(unreadable ? "header_unreadable" : "no_candidate", null);
@@ -121,7 +130,10 @@ internal static class PackedTerrainProbe
         return new Result("candidate_patch_observed", new Observation(
             selected.BytesPerRow * 2, selected.Rows, selected.BytesPerRow,
             left, top, patchRows.ToArray(), selected.SampledNibbles,
-            selected.InRangeNibbles));
+            selected.InRangeNibbles))
+        {
+            Source = new PackedSource(selected.Start, selected.BytesPerRow, selected.Rows)
+        };
     }
 
     private sealed record Candidate(long Start, int BytesPerRow, int Rows,

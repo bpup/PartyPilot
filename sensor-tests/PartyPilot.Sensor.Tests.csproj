@@ -18,5 +18,6 @@
     <Compile Include="../sensor/LootBaseIdentity.cs" Link="LootBaseIdentity.cs" />
     <Compile Include="../sensor/TerrainDiagnostic.cs" Link="TerrainDiagnostic.cs" />
     <Compile Include="../sensor/PackedTerrainProbe.cs" Link="PackedTerrainProbe.cs" />
+    <Compile Include="../sensor/PackedTerrainCapture.cs" Link="PackedTerrainCapture.cs" />
   </ItemGroup>
 </Project>

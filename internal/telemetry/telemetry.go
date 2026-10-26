@@ -10,39 +10,40 @@ import (
 )
 
 type Sample struct {
-	ProcessID                int                  `json:"ProcessId"`
-	SeenUTC                  time.Time            `json:"SeenUtc"`
-	AreaName                 string               `json:"AreaName"`
-	AreaHash                 uint32               `json:"AreaHash"`
-	CoordinateSpace          string               `json:"CoordinateSpace,omitempty"`
-	X                        float64              `json:"X"`
-	Y                        float64              `json:"Y"`
-	Z                        float64              `json:"Z"`
-	Life                     *float64             `json:"Life,omitempty"`
-	LifeMax                  *float64             `json:"LifeMax,omitempty"`
-	Mana                     *float64             `json:"Mana,omitempty"`
-	ManaMax                  *float64             `json:"ManaMax,omitempty"`
-	EnergyShield             *float64             `json:"EnergyShield,omitempty"`
-	EnergyShieldMax          *float64             `json:"EnergyShieldMax,omitempty"`
-	IngameDataAddress        string               `json:"IngameDataAddress,omitempty"`
-	ObservedLocalAddress     string               `json:"ObservedLocalAddress,omitempty"`
-	LocalSlotCandidates      *LocalSlotCandidates `json:"LocalSlotCandidates,omitempty"`
-	LocalSlotCandidateStatus string               `json:"LocalSlotCandidateStatus,omitempty"`
-	RadarEntities            []RadarEntity        `json:"RadarEntities,omitempty"`
-	RadarStatus              string               `json:"RadarStatus,omitempty"`
-	RadarSeenUTC             *time.Time           `json:"RadarSeenUtc,omitempty"`
-	GroundHover              *GroundHover         `json:"GroundHover,omitempty"`
-	GroundHoverStatus        string               `json:"GroundHoverStatus,omitempty"`
-	ItemCards                []RawItemCard        `json:"ItemCards,omitempty"`
-	ItemCardStatus           string               `json:"ItemCardStatus,omitempty"`
-	ItemCardSeenUTC          *time.Time           `json:"ItemCardSeenUtc,omitempty"`
-	TerrainSummary           *RawTerrainSummary   `json:"TerrainSummary,omitempty"`
-	TerrainStatus            string               `json:"TerrainStatus,omitempty"`
-	TerrainSeenUTC           *time.Time           `json:"TerrainSeenUtc,omitempty"`
-	PackedTerrainProbe       *PackedTerrainProbe  `json:"PackedTerrainProbe,omitempty"`
-	PackedTerrainStatus      string               `json:"PackedTerrainStatus,omitempty"`
-	VisiblePlayers           []VisiblePlayer      `json:"VisiblePlayers,omitempty"`
-	VisiblePlayersStatus     string               `json:"VisiblePlayersStatus,omitempty"`
+	ProcessID                  int                  `json:"ProcessId"`
+	SeenUTC                    time.Time            `json:"SeenUtc"`
+	AreaName                   string               `json:"AreaName"`
+	AreaHash                   uint32               `json:"AreaHash"`
+	CoordinateSpace            string               `json:"CoordinateSpace,omitempty"`
+	X                          float64              `json:"X"`
+	Y                          float64              `json:"Y"`
+	Z                          float64              `json:"Z"`
+	Life                       *float64             `json:"Life,omitempty"`
+	LifeMax                    *float64             `json:"LifeMax,omitempty"`
+	Mana                       *float64             `json:"Mana,omitempty"`
+	ManaMax                    *float64             `json:"ManaMax,omitempty"`
+	EnergyShield               *float64             `json:"EnergyShield,omitempty"`
+	EnergyShieldMax            *float64             `json:"EnergyShieldMax,omitempty"`
+	IngameDataAddress          string               `json:"IngameDataAddress,omitempty"`
+	ObservedLocalAddress       string               `json:"ObservedLocalAddress,omitempty"`
+	LocalSlotCandidates        *LocalSlotCandidates `json:"LocalSlotCandidates,omitempty"`
+	LocalSlotCandidateStatus   string               `json:"LocalSlotCandidateStatus,omitempty"`
+	RadarEntities              []RadarEntity        `json:"RadarEntities,omitempty"`
+	RadarStatus                string               `json:"RadarStatus,omitempty"`
+	RadarSeenUTC               *time.Time           `json:"RadarSeenUtc,omitempty"`
+	GroundHover                *GroundHover         `json:"GroundHover,omitempty"`
+	GroundHoverStatus          string               `json:"GroundHoverStatus,omitempty"`
+	ItemCards                  []RawItemCard        `json:"ItemCards,omitempty"`
+	ItemCardStatus             string               `json:"ItemCardStatus,omitempty"`
+	ItemCardSeenUTC            *time.Time           `json:"ItemCardSeenUtc,omitempty"`
+	TerrainSummary             *RawTerrainSummary   `json:"TerrainSummary,omitempty"`
+	TerrainStatus              string               `json:"TerrainStatus,omitempty"`
+	TerrainSeenUTC             *time.Time           `json:"TerrainSeenUtc,omitempty"`
+	PackedTerrainProbe         *PackedTerrainProbe  `json:"PackedTerrainProbe,omitempty"`
+	PackedTerrainStatus        string               `json:"PackedTerrainStatus,omitempty"`
+	PackedTerrainCaptureStatus string               `json:"PackedTerrainCaptureStatus,omitempty"`
+	VisiblePlayers             []VisiblePlayer      `json:"VisiblePlayers,omitempty"`
+	VisiblePlayersStatus       string               `json:"VisiblePlayersStatus,omitempty"`
 }
 
 // RawTerrainSummary is diagnostic evidence only. Values are not walkability flags.
@@ -204,6 +205,7 @@ func Decode(data []byte) (Sample, error) {
 			item.LocalSlotCandidates) ||
 		!validRawTerrain(item.TerrainSummary, item.TerrainStatus, item.TerrainSeenUTC) ||
 		!validPackedTerrainProbe(item.PackedTerrainProbe, item.PackedTerrainStatus, item.TerrainSeenUTC) ||
+		!validPackedCapture(item.PackedTerrainCaptureStatus, item.PackedTerrainStatus) ||
 		!validVisiblePlayers(item.VisiblePlayers, item.ObservedLocalAddress) {
 		return Sample{}, ErrInvalidSample
 	}
@@ -282,6 +284,21 @@ func validPackedTerrainProbe(probe *PackedTerrainProbe, status string, seen *tim
 		}
 	}
 	return true
+}
+
+func validPackedCapture(captureStatus, probeStatus string) bool {
+	if captureStatus == "" {
+		return true
+	}
+	if probeStatus != "candidate_patch_observed" {
+		return false
+	}
+	switch captureStatus {
+	case "captured_local", "already_captured", "invalid_source", "read_failed", "changed_during_read", "write_failed":
+		return true
+	default:
+		return false
+	}
 }
 
 func validRawItemCards(cards []RawItemCard, status string, seen *time.Time,

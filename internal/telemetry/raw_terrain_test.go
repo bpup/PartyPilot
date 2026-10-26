@@ -36,6 +36,15 @@ func TestPackedTerrainPatchIsDiagnosticAndBounded(t *testing.T) {
 	if err != nil || sample.PackedTerrainProbe == nil || sample.PackedTerrainProbe.PatchRows[1] != "101" {
 		t.Fatalf("valid read-only patch lost: %+v, %v", sample.PackedTerrainProbe, err)
 	}
+	withCapture := valid[:len(valid)-1] + `,"PackedTerrainCaptureStatus":"captured_local"}`
+	captured, err := Decode([]byte(withCapture))
+	if err != nil || captured.PackedTerrainCaptureStatus != "captured_local" {
+		t.Fatalf("candidate capture status lost: %+v, %v", captured, err)
+	}
+	unknownCapture := valid[:len(valid)-1] + `,"PackedTerrainCaptureStatus":"trusted_map"}`
+	if _, err := Decode([]byte(unknownCapture)); err == nil {
+		t.Fatal("an unrecognized capture status was accepted")
+	}
 	for _, suffix := range []string{
 		`"PackedTerrainStatus":"candidate_patch_observed"}`,
 		`"PackedTerrainStatus":"no_candidate","PackedTerrainProbe":{"Width":92}}`,
@@ -47,6 +56,7 @@ func TestPackedTerrainPatchIsDiagnosticAndBounded(t *testing.T) {
 			`{"AreaAddress":"0x100000","Anchor":"ingame_data_address",` +
 			`"Width":92,"Height":92,"BytesPerRow":46,"PatchX":6,"PatchY":16,` +
 			`"PatchRows":["1?1"],"SampledNibbles":8192,"InRangeNibbles":8192}}`,
+		`"PackedTerrainStatus":"no_candidate","PackedTerrainCaptureStatus":"captured_local"}`,
 	} {
 		if _, err := Decode([]byte(base + suffix)); err == nil {
 			t.Fatalf("invalid terrain patch accepted: %s", suffix)
