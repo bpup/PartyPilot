@@ -10,5 +10,7 @@
     <Compile Include="../sensor/RadarClassifier.cs" Link="RadarClassifier.cs" />
     <Compile Include="../sensor/RadarPacketBudget.cs" Link="RadarPacketBudget.cs" />
     <Compile Include="../sensor/RadarLootMetadata.cs" Link="RadarLootMetadata.cs" />
+    <Compile Include="../sensor/UiItemCardTreeScanner.cs" Link="UiItemCardTreeScanner.cs" />
+    <Compile Include="../sensor/UiItemCardVtableLocator.cs" Link="UiItemCardVtableLocator.cs" />
   </ItemGroup>
 </Project>

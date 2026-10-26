@@ -32,8 +32,20 @@ type Sample struct {
 	RadarSeenUTC             *time.Time           `json:"RadarSeenUtc,omitempty"`
 	GroundHover              *GroundHover         `json:"GroundHover,omitempty"`
 	GroundHoverStatus        string               `json:"GroundHoverStatus,omitempty"`
+	ItemCards                []RawItemCard        `json:"ItemCards,omitempty"`
+	ItemCardStatus           string               `json:"ItemCardStatus,omitempty"`
+	ItemCardSeenUTC          *time.Time           `json:"ItemCardSeenUtc,omitempty"`
 	VisiblePlayers           []VisiblePlayer      `json:"VisiblePlayers,omitempty"`
 	VisiblePlayersStatus     string               `json:"VisiblePlayersStatus,omitempty"`
+}
+
+// RawItemCard is a currently attached UI node with an item and owner pointer.
+// It has no validated local player, item identity or pickup authorization.
+type RawItemCard struct {
+	Object   string `json:"Object"`
+	Item     string `json:"Item"`
+	Owner    string `json:"Owner"`
+	Evidence string `json:"Evidence"`
 }
 
 // GroundHover records only the entity under a UI ground-label hover. It is
@@ -104,10 +116,41 @@ func Decode(data []byte) (Sample, error) {
 			item.ObservedLocalAddress, item.IngameDataAddress) ||
 		!validRadar(item.RadarEntities, item.RadarStatus, item.RadarSeenUTC) ||
 		!validGroundHover(item.GroundHover, item.GroundHoverStatus, item.RadarSeenUTC) ||
+		!validRawItemCards(item.ItemCards, item.ItemCardStatus, item.ItemCardSeenUTC) ||
 		!validVisiblePlayers(item.VisiblePlayers, item.ObservedLocalAddress) {
 		return Sample{}, ErrInvalidSample
 	}
 	return item, nil
+}
+
+func validRawItemCards(cards []RawItemCard, status string, seen *time.Time) bool {
+	if status == "" {
+		return cards == nil && seen == nil
+	}
+	if seen == nil || seen.IsZero() {
+		return false
+	}
+	if status != "ok" {
+		switch status {
+		case "layout_pending", "layout_unavailable", "root_unavailable", "traversal_limit", "too_many_cards", "scan_failed":
+			return cards == nil
+		default:
+			return false
+		}
+	}
+	if cards == nil || len(cards) > 32 {
+		return false
+	}
+	objects := make(map[string]bool, len(cards))
+	for _, card := range cards {
+		if card.Object == "" || card.Item == "" || card.Owner == "" ||
+			!validAddress(card.Object) || !validAddress(card.Item) || !validAddress(card.Owner) ||
+			objects[card.Object] || card.Evidence != "unassigned_ui_card" {
+			return false
+		}
+		objects[card.Object] = true
+	}
+	return true
 }
 
 func validGroundHover(hover *GroundHover, status string, seen *time.Time) bool {

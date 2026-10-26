@@ -107,3 +107,5 @@ Require(RadarLootMetadata.Stack(1) == 1 && RadarLootMetadata.Stack(999_999) == 9
     RadarLootMetadata.Rarity("Currency") == null && RadarLootMetadata.Rarity(null) == null,
     "Loot stack or rarity admitted an unsupported value.");
 Console.WriteLine("Sensor diagnostics passed.");
+UiItemCardTreeScannerTests.Run();
+UiItemCardVtableLocatorTests.Run();

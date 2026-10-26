@@ -42,7 +42,7 @@ GOOS=windows GOARCH=amd64 go build -o PartyPilot.exe ./cmd/partypilot
 
 ## 功能参照与证据
 
-新增 `release/PartyPilot-LootReplay.exe -replay <JSONL 文件>`，可用明确提供的物品卡片和安全条件离线检查拾取决策；它不会发送手柄输入，实际自动拾取仍未实现，详见[自动拾取取证](AUTO_PICKUP_RESEARCH.md)。
+新增 `release/PartyPilot-LootReplay.exe -replay <JSONL 文件>`，可用明确提供的物品卡片和安全条件离线检查拾取决策。传感器另有默认关闭的 `DiagnoseItemCards`，只读观察当前 UI 树的原始卡片与 owner 指针，尚不能核验玩家归属或拾取资格。这两部分不会发送手柄输入，实际自动拾取仍未实现，详见[自动拾取取证](AUTO_PICKUP_RESEARCH.md)。
 
 用户指定的 MultiPilot 0.6.17 安装目录位于 `/Users/liuchang/Desktop/project/MultiPilotPoE2/current`。其随附快速指南描述了 1–6 人、最多三个游戏窗口、虚拟手柄、跟随、Smart Focus 等功能；这些是参照清单，不能证明本项目已实现。
 

@@ -21,6 +21,9 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     private LocalSlotCandidateScanner.Result? _slotCandidates;
     private string? _slotCandidateStatus;
     private DateTime _lastRadarSentUtc;
+    private DateTime _lastCardSentUtc;
+    private string? _cardModulePath;
+    private Task<long>? _cardVtableTask;
 
     public override void Render()
     {
@@ -127,6 +130,60 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             }
         }
 
+        object[]? itemCards = null;
+        string? itemCardStatus = null;
+        DateTime? itemCardSeenUtc = null;
+        if (Settings.DiagnoseItemCards.Value && now - _lastCardSentUtc >= TimeSpan.FromSeconds(1))
+        {
+            _lastCardSentUtc = now;
+            itemCardSeenUtc = now;
+            try
+            {
+                var process = GameController.Window.Process;
+                var module = process.MainModule;
+                var modulePath = module?.FileName;
+                if (module == null || string.IsNullOrWhiteSpace(modulePath))
+                    itemCardStatus = "layout_unavailable";
+                else
+                {
+                    if (!string.Equals(_cardModulePath, modulePath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _cardModulePath = modulePath;
+                        _cardVtableTask = null;
+                    }
+                    _cardVtableTask ??= Task.Run(() => UiItemCardVtableLocator.Resolve(modulePath));
+                    if (!_cardVtableTask.IsCompleted)
+                        itemCardStatus = "layout_pending";
+                    else if (!_cardVtableTask.IsCompletedSuccessfully || _cardVtableTask.Result == 0)
+                        itemCardStatus = "layout_unavailable";
+                    else
+                    {
+                        var result = UiItemCardTreeScanner.Scan(
+                            (address, size) =>
+                            {
+                                try { return GameController.IngameState.Data.M.ReadMem(address, size); }
+                                catch { return null; }
+                            },
+                            module.BaseAddress.ToInt64(), module.ModuleMemorySize,
+                            GameController.IngameState.Address, _cardVtableTask.Result);
+                        itemCardStatus = result.Cards.Length > 32 ? "too_many_cards" : result.Status;
+                        if (itemCardStatus == "ok")
+                            itemCards = result.Cards.Select(card => (object)new
+                            {
+                                Object = FormatAddress(card.Object),
+                                Item = FormatAddress(card.Item),
+                                Owner = FormatAddress(card.Owner),
+                                Evidence = "unassigned_ui_card"
+                            }).ToArray();
+                    }
+                }
+            }
+            catch
+            {
+                itemCardStatus = "scan_failed";
+            }
+        }
+
         var position = render.Pos;
         // AreaName is diagnostic only. It does not identify a specific instance.
         var message = JsonSerializer.Serialize(new
@@ -153,6 +210,9 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             RadarSeenUtc = radarSeenUtc,
             GroundHover = groundHover,
             GroundHoverStatus = groundHoverStatus,
+            ItemCards = itemCards,
+            ItemCardStatus = itemCardStatus,
+            ItemCardSeenUtc = itemCardSeenUtc,
             VisiblePlayers = visiblePlayers,
             VisiblePlayersStatus = visiblePlayersStatus
         });
