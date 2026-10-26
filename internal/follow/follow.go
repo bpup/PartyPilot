@@ -159,6 +159,7 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 		return Command{State: Holding, Distance: distance}
 	}
 	targetX, targetY := leader.X, leader.Y
+	reason := ""
 	if e.config.TargetTrail {
 		target := e.trailingTarget(e.config.StopDistance)
 		targetX, targetY = target.x, target.y
@@ -166,6 +167,15 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 			e.moving = false
 			e.catchingUp = false
 			return Command{State: Holding, Distance: distance}
+		}
+		// The supplied build detours around the leader when the direct trail
+		// segment passes within five grid units. Live input currently has no
+		// verified terrain, so this branch mirrors its terrain-free path.
+		if terrain == nil && segmentDistance(leader.X, leader.Y,
+			follower.X, follower.Y, targetX, targetY) < 5 {
+			targetX, targetY = playerDetour(leader.X, leader.Y,
+				follower.X, follower.Y, targetX, targetY)
+			reason = "Player avoidance"
 		}
 	} else if e.config.TrailSpacing > 0 {
 		waypoint := e.nextWaypoint(follower)
@@ -206,7 +216,33 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 		X:        dx,
 		Y:        dy,
 		Distance: distance,
+		Reason:   reason,
 	}
+}
+
+func segmentDistance(px, py, sx, sy, ex, ey float64) float64 {
+	dx, dy := ex-sx, ey-sy
+	lengthSquared := dx*dx + dy*dy
+	if lengthSquared < 0.001 {
+		return math.Hypot(px-sx, py-sy)
+	}
+	t := math.Max(0, math.Min(1, ((px-sx)*dx+(py-sy)*dy)/lengthSquared))
+	return math.Hypot(px-(sx+t*dx), py-(sy+t*dy))
+}
+
+func playerDetour(lx, ly, fx, fy, tx, ty float64) (float64, float64) {
+	dx, dy := tx-fx, ty-fy
+	length := math.Hypot(dx, dy)
+	if length*length < 0.001 {
+		return tx, ty
+	}
+	ox, oy := -dy/length*7, dx/length*7
+	leftX, leftY := lx+ox, ly+oy
+	rightX, rightY := lx-ox, ly-oy
+	if math.Hypot(fx-leftX, fy-leftY) <= math.Hypot(fx-rightX, fy-rightY) {
+		return leftX, leftY
+	}
+	return rightX, rightY
 }
 
 func (e *Engine) updateTargetTrail(leader, follower Position) {

@@ -173,6 +173,33 @@ func TestTargetTrailHoldsNearWaypoint(t *testing.T) {
 	}
 }
 
+func TestTargetTrailAvoidsLeaderOnDirectSegment(t *testing.T) {
+	now := time.Unix(54, 0)
+	engine, ok := New(Config{StopDistance: 8, ResumeDistance: 9,
+		CatchUpDistance: 30, MaxAge: 2 * time.Second, TargetTrail: true})
+	if !ok {
+		t.Fatal("target trail configuration rejected")
+	}
+	position := func(x, y float64, at time.Time) Position {
+		return Position{X: x, Y: y, Area: "instance", Seen: at, Valid: true}
+	}
+	engine.Step(now, position(0, 0, now), position(-20, 0, now))
+	at := now.Add(time.Second)
+	leader := position(10, 0, at)
+	clear := engine.Step(at, leader, position(-20, 0, at))
+	if clear.Reason != "" || clear.X < 0.99 || math.Abs(clear.Y) > 0.01 {
+		t.Fatalf("clear trail segment was diverted: %+v", clear)
+	}
+	near := engine.Step(at, leader, position(15, 10, at))
+	if near.Reason != "Player avoidance" || near.State != CatchingUp ||
+		near.X > -0.85 || near.Y > -0.35 {
+		t.Fatalf("segment near leader did not use target detour: %+v", near)
+	}
+	if got := segmentDistance(10, 0, 15, 10, 2, 0); got >= 5 {
+		t.Fatalf("test segment is not near the leader: %v", got)
+	}
+}
+
 func TestTrailAndTerrainAdvanceBeforeNextTrailSample(t *testing.T) {
 	now := time.Unix(51, 0)
 	engine, ok := New(Config{StopDistance: 1, ResumeDistance: 2, CatchUpDistance: 10,
