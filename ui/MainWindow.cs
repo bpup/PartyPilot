@@ -1560,15 +1560,7 @@ public sealed class MainWindow : Window
                 _physicalDevice.Text.Trim(), gameExecutables, _rightStickFollowerOverride.IsChecked == true,
                 _selectedTopology.Id == "2-split" && _autoFlask.IsChecked == true,
                 useWgi, privatePlan, lastFocusedLeads: _lastFocusedLeads.IsChecked == true);
-            session.AReleased += BridgeAReleased;
-            session.PairingArmed += BridgePairingArmed;
-            session.PairingCompleted += BridgePairingCompleted;
-            session.LoginStatusChanged += BridgeLoginStatusChanged;
-            session.Ended += BridgeEnded;
-            _bridge = session;
-            _pairing = new PairingGuide(_selectedTopology);
-            session.StartReading();
-            ShowCurrentPairingStep();
+            ActivateBridge(session, _selectedTopology);
         }
         catch (Exception error)
         {
@@ -1579,6 +1571,19 @@ public sealed class MainWindow : Window
             _busy = false;
             UpdateBridgeControls();
         }
+    }
+
+    private void ActivateBridge(BridgeSession session, PartyTopology topology)
+    {
+        session.AReleased += BridgeAReleased;
+        session.PairingArmed += BridgePairingArmed;
+        session.PairingCompleted += BridgePairingCompleted;
+        session.LoginStatusChanged += BridgeLoginStatusChanged;
+        session.Ended += BridgeEnded;
+        _bridge = session;
+        _pairing = new PairingGuide(topology);
+        session.StartReading();
+        ShowCurrentPairingStep();
     }
 
     private void BridgeAReleased(int slot)
@@ -1899,7 +1904,10 @@ public sealed class MainWindow : Window
 
     private async Task RunLauncherAsync(ClientAction action)
     {
-        if (_busy || _pairingHasStarted || _bridge is not null)
+        var reusePreparedBridge = action == ClientAction.Start && _bridge is not null &&
+            !_pairingHasStarted && _launchedClients.Count == 0 &&
+            _selectedTopology?.ClientCount is 1 or 2;
+        if (_busy || _pairingHasStarted || (_bridge is not null && !reusePreparedBridge))
         {
             _status.Text = "请先停止手柄桥接，再重新检查、启动或绑定游戏窗口。";
             return;
@@ -1975,6 +1983,7 @@ public sealed class MainWindow : Window
             ClientAction.Attach => "正在识别已运行游戏窗口…",
             _ => "正在检查配置…"
         };
+        BridgeSession? prelaunchBridge = null;
         try
         {
             if (action == ClientAction.Start)
@@ -2001,7 +2010,32 @@ public sealed class MainWindow : Window
                     _status.Text = preflight.Message;
                     return;
                 }
-                _status.Text = "启动前只读检查通过；正在等待游戏窗口…";
+                if (_selectedTopology.ClientCount <= 2)
+                {
+                    if (!_leadershipPreferenceReady || _lastFocusedLeads.IsChecked is not bool)
+                    {
+                        _status.Text = "先确认 MAIN 切换设置，再准备虚拟手柄；游戏尚未启动。";
+                        return;
+                    }
+                    if (reusePreparedBridge && _bridge is { IsRunning: true } prepared)
+                        prelaunchBridge = prepared;
+                    else
+                    {
+                        if (_bridge is not null) await StopBridgeAsync();
+                        _status.Text = "正在连接虚拟手柄并核对槽位，游戏尚未启动…";
+                        var session = await BridgeSession.StartAsync(bridgeExecutable,
+                            _selectedTopology.Slots, _physicalIndex.SelectedIndex,
+                            _physicalDevice.Text.Trim(), gameExecutables,
+                            _rightStickFollowerOverride.IsChecked == true,
+                            _selectedTopology.Id == "2-split" && _autoFlask.IsChecked == true,
+                            useWgi, lastFocusedLeads: _lastFocusedLeads.IsChecked == true);
+                        ActivateBridge(session, _selectedTopology);
+                        prelaunchBridge = session;
+                    }
+                    _status.Text = "虚拟手柄已就绪；正在启动并等待游戏窗口…";
+                }
+                else
+                    _status.Text = "启动前只读检查通过；正在等待游戏窗口…";
             }
             if (action != ClientAction.Check)
             {
@@ -2014,6 +2048,8 @@ public sealed class MainWindow : Window
                 Array.Clear(_manualAutoLoginWindows);
                 _rosterStatus.Text = "正在重新识别游戏窗口；完成绑定后可检查 Current Party。";
             }
+            if (prelaunchBridge is not null && !prelaunchBridge.IsRunning)
+                throw new InvalidOperationException("虚拟手柄在游戏启动前中断；游戏尚未启动。");
             using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("启动器未能启动");
             var output = process.StandardOutput.ReadToEndAsync();
             var error = process.StandardError.ReadToEndAsync();
@@ -2028,6 +2064,8 @@ public sealed class MainWindow : Window
                 }
                 catch (Exception bindingError)
                 {
+                    if (prelaunchBridge is not null && ReferenceEquals(_bridge, prelaunchBridge))
+                        await StopBridgeAsync();
                     _status.Text = action == ClientAction.Start
                         ? $"游戏可能已启动，但无法核对其窗口身份：{bindingError.Message}"
                         : $"已运行窗口的身份信息无效：{bindingError.Message}";
@@ -2039,6 +2077,15 @@ public sealed class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(output.Result)) message.AppendLine().Append(output.Result.Trim());
             if (!string.IsNullOrWhiteSpace(error.Result)) message.AppendLine().Append(error.Result.Trim());
             _status.Text = message.ToString();
+            if (prelaunchBridge is not null && (process.ExitCode != 0 ||
+                !ReferenceEquals(_bridge, prelaunchBridge) || !prelaunchBridge.IsRunning))
+            {
+                if (ReferenceEquals(_bridge, prelaunchBridge)) await StopBridgeAsync();
+                _status.Text = process.ExitCode == 0
+                    ? "游戏窗口已识别，但启动前手柄桥接中断；请先重新准备桥接再配对。"
+                    : message + Environment.NewLine + "虚拟手柄已释放。";
+                return;
+            }
             if (action != ClientAction.Check && process.ExitCode == 0 &&
                 _launchedClients.Count == _selectedTopology.ClientCount)
             {
@@ -2050,6 +2097,8 @@ public sealed class MainWindow : Window
         }
         catch (Exception exception)
         {
+            if (prelaunchBridge is not null && ReferenceEquals(_bridge, prelaunchBridge))
+                await StopBridgeAsync();
             _status.Text = $"启动或绑定失败：{exception.Message}";
         }
         finally

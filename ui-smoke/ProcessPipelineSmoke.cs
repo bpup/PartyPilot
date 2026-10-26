@@ -133,6 +133,7 @@ internal static class ProcessPipelineSmoke
             var topology = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-split");
             await using var bridge = await BridgeSession.StartAsync(bridgeExe, topology.Slots, 0,
                 @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"], false, true);
+            if (!bridge.IsRunning) throw new Exception("Bridge readiness did not leave a live prelaunch process.");
             Console.WriteLine("Pipeline smoke: fake bridge ready.");
             bridge.StartReading();
             var clients = new[]

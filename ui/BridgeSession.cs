@@ -24,6 +24,14 @@ internal sealed class BridgeSession : IAsyncDisposable
     internal bool LastFocusedLeadsEnabled { get; }
     internal int LastFocusedSlot => Volatile.Read(ref _lastFocusedSlot);
     internal int LastManualFocusedSlot => Volatile.Read(ref _lastManualFocusedSlot);
+    internal bool IsRunning
+    {
+        get
+        {
+            try { return !_stopping && !_process.HasExited; }
+            catch (InvalidOperationException) { return false; }
+        }
+    }
 
     public event Action<int>? AReleased;
     public event Action<int, int, long>? PairingArmed;
