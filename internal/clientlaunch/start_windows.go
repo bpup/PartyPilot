@@ -5,7 +5,6 @@ package clientlaunch
 import (
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -18,6 +17,40 @@ import (
 )
 
 var shellExecute = syscall.NewLazyDLL("shell32.dll").NewProc("ShellExecuteW")
+
+func Attach(paths []string) (Result, error) {
+	if len(paths) < 1 || len(paths) > 3 {
+		return Result{}, fmt.Errorf("select 1–3 configured game executables")
+	}
+	result := Result{Clients: make([]Client, 0, len(paths))}
+	for index, path := range paths {
+		ids, err := gameProcessIDs(filepath.Base(path))
+		if err != nil {
+			return Result{}, fmt.Errorf("client %d process snapshot: %w", index+1, err)
+		}
+		processes := make(map[int]string, len(ids))
+		for pid := range ids {
+			actual, readErr := clientprocess.ExecutablePath(pid)
+			if readErr != nil {
+				return Result{}, fmt.Errorf("client %d cannot verify same-name process %d: %w", index+1, pid, readErr)
+			}
+			processes[pid] = actual
+		}
+		pid, err := SelectAttachedProcess(path, processes)
+		if err != nil {
+			return Result{}, fmt.Errorf("client %d: %w", index+1, err)
+		}
+		windows, err := windowlayout.DiscoverWindows([]int{pid})
+		if err != nil {
+			return Result{}, fmt.Errorf("client %d process %d has no unique usable game window: %w", index+1, pid, err)
+		}
+		if len(windows) != 1 || windows[0].PID != pid || windows[0].Handle == 0 {
+			return Result{}, fmt.Errorf("client %d process %d has no unique usable game window", index+1, pid)
+		}
+		result.Clients = append(result.Clients, Client{Executable: path, PID: pid, Window: windows[0]})
+	}
+	return result, nil
+}
 
 func Start(paths []string, uris map[int]string, timeout time.Duration) (Result, error) {
 	if err := ValidateURIs(paths, uris); err != nil {
@@ -120,15 +153,6 @@ func startStoreClient(path, uri string, timeout time.Duration) (Client, error) {
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-}
-
-func sameExecutable(actual, expected string) bool {
-	if strings.EqualFold(filepath.Clean(actual), filepath.Clean(expected)) {
-		return true
-	}
-	left, leftErr := os.Stat(actual)
-	right, rightErr := os.Stat(expected)
-	return leftErr == nil && rightErr == nil && os.SameFile(left, right)
 }
 
 func gameProcessIDs(name string) (map[int]bool, error) {

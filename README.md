@@ -2,7 +2,7 @@
 
 独立开发的 PoE2 多角色跟随软件工作区。当前交付包含 **跟随决策内核、实时诊断链路、回放工具与初步桌面入口**；Windows 和 PoE2 游戏内控制尚未验收。它与 `bpup/poe2-scripts` 没有代码或构建依赖。
 
-`release/desktop/PartyPilot.Desktop.exe` 是 Windows x64 自包含桌面程序，按所提供版本主页的“选择输入 → 选择人数 → 准备并开始”顺序组织。它提供 1–6 人的 [角色与客户端布局选项](TOPOLOGY_RESEARCH.md)，依所选布局显示 1–3 个客户端程序路径；2P、3P、5P 的初始布局与所提供版本的设置相符。客户端路径、Steam/Epic 启动 URI、窗口布局预检和显式启动接到 `PartyPilot-ClientLaunch.exe`。最多三个 P1–P4 系统虚拟手柄的布局可从桌面启动受保护桥接：须由内置启动器取得每个游戏的进程 ID 与窗口句柄，用户再逐角色确认登录画面就绪。桥接要求对应窗口位置与尺寸稳定、确实位于前台，才转发受保护的 A 键短按；失焦或窗口变化会回中或中断短按。游戏内角色加入仍由用户确认，最后等待手柄回中。实体手柄隔离仅由用户勾选确认，程序尚未核验 HidHide、登录画面或游戏内结果。需要四个系统手柄或第三客户端 P5/P6 进程内输入的布局会明确禁用桥接。自动跟随、战斗与雷达尚未接入这个界面，不能把“启动游戏窗口”或“人工确认配对”视为“开始完整组队”。人数必须主动选择，启动按钮在选择前保持禁用；macOS 可编译和预览界面，但实际游戏启动只在 Windows 开放。
+`release/desktop/PartyPilot.Desktop.exe` 是 Windows x64 自包含桌面程序，按所提供版本主页的“选择输入 → 选择人数 → 准备并开始”顺序组织。它提供 1–6 人的 [角色与客户端布局选项](TOPOLOGY_RESEARCH.md)，依所选布局显示 1–3 个客户端程序路径；2P、3P、5P 的初始布局与所提供版本的设置相符。客户端路径、Steam/Epic 启动 URI、窗口布局预检、显式启动和已运行窗口绑定接到 `PartyPilot-ClientLaunch.exe`。最多三个 P1–P4 系统虚拟手柄的布局可从桌面启动受保护桥接：须先启动或绑定每个游戏窗口，取得进程 ID 与窗口句柄，用户再逐角色确认登录画面就绪。桥接要求对应窗口位置与尺寸稳定、确实位于前台，才转发受保护的 A 键短按；失焦或窗口变化会回中或中断短按。游戏内角色加入仍由用户确认，最后等待手柄回中。实体手柄隔离仅由用户勾选确认，程序尚未核验 HidHide、登录画面或游戏内结果。需要四个系统手柄或第三客户端 P5/P6 进程内输入的布局会明确禁用桥接。自动跟随、战斗与雷达尚未接入这个界面，不能把“启动游戏窗口”或“人工确认配对”视为“开始完整组队”。人数必须主动选择，启动按钮在选择前保持禁用；macOS 可编译和预览界面，但实际游戏启动只在 Windows 开放。
 
 ```sh
 dotnet build ui/PartyPilot.Desktop.csproj -c Release
@@ -75,16 +75,17 @@ go run ./cmd/windowlayout -displays-file testdata/layout-displays.json -monitors
 
 Windows 版只接受所提供版本识别的游戏进程名，并在应用前复核窗口属于相应进程。屏幕位置、窗口位置和布局计算已用人工屏幕数据验证；窗口发现与移动仅通过 Windows 目标编译，尚未在 Windows/PoE2 运行。`-size full -apply` 会请求无边框全屏叠放，并在本地配置目录保存原窗口样式；随后对同一游戏进程应用普通布局时会恢复原样式。恢复时同时核对进程 ID、窗口句柄和进程创建时间，避免旧记录作用于新进程。样式切换仅通过 Windows 目标编译，尚未在 Windows/PoE2 实测；此布局工具不负责启动游戏或账号流程。
 
-`release/PartyPilot-ClientLaunch.exe` 补上直接从游戏程序启动到等待窗口的基本流程。重复 `-exe` 按客户端顺序指定 1–3 个游戏程序；启动前检查文件、目标进程名及安装目录互不相同。程序逐个启动客户端，按新进程 ID 最多等待每个窗口 60 秒；可用 `-apply-layout -monitors 1,2 -mode multiple` 在全部窗口出现后安排位置，也可用 `-mode stacked -size full -monitors 1,1 -apply-layout` 请求无边框全屏叠放。`-check` 只做路径与布局预检，不启动游戏；在 macOS 上可配合 `-displays-file testdata/layout-displays.json` 验证人工屏幕数据。已启动客户端若后续步骤失败，会在输出中保留其进程 ID，不会静默关闭游戏。
+`release/PartyPilot-ClientLaunch.exe` 补上直接从游戏程序启动到等待窗口的基本流程。重复 `-exe` 按客户端顺序指定 1–3 个游戏程序；启动前检查文件、目标进程名及安装目录互不相同。程序逐个启动客户端，按新进程 ID 最多等待每个窗口 60 秒；可用 `-apply-layout -monitors 1,2 -mode multiple` 在全部窗口出现后安排位置，也可用 `-mode stacked -size full -monitors 1,1 -apply-layout` 请求无边框全屏叠放。`-attach` 不启动游戏，而是要求每个指定程序恰好对应一个已运行进程及可用游戏窗口；多个同路径进程会拒绝绑定。`-check` 只做路径与布局预检，不启动或绑定游戏；`-attach` 不与 `-check` 或 `-uri` 合用。在 macOS 上可配合 `-displays-file testdata/layout-displays.json` 验证人工屏幕数据。已启动客户端若后续步骤失败，会在输出中保留其进程 ID，不会静默关闭游戏。
 
 商店客户端可按槽位增加 `-uri 槽位=启动URI`，同时仍须用相应 `-exe` 指定预期游戏程序。Steam 只接受所提供版本使用的 PoE2 游戏 URI；Epic URI 应从该安装的 Epic 清单取得。工具在发送 URI 前记录同名进程，随后只把新出现、程序路径与 `-exe` 一致且具有游戏窗口的唯一进程归入该槽位；多个匹配进程会报错。URI 启动无法从商店协议直接取得游戏进程 ID，因此若同时有其他方式启动同一程序，进程归属仍需人工核对。
 
 ```sh
 PartyPilot-ClientLaunch.exe -exe "C:\\PoE2-A\\PathOfExile_x64.exe" -exe "D:\\PoE2-B\\PathOfExile_x64.exe" -apply-layout -monitors 1,2 -mode multiple
+PartyPilot-ClientLaunch.exe -exe "C:\\PoE2-A\\PathOfExile_x64.exe" -exe "D:\\PoE2-B\\PathOfExile_x64.exe" -attach
 PartyPilot-ClientLaunch.exe -exe "C:\\Steam\\PathOfExile_x64Steam.exe" -uri 1=steam://rungameid/2694490 -check
 ```
 
-相同独立版安装目录的额外实例仍未实现；目标版本使用专门的多实例运行时，不能用重复启动普通程序代替。控制器启动前保护、账号准备和自动登录仍未实现。启动 URI、进程归属、窗口等待及布局应用只通过参数测试和 Windows 目标编译，尚未在 Windows/PoE2 运行验证。
+相同独立版安装目录的额外实例仍未实现；目标版本使用专门的多实例运行时，不能用重复启动普通程序代替。控制器启动前保护、账号准备和自动登录仍未实现。启动 URI、已运行窗口绑定、进程归属、窗口等待及布局应用只通过参数测试和 Windows 目标编译，尚未在 Windows/PoE2 运行验证。
 
 `release/PartyPilot-ResourceWatch.exe` 提供独立的前后台进程资源策略工具。根据所提供版本的静态实现，它按明确的 1–3 个游戏进程 ID 监视前台窗口；在后台可设置 CPU 硬上限、处理器亲和性或进程内存硬限制，回到前台时请求恢复。RAM 告警只观察工作集，不施加内存限制。默认输出配置预览，只有加 `-apply` 才开始管理进程；按 Ctrl+C 退出时也会请求恢复。程序会核对进程程序名、保持进程句柄，并在进程结束时停止操作。示例中的数值只用于说明参数，不代表 0.6.17 的默认配置：
 

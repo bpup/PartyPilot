@@ -65,9 +65,13 @@ var isolation = window.GetLogicalDescendants().OfType<CheckBox>()
     .Single(item => item.Content?.ToString()?.Contains("实体手柄对游戏隐藏") == true);
 var prepare = window.GetLogicalDescendants().OfType<Button>()
     .Single(item => item.Content?.ToString() == "准备虚拟手柄");
+var attach = window.GetLogicalDescendants().OfType<Button>()
+    .Single(item => item.Content?.ToString() == "绑定已运行窗口");
 if (prepare.IsEnabled) throw new Exception("Bridge preparation was enabled before explicit selections.");
+if (attach.IsEnabled) throw new Exception("Existing-window attachment was enabled before selecting a topology.");
 clientCount.SelectedIndex = 3;
 Dispatcher.UIThread.RunJobs();
+if (!attach.IsEnabled) throw new Exception("Existing-window attachment was unavailable for a selected topology.");
 physicalIndex.SelectedIndex = 0;
 isolation.IsChecked = true;
 Dispatcher.UIThread.RunJobs();

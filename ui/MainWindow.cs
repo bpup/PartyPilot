@@ -9,6 +9,7 @@ namespace PartyPilot.Desktop;
 
 public sealed class MainWindow : Window
 {
+    private enum ClientAction { Check, Start, Attach }
     private static readonly IBrush CanvasBrush = Brush("#10151E");
     private static readonly IBrush CardBrush = Brush("#192332");
     private static readonly IBrush EdgeBrush = Brush("#344152");
@@ -27,6 +28,7 @@ public sealed class MainWindow : Window
     private readonly StackPanel[] _clientRows = new StackPanel[3];
     private readonly Button _check = new();
     private readonly Button _launch = new();
+    private readonly Button _attach = new();
     private readonly TextBlock _status = new();
     private readonly ComboBox _physicalIndex = new();
     private readonly CheckBox _isolationConfirmed = new();
@@ -204,8 +206,8 @@ public sealed class MainWindow : Window
 
     private Border BuildLaunchStep()
     {
-        var panel = Step("3", "PREPARE & START · 准备并开始", "先检查路径与布局，再明确启动游戏窗口。此步骤不执行账号登录或角色配对。");
-        _applyLayout.Content = "启动后应用窗口布局";
+        var panel = Step("3", "PREPARE & START · 准备并开始", "检查配置后，可启动游戏窗口或绑定已运行窗口。此步骤不执行账号登录或角色配对。");
+        _applyLayout.Content = "对游戏窗口应用布局";
         panel.Children.Add(_applyLayout);
         _layoutMode.ItemsSource = new[] { "stacked", "tiled", "multiple" };
         _layoutMode.SelectedIndex = 0;
@@ -215,13 +217,16 @@ public sealed class MainWindow : Window
         _monitors.Watermark = "显示器编号，例如 1,2";
         panel.Children.Add(_monitors);
 
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Margin = new Thickness(0, 10, 0, 0) };
+        var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12, LineSpacing = 8, Margin = new Thickness(0, 10, 0, 0) };
         _check.Content = "检查配置";
-        _check.Click += async (_, _) => await RunLauncherAsync(start: false);
+        _check.Click += async (_, _) => await RunLauncherAsync(ClientAction.Check);
         _launch.Content = "启动游戏窗口";
-        _launch.Click += async (_, _) => await RunLauncherAsync(start: true);
+        _launch.Click += async (_, _) => await RunLauncherAsync(ClientAction.Start);
+        _attach.Content = "绑定已运行窗口";
+        _attach.Click += async (_, _) => await RunLauncherAsync(ClientAction.Attach);
         actions.Children.Add(_check);
         actions.Children.Add(_launch);
+        actions.Children.Add(_attach);
         panel.Children.Add(actions);
         return Card(panel);
     }
@@ -257,6 +262,7 @@ public sealed class MainWindow : Window
         }
         _check.IsEnabled = !_busy && !_pairingHasStarted && count > 0;
         _launch.IsEnabled = !_busy && !_pairingHasStarted && count > 0;
+        _attach.IsEnabled = !_busy && !_pairingHasStarted && count > 0;
         UpdateBridgeControls();
     }
 
@@ -447,7 +453,7 @@ public sealed class MainWindow : Window
                 : _pairing.Armed
                     ? $"P{current.PartyPlayer} 输入已准备。请让客户端 {current.Client} 保持前台、松开所有输入；等待稳定后按一次 A 键。"
                     : _launchedClients.Count != _selectedTopology?.ClientCount
-                        ? "请先在下方启动所有游戏窗口并完成窗口身份绑定，然后确认当前登录画面就绪。"
+                        ? "请先在下方启动或绑定所有游戏窗口，取得窗口身份后再确认当前登录画面就绪。"
                         : $"请打开客户端 {current.Client} 的登录/角色画面，确认就绪后点“当前登录画面已就绪，允许 A 键”。";
     }
 
@@ -470,7 +476,7 @@ public sealed class MainWindow : Window
         _pairingStatus.Text = "手柄桥接已停止，虚拟手柄已释放。";
     }
 
-    private async Task RunLauncherAsync(bool start)
+    private async Task RunLauncherAsync(ClientAction action)
     {
         if (_busy || _pairingHasStarted)
         {
@@ -478,7 +484,7 @@ public sealed class MainWindow : Window
         }
         if (!OperatingSystem.IsWindows())
         {
-            _status.Text = "桌面界面可在 macOS 预览；游戏窗口启动和布局操作需要 Windows。";
+            _status.Text = "桌面界面可在 macOS 预览；游戏窗口启动、绑定和布局操作需要 Windows。";
             return;
         }
         var tool = FindLauncher();
@@ -505,7 +511,7 @@ public sealed class MainWindow : Window
             startInfo.ArgumentList.Add("-exe");
             startInfo.ArgumentList.Add(_paths[index].Text?.Trim() ?? string.Empty);
             var uri = _uris[index].Text?.Trim();
-            if (!string.IsNullOrEmpty(uri))
+            if (action != ClientAction.Attach && !string.IsNullOrEmpty(uri))
             {
                 startInfo.ArgumentList.Add("-uri");
                 startInfo.ArgumentList.Add($"{index + 1}={uri}");
@@ -519,15 +525,24 @@ public sealed class MainWindow : Window
             startInfo.ArgumentList.Add("-monitors");
             startInfo.ArgumentList.Add(_monitors.Text?.Trim() ?? string.Empty);
         }
-        if (!start)
+        if (action == ClientAction.Check)
         {
             startInfo.ArgumentList.Add("-check");
         }
+        else if (action == ClientAction.Attach)
+        {
+            startInfo.ArgumentList.Add("-attach");
+        }
 
         _busy = true;
-        if (start) _launchedClients = [];
+        if (action != ClientAction.Check) _launchedClients = [];
         UpdateClientRows();
-        _status.Text = start ? "正在等待游戏窗口…" : "正在检查配置…";
+        _status.Text = action switch
+        {
+            ClientAction.Start => "正在等待游戏窗口…",
+            ClientAction.Attach => "正在识别已运行游戏窗口…",
+            _ => "正在检查配置…"
+        };
         try
         {
             using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("启动器未能启动");
@@ -535,7 +550,7 @@ public sealed class MainWindow : Window
             var error = process.StandardError.ReadToEndAsync();
             await process.WaitForExitAsync();
             await Task.WhenAll(output, error);
-            if (start && process.ExitCode == 0)
+            if (action != ClientAction.Check && process.ExitCode == 0)
             {
                 try
                 {
@@ -544,7 +559,9 @@ public sealed class MainWindow : Window
                 }
                 catch (Exception bindingError)
                 {
-                    _status.Text = $"游戏可能已启动，但无法核对其窗口身份：{bindingError.Message}";
+                    _status.Text = action == ClientAction.Start
+                        ? $"游戏可能已启动，但无法核对其窗口身份：{bindingError.Message}"
+                        : $"已运行窗口的身份信息无效：{bindingError.Message}";
                     return;
                 }
             }

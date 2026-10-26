@@ -75,6 +75,7 @@ func main() {
 	flag.Var(&paths, "exe", "repeat for each game client in launch order")
 	flag.Var(&uris, "uri", "optional SLOT=Steam-or-Epic-launch-URI, bound to the matching -exe")
 	check := flag.Bool("check", false, "validate paths and layout without launching")
+	attach := flag.Bool("attach", false, "bind one existing game window to each configured executable")
 	timeout := flag.Duration("timeout", 60*time.Second, "time to wait for each game window")
 	applyLayout := flag.Bool("apply-layout", false, "arrange windows after each client is ready")
 	displaysFile := flag.String("displays-file", "", "offline display fixture for -check only")
@@ -83,6 +84,9 @@ func main() {
 	size := flag.String("size", "small", "stacked size")
 	align := flag.String("align", "center", "stacked alignment")
 	flag.Parse()
+	if *attach && (*check || len(uris) != 0) {
+		fail(errors.New("-attach cannot be combined with -check or -uri"))
+	}
 	validated, err := clientlaunch.Validate(paths, *timeout)
 	if err != nil {
 		fail(err)
@@ -130,16 +134,21 @@ func main() {
 		write(response)
 		return
 	}
-	launched, launchErr := clientlaunch.Start(validated, uris, *timeout)
-	response.Clients = launched.Clients
-	if launchErr != nil {
-		response.Error = launchErr.Error()
+	var bound clientlaunch.Result
+	if *attach {
+		bound, err = clientlaunch.Attach(validated)
+	} else {
+		bound, err = clientlaunch.Start(validated, uris, *timeout)
+	}
+	response.Clients = bound.Clients
+	if err != nil {
+		response.Error = err.Error()
 		write(response)
-		fail(launchErr)
+		fail(err)
 	}
 	if *applyLayout {
-		windows := make([]windowlayout.Window, len(launched.Clients))
-		for index, client := range launched.Clients {
+		windows := make([]windowlayout.Window, len(bound.Clients))
+		for index, client := range bound.Clients {
 			windows[index] = client.Window
 		}
 		if err := windowlayout.Apply(windows, *response.Plan); err != nil {
