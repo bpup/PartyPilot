@@ -136,7 +136,7 @@ internal static class BridgeProtocol
                 !root.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String ||
                 type.GetString() != "flask" ||
                 !root.TryGetProperty("slot", out var slot) || !slot.TryGetInt32(out var value) ||
-                value is < 1 or > 4 ||
+                value is < 1 or > 6 ||
                 !root.TryGetProperty("resource", out var resource) || resource.ValueKind != JsonValueKind.String ||
                 resource.GetString() is not ("life" or "mana"))
                 return false;

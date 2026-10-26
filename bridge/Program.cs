@@ -455,7 +455,7 @@ try
                 if (BridgeProtocol.TryParseFlask(line, out var flaskCommand))
                 {
                     if (!autoFlaskEnabled || pairingGate?.Phase != ProtectedPairingPhase.Complete ||
-                        !slots.Contains(flaskCommand.Slot))
+                        !outputs.ContainsKey(flaskCommand.Slot))
                     {
                         router.NeutralAll();
                         Console.Error.WriteLine("Automatic flask command is not armed for this virtual pad.");

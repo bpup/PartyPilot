@@ -287,7 +287,7 @@ public sealed class MainWindow : Window
         panel.Children.Add(_isolationConfirmed);
         _rightStickFollowerOverride.Content = "右摇杆暂时控制可活动的跟随角色（主角色不再使用右摇杆瞄准）";
         panel.Children.Add(_rightStickFollowerOverride);
-        _autoFlask.Content = "随实时跟随启用自动药剂（仅双客户端各一名角色；生命/魔力须绑定手柄十字键左/右）";
+        _autoFlask.Content = "随实时跟随启用自动药剂（双/三客户端各一名角色；生命/魔力须绑定手柄十字键左/右）";
         panel.Children.Add(_autoFlask);
         var leadership = _leadershipPreferences.Load();
         _leadershipPreferenceReady = leadership.Success;
@@ -834,7 +834,7 @@ public sealed class MainWindow : Window
             _ = StopAllResourcesAsync();
         }
         _selectedTopology = selection;
-        if (_bridge is null && topologyChanged) _autoFlask.IsChecked = selection?.Id == "2-split";
+        if (_bridge is null && topologyChanged) _autoFlask.IsChecked = selection?.Id is "2-split" or "3-three-singles";
         var count = _selectedTopology?.ClientCount ?? 0;
         _assignment.Text = _selectedTopology is null
             ? "选择人数后显示角色与客户端分布。"
@@ -1447,7 +1447,7 @@ public sealed class MainWindow : Window
         _isolationConfirmed.IsEnabled = _bridge is null && !_busy;
         _rightStickFollowerOverride.IsEnabled = _bridge is null && !_busy;
         _lastFocusedLeads.IsEnabled = _bridge is null && !_busy;
-        _autoFlask.IsEnabled = _bridge is null && !_busy && _selectedTopology?.Id == "2-split";
+        _autoFlask.IsEnabled = _bridge is null && !_busy && _selectedTopology?.Id is "2-split" or "3-three-singles";
         _check.IsEnabled = !_busy && !_pairingHasStarted && _bridge is null && _selectedTopology is not null;
         _launch.IsEnabled = _check.IsEnabled;
         _attach.IsEnabled = _check.IsEnabled;
@@ -1707,7 +1707,7 @@ public sealed class MainWindow : Window
                 .Select(index => _paths[index].Text?.Trim() ?? "").ToArray();
             var session = await BridgeSession.StartAsync(executable, _selectedTopology.Slots, _physicalIndex.SelectedIndex,
                 _physicalDevice.Text.Trim(), gameExecutables, _rightStickFollowerOverride.IsChecked == true,
-                _selectedTopology.Id == "2-split" && _autoFlask.IsChecked == true,
+                _selectedTopology.Id is "2-split" or "3-three-singles" && _autoFlask.IsChecked == true,
                 useWgi, privatePlan, lastFocusedLeads: _lastFocusedLeads.IsChecked == true);
             ActivateBridge(session, _selectedTopology);
         }
@@ -2201,7 +2201,7 @@ public sealed class MainWindow : Window
                             _selectedTopology.Slots, _physicalIndex.SelectedIndex,
                             _physicalDevice.Text.Trim(), gameExecutables,
                             _rightStickFollowerOverride.IsChecked == true,
-                            _selectedTopology.Id == "2-split" && _autoFlask.IsChecked == true,
+                            _selectedTopology.Id is "2-split" or "3-three-singles" && _autoFlask.IsChecked == true,
                             useWgi, lastFocusedLeads: _lastFocusedLeads.IsChecked == true);
                         ActivateBridge(session, _selectedTopology);
                         prelaunchBridge = session;

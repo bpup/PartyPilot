@@ -178,6 +178,14 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             initialFrame = frame;
             foreach (var command in frame.PadCommands)
                 await bridge.SendAutomationAsync(command.Command);
+            if (bridge.AutoFlaskEnabled)
+            {
+                foreach (var request in frame.Flasks)
+                {
+                    var pad = topology.Slots.Single(slot => slot.PartyPlayer == request.Player).RuntimePad;
+                    await bridge.SendFlaskAsync(pad, request.Resource);
+                }
+            }
             return new LiveFollowSession(process, bridge, topology, readError, frame);
         }
         catch (Exception error)

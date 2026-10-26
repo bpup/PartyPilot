@@ -104,7 +104,9 @@ Expect("{\"state\":\"following\",\"x\":1,\"y\":0}", false, 0, false);
 Expect("not JSON", false, 0, false);
 if (!BridgeProtocol.TryParseFlask("{\"type\":\"flask\",\"slot\":3,\"resource\":\"life\"}", out var flaskCommand) ||
     flaskCommand != new FlaskCommand(3, "life") ||
-    BridgeProtocol.TryParseFlask("{\"type\":\"flask\",\"slot\":5,\"resource\":\"life\"}", out _) ||
+    !BridgeProtocol.TryParseFlask("{\"type\":\"flask\",\"slot\":5,\"resource\":\"life\"}", out var privateFlask) ||
+    privateFlask != new FlaskCommand(5, "life") ||
+    BridgeProtocol.TryParseFlask("{\"type\":\"flask\",\"slot\":7,\"resource\":\"life\"}", out _) ||
     BridgeProtocol.TryParseFlask("{\"type\":\"flask\",\"slot\":3,\"resource\":\"skill\"}", out _))
     throw new Exception("Automatic flask command validation failed.");
 if (!BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_begin\"}", out var beginParty) ||
@@ -198,6 +200,14 @@ if (menuGuard.Observe(2, 0x0010, now.AddMilliseconds(700)).Count != 0 ||
 menuGuard.Reset();
 if (menuGuard.Advance(now.AddSeconds(2)).Count != 0)
     throw new Exception("Menu guard survived a pairing reset.");
+menuGuard.Observe(5, 0, now.AddSeconds(3));
+if (menuGuard.Observe(5, 0x0010, now.AddSeconds(3).AddMilliseconds(10)).Single() !=
+        new MenuGuardChange(5, MenuGuardPhase.MenuDetected) ||
+    menuGuard.Observe(5, 0x2000, now.AddSeconds(3).AddMilliseconds(20)).Single() !=
+        new MenuGuardChange(5, MenuGuardPhase.Settling) ||
+    menuGuard.Advance(now.AddSeconds(3).AddMilliseconds(670)).Single() !=
+        new MenuGuardChange(5, MenuGuardPhase.Clear))
+    throw new Exception("Private P5 menu controls did not guard flasks.");
 var pad2 = new FakePad();
 var pad3 = new FakePad();
 var router = new BridgeRouter(new Dictionary<int, IPadOutput> { [2] = pad2, [3] = pad3 });
@@ -296,6 +306,23 @@ router.Tick(now.AddMilliseconds(501));
 router.SetMenuGuardActive(false);
 if (pad3.Report != default)
     throw new Exception("A stale automation frame resumed after the menu guard cleared.");
+var privateFlaskPad = new FakePad();
+var privateFlaskRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
+    { [1] = new FakePad(), [5] = privateFlaskPad });
+if (!privateFlaskRouter.ConfigurePhysical(1, focusPads: new Dictionary<int, int>
+        { [1] = 1, [2] = 5 }))
+    throw new Exception("P5 private focus mapping was rejected.");
+privateFlaskRouter.SetPhysical(default, now.AddSeconds(4));
+if (!privateFlaskRouter.PulseFlask(5, "life", now.AddSeconds(4).AddMilliseconds(10)) ||
+    (privateFlaskPad.Report.Buttons & 0x0004) == 0)
+    throw new Exception("P5 private output did not receive a flask pulse.");
+privateFlaskRouter.SetMenuGuardActive(true);
+if (privateFlaskPad.Report != default ||
+    privateFlaskRouter.PulseFlask(5, "mana", now.AddSeconds(4).AddMilliseconds(20)))
+    throw new Exception("P5 private flask pulse escaped the menu guard.");
+privateFlaskRouter.PhysicalDisconnected();
+if (privateFlaskPad.Report != default)
+    throw new Exception("P5 private flask output survived disconnect.");
 if (!router.ApplyLine("{\"type\":\"focus\",\"slot\":3}", now) ||
     pad3.Report.Buttons != 0x1000 || pad2.Report.Buttons != 0)
     throw new Exception("Focus did not move physical input.");

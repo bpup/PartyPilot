@@ -92,7 +92,8 @@ public static class LiveFollowFrame
         var flasks = new List<FlaskBridgeRequest>();
         if (root.TryGetProperty("flasks", out var flaskValue))
         {
-            if (flaskValue.ValueKind != JsonValueKind.Array || flaskValue.GetArrayLength() > 2)
+            if (flaskValue.ValueKind != JsonValueKind.Array ||
+                flaskValue.GetArrayLength() > 2 * (allowedFlaskPlayers?.Count ?? 2))
                 throw new InvalidDataException("Live follow returned an invalid flask list.");
             foreach (var item in flaskValue.EnumerateArray())
             {

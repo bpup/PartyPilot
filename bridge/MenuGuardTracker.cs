@@ -36,7 +36,7 @@ internal sealed class MenuGuardTracker
 
     public IReadOnlyList<MenuGuardChange> Observe(int slot, ushort buttons, DateTime nowUtc)
     {
-        if (slot is < 1 or > 4 || nowUtc.Kind != DateTimeKind.Utc)
+        if (slot is < 1 or > 6 || nowUtc.Kind != DateTimeKind.Utc)
             throw new ArgumentException("A paired virtual pad and UTC observation are required.");
         var changes = Advance(nowUtc).ToList();
         const ushort back = 0x0020;

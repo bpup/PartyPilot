@@ -239,7 +239,7 @@ internal sealed class BridgeSession : IAsyncDisposable
 
     internal async Task SendFlaskAsync(int slot, string resource)
     {
-        if (!AutoFlaskEnabled || !_slots.Contains(slot) || resource is not ("life" or "mana") ||
+        if (!AutoFlaskEnabled || !_allSlots.Contains(slot) || resource is not ("life" or "mana") ||
             _stopping || _process.HasExited)
             throw new InvalidOperationException("Automatic flask input is unavailable for this pad.");
         await WriteCommandAsync(JsonSerializer.Serialize(new { type = "flask", slot, resource }));
@@ -335,7 +335,7 @@ internal sealed class BridgeSession : IAsyncDisposable
                     }
                     else if (kind.GetString() == "menu_guard" &&
                         root.TryGetProperty("slot", out var menuSlot) && menuSlot.TryGetInt32(out var menuSlotValue) &&
-                        _slots.Contains(menuSlotValue) &&
+                        _allSlots.Contains(menuSlotValue) &&
                         root.TryGetProperty("state", out var menuState) && menuState.ValueKind == JsonValueKind.String &&
                         menuState.GetString() is "clear" or "menu_detected" or "settling")
                     {

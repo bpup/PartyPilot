@@ -16,6 +16,14 @@ internal static class ProcessPipelineSmoke
         if (!tripleFrame.PadCommands.Select(command => command.Pad).SequenceEqual([3, 5]) ||
             !switchedTriple.PadCommands.Select(command => command.Pad).SequenceEqual([1, 3]))
             throw new Exception("Three-client live follow did not map independent roles to P1/P3/P5.");
+        var tripleFlasks = LiveFollowFrame.ParseDynamic(
+            "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"},\"3\":{\"state\":\"waiting\"}}," +
+            "\"flasks\":[{\"player\":1,\"resource\":\"life\",\"percent\":20,\"reason\":\"threshold\"}," +
+            "{\"player\":2,\"resource\":\"mana\",\"percent\":20,\"reason\":\"threshold\"}," +
+            "{\"player\":3,\"resource\":\"life\",\"percent\":20,\"reason\":\"threshold\"}]}", triple);
+        if (tripleFlasks.Flasks.Count != 3 ||
+            tripleFlasks.Flasks[2] != new FlaskBridgeRequest(3, "life"))
+            throw new Exception("Three-client live follow dropped P5's flask request.");
         try
         {
             LiveFollowFrame.ParseDynamic(
@@ -252,6 +260,36 @@ internal static class ProcessPipelineSmoke
                 throw new Exception("Three-client MAIN switch did not route P1/P3/P5 safely: " +
                     string.Join(" | ", tripleCommands));
             Console.WriteLine("Three independent clients and P5 private follow routing checked with local fake executables.");
+            File.WriteAllText(tripleBridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
+                "if '--enable-auto-flask' not in sys.argv or '--client3-players' not in sys.argv: sys.exit(2)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"last_focused_leads\":true,\"auto_flask_enabled\":true,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3,3:5\",\"private_client3_pid\":103,\"private_client3_window_handle\":203,\"private_client3_slots\":[5]}', flush=True)\n" +
+                $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(tripleLog)}, 'a') as out: out.write(line)\n");
+            File.SetUnixFileMode(tripleBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.WriteAllText(tripleFollowExe, "#!/usr/bin/env python3\nimport sys,time\n" +
+                "if '-auto-flask' not in sys.argv: sys.exit(2)\n" +
+                "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"},\"3\":{\"state\":\"waiting\"}},\"flasks\":[{\"player\":3,\"resource\":\"life\",\"percent\":20,\"reason\":\"threshold\"}]}', flush=True)\n" +
+                "for line in sys.stdin: pass\n");
+            File.SetUnixFileMode(tripleFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            await using (var flaskBridge = await BridgeSession.StartAsync(tripleBridgeExe, triple.Slots, 0,
+                @"HID\VID_1234&PID_5678\DEVICE", tripleClients.Select(client => client.Executable).ToArray(),
+                false, autoFlaskEnabled: true, privatePlan: triplePlan, lastFocusedLeads: true))
+            {
+                flaskBridge.StartReading();
+                await using (var flaskFollow = await LiveFollowSession.StartAsync(tripleFollowExe,
+                    triple, tripleClients, flaskBridge, plan))
+                {
+                    flaskFollow.StartReading();
+                    var flaskDeadline = DateTime.UtcNow.AddSeconds(5);
+                    while (!File.ReadAllLines(tripleLog).Any(line =>
+                               line.Contains("\"type\":\"flask\",\"slot\":5,\"resource\":\"life\"")) &&
+                           DateTime.UtcNow < flaskDeadline)
+                        await Task.Delay(20);
+                }
+            }
+            if (!File.ReadAllLines(tripleLog).Any(line =>
+                    line.Contains("\"type\":\"flask\",\"slot\":5,\"resource\":\"life\"")))
+                throw new Exception("Desktop did not send a P5 flask request to the private-slot bridge.");
+            Console.WriteLine("P3 flask decision-to-P5 bridge routing checked with local fake executables.");
             var couch = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-couch");
             await using (var pairedBridge = await BridgeSession.StartAsync(couchBridgeExe, couch.Slots, 0,
                 @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe"], true))
