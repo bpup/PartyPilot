@@ -93,7 +93,7 @@ func (e *Engine) ObserveOrderedClient(frame OrderedClientFrame) bool {
 		if player.LocalPlayer < 1 || player.LocalPlayer > len(roles) ||
 			!finitePosition(player.X) || !finitePosition(player.Y) ||
 			!finitePosition(player.Z) || !validOrderedPool(player.Life, player.LifeMax) ||
-			player.Life == nil || player.LifeMax == nil || *player.LifeMax <= 0 ||
+			(player.LifeMax != nil && *player.LifeMax <= 0) ||
 			!validOrderedPool(player.Mana, player.ManaMax) ||
 			!validOrderedPool(player.EnergyShield, player.EnergyShieldMax) {
 			e.invalidateOrderedIfCurrent(roles, frame)
@@ -142,6 +142,7 @@ func (e *Engine) invalidateOrderedIfCurrent(roles []RoleBinding, frame OrderedCl
 	}
 	for _, role := range roles {
 		delete(e.samples, role.Slot)
+		delete(e.vitals, role.Slot)
 		delete(e.terrainStable, role.Slot)
 	}
 	e.coordinator.ResetFollow()

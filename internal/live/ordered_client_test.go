@@ -97,6 +97,113 @@ func TestDualLocalClientUsesOneAreaAndPartyLog(t *testing.T) {
 	}
 }
 
+func TestOrderedMotionDoesNotRequireSlowVitals(t *testing.T) {
+	now := time.Now().UTC()
+	engine, err := NewWithBindings([]RoleBinding{{1, 1, 1, 101}, {2, 1, 2, 101}},
+		1, follow.Config{StopDistance: 2, ResumeDistance: 3,
+			CatchUpDistance: 10, MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	if !engine.ObserveClientArea(101, arealog.Signal{AreaID: "G2_4", Seed: 123,
+		ObservedAt: now, Origin: "live"}) {
+		t.Fatal("one client area was not applied")
+	}
+	motion := OrderedClientFrame{ProcessID: 101, SeenUTC: now.Add(time.Millisecond),
+		ReceivedAt: now.Add(time.Millisecond), TickMS: now.UnixMilli() + 1,
+		CoordinateSpace: "world", PlayerOrderReliable: true,
+		PlayerOrderSource: "verified fixture", Players: []OrderedLocalPlayer{
+			{LocalPlayer: 1, X: 30 * worldPerGridUnit},
+			{LocalPlayer: 2, X: 0},
+		}}
+	if !engine.ObserveOrderedClient(motion) {
+		t.Fatal("position-only ordered motion was rejected")
+	}
+	command := engine.Step(motion.SeenUTC)[2]
+	if command.State != follow.CatchingUp || command.ManualOverrideEligible {
+		t.Fatalf("position-only motion did not follow conservatively: %+v", command)
+	}
+	broken := motion
+	broken.SeenUTC = now.Add(2 * time.Millisecond)
+	broken.ReceivedAt = broken.SeenUTC
+	broken.TickMS++
+	broken.Players = append([]OrderedLocalPlayer(nil), motion.Players...)
+	broken.Players[1].Life = floatPtr(50)
+	if engine.ObserveOrderedClient(broken) ||
+		engine.Step(broken.SeenUTC)[2].State != follow.Waiting {
+		t.Fatal("one-sided slow vitality value left old motion active")
+	}
+	withVitals := motion
+	withVitals.SeenUTC = now.Add(3 * time.Millisecond)
+	withVitals.ReceivedAt = withVitals.SeenUTC
+	withVitals.TickMS += 2
+	withVitals.Players = []OrderedLocalPlayer{
+		{LocalPlayer: 1, X: 30 * worldPerGridUnit, Life: floatPtr(100), LifeMax: floatPtr(100)},
+		{LocalPlayer: 2, X: 0, Life: floatPtr(90), LifeMax: floatPtr(100)},
+	}
+	if !engine.ObserveOrderedClient(withVitals) ||
+		!engine.Step(withVitals.SeenUTC)[2].ManualOverrideEligible {
+		t.Fatal("paired vitality values did not restore the full follower state")
+	}
+	fasterMotion := motion
+	fasterMotion.SeenUTC = now.Add(4 * time.Millisecond)
+	fasterMotion.ReceivedAt = fasterMotion.SeenUTC
+	fasterMotion.TickMS += 3
+	if !engine.ObserveOrderedClient(fasterMotion) ||
+		!engine.Step(fasterMotion.SeenUTC)[2].ManualOverrideEligible {
+		t.Fatal("fresh slower vitality did not survive a position-only motion frame")
+	}
+	lostOrder := fasterMotion
+	lostOrder.SeenUTC = now.Add(5 * time.Millisecond)
+	lostOrder.ReceivedAt = lostOrder.SeenUTC
+	lostOrder.TickMS++
+	lostOrder.PlayerOrderReliable = false
+	lostOrder.Players = nil
+	if engine.ObserveOrderedClient(lostOrder) {
+		t.Fatal("unreliable order was accepted")
+	}
+	recoveredMotion := motion
+	recoveredMotion.SeenUTC = now.Add(6 * time.Millisecond)
+	recoveredMotion.ReceivedAt = recoveredMotion.SeenUTC
+	recoveredMotion.TickMS += 5
+	if !engine.ObserveOrderedClient(recoveredMotion) ||
+		engine.Step(recoveredMotion.SeenUTC)[2].ManualOverrideEligible {
+		t.Fatal("vitality survived a lost local-player order")
+	}
+	withVitals.SeenUTC = now.Add(7 * time.Millisecond)
+	withVitals.ReceivedAt = withVitals.SeenUTC
+	withVitals.TickMS += 4
+	if !engine.ObserveOrderedClient(withVitals) ||
+		!engine.Step(withVitals.SeenUTC)[2].ManualOverrideEligible {
+		t.Fatal("fresh vitality did not restore after order recovery")
+	}
+	afterExpiry := motion
+	afterExpiry.SeenUTC = now.Add(2 * time.Second)
+	afterExpiry.ReceivedAt = afterExpiry.SeenUTC
+	afterExpiry.TickMS += 2000
+	if !engine.ObserveOrderedClient(afterExpiry) {
+		t.Fatal("motion after vital expiry was rejected")
+	}
+	if command := engine.Step(afterExpiry.SeenUTC)[2]; command.State != follow.CatchingUp ||
+		command.ManualOverrideEligible {
+		t.Fatalf("expired vitality still authorized manual movement: %+v", command)
+	}
+	newArea := afterExpiry.SeenUTC.Add(time.Millisecond)
+	if !engine.ObserveClientArea(101, arealog.Signal{AreaID: "G2_5", Seed: 456,
+		ObservedAt: newArea, Origin: "live"}) {
+		t.Fatal("new area rejected")
+	}
+	afterArea := motion
+	afterArea.SeenUTC = newArea.Add(time.Millisecond)
+	afterArea.ReceivedAt = afterArea.SeenUTC
+	afterArea.TickMS += 2002
+	if !engine.ObserveOrderedClient(afterArea) ||
+		engine.Step(afterArea.SeenUTC)[2].ManualOverrideEligible {
+		t.Fatal("old vitality crossed into a new area")
+	}
+}
+
 func TestTwoLocalPlayersNeedOneCompleteOrderedFrame(t *testing.T) {
 	now := time.Now().UTC()
 	bindings := []RoleBinding{

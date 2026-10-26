@@ -30,6 +30,7 @@ type Engine struct {
 	slotToPID        map[int]int
 	slots            []int
 	samples          map[int]telemetry.Sample
+	vitals           map[int]telemetry.Sample
 	areas            map[int]arealog.Signal
 	terrains         map[int]boundTerrain
 	terrainStable    map[int]terrainStability
@@ -233,7 +234,8 @@ func NewWithBindings(bindings []RoleBinding, leader int, config follow.Config,
 	return &Engine{coordinator: coordinator, leader: leader, baseLeader: leader,
 		logAge: logAge, sampleAge: config.MaxAge, memberNames: make(map[int]string),
 		pidToSlot: pidToSlot, pidToRoles: pidToRoles, slotToPID: slotToPID,
-		slots: slots, samples: make(map[int]telemetry.Sample), areas: make(map[int]arealog.Signal)}, nil
+		slots: slots, samples: make(map[int]telemetry.Sample),
+		vitals: make(map[int]telemetry.Sample), areas: make(map[int]arealog.Signal)}, nil
 }
 
 func (e *Engine) ObserveSample(sample telemetry.Sample) bool {
@@ -263,6 +265,9 @@ func (e *Engine) storeSample(slot int, sample telemetry.Sample) {
 		delete(e.terrainStable, slot)
 	}
 	e.samples[slot] = sample
+	if sample.Life != nil {
+		e.vitals[slot] = sample
+	}
 }
 
 func (e *Engine) ObserveArea(signal arealog.Signal) bool {
@@ -281,6 +286,7 @@ func (e *Engine) ObserveArea(signal arealog.Signal) bool {
 			!strings.EqualFold(previous.AreaID, signal.AreaID) || previous.Seed != signal.Seed) {
 		e.coordinator.ResetFollow()
 		delete(e.terrainStable, signal.Slot)
+		delete(e.vitals, signal.Slot)
 	}
 	e.areas[signal.Slot] = signal
 	return true
@@ -319,6 +325,7 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 		return commands
 	}
 	positions := make(map[int]follow.Position, len(e.slots))
+	lives := make(map[int]*float64, len(e.slots))
 	deadFollowers := make(map[int]bool)
 	terrainWait := make(map[int]bool)
 	terrainSettling := make(map[int]bool)
@@ -336,7 +343,9 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 			delete(e.terrainStable, slot)
 			continue
 		}
-		if slot != e.leader && sample.Life != nil && *sample.Life <= 0 {
+		life := e.currentLife(slot, sample, area, now)
+		lives[slot] = life
+		if slot != e.leader && life != nil && *life <= 0 {
 			delete(e.terrainStable, slot)
 			if !sample.SeenUTC.After(now) && now.Sub(sample.SeenUTC) <= e.sampleAge {
 				deadFollowers[slot] = true
@@ -432,16 +441,27 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 			commands[slot] = follow.Command{State: follow.Waiting, Reason: "dead follower"}
 			continue
 		}
-		sample, exists := e.samples[slot]
 		if command.State == follow.Following || command.State == follow.CatchingUp {
 			command.X, command.Y = isometricStick(command.X, command.Y)
 		}
-		if exists && sample.Life != nil && *sample.Life > 0 && command.State != follow.Waiting {
+		if life := lives[slot]; life != nil && *life > 0 && command.State != follow.Waiting {
 			command.ManualOverrideEligible = true
 		}
 		commands[slot] = command
 	}
 	return commands
+}
+
+func (e *Engine) currentLife(slot int, motion telemetry.Sample, area arealog.Signal,
+	now time.Time) *float64 {
+	vital, exists := e.vitals[slot]
+	if !exists || vital.Life == nil || vital.SeenUTC.Before(area.ObservedAt) ||
+		vital.SeenUTC.After(now) || vital.ReceivedAt.After(now) ||
+		now.Sub(vital.ReceivedAt) > e.sampleAge ||
+		(motion.AreaHash != 0 && vital.AreaHash != 0 && motion.AreaHash != vital.AreaHash) {
+		return nil
+	}
+	return vital.Life
 }
 
 func isometricStick(gridX, gridY float64) (float64, float64) {
