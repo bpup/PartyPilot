@@ -21,7 +21,6 @@ import (
 	"partypilot/internal/flask"
 	"partypilot/internal/follow"
 	"partypilot/internal/live"
-	"partypilot/internal/partylog"
 	"partypilot/internal/telemetry"
 )
 
@@ -299,12 +298,7 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 				return fail("log read failed", fmt.Errorf("slot %d log: %w", slot, err))
 			}
 			for _, line := range lines {
-				if signal, ok := arealog.ParseGeneration(line, slot, now); ok {
-					engine.ObserveArea(signal)
-				}
-				if event, ok := partylog.Parse(line, slot); ok {
-					engine.ObserveParty(event)
-				}
+				engine.ObserveClientLogLine(roster[slot], line, now)
 			}
 		}
 		if err := encoder.Encode(frame{Focused: engine.Leader(), Commands: engine.Step(now), Flasks: activations}); err != nil {

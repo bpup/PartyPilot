@@ -133,6 +133,32 @@ func (e *Engine) ObserveParty(event partylog.Event) bool {
 	return true
 }
 
+// ObserveClientParty applies an event from one verified client log. The log
+// belongs to the process, while a dual-local client owns two party roles.
+func (e *Engine) ObserveClientParty(processID int, event partylog.Event) bool {
+	roles := e.pidToRoles[processID]
+	if len(roles) == 0 {
+		return false
+	}
+	event.ClientSlot = roles[0].Slot
+	return e.ObserveParty(event)
+}
+
+// ObserveClientLogLine parses one complete line from a process-bound Client.txt.
+// For a dual-local client the one area generation updates both roles.
+func (e *Engine) ObserveClientLogLine(processID int, line string, observedAt time.Time) {
+	roles := e.pidToRoles[processID]
+	if len(roles) == 0 {
+		return
+	}
+	if signal, ok := arealog.ParseGeneration(line, roles[0].Slot, observedAt); ok {
+		e.ObserveClientArea(processID, signal)
+	}
+	if event, ok := partylog.Parse(line, roles[0].Slot); ok {
+		e.ObserveClientParty(processID, event)
+	}
+}
+
 func New(roster map[int]int, leader int, config follow.Config, logAge time.Duration) (*Engine, error) {
 	if len(roster) < 2 || len(roster) > 3 || logAge <= 0 {
 		return nil, fmt.Errorf("live sensor supports 2–3 clients with positive log age")
@@ -257,6 +283,28 @@ func (e *Engine) ObserveArea(signal arealog.Signal) bool {
 		delete(e.terrainStable, signal.Slot)
 	}
 	e.areas[signal.Slot] = signal
+	return true
+}
+
+// ObserveClientArea fans one verified client-log generation out to every
+// local role owned by its process. It does not infer instance identity from
+// position samples or visible entities.
+func (e *Engine) ObserveClientArea(processID int, signal arealog.Signal) bool {
+	roles := e.pidToRoles[processID]
+	if len(roles) == 0 || signal.AreaID == "" || signal.Seed <= 0 || signal.ObservedAt.IsZero() {
+		return false
+	}
+	for _, role := range roles {
+		if previous, exists := e.areas[role.Slot]; exists &&
+			signal.ObservedAt.Before(previous.ObservedAt) {
+			return false
+		}
+	}
+	for _, role := range roles {
+		roleSignal := signal
+		roleSignal.Slot = role.Slot
+		e.ObserveArea(roleSignal)
+	}
 	return true
 }
 

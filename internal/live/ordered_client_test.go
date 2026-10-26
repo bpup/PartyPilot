@@ -6,8 +6,50 @@ import (
 
 	"partypilot/internal/arealog"
 	"partypilot/internal/follow"
+	"partypilot/internal/partylog"
 	"partypilot/internal/telemetry"
 )
+
+func TestDualLocalClientUsesOneAreaAndPartyLog(t *testing.T) {
+	now := time.Now().UTC()
+	engine, err := NewWithBindings([]RoleBinding{
+		{Slot: 1, Client: 1, LocalPlayer: 1, ProcessID: 101},
+		{Slot: 2, Client: 1, LocalPlayer: 2, ProcessID: 101},
+	}, 1, follow.Config{StopDistance: 2, ResumeDistance: 3,
+		CatchUpDistance: 10, MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	area := arealog.Signal{AreaID: "G2_4", Seed: 123, ObservedAt: now, Origin: "live"}
+	if engine.ObserveClientArea(202, area) {
+		t.Fatal("client log was not bound to its process")
+	}
+	engine.ObserveClientLogLine(101, `Generating level 68 area "G2_4" with seed 123`, now)
+	for _, slot := range []int{1, 2} {
+		if got := engine.areas[slot]; got.Slot != slot || got.AreaID != area.AreaID || got.Seed != area.Seed {
+			t.Fatalf("role %d missed client area: %+v", slot, got)
+		}
+	}
+	newer := area
+	newer.ObservedAt = now.Add(time.Second)
+	newer.Seed = 456
+	if !engine.ObserveClientArea(101, newer) {
+		t.Fatal("new client generation was rejected")
+	}
+	if engine.ObserveClientArea(101, area) || engine.areas[1].Seed != 456 ||
+		engine.areas[2].Seed != 456 {
+		t.Fatal("old log generation partially replaced a newer client generation")
+	}
+	if engine.ObserveClientParty(202, partylog.Event{Kind: partylog.Disbanded}) {
+		t.Fatal("unbound client event stopped the session")
+	}
+	engine.ObserveClientLogLine(101, "You have left the party.", now.Add(time.Second))
+	if got := engine.Step(now.Add(time.Second))[2]; got.State != follow.Waiting ||
+		got.Reason != "local client left party" {
+		t.Fatalf("second local role did not stop after the shared log event: %+v", got)
+	}
+}
 
 func TestTwoLocalPlayersNeedOneCompleteOrderedFrame(t *testing.T) {
 	now := time.Now().UTC()

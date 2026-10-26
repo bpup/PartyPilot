@@ -82,6 +82,8 @@ GOOS=windows GOARCH=amd64 go build -o PartyPilot.exe ./cmd/partypilot
 
 该可见实体诊断现在还带各角色的生命、魔力和能量护盾读数；有角色路径和地址但暂时无名字的实体也会保留。实时内核另有可测试的同进程双角色有序帧入口，但现有候选扫描不会生成可靠帧，桌面仍只开放每客户端一名角色的实时跟随。四人以上布局的真实自动跟随仍待游戏数据源和 Windows/PoE2 验证。
 
+实时内核还可把同一游戏进程的单份 `Client.txt` 区域生成及离队记录作用到其两名本地角色；该路径已用合成日志行验证，双角色实时命令行与游戏内行为仍未接入或验收。
+
 开启 `DiagnoseLocalSlotCandidates` 时，诊断现会按所提供版本的公开默认偏移尝试读取候选角色的原始三维坐标，放在 `LocalSlotCandidates.RawPositions` 中；读不到的位置为 `null`。同一诊断还给出当前角色的 ExileCore2 坐标到原始世界/网格 XY 的两种数值距离，不自动判断哪种坐标系正确。这不是经游戏验证的第二角色位置，也不会进入自动跟随或输入，具体边界见[同窗口角色身份核对](SAME_CLIENT_RESEARCH.md)。
 同一帧还按地址逐槽对照当前可见的 ExileCore2 玩家实体，`VisiblePositionComparisons` 中不可见的槽位为 `null`。这帮助检查第二角色的坐标关系；未在游戏中采样验证，也不改变跟随准入。
 
