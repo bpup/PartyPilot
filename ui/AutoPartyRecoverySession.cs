@@ -31,8 +31,10 @@ internal sealed class AutoPartyRecoverySession
         _status = status;
     }
 
-    internal async Task<bool> RunAsync(CancellationToken token)
+    internal async Task<bool> RunAsync(CancellationToken token, int requestedTargetClient = 0)
     {
+        if (requestedTargetClient < 0 || requestedTargetClient > _topology.ClientCount)
+            throw new ArgumentOutOfRangeException(nameof(requestedTargetClient));
         if (_clients.Any(client => !PoeChatInviteService.IsWindowOwned(client)))
             throw new InvalidOperationException("An exact game window is unavailable for Auto Party.");
         var began = false;
@@ -40,8 +42,13 @@ internal sealed class AutoPartyRecoverySession
         {
             await _bridge.BeginAutoPartyAsync(token);
             began = true;
-            var stableClients = new HashSet<int> { 1 };
-            for (var targetClient = 2; targetClient <= _topology.ClientCount; targetClient++)
+            var stableClients = requestedTargetClient == 0
+                ? new HashSet<int> { 1 }
+                : Enumerable.Range(1, _topology.ClientCount).Where(client => client != requestedTargetClient).ToHashSet();
+            IEnumerable<int> targets = requestedTargetClient == 0
+                ? Enumerable.Range(2, _topology.ClientCount - 1)
+                : [requestedTargetClient];
+            foreach (var targetClient in targets)
             {
                 if (!await RecoverClientAsync(targetClient, stableClients, token))
                 {
@@ -68,7 +75,7 @@ internal sealed class AutoPartyRecoverySession
     private async Task<bool> RecoverClientAsync(int targetClient, HashSet<int> stableClients, CancellationToken token)
     {
         var coordinator = new AutoPartyCoordinator();
-        const int inviterClient = 1;
+        var inviterClient = stableClients.Min();
         var inviter = _clients[inviterClient - 1];
         var receiver = _clients[targetClient - 1];
         var inviterSlot = _topology.Slots.First(slot => slot.Client == inviterClient).RuntimePad;

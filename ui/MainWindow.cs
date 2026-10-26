@@ -4,6 +4,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Threading;
 
 namespace PartyPilot.Desktop;
 
@@ -39,6 +40,7 @@ public sealed class MainWindow : Window
     private readonly TextBlock _inviteStatus = new();
     private readonly Button _runAutoParty = new();
     private readonly Button _stopAutoParty = new();
+    private readonly Button _watchPartyLog = new();
     private readonly TextBlock _autoPartyStatus = new();
     private readonly TextBlock _status = new();
     private readonly ComboBox _physicalIndex = new();
@@ -106,6 +108,7 @@ public sealed class MainWindow : Window
     private bool _inviteBusy;
     private CancellationTokenSource? _inviteCancellation;
     private CancellationTokenSource? _autoPartyCancellation;
+    private PartyLeaveLogMonitor? _partyLogMonitor;
     private bool _autoPartyRunning;
     private bool _closing;
     private string _loginStatus = "waiting";
@@ -372,10 +375,13 @@ public sealed class MainWindow : Window
         _runAutoParty.Click += async (_, _) => await RunAutoPartyAsync();
         _stopAutoParty.Content = "取消自动组队";
         _stopAutoParty.Click += (_, _) => _autoPartyCancellation?.Cancel();
+        _watchPartyLog.Content = "开始监听离队日志";
+        _watchPartyLog.Click += (_, _) => TogglePartyLogMonitor();
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12, LineSpacing = 8 };
         actions.Children.Add(_sendInvite);
         actions.Children.Add(_runAutoParty);
         actions.Children.Add(_stopAutoParty);
+        actions.Children.Add(_watchPartyLog);
         panel.Children.Add(actions);
         _inviteStatus.Text = "需要已绑定窗口、完成配对和每个客户端至少一个准确角色名。";
         _inviteStatus.Foreground = MutedBrush;
@@ -584,6 +590,7 @@ public sealed class MainWindow : Window
         var topologyChanged = !ReferenceEquals(_selectedTopology, selection);
         if (topologyChanged)
         {
+            StopPartyLogMonitor();
             _inviteCancellation?.Cancel();
             _autoPartyCancellation?.Cancel();
             _launchedClients = [];
@@ -631,6 +638,7 @@ public sealed class MainWindow : Window
 
     private void ClearLaunchedClients()
     {
+        StopPartyLogMonitor();
         _inviteCancellation?.Cancel();
         _autoPartyCancellation?.Cancel();
         _launchedClients = [];
@@ -1046,9 +1054,56 @@ public sealed class MainWindow : Window
         _sendInvite.IsEnabled = ready;
         _runAutoParty.IsEnabled = ready;
         _stopAutoParty.IsEnabled = _autoPartyRunning;
+        _watchPartyLog.IsEnabled = _partyLogMonitor is not null || ready;
+        _watchPartyLog.Content = _partyLogMonitor is null ? "开始监听离队日志" : "停止监听离队日志";
     }
 
-    private async Task RunAutoPartyAsync()
+    private void TogglePartyLogMonitor()
+    {
+        if (_partyLogMonitor is not null) { StopPartyLogMonitor(); return; }
+        if (!_runAutoParty.IsEnabled) return;
+        try
+        {
+            var monitor = new PartyLeaveLogMonitor(_launchedClients);
+            monitor.Signal += signal => OnPartyLeaveSignal(monitor, signal);
+            monitor.Error += error => OnPartyLogError(monitor, error);
+            _partyLogMonitor = monitor;
+            _autoPartyStatus.Text = "正在监听各客户端的新离队日志行；历史日志不触发恢复。";
+        }
+        catch (Exception error) when (error is ArgumentException or IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            _autoPartyStatus.Text = $"无法开始离队日志监听：{error.Message}";
+        }
+        UpdateAutoPartyControls();
+    }
+
+    private void StopPartyLogMonitor()
+    {
+        var monitor = _partyLogMonitor;
+        _partyLogMonitor = null;
+        if (monitor is null) return;
+        monitor.Dispose();
+        if (!_closing) _autoPartyStatus.Text = "离队日志监听已停止。";
+        UpdateAutoPartyControls();
+    }
+
+    private void OnPartyLogError(PartyLeaveLogMonitor source, string error) =>
+        Dispatcher.UIThread.Post(() => { if (ReferenceEquals(_partyLogMonitor, source)) _autoPartyStatus.Text = error; });
+
+    private void OnPartyLeaveSignal(PartyLeaveLogMonitor source, PartyLeaveSignal signal) => Dispatcher.UIThread.Post(async () =>
+    {
+        if (!ReferenceEquals(_partyLogMonitor, source) || _autoPartyRunning || !_runAutoParty.IsEnabled ||
+            _selectedTopology is null || signal.Client > _selectedTopology.ClientCount) return;
+        var target = PartyLeaveRouting.ResolveTarget(signal, _selectedTopology,
+            _inviteNames.Take(_selectedTopology.PlayerCount).Select(box => box.Text).ToArray());
+        if (target < 0) return;
+        _autoPartyStatus.Text = target == 0
+            ? "Client.txt 检测到队伍解散，开始全队恢复。"
+            : $"Client.txt 检测到客户端 {target} 离队，开始定向恢复。";
+        await RunAutoPartyAsync(target);
+    });
+
+    private async Task RunAutoPartyAsync(int requestedTargetClient = 0)
     {
         if (!_runAutoParty.IsEnabled || _selectedTopology is null || _bridge is null ||
             !AutoPartyInviteNames.TryCreate(_selectedTopology,
@@ -1072,9 +1127,11 @@ public sealed class MainWindow : Window
             var recovery = new AutoPartyRecoverySession(bridge, topology,
                 clients, names, status => _autoPartyStatus.Text = status);
             _autoPartyStatus.Text = "自动组队恢复已开始；正在等待桥接确认。";
-            var observed = await recovery.RunAsync(cancellation.Token);
+            var observed = await recovery.RunAsync(cancellation.Token, requestedTargetClient);
             _autoPartyStatus.Text = observed
-                ? "所有客户端画面候选人数达到所选布局；角色身份及游戏内组队结果仍待核对。"
+                ? requestedTargetClient == 0
+                    ? "各受邀客户端画面候选人数达到所选布局；角色身份及游戏内组队结果仍待核对。"
+                    : $"客户端 {requestedTargetClient} 画面候选人数达到所选布局；其他客户端及角色身份仍待核对。"
                 : $"客户端 {recovery.FailedClient} 的自动组队尝试结束，画面候选人数未达到所选布局。";
         }
         catch (OperationCanceledException)
@@ -1349,6 +1406,7 @@ public sealed class MainWindow : Window
 
     private async Task StopBridgeAsync()
     {
+        StopPartyLogMonitor();
         _inviteCancellation?.Cancel();
         _autoPartyCancellation?.Cancel();
         await StopFollowAsync();
