@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace PartyPilot.Bridge;
 
-internal readonly record struct BridgeCommand(int Slot, short X, short Y, bool Active);
+internal readonly record struct BridgeCommand(int Slot, short X, short Y, bool Active, bool EligibleForManualMovement);
 internal readonly record struct PairingControl(string Type, int Slot, int Pid, long WindowHandle);
 
 internal static class BridgeProtocol
@@ -75,9 +75,16 @@ internal static class BridgeProtocol
             }
 
             var state = stateElement.GetString();
+            var manualEligible = false;
+            if (root.TryGetProperty("manual_override_eligible", out var manualValue))
+            {
+                if (manualValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return false;
+                manualEligible = manualValue.GetBoolean();
+            }
             if (state is "waiting" or "holding")
             {
-                command = new BridgeCommand(slot, 0, 0, false);
+                if (state == "waiting" && manualEligible) return false;
+                command = new BridgeCommand(slot, 0, 0, false, manualEligible);
                 return true;
             }
             if (state is not ("following" or "catching_up") ||
@@ -96,7 +103,7 @@ internal static class BridgeProtocol
                 slot,
                 (short)Math.Clamp(Math.Round(x * 32767), short.MinValue, short.MaxValue),
                 (short)Math.Clamp(Math.Round(y * 32767), short.MinValue, short.MaxValue),
-                true);
+                true, manualEligible);
             return true;
         }
         catch (JsonException)

@@ -33,6 +33,7 @@ public sealed class MainWindow : Window
     private readonly ComboBox _physicalIndex = new();
     private readonly TextBox _physicalDevice = new();
     private readonly CheckBox _isolationConfirmed = new();
+    private readonly CheckBox _rightStickFollowerOverride = new();
     private readonly Button _prepareBridge = new();
     private readonly Button _armPairing = new();
     private readonly Button _confirmRole = new();
@@ -163,6 +164,8 @@ public sealed class MainWindow : Window
         panel.Children.Add(Label("从 HidHide 设备列表复制当前实体手柄的设备 ID；程序会读取隔离配置，但设备与 XInput 编号的对应仍需实机核对。", 12, MutedBrush));
         _isolationConfirmed.Content = "我已确认实体手柄对游戏隐藏，仅由桥接读取";
         panel.Children.Add(_isolationConfirmed);
+        _rightStickFollowerOverride.Content = "右摇杆暂时控制可活动的跟随角色（主角色不再使用右摇杆瞄准）";
+        panel.Children.Add(_rightStickFollowerOverride);
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12, LineSpacing = 8 };
         _prepareBridge.Content = "准备虚拟手柄";
         _prepareBridge.Click += async (_, _) => await PrepareBridgeAsync();
@@ -366,6 +369,7 @@ public sealed class MainWindow : Window
         _physicalIndex.IsEnabled = _bridge is null && !_busy;
         _physicalDevice.IsEnabled = _bridge is null && !_busy;
         _isolationConfirmed.IsEnabled = _bridge is null && !_busy;
+        _rightStickFollowerOverride.IsEnabled = _bridge is null && !_busy;
         for (var index = 0; index < _paths.Length; index++)
         {
             if (_paths[index] is not null) _paths[index].IsEnabled = _bridge is null && !_pairingHasStarted && !_busy;
@@ -417,7 +421,7 @@ public sealed class MainWindow : Window
             var gameExecutables = Enumerable.Range(0, _selectedTopology.ClientCount)
                 .Select(index => _paths[index].Text?.Trim() ?? "").ToArray();
             var session = await BridgeSession.StartAsync(executable, slots, _physicalIndex.SelectedIndex,
-                _physicalDevice.Text.Trim(), gameExecutables);
+                _physicalDevice.Text.Trim(), gameExecutables, _rightStickFollowerOverride.IsChecked == true);
             session.AReleased += BridgeAReleased;
             session.PairingArmed += BridgePairingArmed;
             session.PairingCompleted += BridgePairingCompleted;
@@ -618,6 +622,7 @@ public sealed class MainWindow : Window
             ("waiting", "missing position") => "缺少角色位置样本；请检查两端传感器与进程绑定。自动方向已停止。",
             ("waiting", "different or unknown instance") => "两端尚无可用的同一区域实例证据；自动方向已停止。",
             ("waiting", "stale position") => "角色位置样本已过期；自动方向已停止。",
+            ("waiting", "dead follower") => "传感器报告跟随角色生命值为零；自动与右摇杆方向已停止。",
             ("waiting", "party disbanded") => "日志报告队伍解散，本次跟随已锁定停止；重新组队后再启动。",
             ("waiting", "local client left party") => "日志报告本地角色离队，本次跟随已锁定停止；重新组队后再启动。",
             ("waiting", "followed member left party") => "日志报告所跟随角色离队，本次跟随已锁定停止；重新组队后再启动。",

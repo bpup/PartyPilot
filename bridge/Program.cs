@@ -73,11 +73,12 @@ if (args.Length == 4 && args[0] == "--probe-xinput" && args[2] == "--samples" &&
 
 if (!args.Contains("--enable-controller") || !BridgeSlots.TryParse(args, out var slots))
 {
-    Console.Error.WriteLine("Usage: PartyPilot.Bridge --enable-controller --slots 1,2 [--physical-index 0 --main-slot 1 --physical-hidden-confirmed --device-instance HID\\... --game-exe C:\\Game\\PathOfExile.exe [--pairing-protected]]");
+    Console.Error.WriteLine("Usage: PartyPilot.Bridge --enable-controller --slots 1,2 [--physical-index 0 --main-slot 1 --physical-hidden-confirmed --device-instance HID\\... --game-exe C:\\Game\\PathOfExile.exe [--pairing-protected] [--right-stick-follower-override]]");
     return 2;
 }
 var physicalMode = args.Contains("--physical-index") || args.Contains("--main-slot") ||
-    args.Contains("--physical-hidden-confirmed");
+    args.Contains("--physical-hidden-confirmed") || args.Contains("--right-stick-follower-override");
+var rightStickFollowerOverride = args.Contains("--right-stick-follower-override");
 var protectedPairing = args.Contains("--pairing-protected");
 var physicalIndexPosition = Array.IndexOf(args, "--physical-index");
 var mainSlotPosition = Array.IndexOf(args, "--main-slot");
@@ -152,7 +153,7 @@ try
         var router = new BridgeRouter(pads.ToDictionary(
             entry => entry.Key,
             entry => (IPadOutput)new ViGEmPadOutput(entry.Value)));
-        if (physicalMode) router.ConfigurePhysical(mainSlot);
+        if (physicalMode) router.ConfigurePhysical(mainSlot, rightStickFollowerOverride);
         var pairingSignals = new PairingSignalTracker();
         var pairingGate = protectedPairing ? new ProtectedPairingGate() : null;
         var windowStability = new WindowStabilityTracker();
@@ -162,7 +163,8 @@ try
         var pairingTargetPid = 0;
         long pairingTargetWindow = 0;
         Console.WriteLine(JsonSerializer.Serialize(new { @event = "ready", slots, physical_mode = physicalMode,
-            pairing_protected = protectedPairing, hidhide_preflight = physicalMode }));
+            pairing_protected = protectedPairing, hidhide_preflight = physicalMode,
+            right_stick_follower_override = rightStickFollowerOverride }));
 
         Task<string?> pendingLine = Console.In.ReadLineAsync();
         while (true)

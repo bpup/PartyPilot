@@ -31,17 +31,21 @@ var movement = LiveFollowFrame.Parse(
 var waiting = LiveFollowFrame.Parse(
     "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"reason\":\"party disbanded\"}}}", 2, 3);
 var stopped = LiveFollowFrame.Waiting(3);
+var manual = LiveFollowFrame.Parse(
+    "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"holding\",\"manual_override_eligible\":true}}}", 2, 3);
 if (!movement.Command.Contains("\"slot\":3") || movement.Status != "following" ||
     !waiting.Command.Contains("\"slot\":3") || waiting.Status != "waiting" ||
     waiting.Reason != "party disbanded" ||
-    stopped.Command != waiting.Command)
+    stopped.Command != waiting.Command || !manual.Command.Contains("\"manual_override_eligible\":true"))
     throw new Exception("Live follow did not map P2 to the second client's system pad.");
 foreach (var invalidFrame in new[]
 {
     "{\"focused\":1,\"commands\":{\"3\":{\"state\":\"waiting\"}}}",
     "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":2,\"y\":0}}}",
     "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"reason\":3}}}",
-    "{\"focused\":2,\"commands\":{\"2\":{\"state\":\"waiting\"}}}"
+    "{\"focused\":2,\"commands\":{\"2\":{\"state\":\"waiting\"}}}",
+    "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"manual_override_eligible\":true}}}",
+    "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"holding\",\"manual_override_eligible\":1}}}"
 })
 {
     try { LiveFollowFrame.Parse(invalidFrame, 2, 3); throw new Exception("Invalid live follow frame was accepted."); }

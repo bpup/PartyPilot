@@ -19,9 +19,13 @@ internal sealed class BridgeRouter
 {
     private readonly Dictionary<int, PadRoute> _routes;
     private bool _physicalMode;
+    private bool _rightStickFollowerOverride;
+    private int _mainSlot;
     private int _focusedSlot;
     private PadReport _physicalReport;
     private bool _physicalConnected;
+    private short _manualX;
+    private short _manualY;
     private ushort _previousButtons;
 
     public int FocusedSlot => _physicalMode ? _focusedSlot : 0;
@@ -31,10 +35,12 @@ internal sealed class BridgeRouter
         _routes = outputs.ToDictionary(entry => entry.Key, entry => new PadRoute(entry.Value));
     }
 
-    public bool ConfigurePhysical(int mainSlot)
+    public bool ConfigurePhysical(int mainSlot, bool rightStickFollowerOverride = false)
     {
         if (!_routes.ContainsKey(mainSlot)) return false;
         _physicalMode = true;
+        _rightStickFollowerOverride = rightStickFollowerOverride;
+        _mainSlot = mainSlot;
         _focusedSlot = mainSlot;
         NeutralAll();
         return true;
@@ -61,6 +67,7 @@ internal sealed class BridgeRouter
         }
         route.Automation = command.Active ? PadReport.FromMovement(command.X, command.Y) : default;
         route.Active = command.Active;
+        route.EligibleForManualMovement = command.EligibleForManualMovement;
         route.LastUpdateUtc = nowUtc;
         Render(command.Slot, route);
         return true;
@@ -79,28 +86,34 @@ internal sealed class BridgeRouter
         _previousButtons = gamepad.Buttons;
         gamepad.Buttons &= unchecked((ushort)~(leftThumb | rightThumb));
         _physicalConnected = true;
+        _manualX = gamepad.RightX;
+        _manualY = gamepad.RightY;
+        if (_rightStickFollowerOverride && _focusedSlot == _mainSlot)
+        {
+            gamepad.RightX = 0;
+            gamepad.RightY = 0;
+        }
         _physicalReport = PadReport.FromPhysical(gamepad);
-        if (previousFocus != _focusedSlot) RenderAll();
+        if (previousFocus != _focusedSlot || _rightStickFollowerOverride) RenderAll();
         else Render(_focusedSlot, _routes[_focusedSlot]);
     }
 
     public void PhysicalDisconnected()
     {
         if (!_physicalMode) return;
-        _physicalConnected = false;
-        _physicalReport = default;
-        _previousButtons = 0;
-        Render(_focusedSlot, _routes[_focusedSlot]);
+        NeutralAll();
     }
 
     public void Tick(DateTime nowUtc)
     {
         foreach (var (slot, route) in _routes)
         {
-            if (route.Active && nowUtc - route.LastUpdateUtc > TimeSpan.FromMilliseconds(500))
+            if ((route.Active || route.EligibleForManualMovement) &&
+                nowUtc - route.LastUpdateUtc > TimeSpan.FromMilliseconds(500))
             {
                 route.Automation = default;
                 route.Active = false;
+                route.EligibleForManualMovement = false;
                 Render(slot, route);
             }
         }
@@ -110,11 +123,14 @@ internal sealed class BridgeRouter
     {
         _physicalConnected = false;
         _physicalReport = default;
+        _manualX = 0;
+        _manualY = 0;
         _previousButtons = 0;
         foreach (var route in _routes.Values)
         {
             route.Automation = default;
             route.Active = false;
+            route.EligibleForManualMovement = false;
             route.Output.SetReport(default);
         }
     }
@@ -126,9 +142,19 @@ internal sealed class BridgeRouter
 
     private void Render(int slot, PadRoute route)
     {
-        route.Output.SetReport(_physicalMode && slot == _focusedSlot
-            ? (_physicalConnected ? _physicalReport : default)
-            : route.Automation);
+        if (_physicalMode && slot == _focusedSlot)
+        {
+            route.Output.SetReport(_physicalConnected ? _physicalReport : default);
+            return;
+        }
+        if (_rightStickFollowerOverride && _physicalConnected && _focusedSlot == _mainSlot &&
+            route.EligibleForManualMovement &&
+            (Math.Abs((int)_manualX) > 8000 || Math.Abs((int)_manualY) > 8000))
+        {
+            route.Output.SetReport(PadReport.FromMovement(_manualX, _manualY));
+            return;
+        }
+        route.Output.SetReport(route.Automation);
     }
 
     private sealed class PadRoute(IPadOutput output)
@@ -137,5 +163,6 @@ internal sealed class BridgeRouter
         public PadReport Automation { get; set; }
         public DateTime LastUpdateUtc { get; set; }
         public bool Active { get; set; }
+        public bool EligibleForManualMovement { get; set; }
     }
 }

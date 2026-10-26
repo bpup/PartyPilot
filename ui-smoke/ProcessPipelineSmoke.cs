@@ -14,17 +14,17 @@ internal static class ProcessPipelineSmoke
         try
         {
             File.WriteAllText(bridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
-                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true}', flush=True)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"right_stick_follower_override\":false}', flush=True)\n" +
                 $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(log)}, 'a') as out: out.write(line)\n");
             File.WriteAllText(followExe, "#!/usr/bin/env python3\nimport time\n" +
                 "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"reason\":\"missing position\"}}}', flush=True)\n" +
                 "time.sleep(0.05)\n" +
-                "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0}}}', flush=True)\n");
+                "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0,\"manual_override_eligible\":true}}}', flush=True)\n");
             File.SetUnixFileMode(bridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(followExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             Console.WriteLine("Pipeline smoke: starting fake bridge.");
             await using var bridge = await BridgeSession.StartAsync(bridgeExe, [1, 3], 0,
-                @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"]);
+                @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"], false);
             Console.WriteLine("Pipeline smoke: fake bridge ready.");
             bridge.StartReading();
             var topology = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-split");
@@ -48,6 +48,7 @@ internal static class ProcessPipelineSmoke
             if (lines.Length < 3 ||
                 !lines[0].Contains("\"slot\":3,\"state\":\"waiting\"") ||
                 !lines[1].Contains("\"slot\":3,\"state\":\"following\"") ||
+                !lines[1].Contains("\"manual_override_eligible\":true") ||
                 !lines[^1].Contains("\"slot\":3,\"state\":\"waiting\""))
                 throw new Exception("Live follow did not hand off movement and neutralize on exit: " + string.Join(" | ", lines));
             Console.WriteLine("Desktop decision-to-bridge process handoff and stop checked with local fake executables.");

@@ -21,6 +21,11 @@ if (args.Contains("--stdin"))
 Expect("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", true, 2, true);
 Expect("{\"slot\":3,\"state\":\"holding\"}", true, 3, false);
 Expect("{\"slot\":2,\"state\":\"waiting\"}", true, 2, false);
+if (!BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"holding\",\"manual_override_eligible\":true}", out var manualHolding) ||
+    !manualHolding.EligibleForManualMovement || manualHolding.Active ||
+    BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"waiting\",\"manual_override_eligible\":true}", out _) ||
+    BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"holding\",\"manual_override_eligible\":1}", out _))
+    throw new Exception("Manual movement eligibility was not parsed safely.");
 Expect("{\"slot\":0,\"state\":\"following\",\"x\":1,\"y\":0}", false, 0, false);
 Expect("{\"slot\":2,\"state\":\"following\",\"x\":2,\"y\":0}", false, 0, false);
 Expect("{\"slot\":2,\"state\":\"following\",\"x\":0,\"y\":0}", false, 0, false);
@@ -216,6 +221,37 @@ if (pad1.Report != default || pad2ForHotkey.Report.Buttons != 0x1000 || pad2ForH
 hotkeyRouter.SetPhysical(new XInputGamepad { Buttons = 0x0040 });
 if (pad1.Report.Buttons != 0 || pad2ForHotkey.Report != default)
     throw new Exception("L3 focus switch or key suppression failed.");
+var overrideMain = new FakePad();
+var overrideFollower = new FakePad();
+var overrideHolding = new FakePad();
+var overrideWaiting = new FakePad();
+var overrideRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
+{
+    [1] = overrideMain, [2] = overrideFollower, [3] = overrideHolding, [4] = overrideWaiting
+});
+overrideRouter.ConfigurePhysical(1, rightStickFollowerOverride: true);
+overrideRouter.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0,\"manual_override_eligible\":true}", now);
+overrideRouter.ApplyLine("{\"slot\":3,\"state\":\"holding\",\"manual_override_eligible\":true}", now);
+overrideRouter.ApplyLine("{\"slot\":4,\"state\":\"waiting\"}", now);
+overrideRouter.SetPhysical(new XInputGamepad { LeftX = 111, RightX = 12000, RightY = -9000 });
+if (overrideMain.X != 111 || overrideMain.Report.RightX != 0 || overrideMain.Report.RightY != 0 ||
+    overrideFollower.X != 12000 || overrideFollower.Y != -9000 ||
+    overrideHolding.X != 12000 || overrideHolding.Y != -9000 || overrideWaiting.Report != default)
+    throw new Exception("Right stick did not move only eligible followers while keeping MAIN aim neutral.");
+overrideRouter.SetPhysical(new XInputGamepad { LeftX = 111, RightX = 8000 });
+if (overrideFollower.X != 32767 || overrideHolding.Report != default)
+    throw new Exception("Neutral right stick did not restore automated movement.");
+overrideRouter.SetPhysical(new XInputGamepad { RightX = 12000 });
+overrideRouter.ApplyLine("{\"slot\":2,\"state\":\"waiting\"}", now.AddMilliseconds(100));
+if (overrideFollower.Report != default || overrideHolding.X != 12000)
+    throw new Exception("Waiting follower was reactivated by manual input.");
+overrideRouter.Tick(now.AddMilliseconds(501));
+if (overrideHolding.Report != default)
+    throw new Exception("Manual movement survived a stale holding command.");
+overrideRouter.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0,\"manual_override_eligible\":true}", now.AddMilliseconds(502));
+overrideRouter.PhysicalDisconnected();
+if (overrideMain.Report != default || overrideFollower.Report != default || overrideHolding.Report != default)
+    throw new Exception("Physical disconnect did not neutralize right-stick and automated movement.");
 Console.WriteLine("Bridge protocol checks passed.");
 
 static void Expect(string line, bool expectedValid, int expectedSlot, bool expectedActive)

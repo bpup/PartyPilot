@@ -26,11 +26,12 @@ const (
 )
 
 type Command struct {
-	State    State   `json:"state"`
-	X        float64 `json:"x"`
-	Y        float64 `json:"y"`
-	Distance float64 `json:"distance"`
-	Reason   string  `json:"reason,omitempty"`
+	State                  State   `json:"state"`
+	X                      float64 `json:"x"`
+	Y                      float64 `json:"y"`
+	Distance               float64 `json:"distance"`
+	Reason                 string  `json:"reason,omitempty"`
+	ManualOverrideEligible bool    `json:"manual_override_eligible,omitempty"`
 }
 
 type Config struct {

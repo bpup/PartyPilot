@@ -115,3 +115,37 @@ func TestLiveFollowRejectsUnknownAndOldSamples(t *testing.T) {
 		t.Fatal("unknown area slot accepted")
 	}
 }
+
+func TestManualOverrideRequiresFreshLivingFollower(t *testing.T) {
+	now := time.Now().UTC()
+	config := follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}
+	engine, err := New(map[int]int{1: 101, 2: 202}, 1, config, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, slot := range []int{1, 2} {
+		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123, ObservedAt: now, Origin: "live"})
+	}
+	hp := 100.0
+	engine.ObserveSample(telemetry.Sample{ProcessID: 101, SeenUTC: now.Add(time.Millisecond), X: 12})
+	engine.ObserveSample(telemetry.Sample{ProcessID: 202, SeenUTC: now.Add(time.Millisecond), X: 0, Life: &hp})
+	if command := engine.Step(now.Add(time.Millisecond))[2]; command.State != follow.CatchingUp || !command.ManualOverrideEligible {
+		t.Fatalf("living follower should allow right-stick movement: %+v", command)
+	}
+	engine.ObserveSample(telemetry.Sample{ProcessID: 202, SeenUTC: now.Add(2 * time.Millisecond), X: 12, Life: &hp})
+	if command := engine.Step(now.Add(2 * time.Millisecond))[2]; command.State != follow.Holding || !command.ManualOverrideEligible {
+		t.Fatalf("living holding follower should allow manual movement: %+v", command)
+	}
+	dead := 0.0
+	engine.ObserveSample(telemetry.Sample{ProcessID: 202, SeenUTC: now.Add(3 * time.Millisecond), X: 0, Life: &dead})
+	if command := engine.Step(now.Add(3 * time.Millisecond))[2]; command.ManualOverrideEligible || command.State != follow.Waiting || command.Reason != "dead follower" {
+		t.Fatalf("dead follower should not receive automated or manual movement: %+v", command)
+	}
+	engine.ObserveSample(telemetry.Sample{ProcessID: 202, SeenUTC: now.Add(4 * time.Millisecond), X: 0})
+	if command := engine.Step(now.Add(4 * time.Millisecond))[2]; command.ManualOverrideEligible {
+		t.Fatalf("missing life data should not allow manual movement: %+v", command)
+	}
+	if command := engine.Step(now.Add(2 * time.Second))[2]; command.ManualOverrideEligible {
+		t.Fatalf("stale follower should not allow manual movement: %+v", command)
+	}
+}

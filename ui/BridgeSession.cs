@@ -24,7 +24,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     }
 
     public static async Task<BridgeSession> StartAsync(string executable, int[] slots, int physicalIndex,
-        string deviceInstance, IReadOnlyList<string> gameExecutables)
+        string deviceInstance, IReadOnlyList<string> gameExecutables, bool rightStickFollowerOverride)
     {
         if (slots.Length is < 1 or > 3 || slots.Any(slot => slot is < 1 or > 4) ||
             slots.Distinct().Count() != slots.Length || physicalIndex is < 0 or > 3 ||
@@ -56,12 +56,13 @@ internal sealed class BridgeSession : IAsyncDisposable
             start.ArgumentList.Add("--game-exe");
             start.ArgumentList.Add(game);
         }
+        if (rightStickFollowerOverride) start.ArgumentList.Add("--right-stick-follower-override");
         var process = Process.Start(start) ?? throw new InvalidOperationException("Virtual controller bridge did not start.");
         var readError = process.StandardError.ReadToEndAsync();
         try
         {
             var readyLine = await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15));
-            if (readyLine is null || !IsExpectedReady(readyLine, slots))
+            if (readyLine is null || !IsExpectedReady(readyLine, slots, rightStickFollowerOverride))
             {
                 throw new InvalidOperationException("Virtual controller bridge did not confirm the requested pad slots.");
             }
@@ -84,7 +85,7 @@ internal sealed class BridgeSession : IAsyncDisposable
         _readEvents = ReadEventsAsync();
     }
 
-    private static bool IsExpectedReady(string line, int[] slots)
+    private static bool IsExpectedReady(string line, int[] slots, bool rightStickFollowerOverride)
     {
         try
         {
@@ -94,6 +95,8 @@ internal sealed class BridgeSession : IAsyncDisposable
                    root.TryGetProperty("physical_mode", out var mode) && mode.GetBoolean() &&
                    root.TryGetProperty("pairing_protected", out var protectedMode) && protectedMode.GetBoolean() &&
                    root.TryGetProperty("hidhide_preflight", out var preflight) && preflight.GetBoolean() &&
+                   root.TryGetProperty("right_stick_follower_override", out var rightStick) &&
+                   rightStick.GetBoolean() == rightStickFollowerOverride &&
                    root.TryGetProperty("slots", out var selected) &&
                    selected.EnumerateArray().Select(value => value.GetInt32()).SequenceEqual(slots.Order());
         }

@@ -20,6 +20,7 @@ type Engine struct {
 	coordinator *party.Coordinator
 	leader      int
 	logAge      time.Duration
+	sampleAge   time.Duration
 	pidToSlot   map[int]int
 	slots       []int
 	samples     map[int]telemetry.Sample
@@ -91,7 +92,7 @@ func New(roster map[int]int, leader int, config follow.Config, logAge time.Durat
 	if err != nil {
 		return nil, err
 	}
-	return &Engine{coordinator: coordinator, leader: leader, logAge: logAge,
+	return &Engine{coordinator: coordinator, leader: leader, logAge: logAge, sampleAge: config.MaxAge,
 		pidToSlot: pidToSlot, slots: slots, samples: make(map[int]telemetry.Sample), areas: make(map[int]arealog.Signal)}, nil
 }
 
@@ -137,6 +138,7 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 		return commands
 	}
 	positions := make(map[int]follow.Position, len(e.slots))
+	deadFollowers := make(map[int]bool)
 	leaderArea, hasLeaderArea := e.areas[e.leader]
 	for _, slot := range e.slots {
 		sample, hasSample := e.samples[slot]
@@ -151,10 +153,28 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 		} else if area.Origin != "live" || area.ObservedAt.After(now) || now.Sub(area.ObservedAt) > e.logAge {
 			continue
 		}
+		if slot != e.leader && sample.Life != nil && *sample.Life <= 0 {
+			if !sample.SeenUTC.After(now) && now.Sub(sample.SeenUTC) <= e.sampleAge {
+				deadFollowers[slot] = true
+			}
+			continue
+		}
 		positions[slot] = follow.Position{
 			X: sample.X, Y: sample.Y, Seen: sample.SeenUTC, Valid: true,
 			Area: strings.ToLower(leaderArea.AreaID) + fmt.Sprintf(":%d", leaderArea.Seed),
 		}
 	}
-	return e.coordinator.Step(now, positions)
+	commands := e.coordinator.Step(now, positions)
+	for slot, command := range commands {
+		if deadFollowers[slot] {
+			commands[slot] = follow.Command{State: follow.Waiting, Reason: "dead follower"}
+			continue
+		}
+		sample, exists := e.samples[slot]
+		if exists && sample.Life != nil && *sample.Life > 0 && command.State != follow.Waiting {
+			command.ManualOverrideEligible = true
+			commands[slot] = command
+		}
+	}
+	return commands
 }

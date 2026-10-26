@@ -60,14 +60,30 @@ public static class LiveFollowFrame
                 throw new InvalidDataException("Live follow returned an invalid reason value.");
             reason = reasonValue.GetString();
         }
+        var manualEligible = false;
+        if (follower.TryGetProperty("manual_override_eligible", out var eligibleValue))
+        {
+            if (eligibleValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                throw new InvalidDataException("Live follow returned an invalid manual override flag.");
+            manualEligible = eligibleValue.GetBoolean();
+        }
         if (state is "waiting" or "holding")
-            return new FollowBridgeFrame(JsonSerializer.Serialize(new { slot = followerPad, state }), state, reason);
+        {
+            if (state == "waiting" && manualEligible)
+                throw new InvalidDataException("Waiting follower cannot receive manual movement.");
+            var command = manualEligible
+                ? JsonSerializer.Serialize(new { slot = followerPad, state, manual_override_eligible = true })
+                : JsonSerializer.Serialize(new { slot = followerPad, state });
+            return new FollowBridgeFrame(command, state, reason);
+        }
         if (state is not ("following" or "catching_up") ||
             !follower.TryGetProperty("x", out var xValue) || !xValue.TryGetDouble(out var x) ||
             !follower.TryGetProperty("y", out var yValue) || !yValue.TryGetDouble(out var y) ||
             !double.IsFinite(x) || !double.IsFinite(y) ||
             Math.Sqrt(x * x + y * y) is < 0.001 or > 1.001)
             throw new InvalidDataException("Live follow returned an invalid movement direction.");
-        return new FollowBridgeFrame(JsonSerializer.Serialize(new { slot = followerPad, state, x, y }), state, reason);
+        return new FollowBridgeFrame(manualEligible
+            ? JsonSerializer.Serialize(new { slot = followerPad, state, x, y, manual_override_eligible = true })
+            : JsonSerializer.Serialize(new { slot = followerPad, state, x, y }), state, reason);
     }
 }
