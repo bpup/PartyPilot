@@ -9,6 +9,29 @@ static void put32(uint8_t *p, uint32_t v) { put16(p, (uint16_t)v); put16(p + 2, 
 static void put64(uint8_t *p, uint64_t v) { put32(p, (uint32_t)v); put32(p + 4, (uint32_t)(v >> 32)); }
 
 int main(void) {
+    uint8_t config[PP_CONFIG_SIZE] = {0};
+    uint32_t p5_index = PP_NO_INDEX, p6_index = PP_NO_INDEX;
+    put32(config, PP_CONFIG_MAGIC);
+    put32(config + 4, PP_VERSION);
+    put32(config + 8, PP_CONFIG_SIZE);
+    put32(config + 12, 2);
+    put32(config + 16, 0);
+    assert(pp_read_config(config, sizeof(config), PP_SLOT_P5 | PP_SLOT_P6,
+                          &p5_index, &p6_index));
+    assert(p5_index == 2 && p6_index == 0);
+    put32(config + 16, 2);
+    assert(!pp_read_config(config, sizeof(config), PP_SLOT_P5 | PP_SLOT_P6,
+                           &p5_index, &p6_index));
+    put32(config + 16, PP_NO_INDEX);
+    assert(pp_read_config(config, sizeof(config), PP_SLOT_P5,
+                          &p5_index, &p6_index));
+    assert(p5_index == 2 && p6_index == PP_NO_INDEX);
+    assert(!pp_read_config(config, sizeof(config), PP_SLOT_P5 | PP_SLOT_P6,
+                           &p5_index, &p6_index));
+    config[0] = 0;
+    assert(!pp_read_config(config, sizeof(config), PP_SLOT_P5,
+                           &p5_index, &p6_index));
+
     uint8_t frame[PP_FRAME_SIZE] = {0};
     pp_report output;
     put32(frame, PP_MAGIC);

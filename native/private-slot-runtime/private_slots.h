@@ -5,8 +5,11 @@
 #include <stdint.h>
 
 #define PP_FRAME_SIZE 76u
+#define PP_CONFIG_SIZE 20u
 #define PP_MAGIC 0x50505336u
 #define PP_VERSION 1u
+#define PP_CONFIG_MAGIC 0x43535050u
+#define PP_NO_INDEX 0xffffffffu
 #define PP_STATUS_READY 2u
 #define PP_SLOT_P5 1u
 #define PP_SLOT_P6 2u
@@ -34,5 +37,8 @@ typedef enum pp_read_result {
 pp_read_result pp_read_pad(const volatile uint8_t *frame, size_t length,
                            int player, uint64_t now_tick, uint64_t max_age_ms,
                            pp_report *out);
+
+int pp_read_config(const volatile uint8_t *config, size_t length,
+                   uint32_t connected, uint32_t *p5_index, uint32_t *p6_index);
 
 #endif

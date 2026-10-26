@@ -10,16 +10,21 @@ internal sealed class PrivateSlotPublisher : IDisposable
 {
     private readonly object _sync = new();
     private readonly MemoryMappedFile? _mapping;
+    private readonly MemoryMappedFile? _configMapping;
     private readonly MemoryMappedViewAccessor _view;
+    private readonly MemoryMappedViewAccessor? _configView;
     private readonly Func<bool> _processAlive;
     private readonly uint _connected;
     private bool _disposed;
 
     private PrivateSlotPublisher(MemoryMappedFile? mapping, MemoryMappedViewAccessor view,
+        MemoryMappedFile? configMapping, MemoryMappedViewAccessor? configView,
         Func<bool> processAlive, bool includeP6)
     {
         _mapping = mapping;
         _view = view;
+        _configMapping = configMapping;
+        _configView = configView;
         _processAlive = processAlive;
         _connected = includeP6 ? PrivateSlotFrame.P5 | PrivateSlotFrame.P6 : PrivateSlotFrame.P5;
         var initial = new byte[PrivateSlotFrame.Size];
@@ -29,26 +34,42 @@ internal sealed class PrivateSlotPublisher : IDisposable
         if (includeP6) WritePadCore(6, default);
     }
 
-    internal static PrivateSlotPublisher OpenForProcess(Process gameProcess, bool includeP6)
+    internal static PrivateSlotPublisher OpenForProcess(Process gameProcess, bool includeP6,
+        int p5LocalIndex, int? p6LocalIndex)
     {
         ArgumentNullException.ThrowIfNull(gameProcess);
         if (!OperatingSystem.IsWindows() || gameProcess.Id <= 0 || gameProcess.HasExited)
             throw new InvalidOperationException("A live Windows Client 3 process is required.");
         // The caller must already have bound this Process object to Client 3.
-        var mapping = MemoryMappedFile.CreateOrOpen($"Local\\PartyPilot.PrivateSlots.{gameProcess.Id}",
-            PrivateSlotFrame.Size, MemoryMappedFileAccess.ReadWrite);
+        var config = PrivateSlotConfig.Encode(includeP6, p5LocalIndex, p6LocalIndex);
+        var configMapping = MemoryMappedFile.CreateNew($"Local\\PartyPilot.PrivateSlots.Config.{gameProcess.Id}",
+            PrivateSlotConfig.Size, MemoryMappedFileAccess.ReadWrite);
+        MemoryMappedViewAccessor? configView = null;
+        MemoryMappedFile? mapping = null;
+        MemoryMappedViewAccessor? view = null;
         try
         {
-            var view = mapping.CreateViewAccessor(0, PrivateSlotFrame.Size, MemoryMappedFileAccess.ReadWrite);
-            try { return new PrivateSlotPublisher(mapping, view, () => !gameProcess.HasExited, includeP6); }
-            catch { view.Dispose(); throw; }
+            configView = configMapping.CreateViewAccessor(0, PrivateSlotConfig.Size, MemoryMappedFileAccess.ReadWrite);
+            configView.WriteArray(0, config, 0, config.Length);
+            mapping = MemoryMappedFile.CreateNew($"Local\\PartyPilot.PrivateSlots.{gameProcess.Id}",
+                PrivateSlotFrame.Size, MemoryMappedFileAccess.ReadWrite);
+            view = mapping.CreateViewAccessor(0, PrivateSlotFrame.Size, MemoryMappedFileAccess.ReadWrite);
+            return new PrivateSlotPublisher(mapping, view, configMapping, configView,
+                () => !gameProcess.HasExited, includeP6);
         }
-        catch { mapping.Dispose(); throw; }
+        catch
+        {
+            view?.Dispose();
+            mapping?.Dispose();
+            configView?.Dispose();
+            configMapping.Dispose();
+            throw;
+        }
     }
 
     // Anonymous view keeps the memory protocol testable without Windows.
     internal static PrivateSlotPublisher CreateForTest(MemoryMappedViewAccessor view,
-        Func<bool> processAlive, bool includeP6) => new(null, view, processAlive, includeP6);
+        Func<bool> processAlive, bool includeP6) => new(null, view, null, null, processAlive, includeP6);
 
     internal bool IsReady
     {
@@ -97,6 +118,8 @@ internal sealed class PrivateSlotPublisher : IDisposable
             _disposed = true;
             _view.Dispose();
             _mapping?.Dispose();
+            _configView?.Dispose();
+            _configMapping?.Dispose();
         }
     }
 

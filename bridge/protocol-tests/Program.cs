@@ -19,6 +19,7 @@ if (args.Contains("--stdin"))
 }
 
 PrivateSlotFrameTests.Run();
+PrivateSlotConfigTests.Run();
 PrivateSlotPublisherTests.Run();
 Client3FocusRoutingTests.Run();
 Client3InputPublisherTests.Run();

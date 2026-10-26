@@ -17,8 +17,6 @@ typedef DWORD (WINAPI *get_capabilities_fn)(DWORD, DWORD, XINPUT_CAPABILITIES *)
 typedef DWORD (WINAPI *set_state_fn)(DWORD, XINPUT_VIBRATION *);
 
 int main(void) {
-    if (!SetEnvironmentVariableW(L"PARTYPILOT_P5_LOCAL_INDEX", L"0") ||
-        !SetEnvironmentVariableW(L"PARTYPILOT_P6_LOCAL_INDEX", L"1")) return 2;
     HMODULE xinput = LoadLibraryW(L"xinput1_4.dll");
     if (xinput == NULL) { fputs("XInput 1.4 unavailable.\n", stderr); return 2; }
     get_state_fn get_state = (get_state_fn)GetProcAddress(xinput, "XInputGetState");
@@ -34,6 +32,20 @@ int main(void) {
     uint8_t *frame = (uint8_t *)MapViewOfFile(mapping, FILE_MAP_READ | FILE_MAP_WRITE,
                                               0, 0, PP_FRAME_SIZE);
     if (frame == NULL) return 2;
+    swprintf(name, sizeof(name) / sizeof(name[0]),
+             L"Local\\PartyPilot.PrivateSlots.Config.%lu", GetCurrentProcessId());
+    HANDLE config_mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0,
+                                               PP_CONFIG_SIZE, name);
+    if (config_mapping == NULL) return 2;
+    uint8_t *config = (uint8_t *)MapViewOfFile(config_mapping, FILE_MAP_READ | FILE_MAP_WRITE,
+                                               0, 0, PP_CONFIG_SIZE);
+    if (config == NULL) return 2;
+    memset(config, 0, PP_CONFIG_SIZE);
+    put32(config, PP_CONFIG_MAGIC);
+    put32(config + 4, PP_VERSION);
+    put32(config + 8, PP_CONFIG_SIZE);
+    put32(config + 12, 2); // Explicit test indices, not a game mapping.
+    put32(config + 16, 0);
     memset(frame, 0, PP_FRAME_SIZE);
     put32(frame, PP_MAGIC);
     put32(frame + 4, PP_VERSION);
@@ -60,21 +72,21 @@ int main(void) {
     XINPUT_STATE state = {0};
     XINPUT_CAPABILITIES caps = {0};
     XINPUT_VIBRATION vibration = {0};
-    if (get_state(0, &state) != ERROR_SUCCESS || state.Gamepad.wButtons != 0x1000 ||
-        get_state(1, &state) != ERROR_SUCCESS || state.Gamepad.wButtons != 0x0020 ||
-        get_state(2, &state) != ERROR_DEVICE_NOT_CONNECTED ||
-        get_capabilities(0, 0, &caps) != ERROR_SUCCESS ||
-        set_state(1, &vibration) != ERROR_SUCCESS) {
+    if (get_state(2, &state) != ERROR_SUCCESS || state.Gamepad.wButtons != 0x1000 ||
+        get_state(0, &state) != ERROR_SUCCESS || state.Gamepad.wButtons != 0x0020 ||
+        get_state(1, &state) != ERROR_DEVICE_NOT_CONNECTED ||
+        get_capabilities(2, 0, &caps) != ERROR_SUCCESS ||
+        set_state(0, &vibration) != ERROR_SUCCESS) {
         fputs("Private XInput routing failed.\n", stderr);
         return 1;
     }
     put64(frame + 40, GetTickCount64() - 501);
-    if (get_state(0, &state) != ERROR_SUCCESS || state.Gamepad.wButtons != 0) {
+    if (get_state(2, &state) != ERROR_SUCCESS || state.Gamepad.wButtons != 0) {
         fputs("Stale input was not neutralized.\n", stderr);
         return 1;
     }
     InterlockedExchange((volatile LONG *)(frame + 12), 5);
-    if (get_state(0, &state) != ERROR_DEVICE_NOT_CONNECTED) {
+    if (get_state(2, &state) != ERROR_DEVICE_NOT_CONNECTED) {
         fputs("Stopped private slot remained connected.\n", stderr);
         return 1;
     }

@@ -14,8 +14,10 @@ internal sealed class Client3InputPublisher : IDisposable
         _includeP6 = includeP6;
     }
 
-    internal static Client3InputPublisher OpenForProcess(Process client3, bool includeP6) =>
-        new(PrivateSlotPublisher.OpenForProcess(client3, includeP6), includeP6);
+    internal static Client3InputPublisher OpenForProcess(Process client3, bool includeP6,
+        int p5LocalIndex, int? p6LocalIndex) =>
+        new(PrivateSlotPublisher.OpenForProcess(client3, includeP6,
+            p5LocalIndex, p6LocalIndex), includeP6);
 
     internal static Client3InputPublisher CreateForTest(PrivateSlotPublisher publisher,
         bool includeP6) => new(publisher, includeP6);

@@ -15,6 +15,23 @@ static uint64_t read64(const volatile uint8_t *data) {
     return (uint64_t)read32(data) | ((uint64_t)read32(data + 4) << 32);
 }
 
+int pp_read_config(const volatile uint8_t *config, size_t length,
+                   uint32_t connected, uint32_t *p5_index, uint32_t *p6_index) {
+    if (config == NULL || length != PP_CONFIG_SIZE || p5_index == NULL ||
+        p6_index == NULL || read32(config) != PP_CONFIG_MAGIC ||
+        read32(config + 4) != PP_VERSION || read32(config + 8) != PP_CONFIG_SIZE ||
+        (connected != PP_SLOT_P5 && connected != (PP_SLOT_P5 | PP_SLOT_P6)))
+        return 0;
+    uint32_t p5 = read32(config + 12);
+    uint32_t p6 = read32(config + 16);
+    if (p5 > 3 || (connected == PP_SLOT_P5 && p6 != PP_NO_INDEX) ||
+        (connected == (PP_SLOT_P5 | PP_SLOT_P6) && (p6 > 3 || p5 == p6)))
+        return 0;
+    *p5_index = p5;
+    *p6_index = p6;
+    return 1;
+}
+
 pp_read_result pp_read_pad(const volatile uint8_t *frame, size_t length,
                            int player, uint64_t now_tick, uint64_t max_age_ms,
                            pp_report *out) {
