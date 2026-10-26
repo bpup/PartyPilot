@@ -9,10 +9,19 @@ func (g *Grid) HasLineOfSight(fromX, fromY, toX, toY float64, clearance int) boo
 		!finite(fromX) || !finite(fromY) || !finite(toX) || !finite(toY) {
 		return false
 	}
-	return g.lineOfSight(newGridAccess(g), fromX, fromY, toX, toY, clearance)
+	return g.lineOfSight(newGridAccess(g), fromX, fromY, toX, toY, clearance, nil)
 }
 
-func (g *Grid) lineOfSight(access gridAccess, fromX, fromY, toX, toY float64, clearance int) bool {
+type avoidRegion struct {
+	x, y, radius float64
+}
+
+func (region *avoidRegion) contains(x, y float64) bool {
+	return region != nil && math.Hypot(x-region.x, y-region.y) < region.radius
+}
+
+func (g *Grid) lineOfSight(access gridAccess, fromX, fromY, toX, toY float64,
+	clearance int, avoid *avoidRegion) bool {
 	if !finite(fromX) || !finite(fromY) || !finite(toX) || !finite(toY) || clearance < 0 {
 		return false
 	}
@@ -37,6 +46,12 @@ func (g *Grid) lineOfSight(access gridAccess, fromX, fromY, toX, toY float64, cl
 		y := int(math.Round(fromCellY + (toCellY-fromCellY)*fraction))
 		if !access.clear(Cell{X: x, Y: y}, clearance) {
 			return false
+		}
+		if avoid != nil {
+			centerX, centerY := g.center(Cell{X: x, Y: y})
+			if avoid.contains(centerX, centerY) {
+				return false
+			}
 		}
 	}
 	return true

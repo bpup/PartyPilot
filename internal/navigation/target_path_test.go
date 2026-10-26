@@ -35,3 +35,36 @@ func TestTargetNavigationRejectsDiagonalCornerAndNarrowChannel(t *testing.T) {
 		t.Fatal("extreme finite coordinates bypassed bounded grid checks")
 	}
 }
+
+func TestTargetNavigationAvoidsObservedLeaderAcrossEntireRoute(t *testing.T) {
+	g := &Grid{Area: "instance", CellSize: 1, Width: 40, Height: 31,
+		TargetNavigation: true}
+	if direct, ok := g.TargetWaypoints(5, 15, 25, 15); !ok ||
+		len(direct) != 1 || direct[0] != (Waypoint{25, 15}) {
+		t.Fatalf("open map did not use direct route: %v, %v", direct, ok)
+	}
+	waypoints, ok := g.TargetWaypointsAvoid(5, 15, 25, 15, 15, 15, 5)
+	if !ok || len(waypoints) == 0 || waypoints[0].Y == 15 {
+		t.Fatalf("leader avoidance did not bend route: %v, %v", waypoints, ok)
+	}
+	access := newGridAccess(g)
+	previous := Waypoint{5, 15}
+	avoid := &avoidRegion{x: 15, y: 15, radius: 5}
+	for _, waypoint := range waypoints {
+		if !g.lineOfSight(access, previous.X, previous.Y,
+			waypoint.X, waypoint.Y, 0, avoid) {
+			t.Fatalf("simplified route crossed leader region: %v", waypoints)
+		}
+		previous = waypoint
+	}
+	if _, ok := g.TargetWaypointsAvoid(5, 15, 25, 15, 15, 15, math.NaN()); ok {
+		t.Fatal("invalid avoidance radius was accepted")
+	}
+	if _, ok := g.TargetWaypointsAvoid(5, 15, 25, 15, 15, 15, 100); ok {
+		t.Fatal("unavoidable leader exclusion produced a route")
+	}
+	g.OriginX, g.CellSize = math.MaxFloat64, math.MaxFloat64
+	if g.Valid() {
+		t.Fatal("overflowing grid coordinate mapping was accepted")
+	}
+}

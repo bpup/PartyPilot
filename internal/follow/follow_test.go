@@ -272,6 +272,47 @@ func TestTargetTrailAvoidsLeaderOnDirectSegment(t *testing.T) {
 	}
 }
 
+func TestTargetTerrainTrailAvoidsLeaderAfterTurnaround(t *testing.T) {
+	at := time.Unix(65, 0)
+	engine, ok := New(Config{StopDistance: 9, ResumeDistance: 10, CatchUpDistance: 30,
+		MaxAge: 2 * time.Second, TargetTrail: true})
+	if !ok {
+		t.Fatal("invalid terrain trail config")
+	}
+	grid := &navigation.Grid{Area: "instance", CellSize: 1, Width: 45, Height: 31,
+		TargetNavigation: true}
+	follower := Position{X: 5, Y: 15, Area: "instance", Seen: at, Valid: true}
+	leader := Position{X: 25, Y: 15, Area: "instance", Seen: at, Valid: true}
+	if command := engine.StepWithTerrain(at, leader, follower, grid); command.State != Following ||
+		command.Y != 0 {
+		t.Fatalf("initial separated leader unexpectedly bent route: %+v", command)
+	}
+	at = at.Add(time.Second)
+	leader.X, leader.Seen, follower.Seen = 15, at, at
+	command := engine.StepWithTerrain(at, leader, follower, grid)
+	if command.State != Following || command.Y == 0 {
+		t.Fatalf("leader between follower and trail target was not avoided: %+v", command)
+	}
+}
+
+func TestTargetTerrainUsesMarkedRecoveryWhenAvoidanceHasNoRoute(t *testing.T) {
+	at := time.Unix(66, 0)
+	engine, ok := New(Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 30,
+		MaxAge: time.Second, TargetTrail: true})
+	if !ok {
+		t.Fatal("invalid terrain recovery config")
+	}
+	grid := &navigation.Grid{Area: "instance", CellSize: 1, Width: 45, Height: 31,
+		TargetNavigation: true}
+	command := engine.StepWithTerrain(at,
+		Position{X: 25, Y: 15, Area: "instance", Seen: at, Valid: true},
+		Position{X: 5, Y: 15, Area: "instance", Seen: at, Valid: true}, grid)
+	if command.State != Following || command.Reason != "Obstacle recovery" ||
+		command.X == 0 && command.Y == 0 {
+		t.Fatalf("unreachable leader exclusion did not use marked recovery: %+v", command)
+	}
+}
+
 func TestTrailAndTerrainAdvanceBeforeNextTrailSample(t *testing.T) {
 	now := time.Unix(51, 0)
 	engine, ok := New(Config{StopDistance: 1, ResumeDistance: 2, CatchUpDistance: 10,

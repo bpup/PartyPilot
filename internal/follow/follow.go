@@ -226,7 +226,21 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 	}
 	if terrain != nil {
 		var ok bool
-		dx, dy, ok = terrain.NextDirection(follower.X, follower.Y, targetX, targetY)
+		if e.config.TargetTrail && terrain.TargetNavigation {
+			dx, dy, ok = terrain.NextDirectionAvoid(follower.X, follower.Y,
+				targetX, targetY, leader.X, leader.Y, 5)
+			if !ok {
+				recoveryX, recoveryY := playerDetour(leader.X, leader.Y,
+					follower.X, follower.Y, targetX, targetY)
+				dx, dy = recoveryX-follower.X, recoveryY-follower.Y
+				if length := math.Hypot(dx, dy); length > 0 {
+					dx, dy, ok = dx/length, dy/length, true
+					reason = "Obstacle recovery"
+				}
+			}
+		} else {
+			dx, dy, ok = terrain.NextDirection(follower.X, follower.Y, targetX, targetY)
+		}
 		if !ok || (dx == 0 && dy == 0) {
 			return wait("terrain route unavailable")
 		}

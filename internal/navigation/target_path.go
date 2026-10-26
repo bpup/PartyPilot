@@ -29,6 +29,22 @@ func (q *routeQueue) Pop() any {
 // clearance, diagonal corner guard and line-of-sight simplification. The grid
 // still needs a verified area identity and coordinate mapping before live use.
 func (g *Grid) TargetWaypoints(fromX, fromY, toX, toY float64) ([]Waypoint, bool) {
+	return g.targetWaypoints(fromX, fromY, toX, toY, nil)
+}
+
+// TargetWaypointsAvoid treats cells within radius of the observed leader as
+// unavailable throughout search and route simplification.
+func (g *Grid) TargetWaypointsAvoid(fromX, fromY, toX, toY,
+	avoidX, avoidY, radius float64) ([]Waypoint, bool) {
+	if !finite(avoidX) || !finite(avoidY) || !finite(radius) || radius <= 0 {
+		return nil, false
+	}
+	return g.targetWaypoints(fromX, fromY, toX, toY,
+		&avoidRegion{x: avoidX, y: avoidY, radius: radius})
+}
+
+func (g *Grid) targetWaypoints(fromX, fromY, toX, toY float64,
+	avoid *avoidRegion) ([]Waypoint, bool) {
 	if !g.Valid() || !g.TargetNavigation ||
 		!finite(fromX) || !finite(fromY) || !finite(toX) || !finite(toY) {
 		return nil, false
@@ -43,7 +59,8 @@ func (g *Grid) TargetWaypoints(fromX, fromY, toX, toY float64) ([]Waypoint, bool
 		if value, known := allowedCache[index]; known {
 			return value
 		}
-		value := access.clear(cell, 1)
+		centerX, centerY := g.center(cell)
+		value := access.clear(cell, 1) && !avoid.contains(centerX, centerY)
 		allowedCache[index] = value
 		return value
 	}
@@ -77,12 +94,12 @@ func (g *Grid) TargetWaypoints(fromX, fromY, toX, toY float64) ([]Waypoint, bool
 	if !startOK || !goalOK {
 		return nil, false
 	}
-	if g.lineOfSight(access, fromX, fromY, toX, toY, 1) {
+	if g.lineOfSight(access, fromX, fromY, toX, toY, 1, avoid) {
 		return []Waypoint{{toX, toY}}, true
 	}
 	startIndex, goalIndex := g.index(start), g.index(goal)
 	if startIndex == goalIndex {
-		if g.lineOfSight(access, fromX, fromY, toX, toY, 0) {
+		if g.lineOfSight(access, fromX, fromY, toX, toY, 0, avoid) {
 			return []Waypoint{{toX, toY}}, true
 		}
 		return nil, false
@@ -158,7 +175,7 @@ func (g *Grid) TargetWaypoints(fromX, fromY, toX, toY float64) ([]Waypoint, bool
 		chosen := -1
 		for next := len(points) - 1; next > index && checks < 8192; next-- {
 			checks++
-			if g.lineOfSight(access, current.X, current.Y, points[next].X, points[next].Y, 1) {
+			if g.lineOfSight(access, current.X, current.Y, points[next].X, points[next].Y, 1, avoid) {
 				chosen = next
 				break
 			}
@@ -166,7 +183,7 @@ func (g *Grid) TargetWaypoints(fromX, fromY, toX, toY float64) ([]Waypoint, bool
 		if chosen < 0 {
 			chosen = index + 1
 			if !g.lineOfSight(access, current.X, current.Y,
-				points[chosen].X, points[chosen].Y, 0) {
+				points[chosen].X, points[chosen].Y, 0, avoid) {
 				return nil, false
 			}
 		}
@@ -179,6 +196,21 @@ func (g *Grid) TargetWaypoints(fromX, fromY, toX, toY float64) ([]Waypoint, bool
 
 func (g *Grid) targetDirection(fromX, fromY, toX, toY float64) (float64, float64, bool) {
 	points, ok := g.TargetWaypoints(fromX, fromY, toX, toY)
+	return directionFromWaypoints(points, fromX, fromY, ok)
+}
+
+// NextDirectionAvoid is available only for target-format terrain.
+func (g *Grid) NextDirectionAvoid(fromX, fromY, toX, toY,
+	avoidX, avoidY, radius float64) (float64, float64, bool) {
+	if g == nil || !g.TargetNavigation {
+		return 0, 0, false
+	}
+	points, ok := g.TargetWaypointsAvoid(fromX, fromY, toX, toY,
+		avoidX, avoidY, radius)
+	return directionFromWaypoints(points, fromX, fromY, ok)
+}
+
+func directionFromWaypoints(points []Waypoint, fromX, fromY float64, ok bool) (float64, float64, bool) {
 	if !ok || len(points) == 0 {
 		return 0, 0, false
 	}

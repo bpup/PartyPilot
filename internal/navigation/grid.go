@@ -30,6 +30,10 @@ func (g *Grid) Valid() bool {
 		!finite(g.CellSize) || g.CellSize <= 0 || g.Width < 1 || g.Height < 1 {
 		return false
 	}
+	if !finite(g.OriginX+float64(g.Width-1)*g.CellSize) ||
+		!finite(g.OriginY+float64(g.Height-1)*g.CellSize) {
+		return false
+	}
 	if g.packed != nil {
 		return g.TargetNavigation && g.PackedSource &&
 			g.Width <= 100000 && g.Height <= 100000 &&
