@@ -104,23 +104,64 @@ func TestLiveTerrainBindingRequiresMatchingCaptureAndLiveEvidence(t *testing.T) 
 		t.Fatalf("wrong live hash moved: %+v", got)
 	}
 	observeGridSample(e, telemetry.Sample{ProcessID: 202, SeenUTC: at.Add(time.Millisecond), AreaHash: 77, X: 10, Y: 20})
-	if got := e.Step(at.Add(time.Millisecond))[2]; got.State == follow.Waiting {
-		t.Fatalf("matching evidence did not reach terrain planner: %+v", got)
+	if got := e.Step(at.Add(time.Millisecond))[2]; got.State != follow.Waiting ||
+		got.Reason != "terrain still settling" {
+		t.Fatalf("one terrain/motion frame moved: %+v", got)
 	}
-	observeGridSample(e, telemetry.Sample{ProcessID: 101, SeenUTC: at.Add(1250 * time.Microsecond), AreaHash: 78, X: 30, Y: 20})
-	if got := e.Step(at.Add(1250 * time.Microsecond))[2]; got.State != follow.Waiting {
+	if got := e.Step(at.Add(time.Millisecond))[2]; got.State != follow.Waiting {
+		t.Fatalf("repeated frame counted twice: %+v", got)
+	}
+	for frame := 2; frame <= 3; frame++ {
+		frameAt := at.Add(time.Duration(frame) * time.Millisecond)
+		observeGridSample(e, telemetry.Sample{ProcessID: 101, SeenUTC: frameAt, AreaHash: 77, X: 30, Y: 20})
+		observeGridSample(e, telemetry.Sample{ProcessID: 202, SeenUTC: frameAt, AreaHash: 77, X: 10, Y: 20})
+		got := e.Step(frameAt)[2]
+		if frame == 2 && got.State != follow.Waiting || frame == 3 && got.State == follow.Waiting {
+			t.Fatalf("frame %d did not follow three-frame gate: %+v", frame, got)
+		}
+	}
+	observeGridSample(e, telemetry.Sample{ProcessID: 202, SeenUTC: at.Add(3200 * time.Microsecond), AreaHash: 78, X: 10, Y: 20})
+	observeGridSample(e, telemetry.Sample{ProcessID: 202, SeenUTC: at.Add(3400 * time.Microsecond), AreaHash: 77, X: 10, Y: 20})
+	if got := e.Step(at.Add(3400 * time.Microsecond))[2]; got.State != follow.Waiting {
+		t.Fatalf("unobserved bad sample failed to reset stability: %+v", got)
+	}
+	observeGridSample(e, telemetry.Sample{ProcessID: 101, SeenUTC: at.Add(4250 * time.Microsecond), AreaHash: 78, X: 30, Y: 20})
+	if got := e.Step(at.Add(4250 * time.Microsecond))[2]; got.State != follow.Waiting {
 		t.Fatalf("target hash mismatch moved: %+v", got)
 	}
-	observeGridSample(e, telemetry.Sample{ProcessID: 101, SeenUTC: at.Add(1400 * time.Microsecond), AreaHash: 77, X: 30, Y: 20})
-	observeGridSample(e, telemetry.Sample{ProcessID: 202, SeenUTC: at.Add(1500 * time.Microsecond), AreaHash: 77, X: 500, Y: 20})
-	if got := e.Step(at.Add(1500 * time.Microsecond))[2]; got.State != follow.Waiting {
+	observeGridSample(e, telemetry.Sample{ProcessID: 101, SeenUTC: at.Add(4400 * time.Microsecond), AreaHash: 77, X: 30, Y: 20})
+	observeGridSample(e, telemetry.Sample{ProcessID: 202, SeenUTC: at.Add(4500 * time.Microsecond), AreaHash: 77, X: 500, Y: 20})
+	if got := e.Step(at.Add(4500 * time.Microsecond))[2]; got.State != follow.Waiting {
 		t.Fatalf("position outside bound map moved: %+v", got)
 	}
 	e.ObserveArea(arealog.Signal{Slot: 2, AreaID: "G2_4", Seed: 456,
-		ObservedAt: at.Add(2 * time.Millisecond), Origin: "live"})
-	observeGridSample(e, telemetry.Sample{ProcessID: 202, SeenUTC: at.Add(3 * time.Millisecond), AreaHash: 77, X: 10, Y: 20})
-	if got := e.Step(at.Add(3 * time.Millisecond))[2]; got.State != follow.Waiting {
+		ObservedAt: at.Add(5 * time.Millisecond), Origin: "live"})
+	observeGridSample(e, telemetry.Sample{ProcessID: 202, SeenUTC: at.Add(6 * time.Millisecond), AreaHash: 77, X: 10, Y: 20})
+	if got := e.Step(at.Add(6 * time.Millisecond))[2]; got.State != follow.Waiting {
 		t.Fatalf("changed seed moved: %+v", got)
+	}
+	for _, slot := range []int{1, 2} {
+		e.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
+			ObservedAt: at.Add(7 * time.Millisecond), Origin: "live"})
+	}
+	for frame := 1; frame <= 3; frame++ {
+		frameAt := at.Add(time.Duration(7+frame) * time.Millisecond)
+		observeGridSample(e, telemetry.Sample{ProcessID: 101, SeenUTC: frameAt, AreaHash: 77, X: 30, Y: 20})
+		observeGridSample(e, telemetry.Sample{ProcessID: 202, SeenUTC: frameAt, AreaHash: 77, X: 10, Y: 20})
+		got := e.Step(frameAt)[2]
+		if frame < 3 && got.State != follow.Waiting || frame == 3 && got.State == follow.Waiting {
+			t.Fatalf("area return frame %d did not restart stability gate: %+v", frame, got)
+		}
+	}
+	for _, slot := range []int{1, 2} {
+		e.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
+			ObservedAt: at.Add(11 * time.Millisecond), Origin: "live"})
+	}
+	frameAt := at.Add(12 * time.Millisecond)
+	observeGridSample(e, telemetry.Sample{ProcessID: 101, SeenUTC: frameAt, AreaHash: 77, X: 30, Y: 20})
+	observeGridSample(e, telemetry.Sample{ProcessID: 202, SeenUTC: frameAt, AreaHash: 77, X: 10, Y: 20})
+	if got := e.Step(frameAt)[2]; got.State != follow.Waiting {
+		t.Fatalf("new generation signal with same area bypassed stability gate: %+v", got)
 	}
 }
 

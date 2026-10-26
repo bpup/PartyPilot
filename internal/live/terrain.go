@@ -35,6 +35,32 @@ type boundTerrain struct {
 	seen    time.Time
 }
 
+// A bounded motion-frame gate adapted from the supplied build's three-unique-
+// frame rule. The capture remains immutable, so this is not a live terrain
+// refresh check.
+type terrainStability struct {
+	area     string
+	lastTick int64
+	frames   int
+}
+
+func (s *terrainStability) observe(area string, tick int64) bool {
+	if area == "" || tick <= 0 {
+		*s = terrainStability{}
+		return false
+	}
+	if s.area != area {
+		*s = terrainStability{area: area}
+	}
+	if s.lastTick != tick {
+		s.lastTick = tick
+		if s.frames < 3 {
+			s.frames++
+		}
+	}
+	return s.frames >= 3
+}
+
 func LoadTerrainBinding(path string) (TerrainBinding, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -92,6 +118,7 @@ func (e *Engine) SetTerrainBinding(slot int, binding TerrainBinding) error {
 		e.terrains = make(map[int]boundTerrain)
 	}
 	e.terrains[slot] = boundTerrain{binding: binding, grid: grid, capture: capture, seen: capture.SeenUTC}
+	e.terrainStable = make(map[int]terrainStability)
 	e.coordinator.ResetFollow()
 	return nil
 }

@@ -30,6 +30,7 @@ type Engine struct {
 	samples          map[int]telemetry.Sample
 	areas            map[int]arealog.Signal
 	terrains         map[int]boundTerrain
+	terrainStable    map[int]terrainStability
 	leaderName       string
 	memberNames      map[int]string
 	stopped          string
@@ -99,6 +100,7 @@ func (e *Engine) Stop(reason string) {
 		e.stopped = reason
 	}
 	e.coordinator.ResetFollow()
+	e.terrainStable = make(map[int]terrainStability)
 }
 
 // ObserveParty latches a stop. A later position or area update cannot resume
@@ -171,6 +173,10 @@ func (e *Engine) ObserveSample(sample telemetry.Sample) bool {
 			sample.ReceivedAt.Before(previous.ReceivedAt)) {
 		return false
 	}
+	if bound, exists := e.terrains[slot]; exists &&
+		(sample.AreaHash != bound.binding.AreaHash || sample.SeenUTC.Before(bound.seen)) {
+		delete(e.terrainStable, slot)
+	}
 	e.samples[slot] = sample
 	return true
 }
@@ -187,8 +193,10 @@ func (e *Engine) ObserveArea(signal arealog.Signal) bool {
 		return false
 	}
 	if previous, exists := e.areas[signal.Slot]; exists &&
-		(!strings.EqualFold(previous.AreaID, signal.AreaID) || previous.Seed != signal.Seed) {
+		(signal.ObservedAt.After(previous.ObservedAt) ||
+			!strings.EqualFold(previous.AreaID, signal.AreaID) || previous.Seed != signal.Seed) {
 		e.coordinator.ResetFollow()
+		delete(e.terrainStable, signal.Slot)
 	}
 	e.areas[signal.Slot] = signal
 	return true
@@ -207,6 +215,7 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 	positions := make(map[int]follow.Position, len(e.slots))
 	deadFollowers := make(map[int]bool)
 	terrainWait := make(map[int]bool)
+	terrainSettling := make(map[int]bool)
 	skewWait := make(map[int]bool)
 	terrains := make(map[int]*navigation.Grid)
 	for _, slot := range e.slots {
@@ -214,12 +223,15 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 		area, hasArea := e.areas[slot]
 		if !hasSample || !hasArea || sample.SeenUTC.Before(area.ObservedAt) ||
 			sample.ReceivedAt.After(now) || now.Sub(sample.ReceivedAt) > e.sampleAge {
+			delete(e.terrainStable, slot)
 			continue
 		}
 		if area.Origin != "live" || area.ObservedAt.After(now) || now.Sub(area.ObservedAt) > e.logAge {
+			delete(e.terrainStable, slot)
 			continue
 		}
 		if slot != e.leader && sample.Life != nil && *sample.Life <= 0 {
+			delete(e.terrainStable, slot)
 			if !sample.SeenUTC.After(now) && now.Sub(sample.SeenUTC) <= e.sampleAge {
 				deadFollowers[slot] = true
 			}
@@ -234,10 +246,18 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 			if sample.AreaHash != bound.binding.AreaHash || sample.SeenUTC.Before(bound.seen) ||
 				!strings.EqualFold(area.AreaID, bound.binding.AreaID) || area.Seed != bound.binding.Seed ||
 				!bound.grid.ContainsPoint(positions[slot].X, positions[slot].Y) {
+				delete(e.terrainStable, slot)
 				delete(positions, slot)
 				terrainWait[slot] = true
 			} else {
-				terrains[slot] = bound.grid
+				stability := e.terrainStable[slot]
+				if stability.observe(positions[slot].Area, sample.TickMS) {
+					terrains[slot] = bound.grid
+				} else {
+					terrainWait[slot] = true
+					terrainSettling[slot] = true
+				}
+				e.terrainStable[slot] = stability
 			}
 		}
 	}
@@ -250,9 +270,14 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 		for other, position := range positions {
 			if position.Area == bound.grid.Area &&
 				(e.terrains[other].grid == nil ||
+					terrains[other] == nil ||
 					e.samples[other].AreaHash != bound.binding.AreaHash ||
 					!bound.grid.ContainsPoint(position.X, position.Y)) {
 				terrainWait[slot] = true
+				if e.terrains[other].grid != nil && terrains[other] == nil &&
+					e.terrainStable[other].frames < 3 {
+					terrainSettling[slot] = true
+				}
 				delete(terrains, slot)
 				break
 			}
@@ -284,10 +309,16 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 	}
 	holds := make(map[int]string, len(terrainWait)+len(skewWait))
 	for slot := range terrainWait {
-		holds[slot] = "terrain binding evidence missing"
+		if terrainSettling[slot] {
+			holds[slot] = "terrain still settling"
+		} else {
+			holds[slot] = "terrain binding evidence missing"
+		}
 	}
 	for slot := range skewWait {
-		holds[slot] = "cross-client motion skew"
+		if holds[slot] == "" {
+			holds[slot] = "cross-client motion skew"
+		}
 	}
 	commands := e.coordinator.StepWithTerrainsAndHolds(now, positions, terrains, holds)
 	for slot, command := range commands {
