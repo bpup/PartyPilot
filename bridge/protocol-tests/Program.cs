@@ -74,6 +74,14 @@ if (!Client3AttachRequest.TryParse(["--attach-private-client3", "--pid", "123",
         "--pid", "456", "--game-exe", @"C:\PoE2\PathOfExile_x64.exe",
         "--players", "5"], out _))
     throw new Exception("Client 3 attach binding arguments were accepted ambiguously.");
+if (!Client3AttachRequest.TryParsePreResume(["--prepare-private-client3", "--pid", "123",
+        "--game-exe", @"C:\PoE2\PathOfExile_x64.exe", "--players", "5,6"],
+        out var preResumeRequest) ||
+    preResumeRequest != new Client3AttachRequest(123, 0,
+        @"C:\PoE2\PathOfExile_x64.exe", true) ||
+    Client3AttachRequest.TryParsePreResume(["--prepare-private-client3", "--pid", "123",
+        "--pid", "456", "--players", "5"], out _))
+    throw new Exception("Client 3 pre-resume binding arguments were accepted ambiguously.");
 
 Expect("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", true, 2, true);
 Expect("{\"slot\":3,\"state\":\"holding\"}", true, 3, false);

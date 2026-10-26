@@ -1936,6 +1936,17 @@ public sealed class MainWindow : Window
             _status.Text = "请先选择人数与角色分布。";
             return;
         }
+        var client3Name = _selectedTopology.ClientCount == 3
+            ? Path.GetFileNameWithoutExtension(_paths[2].Text?.Trim()) : "";
+        var prepareClient3BeforeResume = action == ClientAction.Start &&
+            _selectedTopology.ClientCount == 3 && string.IsNullOrWhiteSpace(_uris[2].Text) &&
+            (string.Equals(client3Name, "PathOfExile", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(client3Name, "PathOfExile_x64", StringComparison.OrdinalIgnoreCase));
+        if (prepareClient3BeforeResume)
+        {
+            startInfo.RedirectStandardInput = true;
+            startInfo.ArgumentList.Add("-pre-resume-client3");
+        }
         for (var index = 0; index < _selectedTopology.ClientCount; index++)
         {
             startInfo.ArgumentList.Add("-exe");
@@ -2051,8 +2062,46 @@ public sealed class MainWindow : Window
             if (prelaunchBridge is not null && !prelaunchBridge.IsRunning)
                 throw new InvalidOperationException("虚拟手柄在游戏启动前中断；游戏尚未启动。");
             using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("启动器未能启动");
-            var output = process.StandardOutput.ReadToEndAsync();
             var error = process.StandardError.ReadToEndAsync();
+            Task<string> output;
+            if (prepareClient3BeforeResume)
+            {
+                try
+                {
+                    var notice = await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromMinutes(3));
+                    var expectedGame = _paths[2].Text?.Trim() ?? "";
+                    if (!Client3PreResumeSession.TryReadLauncherNotice(notice, expectedGame, out var pid))
+                        throw new InvalidOperationException("启动器没有确认第三客户端的暂停进程身份。");
+                    var privateBridge = BridgeSession.FindExecutable() ??
+                        throw new InvalidOperationException("找不到第三客户端私有手柄桥接程序。");
+                    var includeP6 = _selectedTopology.Slots.Count(slot => slot.Client == 3) == 2;
+                    await using var preparation = await Client3PreResumeSession.StartAsync(
+                        privateBridge, pid, expectedGame, includeP6);
+                    await process.StandardInput.WriteLineAsync($"resume {pid}");
+                    await process.StandardInput.FlushAsync();
+                    await preparation.ConfirmResumeAsync();
+                    output = process.StandardOutput.ReadToEndAsync();
+                }
+                catch (Exception preparationError)
+                {
+                    try { process.StandardInput.Close(); } catch (InvalidOperationException) { }
+                    // The launcher owns cleanup of a still-suspended game process.
+                    // Closing stdin makes its pre-resume callback reject the launch.
+                    try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(50)); }
+                    catch (TimeoutException) { }
+                    if (process.HasExited)
+                    {
+                        var detail = (await process.StandardOutput.ReadToEndAsync()).Trim();
+                        var diagnostic = (await error).Trim();
+                        if (detail.Length > 500) detail = detail[..500];
+                        if (diagnostic.Length > 500) diagnostic = diagnostic[..500];
+                        throw new InvalidOperationException(
+                            $"{preparationError.Message} {detail} {diagnostic}".Trim(), preparationError);
+                    }
+                    throw;
+                }
+            }
+            else output = process.StandardOutput.ReadToEndAsync();
             await process.WaitForExitAsync();
             await Task.WhenAll(output, error);
             if (action != ClientAction.Check && process.ExitCode == 0)

@@ -4,6 +4,17 @@ internal static class PrivateClient3PlanSmoke
 {
     public static void Run()
     {
+        var expectedGame = Path.GetFullPath("PathOfExile_x64.exe");
+        var notice = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            @event = "client3_pre_resume", pid = 103, executable = expectedGame
+        });
+        if (!Client3PreResumeSession.TryReadLauncherNotice(notice, expectedGame, out var announced) ||
+            announced != 103 ||
+            Client3PreResumeSession.TryReadLauncherNotice(notice.Replace("\"pid\":103", "\"pid\":0"),
+                expectedGame, out _) ||
+            Client3PreResumeSession.TryReadLauncherNotice(notice, Path.GetFullPath("other.exe"), out _))
+            throw new Exception("Client 3 pre-resume notice accepted an invalid process binding.");
         var clients = new[]
         {
             new LaunchedClient(101, 201, Path.GetFullPath("PathOfExile_x64.exe")),

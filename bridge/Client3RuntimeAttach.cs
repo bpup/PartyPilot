@@ -149,19 +149,26 @@ internal sealed class Client3RuntimeAttach : IDisposable, IClient3PadOutput
         {
             var localKernel = GetModuleHandleW("kernel32.dll");
             var localLoader = localKernel == 0 ? 0 : GetProcAddress(localKernel, "LoadLibraryW");
-            using var current = Process.GetCurrentProcess();
-            var localModule = current.Modules.Cast<ProcessModule>().SingleOrDefault(module =>
-                localLoader >= module.BaseAddress &&
-                localLoader < module.BaseAddress + module.ModuleMemorySize);
-            var remoteModule = localModule is null ? null : process.Modules.Cast<ProcessModule>()
-                .SingleOrDefault(module => string.Equals(module.ModuleName,
-                    localModule.ModuleName, StringComparison.OrdinalIgnoreCase));
-            if (localLoader == 0 || localModule is null || remoteModule is null)
+            if (localLoader == 0)
                 throw new InvalidOperationException("Cannot resolve Client 3's Windows loader.");
-            var offset = localLoader - localModule.BaseAddress;
-            if (offset < 0 || offset >= remoteModule.ModuleMemorySize)
-                throw new InvalidOperationException("Client 3's Windows loader module differs from this process.");
-            var loader = remoteModule.BaseAddress + offset;
+            // The loader's process module list is not reliable while its main thread is suspended.
+            var loader = localLoader;
+            if (verifyModule)
+            {
+                using var current = Process.GetCurrentProcess();
+                var localModule = current.Modules.Cast<ProcessModule>().SingleOrDefault(module =>
+                    localLoader >= module.BaseAddress &&
+                    localLoader < module.BaseAddress + module.ModuleMemorySize);
+                var remoteModule = localModule is null ? null : process.Modules.Cast<ProcessModule>()
+                    .SingleOrDefault(module => string.Equals(module.ModuleName,
+                        localModule.ModuleName, StringComparison.OrdinalIgnoreCase));
+                if (localModule is null || remoteModule is null)
+                    throw new InvalidOperationException("Cannot resolve Client 3's Windows loader module.");
+                var offset = localLoader - localModule.BaseAddress;
+                if (offset < 0 || offset >= remoteModule.ModuleMemorySize)
+                    throw new InvalidOperationException("Client 3's Windows loader module differs from this process.");
+                loader = remoteModule.BaseAddress + offset;
+            }
             var bytes = Encoding.Unicode.GetBytes(runtime + "\0");
             remotePath = VirtualAllocEx(handle, 0, (nuint)bytes.Length,
                 MemCommitReserve, PageReadWrite);

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -100,6 +101,7 @@ func main() {
 	flag.Var(&uris, "uri", "optional SLOT=Steam-or-Epic-launch-URI, bound to the matching -exe")
 	flag.Var(&pids, "pid", "optional SLOT=PID for -attach; required when clients share one installation")
 	runtime := flag.String("multi-instance-runtime", defaultRuntime, "independent mutex runtime for extra standalone clients from one installation")
+	preResumeClient3 := flag.Bool("pre-resume-client3", false, "wait for Client 3 private input preparation before resuming its standalone process")
 	check := flag.Bool("check", false, "validate paths and layout without launching")
 	attach := flag.Bool("attach", false, "bind one existing game window to each configured executable")
 	timeout := flag.Duration("timeout", 60*time.Second, "time to wait for each game window")
@@ -120,6 +122,9 @@ func main() {
 	if len(pids) != 0 && !*attach {
 		fail(errors.New("-pid requires -attach"))
 	}
+	if *preResumeClient3 && (*attach || *check) {
+		fail(errors.New("-pre-resume-client3 requires a game launch"))
+	}
 	var validated []string
 	var err error
 	if *attach {
@@ -129,6 +134,9 @@ func main() {
 	}
 	if err != nil {
 		fail(err)
+	}
+	if *preResumeClient3 && len(validated) != 3 {
+		fail(errors.New("-pre-resume-client3 requires exactly three clients"))
 	}
 	if *attach {
 		if err := clientlaunch.ValidateAttachPIDs(validated, pids); err != nil {
@@ -182,7 +190,12 @@ func main() {
 	if *attach {
 		bound, err = clientlaunch.Attach(validated, pids)
 	} else {
-		bound, err = clientlaunch.Start(validated, uris, *timeout, runtimePath)
+		if *preResumeClient3 {
+			bound, err = clientlaunch.StartWithPreResume(validated, uris, *timeout,
+				runtimePath, func(pid int) error { return waitForClient3Preparation(pid, validated[2]) })
+		} else {
+			bound, err = clientlaunch.Start(validated, uris, *timeout, runtimePath)
+		}
 	}
 	response.Clients = bound.Clients
 	if err != nil {
@@ -208,6 +221,34 @@ func main() {
 func write(value output) {
 	if err := json.NewEncoder(os.Stdout).Encode(value); err != nil {
 		fail(err)
+	}
+}
+
+func waitForClient3Preparation(pid int, executable string) error {
+	if err := json.NewEncoder(os.Stdout).Encode(struct {
+		Event      string `json:"event"`
+		PID        int    `json:"pid"`
+		Executable string `json:"executable"`
+	}{"client3_pre_resume", pid, executable}); err != nil {
+		return fmt.Errorf("announce Client 3 preparation: %w", err)
+	}
+	type reply struct {
+		line string
+		err  error
+	}
+	replies := make(chan reply, 1)
+	go func() {
+		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		replies <- reply{line, err}
+	}()
+	select {
+	case response := <-replies:
+		if response.err != nil || strings.TrimSpace(response.line) != fmt.Sprintf("resume %d", pid) {
+			return errors.New("Client 3 private input preparation was not confirmed")
+		}
+		return nil
+	case <-time.After(45 * time.Second):
+		return errors.New("Client 3 private input preparation timed out after 45 seconds")
 	}
 }
 

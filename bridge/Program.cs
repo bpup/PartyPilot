@@ -4,6 +4,39 @@ using Nefarius.ViGEm.Client.Targets;
 using Nefarius.ViGEm.Client.Targets.Xbox360;
 using PartyPilot.Bridge;
 
+if (args.Length > 0 && args[0] == "--prepare-private-client3")
+{
+    if (!Client3AttachRequest.TryParsePreResume(args, out var request))
+    {
+        Console.Error.WriteLine("Usage: PartyPilot.Bridge --prepare-private-client3 --pid PID --game-exe C:\\PoE2\\PathOfExile_x64.exe --players 5[,6]");
+        return 2;
+    }
+    try
+    {
+        using var session = await Client3RuntimeAttach.AttachPreResumeAsync(request.Pid,
+            request.GameExecutable, request.IncludeP6);
+        Console.WriteLine(JsonSerializer.Serialize(new { @event = "private_client3_loaded",
+            pid = request.Pid, players = request.IncludeP6 ? new[] { 5, 6 } : new[] { 5 } }));
+        await Console.Out.FlushAsync();
+        var confirmation = await Console.In.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(45));
+        if (confirmation != $"resume {request.Pid}")
+            throw new InvalidOperationException("Client 3 resume was not confirmed by its launcher.");
+        await session.WaitReadyAfterResumeAsync();
+        Console.WriteLine(JsonSerializer.Serialize(new { @event = "private_client3_ready",
+            pid = request.Pid, players = request.IncludeP6 ? new[] { 5, 6 } : new[] { 5 },
+            local_indices = request.IncludeP6 ? new[] { 0, 1 } : new[] { 0 } }));
+        await Console.Out.FlushAsync();
+        return 0;
+    }
+    catch (Exception error) when (error is InvalidOperationException or IOException or
+        System.ComponentModel.Win32Exception or TimeoutException or UnauthorizedAccessException or
+        OperationCanceledException or ArgumentException or NotSupportedException)
+    {
+        Console.Error.WriteLine($"Client 3 pre-resume input failed: {error.Message}");
+        return 1;
+    }
+}
+
 if (args.Length > 0 && args[0] == "--attach-private-client3")
 {
     if (!Client3AttachRequest.TryParse(args, out var request))
