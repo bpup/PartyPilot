@@ -17,6 +17,9 @@ internal static class ProcessPipelineSmoke
         var dynamicBridgeExe = Path.Combine(directory, "fake-dynamic-bridge");
         var dynamicFollowExe = Path.Combine(directory, "fake-dynamic-follow");
         var dynamicLog = Path.Combine(directory, "dynamic-bridge-input.jsonl");
+        var switchBridgeExe = Path.Combine(directory, "fake-switch-bridge");
+        var switchFollowExe = Path.Combine(directory, "fake-switch-follow");
+        var switchLog = Path.Combine(directory, "switch-bridge-input.jsonl");
         try
         {
             File.WriteAllText(bridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
@@ -42,6 +45,24 @@ internal static class ProcessPipelineSmoke
                 "if focus != {'type':'manual_focus','slot':2}: sys.exit(2)\n" +
                 "print('{\"focused\":2,\"commands\":{\"1\":{\"state\":\"following\",\"x\":0,\"y\":1}}}', flush=True)\n" +
                 "time.sleep(0.3)\n");
+            File.WriteAllText(switchBridgeExe, "#!/usr/bin/env python3\nimport sys,json\n" +
+                "if '--last-focused-leads' not in sys.argv: sys.exit(2)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"last_focused_leads\":true,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
+                "phase=0\n" +
+                $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(switchLog)}, 'a') as out: out.write(line)\n" +
+                "    command=json.loads(line)\n" +
+                "    if phase==0 and command.get('slot')==3 and command.get('state')=='following':\n" +
+                "        print('{\"event\":\"manual_focus\",\"slot\":3}', flush=True); phase=1\n" +
+                "    elif phase==1 and command.get('slot')==1 and command.get('state')=='following':\n" +
+                "        print('{\"event\":\"manual_focus\",\"slot\":1}', flush=True); phase=2\n");
+            File.WriteAllText(switchFollowExe, "#!/usr/bin/env python3\nimport sys,json,time\n" +
+                "if '-last-focused-leads' not in sys.argv: sys.exit(2)\n" +
+                "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0}}}', flush=True)\n" +
+                "for expected, follower in [(2,1),(1,2)]:\n" +
+                "    focus=json.loads(sys.stdin.readline())\n" +
+                "    if focus != {'type':'manual_focus','slot':expected}: sys.exit(2)\n" +
+                "    print(json.dumps({'focused':expected,'commands':{str(follower):{'state':'following','x':1,'y':0}}}), flush=True)\n" +
+                "time.sleep(0.3)\n");
             File.WriteAllText(couchBridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '--focus-pad-map' not in sys.argv or sys.argv[sys.argv.index('--focus-pad-map')+1] != '1:1,2:2': sys.exit(2)\n" +
                 "if '--right-stick-follower-override' not in sys.argv or '--direct-right-stick-slot' not in sys.argv or sys.argv[sys.argv.index('--direct-right-stick-slot')+1] != '2': sys.exit(2)\n" +
@@ -64,6 +85,8 @@ internal static class ProcessPipelineSmoke
             File.SetUnixFileMode(followExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(dynamicBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(dynamicFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(switchBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(switchFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(couchBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(wgiBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(client3BridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -125,6 +148,31 @@ internal static class ProcessPipelineSmoke
                 !File.ReadAllLines(dynamicLog).Any(line => line.Contains("\"slot\":1,\"state\":\"following\"")))
                 throw new Exception("Dynamic MAIN did not route P1 movement to pad P1.");
             Console.WriteLine("P2 MAIN startup and P1 follower routing checked with local fake executables.");
+            await using (var switchBridge = await BridgeSession.StartAsync(switchBridgeExe, topology.Slots, 0,
+                @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"], false,
+                lastFocusedLeads: true))
+            {
+                switchBridge.StartReading();
+                await using (var switchFollow = await LiveFollowSession.StartAsync(switchFollowExe,
+                    topology, clients, switchBridge, plan))
+                {
+                    switchFollow.StartReading();
+                    var switchDeadline = DateTime.UtcNow.AddSeconds(5);
+                    while ((switchFollow.Current.FocusedPlayer != 1 ||
+                            !File.Exists(switchLog) || File.ReadAllLines(switchLog).Count(line => line.Contains("\"state\":\"following\"")) < 3) &&
+                           DateTime.UtcNow < switchDeadline)
+                        await Task.Delay(20);
+                }
+            }
+            var switchCommands = File.Exists(switchLog) ? File.ReadAllLines(switchLog) : [];
+            var movementSlots = switchCommands.Where(line => line.Contains("\"state\":\"following\""))
+                .Select(line => JsonDocument.Parse(line).RootElement.GetProperty("slot").GetInt32()).ToArray();
+            if (!movementSlots.SequenceEqual([3, 1, 3]) ||
+                !switchCommands.Any(line => line.Contains("\"slot\":3,\"state\":\"waiting\"")) ||
+                !switchCommands.Any(line => line.Contains("\"slot\":1,\"state\":\"waiting\"")))
+                throw new Exception("Runtime MAIN switching did not neutralize old pads and route new followers: " +
+                    string.Join(" | ", switchCommands));
+            Console.WriteLine("P1 to P2 to P1 live MAIN switching checked with local fake executables.");
             var couch = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-couch");
             await using (var pairedBridge = await BridgeSession.StartAsync(couchBridgeExe, couch.Slots, 0,
                 @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe"], true))

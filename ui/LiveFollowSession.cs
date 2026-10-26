@@ -16,8 +16,12 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     private readonly Dictionary<int, int> _playerToPad;
     private readonly ConcurrentQueue<(int Player, string State)> _pendingMenu = new();
     private readonly ConcurrentQueue<int> _pendingFocus = new();
+    private readonly SemaphoreSlim _controlSignal = new(0);
+    private readonly CancellationTokenSource _controlCancellation = new();
     private readonly Task<string> _readError;
     private Task _readFrames = Task.CompletedTask;
+    private Task _writeControls = Task.CompletedTask;
+    private string? _controlFailure;
     private bool _stopping;
 
     public FollowBridgeFrame Current { get; private set; }
@@ -40,20 +44,36 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             bridge.MenuGuardChanged += OnMenuGuardChanged;
             foreach (var slot in topology.Slots)
                 _pendingMenu.Enqueue((slot.PartyPlayer, bridge.GetMenuGuardState(slot.RuntimePad)));
+            _controlSignal.Release();
         }
-        if (bridge.LastFocusedLeadsEnabled) bridge.ManualFocusChanged += OnManualFocusChanged;
+        if (bridge.LastFocusedLeadsEnabled)
+        {
+            bridge.ManualFocusChanged += OnManualFocusChanged;
+            if (_padToPlayer.TryGetValue(bridge.LastManualFocusedSlot, out var currentLeader) &&
+                currentLeader != initialFrame.FocusedPlayer)
+            {
+                _pendingFocus.Enqueue(currentLeader);
+                _controlSignal.Release();
+            }
+        }
     }
 
     private void OnMenuGuardChanged(int pad, string state)
     {
         if (!_stopping && _padToPlayer.TryGetValue(pad, out var player))
+        {
             _pendingMenu.Enqueue((player, state));
+            _controlSignal.Release();
+        }
     }
 
     private void OnManualFocusChanged(int pad)
     {
         if (!_stopping && _padToPlayer.TryGetValue(pad, out var player))
+        {
             _pendingFocus.Enqueue(player);
+            _controlSignal.Release();
+        }
     }
 
     public static async Task<LiveFollowSession> StartAsync(string executable, PartyTopology topology,
@@ -140,7 +160,27 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     public void StartReading()
     {
         if (_readFrames != Task.CompletedTask) throw new InvalidOperationException("Live follow is already being read.");
+        if (_bridge.AutoFlaskEnabled || _bridge.LastFocusedLeadsEnabled)
+            _writeControls = WriteControlsAsync();
         _readFrames = ReadFramesAsync();
+    }
+
+    private async Task WriteControlsAsync()
+    {
+        try
+        {
+            while (true)
+            {
+                await _controlSignal.WaitAsync(_controlCancellation.Token);
+                await FlushControlsAsync();
+            }
+        }
+        catch (OperationCanceledException) when (_controlCancellation.IsCancellationRequested) { }
+        catch (Exception error)
+        {
+            _controlFailure = error.Message;
+            if (!_process.HasExited) _process.Kill();
+        }
     }
 
     private async Task ReadFramesAsync()
@@ -150,7 +190,6 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         {
             while (!_stopping)
             {
-                await FlushControlsAsync();
                 var line = await _process.StandardOutput.ReadLineAsync();
                 if (line is null) break;
                 var frame = _bridge.LastFocusedLeadsEnabled
@@ -181,6 +220,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         }
         finally
         {
+            _controlCancellation.Cancel();
             if (!_stopping)
             {
                 if (!_process.HasExited) _process.Kill();
@@ -192,7 +232,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 catch (Exception error) when (error is InvalidOperationException or IOException) { }
                 var diagnostics = (await _readError).Trim();
                 if (diagnostics.Length > 300) diagnostics = diagnostics[..300];
-                Dispatcher.UIThread.Post(() => Ended?.Invoke(failure ?? diagnostics));
+                Dispatcher.UIThread.Post(() => Ended?.Invoke(failure ?? _controlFailure ?? diagnostics));
             }
         }
     }
@@ -218,9 +258,11 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         _stopping = true;
         _bridge.MenuGuardChanged -= OnMenuGuardChanged;
         _bridge.ManualFocusChanged -= OnManualFocusChanged;
+        _controlCancellation.Cancel();
         if (!_process.HasExited) _process.Kill();
         await _process.WaitForExitAsync();
         await _readFrames;
+        await _writeControls;
         await _readError;
         try
         {
@@ -228,6 +270,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         }
         catch (Exception error) when (error is InvalidOperationException or IOException) { }
         _process.Dispose();
+        _controlCancellation.Dispose();
+        _controlSignal.Dispose();
     }
 
     public static string? FindExecutable()

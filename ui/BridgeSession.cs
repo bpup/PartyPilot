@@ -347,7 +347,9 @@ internal sealed class BridgeSession : IAsyncDisposable
                         manualSlot.TryGetInt32(out var manualPad) && _allSlots.Contains(manualPad))
                     {
                         Volatile.Write(ref _lastManualFocusedSlot, manualPad);
-                        Dispatcher.UIThread.Post(() => ManualFocusChanged?.Invoke(manualPad));
+                        // Live follow only enqueues this event; dispatching through the UI loop can
+                        // stall a controller process that is waiting for the focus command.
+                        ManualFocusChanged?.Invoke(manualPad);
                     }
                     else if (kind.GetString() == "login_status" &&
                         root.TryGetProperty("source", out var source) && source.ValueKind == JsonValueKind.String &&
