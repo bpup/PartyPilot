@@ -76,12 +76,14 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                         paths.TryAdd(entity.Address, entity.Path ?? "");
                         if (paths.Count == 256) break;
                     }
-                    _slotCandidates = LocalSlotCandidateScanner.Scan(stateAddress, data.Address, localAddress, paths,
-                        (address, size) =>
-                        {
-                            try { return data.M.ReadMem(address, size); }
-                            catch { return null; } // An unreadable candidate is not an overall scan failure.
-                        });
+                    byte[]? ReadCandidate(long address, int size)
+                    {
+                        try { return data.M.ReadMem(address, size); }
+                        catch { return null; } // An unreadable candidate is not an overall scan failure.
+                    }
+                    _slotCandidates = LocalSlotCandidateScanner.Scan(stateAddress, data.Address, localAddress,
+                        paths, ReadCandidate,
+                        address => RawCharacterPathReader.Read(address, ReadCandidate));
                     _lastSlotScanStateAddress = stateAddress;
                     _lastSlotScanDataAddress = data.Address;
                     _lastSlotScanLocalAddress = localAddress;

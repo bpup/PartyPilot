@@ -45,6 +45,35 @@ memory.Remove(data + 2552 + 72);
 paths.Remove(other);
 Require(LocalSlotCandidateScanner.Scan(state, data, local, paths, Read).Status == "no_candidate",
     "Unobserved candidate player was accepted.");
+var details = 0x500000L;
+var pathAddress = 0x600000L;
+var characterPath = "Metadata/Characters/Player";
+var characterPathBytes = System.Text.Encoding.Unicode.GetBytes(characterPath);
+memory[other + 8] = BitConverter.GetBytes(details);
+memory[details + 8] = BitConverter.GetBytes(pathAddress)
+    .Concat(new byte[8])
+    .Concat(BitConverter.GetBytes((long)characterPath.Length))
+    .Concat(BitConverter.GetBytes((long)characterPath.Length)).ToArray();
+memory[pathAddress] = characterPathBytes;
+Require(RawCharacterPathReader.Read(other, Read) == characterPath,
+    "Raw character path was not decoded from the supplied default layout.");
+var rawPathCandidate = LocalSlotCandidateScanner.Scan(state, data, local, paths, Read,
+    address => RawCharacterPathReader.Read(address, Read));
+Require(rawPathCandidate.Status == "two_slot_candidate" &&
+    rawPathCandidate.OrderedAddresses.SequenceEqual(["0x200000", "0x300000"]),
+    "An offscreen vector entry with a raw character path was lost.");
+memory[pathAddress] = System.Text.Encoding.Unicode.GetBytes(characterPath.Replace("Characters", "Charactezz"));
+Require(RawCharacterPathReader.Read(other, Read) == null &&
+    LocalSlotCandidateScanner.Scan(state, data, local, paths, Read,
+        address => RawCharacterPathReader.Read(address, Read)).Status == "no_candidate",
+    "A raw non-character path was accepted as a local player.");
+memory[pathAddress] = characterPathBytes;
+memory[details + 8] = BitConverter.GetBytes(pathAddress)
+    .Concat(new byte[8])
+    .Concat(BitConverter.GetBytes(513L))
+    .Concat(BitConverter.GetBytes(513L)).ToArray();
+Require(RawCharacterPathReader.Read(other, Read) == null,
+    "An oversized raw path was accepted.");
 paths[other] = "Metadata/Monsters/Player";
 Require(LocalSlotCandidateScanner.Scan(state, data, local, paths, Read).Status == "no_candidate",
     "Non-character entity was accepted.");

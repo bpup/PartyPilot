@@ -13,7 +13,8 @@ public static class LocalSlotCandidateScanner
         bool? StatePointerMatchesDataAddress, string[] CandidateAreaAddresses);
 
     public static Result Scan(long ingameStateAddress, long dataAddress, long observedLocalAddress,
-        IReadOnlyDictionary<long, string> visiblePaths, Func<long, int, byte[]?> read)
+        IReadOnlyDictionary<long, string> visiblePaths, Func<long, int, byte[]?> read,
+        Func<long, string?>? readMissingPath = null)
     {
         const string anchor = "ExileCore2.IngameState.Address + static area pointer / IngameState.Data.Address";
         const string profile = "supplied-build static defaults (active offsets unverified)";
@@ -50,7 +51,8 @@ public static class LocalSlotCandidateScanner
                     var vectorOffset = ReferenceVectorOffset + delta;
                     if (vectorOffset < 0) continue;
                     var headerAddress = areaAddress + structOffset + vectorOffset;
-                    if (!TryReadOrder(headerAddress, observedLocalAddress, visiblePaths, read, out var order))
+                    if (!TryReadOrder(headerAddress, observedLocalAddress, visiblePaths, read,
+                            readMissingPath, out var order))
                         continue;
                     matchingHeaders++;
                     matchedAreas.Add(areaAddress);
@@ -72,7 +74,8 @@ public static class LocalSlotCandidateScanner
     }
 
     private static bool TryReadOrder(long headerAddress, long observedLocalAddress,
-        IReadOnlyDictionary<long, string> visiblePaths, Func<long, int, byte[]?> read, out long[] order)
+        IReadOnlyDictionary<long, string> visiblePaths, Func<long, int, byte[]?> read,
+        Func<long, string?>? readMissingPath, out long[] order)
     {
         order = [];
         var header = read(headerAddress, 24);
@@ -94,8 +97,10 @@ public static class LocalSlotCandidateScanner
         for (var index = 0; index < count; index++)
         {
             var address = BitConverter.ToInt64(entries, index * 8);
-            if (!Plausible(address) || !seen.Add(address) ||
-                !visiblePaths.TryGetValue(address, out var path) || !IsCharacterPath(path)) return false;
+            if (!Plausible(address) || !seen.Add(address)) return false;
+            if (!visiblePaths.TryGetValue(address, out var path))
+                path = readMissingPath?.Invoke(address);
+            if (path == null || !IsCharacterPath(path)) return false;
             found[index] = address;
             hasLocal |= address == observedLocalAddress;
         }
