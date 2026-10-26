@@ -15,7 +15,8 @@ func GridFromPacked(area string, originX, originY, cellSize float64,
 		return nil, ErrPackedTerrain
 	}
 	g := &Grid{Area: area, OriginX: originX, OriginY: originY,
-		CellSize: cellSize, Width: bytesPerRow * 2, Height: rows}
+		CellSize: cellSize, Width: bytesPerRow * 2, Height: rows,
+		TargetNavigation: true}
 	if !g.Valid() {
 		return nil, ErrPackedTerrain
 	}

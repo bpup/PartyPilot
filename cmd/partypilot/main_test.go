@@ -11,13 +11,26 @@ import (
 )
 
 func TestPackedTerrainReplayProducesDetour(t *testing.T) {
-	// 0x10 in rows 1..3 blocks x=2; base64 encoding of 15 bytes.
-	input := `{"now":"2026-10-26T00:00:00Z","leader":{"area":"a","x":15.5,"y":22.5,"seen":"2026-10-26T00:00:00Z","valid":true},"follower":{"area":"a","x":10.5,"y":22.5,"seen":"2026-10-26T00:00:00Z","valid":true},"packed_terrain":{"area":"a","origin_x":10,"origin_y":20,"cell_size":1,"bytes_per_row":3,"rows":5,"data":"ERERERARERARERARERER"}}` + "\n"
-	second := strings.ReplaceAll(input, "2026-10-26T00:00:00Z", "2026-10-26T00:00:00.1Z")
-	second = strings.Replace(second, `"x":10.5`, `"x":11.5`, 1)
+	packed := make([]byte, 10*15)
+	for i := range packed {
+		packed[i] = 0x11
+	}
+	for y := 4; y <= 10; y++ {
+		packed[y*10+5] = 0x10
+	}
+	at := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
+	item := frame{Now: at,
+		Leader:        follow.Position{X: 16, Y: 7, Area: "a", Seen: at, Valid: true},
+		Follower:      follow.Position{X: 4, Y: 7, Area: "a", Seen: at, Valid: true},
+		PackedTerrain: &packedTerrain{Area: "a", CellSize: 1, BytesPerRow: 10, Rows: 15, Data: packed}}
+	first, _ := json.Marshal(item)
+	item.Now = at.Add(100 * time.Millisecond)
+	item.Leader.Seen, item.Follower.Seen = item.Now, item.Now
+	item.Follower.X = 5
+	second, _ := json.Marshal(item)
 	var output bytes.Buffer
-	config := follow.Config{StopDistance: 1, ResumeDistance: 2, CatchUpDistance: 10, MaxAge: time.Second}
-	if err := replay(strings.NewReader(input+second), &output, config); err != nil {
+	config := follow.Config{StopDistance: 1, ResumeDistance: 2, CatchUpDistance: 30, MaxAge: time.Second}
+	if err := replay(strings.NewReader(string(first)+"\n"+string(second)+"\n"), &output, config); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
@@ -26,7 +39,7 @@ func TestPackedTerrainReplayProducesDetour(t *testing.T) {
 	}
 	var command follow.Command
 	if err := json.Unmarshal([]byte(lines[1]), &command); err != nil ||
-		command.State != follow.Following || command.X != 0 || command.Y != -1 {
+		command.State != follow.Following || command.Y == 0 {
 		t.Fatalf("packed wall did not cause expected turn: %+v, %v", command, err)
 	}
 }

@@ -13,10 +13,27 @@ func (g *Grid) HasLineOfSight(fromX, fromY, toX, toY float64, clearance int) boo
 	for _, cell := range g.Blocked {
 		blocked[g.index(cell)] = true
 	}
-	fromCellX := (fromX-g.OriginX)/g.CellSize - 0.5
-	fromCellY := (fromY-g.OriginY)/g.CellSize - 0.5
-	toCellX := (toX-g.OriginX)/g.CellSize - 0.5
-	toCellY := (toY-g.OriginY)/g.CellSize - 0.5
+	return g.lineOfSight(blocked, fromX, fromY, toX, toY, clearance)
+}
+
+func (g *Grid) lineOfSight(blocked []bool, fromX, fromY, toX, toY float64, clearance int) bool {
+	if !finite(fromX) || !finite(fromY) || !finite(toX) || !finite(toY) || clearance < 0 {
+		return false
+	}
+	shift := 0.5
+	if g.TargetNavigation {
+		shift = 0
+	}
+	fromCellX := (fromX-g.OriginX)/g.CellSize - shift
+	fromCellY := (fromY-g.OriginY)/g.CellSize - shift
+	toCellX := (toX-g.OriginX)/g.CellSize - shift
+	toCellY := (toY-g.OriginY)/g.CellSize - shift
+	if !finite(fromCellX) || !finite(fromCellY) || !finite(toCellX) || !finite(toCellY) ||
+		fromCellX < -1 || fromCellY < -1 || toCellX < -1 || toCellY < -1 ||
+		fromCellX > float64(g.Width) || fromCellY > float64(g.Height) ||
+		toCellX > float64(g.Width) || toCellY > float64(g.Height) {
+		return false
+	}
 	steps := max(1, int(math.Ceil(math.Hypot(toCellX-fromCellX, toCellY-fromCellY)*2)))
 	for step := 0; step <= steps; step++ {
 		fraction := float64(step) / float64(steps)

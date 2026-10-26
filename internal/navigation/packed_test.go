@@ -19,9 +19,24 @@ func TestGridFromPackedKeepsNibbleOrderAndDetours(t *testing.T) {
 	if len(g.Blocked) != 3 || g.Blocked[0] != (Cell{X: 2, Y: 1}) {
 		t.Fatalf("low nibble must be the left cell: %v", g.Blocked)
 	}
-	path, ok := g.Path(10.5, 22.5, 15.5, 22.5)
-	if !ok || len(path) <= 6 {
-		t.Fatalf("route did not detour around packed obstacle: %v, %v", path, ok)
+	if _, ok := g.TargetWaypoints(10, 22, 15, 22); ok {
+		t.Fatal("narrow legacy fixture was accepted despite one-cell clearance")
+	}
+	wide := make([]byte, 10*15)
+	for i := range wide {
+		wide[i] = 0x11
+	}
+	for y := 4; y <= 10; y++ {
+		wide[y*10+5] = 0x10 // left nibble is cell x=10.
+	}
+	terrain, err := GridFromPacked("observed-instance", 0, 0, 1, wide, 10, 15)
+	if err != nil || !terrain.TargetNavigation {
+		t.Fatalf("target terrain mode was not set: %v", err)
+	}
+	waypoints, ok := terrain.TargetWaypoints(4, 7, 16, 7)
+	if !ok || len(waypoints) == 0 || waypoints[0].Y == 7 ||
+		waypoints[len(waypoints)-1] != (Waypoint{16, 7}) {
+		t.Fatalf("packed terrain did not detour around cleared wall: %v, %v", waypoints, ok)
 	}
 }
 

@@ -5,13 +5,14 @@ import "math"
 // Grid is a controlled, instance-specific navigation input. Its cells must
 // come from a verified source before it can be used with live game data.
 type Grid struct {
-	Area     string  `json:"area"`
-	OriginX  float64 `json:"origin_x"`
-	OriginY  float64 `json:"origin_y"`
-	CellSize float64 `json:"cell_size"`
-	Width    int     `json:"width"`
-	Height   int     `json:"height"`
-	Blocked  []Cell  `json:"blocked"`
+	Area             string  `json:"area"`
+	OriginX          float64 `json:"origin_x"`
+	OriginY          float64 `json:"origin_y"`
+	CellSize         float64 `json:"cell_size"`
+	Width            int     `json:"width"`
+	Height           int     `json:"height"`
+	Blocked          []Cell  `json:"blocked"`
+	TargetNavigation bool    `json:"target_navigation,omitempty"`
 }
 
 type Cell struct {
@@ -43,12 +44,21 @@ func (g *Grid) cellAt(x, y float64) (Cell, bool) {
 	if !finite(x) || !finite(y) {
 		return Cell{}, false
 	}
+	if g.TargetNavigation {
+		cell := Cell{X: int(math.RoundToEven((x - g.OriginX) / g.CellSize)),
+			Y: int(math.RoundToEven((y - g.OriginY) / g.CellSize))}
+		return cell, g.contains(cell)
+	}
 	cell := Cell{X: int(math.Floor((x - g.OriginX) / g.CellSize)),
 		Y: int(math.Floor((y - g.OriginY) / g.CellSize))}
 	return cell, g.contains(cell)
 }
 
 func (g *Grid) center(cell Cell) (float64, float64) {
+	if g.TargetNavigation {
+		return g.OriginX + float64(cell.X)*g.CellSize,
+			g.OriginY + float64(cell.Y)*g.CellSize
+	}
 	return g.OriginX + (float64(cell.X)+0.5)*g.CellSize,
 		g.OriginY + (float64(cell.Y)+0.5)*g.CellSize
 }
@@ -114,6 +124,9 @@ func (g *Grid) Path(fromX, fromY, toX, toY float64) ([]Cell, bool) {
 }
 
 func (g *Grid) NextDirection(fromX, fromY, toX, toY float64) (float64, float64, bool) {
+	if g != nil && g.TargetNavigation {
+		return g.targetDirection(fromX, fromY, toX, toY)
+	}
 	path, ok := g.Path(fromX, fromY, toX, toY)
 	if !ok {
 		return 0, 0, false
