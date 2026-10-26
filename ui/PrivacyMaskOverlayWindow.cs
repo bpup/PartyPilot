@@ -12,6 +12,12 @@ public sealed class PrivacyMaskOverlayWindow : Window
 {
     private readonly LaunchedClient _client;
     private readonly IReadOnlyList<PrivacyMaskBox> _boxes;
+    private readonly bool _autoNameplates;
+    private readonly int _clientNumber;
+    private IReadOnlyList<PrivacyMaskBox> _activeBoxes;
+    private IReadOnlyList<PrivacyMaskBox> _autoBoxes = [];
+    private DateTime _lastAutoDetectedUtc;
+    private DateTime _lastGameplayUtc;
     private readonly Canvas _canvas = new();
     private readonly List<Image> _images = [];
     private readonly List<WriteableBitmap> _bitmaps = [];
@@ -23,12 +29,17 @@ public sealed class PrivacyMaskOverlayWindow : Window
     private bool _wasForeground;
     private DateTime _lastFrameUtc;
     public bool TargetIsLost { get; private set; }
+    public int ProcessId => _client.Pid;
     public event Action? TargetLost;
 
-    public PrivacyMaskOverlayWindow(LaunchedClient client, IReadOnlyList<PrivacyMaskBox> boxes)
+    public PrivacyMaskOverlayWindow(LaunchedClient client, IReadOnlyList<PrivacyMaskBox> boxes,
+        bool autoNameplates = false, int clientNumber = 1)
     {
         _client = client;
         _boxes = boxes;
+        _autoNameplates = autoNameplates;
+        _clientNumber = clientNumber;
+        _activeBoxes = boxes;
         Title = $"PartyPilot Privacy · {client.Pid}";
         SystemDecorations = SystemDecorations.None;
         ShowInTaskbar = false;
@@ -63,7 +74,7 @@ public sealed class PrivacyMaskOverlayWindow : Window
         ClearFrames();
         _canvas.Children.Clear();
         if (Bounds.Width <= 0 || Bounds.Height <= 0) return;
-        foreach (var box in _boxes)
+        foreach (var box in _activeBoxes)
         {
             var (x, y, width, height) = box.InClient(Bounds.Width, Bounds.Height);
             var mask = new Border { Width = width, Height = height, Background = Brushes.Black };
@@ -124,25 +135,67 @@ public sealed class PrivacyMaskOverlayWindow : Window
             return;
         }
         _wasForeground = true;
+        if (_autoBoxes.Count > 0 && (DateTime.UtcNow - _lastAutoDetectedUtc >
+            TimeSpan.FromMilliseconds(140) || DateTime.UtcNow - _lastGameplayUtc > TimeSpan.FromSeconds(2)))
+        {
+            _autoBoxes = [];
+            SetActiveBoxes(_boxes);
+        }
         if (_lastFrameUtc != default && DateTime.UtcNow - _lastFrameUtc > TimeSpan.FromMilliseconds(250))
             foreach (var image in _images) image.IsVisible = false;
         RequestCapture(handle, rect.Right - rect.Left, rect.Bottom - rect.Top);
     }
 
+    public void ObserveGameplay(DateTime seenUtc)
+    {
+        var age = DateTime.UtcNow - seenUtc;
+        if (seenUtc.Kind == DateTimeKind.Utc && age >= TimeSpan.Zero &&
+            age <= TimeSpan.FromSeconds(2))
+            _lastGameplayUtc = seenUtc;
+    }
+
+    private void SetActiveBoxes(IReadOnlyList<PrivacyMaskBox> boxes)
+    {
+        if (_activeBoxes.SequenceEqual(boxes)) return;
+        _activeBoxes = boxes;
+        Draw();
+    }
+
     private void RequestCapture(nint handle, int width, int height)
     {
-        if (_images.Count != _boxes.Count ||
+        var gameplayFresh = _autoNameplates && _lastGameplayUtc != default &&
+            DateTime.UtcNow - _lastGameplayUtc <= TimeSpan.FromSeconds(2);
+        if ((_activeBoxes.Count == 0 && !gameplayFresh) ||
+            _images.Count != _activeBoxes.Count ||
             Interlocked.CompareExchange(ref _captureInFlight, 1, 0) != 0) return;
         var generation = _generation;
         var sequence = Interlocked.Increment(ref _captureSequence);
+        var currentActive = _activeBoxes;
+        var heldAuto = _autoBoxes;
+        var lastAutoAt = _lastAutoDetectedUtc;
         _ = Task.Run(() =>
         {
             PrivacyBlurFrame?[]? frames = null;
+            IReadOnlyList<PrivacyMaskBox> active = currentActive;
+            IReadOnlyList<PrivacyMaskBox> detectedAuto = [];
+            var detectedAt = DateTime.UtcNow;
             try
             {
                 var pixels = PrivacyWindowCapture.TryCapture(handle, width, height);
                 if (pixels is not null)
-                    frames = _boxes.Select(box => PrivacyBlur.Build(pixels, width, height, box)).ToArray();
+                {
+                    if (gameplayFresh)
+                        detectedAuto = PrivacyNameplateDetector.SelectTwo(
+                                PrivacyNameplateDetector.Locate(pixels, width, height), height)
+                            .Select(bounds => PrivacyNameplateDetector.Expand(_clientNumber, bounds,
+                                width, height)).ToArray();
+                    detectedAt = DateTime.UtcNow;
+                    var auto = detectedAuto.Count > 0 ? detectedAuto :
+                        gameplayFresh && detectedAt - lastAutoAt <= TimeSpan.FromMilliseconds(140)
+                            ? heldAuto : [];
+                    active = _boxes.Concat(auto).ToArray();
+                    frames = active.Select(box => PrivacyBlur.Build(pixels, width, height, box)).ToArray();
+                }
             }
             catch { /* A failed capture leaves the opaque masks visible. */ }
             finally { Interlocked.Exchange(ref _captureInFlight, 0); }
@@ -151,11 +204,20 @@ public sealed class PrivacyMaskOverlayWindow : Window
                 if (generation != _generation || TargetIsLost || !_wasForeground ||
                     sequence <= _appliedSequence) return;
                 _appliedSequence = sequence;
-                if (frames is null || frames.Length != _images.Count || frames.Any(frame => frame is null))
+                if (frames is null || frames.Any(frame => frame is null))
                 {
                     HideFrames();
                     return;
                 }
+                if (detectedAuto.Count > 0)
+                {
+                    _autoBoxes = detectedAuto;
+                    _lastAutoDetectedUtc = detectedAt;
+                }
+                else if (!gameplayFresh || detectedAt - _lastAutoDetectedUtc > TimeSpan.FromMilliseconds(140))
+                    _autoBoxes = [];
+                SetActiveBoxes(active);
+                if (frames.Length != _images.Count) { HideFrames(); return; }
                 try { ShowFrames(frames!); }
                 catch { HideFrames(); }
             });

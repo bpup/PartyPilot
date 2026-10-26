@@ -55,6 +55,7 @@ public sealed class MainWindow : Window
     private readonly Button _stopRadar = new();
     private readonly TextBlock _radarStatus = new();
     private readonly TextBox _privacyBoxes = new();
+    private readonly CheckBox _privacyAutoNames = new();
     private readonly Button _startPrivacy = new();
     private readonly Button _stopPrivacy = new();
     private readonly TextBlock _privacyStatus = new();
@@ -391,6 +392,9 @@ public sealed class MainWindow : Window
         var panel = Step("6", "PRIVACY · 游戏画面遮挡",
             "在已绑定游戏窗口的指定区域显示模糊遮挡；窗口画面无法捕获时保留黑色遮挡。仅当前游戏窗口在前台时显示，暂不自动识别姓名牌。");
         panel.Children.Add(Label("每行：客户端编号, 左边距%, 上边距%, 宽%, 高%；最多 16 行，例如 1,10,5,20,6。", 12, MutedBrush));
+        _privacyAutoNames.Content = "自动识别并遮挡游戏画面中的姓名牌（需启用各客户端传感器）";
+        _privacyAutoNames.IsCheckedChanged += (_, _) => UpdatePrivacyControls();
+        panel.Children.Add(_privacyAutoNames);
         _privacyBoxes.AcceptsReturn = true;
         _privacyBoxes.MinHeight = 76;
         _privacyBoxes.Watermark = "1,10,5,20,6";
@@ -404,7 +408,7 @@ public sealed class MainWindow : Window
         actions.Children.Add(_startPrivacy);
         actions.Children.Add(_stopPrivacy);
         panel.Children.Add(actions);
-        _privacyStatus.Text = "等待已绑定的游戏窗口与明确指定的遮挡区域。";
+        _privacyStatus.Text = "等待已绑定游戏窗口，以及手动区域或已启用的自动姓名牌选项。";
         _privacyStatus.Foreground = MutedBrush;
         _privacyStatus.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(_privacyStatus);
@@ -574,23 +578,33 @@ public sealed class MainWindow : Window
 
     private void UpdatePrivacyControls()
     {
+        var parsed = string.IsNullOrWhiteSpace(_privacyBoxes.Text) ||
+            PrivacyMaskPlan.TryParse(_privacyBoxes.Text, _selectedTopology?.ClientCount ?? 0, out _);
         var ready = _selectedTopology is not null &&
             _launchedClients.Count == _selectedTopology.ClientCount &&
-            PrivacyMaskPlan.TryParse(_privacyBoxes.Text, _selectedTopology.ClientCount, out _);
+            parsed && (_privacyAutoNames.IsChecked == true ||
+                !string.IsNullOrWhiteSpace(_privacyBoxes.Text));
         _startPrivacy.IsEnabled = OperatingSystem.IsWindows() && !_busy && _privacy is null && ready;
         _stopPrivacy.IsEnabled = _privacy is not null;
+        _privacyBoxes.IsEnabled = _privacy is null;
+        _privacyAutoNames.IsEnabled = _privacy is null;
     }
 
     private void StartPrivacy()
     {
         if (_privacy is not null || _busy || !OperatingSystem.IsWindows() ||
-            _selectedTopology is null || _launchedClients.Count != _selectedTopology.ClientCount ||
-            !PrivacyMaskPlan.TryParse(_privacyBoxes.Text, _selectedTopology.ClientCount, out var boxes)) return;
+            _selectedTopology is null || _launchedClients.Count != _selectedTopology.ClientCount) return;
+        IReadOnlyList<PrivacyMaskBox> boxes = [];
+        if (!string.IsNullOrWhiteSpace(_privacyBoxes.Text) &&
+            !PrivacyMaskPlan.TryParse(_privacyBoxes.Text, _selectedTopology.ClientCount, out boxes)) return;
+        var autoNames = _privacyAutoNames.IsChecked == true;
+        if (boxes.Count == 0 && !autoNames) return;
         try
         {
-            _privacy = PrivacyMaskSession.Start(_launchedClients, boxes);
+            _privacy = PrivacyMaskSession.Start(_launchedClients, boxes, autoNames);
             _privacy.Ended += PrivacyEnded;
-            _privacyStatus.Text = $"已显示 {boxes.Count} 个手动遮挡区域；捕获失败时显示黑色，失焦时隐藏。";
+            _privacyStatus.Text = $"已启用 {boxes.Count} 个手动区域" +
+                (autoNames ? "和自动姓名牌检测" : "") + "；截图失败时保留黑色遮挡，失焦时隐藏。";
         }
         catch (Exception error) { _privacyStatus.Text = $"遮挡未能打开：{error.Message}"; }
         UpdatePrivacyControls();

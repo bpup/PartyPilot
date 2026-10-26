@@ -140,6 +140,31 @@ if (blurredPixels is null || blurredPixels.Width != 3 || blurredPixels.Height !=
     PrivacyBlur.Build(sourcePixels, 3, 3, new PrivacyMaskBox(1, 1, 1, 0, 0)) is not null ||
     PrivacyBlur.Build([], 3, 3, new PrivacyMaskBox(1, 0, 0, 1, 1)) is not null)
     throw new Exception("Privacy blur did not clip and blur a BGRA frame as expected.");
+var names = new byte[480 * 240 * 4];
+DrawSyntheticName(names, 480, 115, 55, 125, 16);
+DrawSyntheticName(names, 480, 265, 145, 105, 17);
+var detectedNames = PrivacyNameplateDetector.Locate(names, 480, 240);
+var selectedNames = PrivacyNameplateDetector.SelectTwo(detectedNames, 240);
+if (detectedNames.Count != 2 || detectedNames[0].X > 115 || detectedNames[0].Y > 55 ||
+    detectedNames[1].X > 265 || detectedNames[1].Y > 145 ||
+    selectedNames.Count != 2 ||
+    PrivacyNameplateDetector.Expand(1, detectedNames[0], 480, 240).Width <= 0 ||
+    PrivacyNameplateDetector.Locate([], 480, 240).Count != 0)
+    throw new Exception("Privacy nameplate pixel detection failed on the target synthetic pattern.");
+var privacyPulse = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
+{
+    ProcessId = 123,
+    SeenUtc = DateTime.UtcNow,
+    PrivacyStatus = "render-ok"
+});
+if (!PrivacyGameplayFrames.TryParse(privacyPulse, 123, DateTime.UtcNow, out var gameplayPulse) ||
+    gameplayPulse?.ProcessId != 123 ||
+    PrivacyGameplayFrames.TryParse(privacyPulse, 124, DateTime.UtcNow, out _) ||
+    PrivacyGameplayFrames.TryParse(privacyPulse, 123, DateTime.UtcNow.AddSeconds(3), out _) ||
+    PrivacyGameplayFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        System.Text.Encoding.UTF8.GetString(privacyPulse).Replace("render-ok", "failed")),
+        123, DateTime.UtcNow, out _))
+    throw new Exception("Privacy gameplay evidence accepted a stale or unrelated process sample.");
 var labels = window.GetLogicalDescendants().OfType<TextBlock>().Select(item => item.Text).ToArray();
 if (!labels.Contains("PLAY") || !labels.Any(item => item?.Contains("HOW MANY CHARACTERS") == true) ||
     !labels.Any(item => item?.Contains("PREPARE & START") == true) ||
@@ -452,6 +477,20 @@ if (!OperatingSystem.IsWindows())
     }
 }
 await Task.Run(ProcessPipelineSmoke.RunAsync).ConfigureAwait(false);
+
+static void DrawSyntheticName(byte[] pixels, int width, int left, int top, int nameWidth, int nameHeight)
+{
+    for (var y = top; y < top + nameHeight; y++)
+        for (var x = left; x < left + nameWidth; x++)
+            if ((x - left) % 5 < 3 || (y - top) % 4 < 2)
+            {
+                var index = (y * width + x) * 4;
+                pixels[index] = 124;
+                pixels[index + 1] = 144;
+                pixels[index + 2] = 169;
+                pixels[index + 3] = 255;
+            }
+}
 
 sealed class SmokeApp : Application
 {

@@ -11,6 +11,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
 {
     private static readonly IPEndPoint Receiver = new(IPAddress.Loopback, 47617);
     private static readonly IPEndPoint RadarReceiver = new(IPAddress.Loopback, 47618);
+    private static readonly IPEndPoint PrivacyReceiver = new(IPAddress.Loopback, 47619);
     private readonly UdpClient _udp = new();
     private DateTime _lastSentUtc;
     private DateTime _lastSlotScanUtc;
@@ -145,6 +146,13 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         var bytes = Encoding.UTF8.GetBytes(message);
         _udp.Send(bytes, bytes.Length, Receiver);
         if (radarSeenUtc.HasValue) _udp.Send(bytes, bytes.Length, RadarReceiver);
+        var privacyPulse = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            ProcessId = GameController.Window.Process.Id,
+            SeenUtc = now,
+            PrivacyStatus = "render-ok"
+        });
+        _udp.Send(privacyPulse, privacyPulse.Length, PrivacyReceiver);
     }
 
     private object[] ReadVisiblePlayers(uint? observedLocalId)
