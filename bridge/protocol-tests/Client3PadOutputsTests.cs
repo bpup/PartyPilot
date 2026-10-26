@@ -50,6 +50,32 @@ internal static class Client3PadOutputsTests
         lost.P6.SetReport(p6);
         if (lost.IsReady || lostOutput.P5 != default || lostOutput.P6 != default)
             throw new Exception("Client 3 loss did not neutralize both slots.");
+
+        var routed = new Client3PadOutputs();
+        var routedOutput = new FakeClient3Output { IsReady = true };
+        routed.Bind(routedOutput, true);
+        var main = new FakePad();
+        var router = new BridgeRouter(new Dictionary<int, IPadOutput>
+        {
+            [1] = main, [5] = routed.P5, [6] = routed.P6
+        }, routed);
+        if (!router.ConfigurePhysical(1, focusPads: new Dictionary<int, int>
+            { [1] = 1, [5] = 5, [6] = 6 }))
+            throw new Exception("Composite route rejected explicit P5/P6 focus pads.");
+        var now = new DateTime(2026, 10, 27, 0, 0, 0, DateTimeKind.Utc);
+        var before = routedOutput.SubmitCount;
+        router.SetPhysical(new XInputGamepad { Buttons = 0x0001, LeftTrigger = 180,
+            LeftX = 505 }, now);
+        if (routedOutput.SubmitCount != before + 1 || routedOutput.P5.LeftX != 505 ||
+            routedOutput.P6 != default || main.Report != default)
+            throw new Exception("P5 focus did not publish one combined private submission.");
+        router.SetPhysical(default, now.AddMilliseconds(10));
+        before = routedOutput.SubmitCount;
+        router.SetPhysical(new XInputGamepad { Buttons = 0x0002, LeftTrigger = 180,
+            LeftX = 606 }, now.AddMilliseconds(100));
+        if (routedOutput.SubmitCount != before + 1 || routedOutput.P5 != default ||
+            routedOutput.P6.LeftX != 606 || main.Report != default)
+            throw new Exception("P6 focus exposed a mixed old/new private report.");
     }
 
     private sealed class FakeClient3Output : IClient3PadOutput

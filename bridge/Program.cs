@@ -118,9 +118,11 @@ if (args.Length == 4 && args[0] == "--probe-xinput" && args[2] == "--samples" &&
 }
 
 if (!args.Contains("--enable-controller") || !BridgeSlots.TryParse(args, out var slots) ||
-    !FocusPadMap.TryParse(args, slots, out var focusPads))
+    !CompositeClient3Options.TryParse(args, out var client3Options) ||
+    !FocusPadMap.TryParse(args, slots, client3Options?.PrivateSlots ?? [], out var focusPads) ||
+    (client3Options is not null && focusPads is null))
 {
-    Console.Error.WriteLine("Usage: PartyPilot.Bridge --enable-controller --slots 1,2 [--focus-pad-map 1:1,2:2] [--physical-index 0 --main-slot 1 --physical-hidden-confirmed --device-instance HID\\... --game-exe C:\\Game\\PathOfExile.exe [--pairing-protected] [--right-stick-follower-override --direct-right-stick-slot 2]]");
+    Console.Error.WriteLine("Usage: PartyPilot.Bridge --enable-controller --slots 1,2 [--focus-pad-map 1:1,2:2] [--physical-index 0 --main-slot 1 --physical-hidden-confirmed --device-instance HID\\... --game-exe C:\\Game\\PathOfExile.exe [--pairing-protected] [--client3-pid PID --client3-window-handle HANDLE --client3-game-exe PATH --client3-players 5[,6]] [--right-stick-follower-override --direct-right-stick-slot 2]]");
     return 2;
 }
 var wgiMode = args.Contains("--physical-wgi");
@@ -151,6 +153,12 @@ var gamePaths = args.Select((value, index) => (value, index))
     .Where(item => item.value == "--game-exe")
     .Select(item => item.index + 1 < args.Length ? args[item.index + 1] : "")
     .ToArray();
+if (client3Options is { } privatePlan &&
+    (!physicalMode || !protectedPairing || !privatePlan.MatchesThirdGamePath(gamePaths)))
+{
+    Console.Error.WriteLine("Client 3 requires protected physical mode and a matching third game executable.");
+    return 2;
+}
 uint physicalIndex = 0;
 int mainSlot = 0;
 if (directRightStickSlot != 0 &&
@@ -217,6 +225,13 @@ try
         Console.Error.WriteLine("The selected physical controller is not connected before virtual pads start.");
         return 2;
     }
+    using var privateClient3 = client3Options is { } attach
+        ? await Client3RuntimeAttach.AttachAsync(attach.Pid, attach.WindowHandle,
+            attach.GameExecutable, attach.IncludeP6) : null;
+    var privateOutputs = new Client3PadOutputs();
+    if (privateClient3 is not null &&
+        !privateOutputs.Bind(privateClient3, client3Options!.Value.IncludeP6))
+        throw new InvalidOperationException("Client 3 input became unavailable before routing.");
     using var client = new ViGEmClient();
     var pads = new Dictionary<int, IXbox360Controller>();
     try
@@ -239,9 +254,15 @@ try
             return 2;
         }
         Console.Error.WriteLine($"Connected {pads.Count} virtual controller(s).");
-        var router = new BridgeRouter(pads.ToDictionary(
+        var outputs = pads.ToDictionary(
             entry => entry.Key,
-            entry => (IPadOutput)new ViGEmPadOutput(entry.Value)));
+            entry => (IPadOutput)new ViGEmPadOutput(entry.Value));
+        if (privateClient3 is not null)
+        {
+            outputs.Add(5, privateOutputs.P5);
+            if (client3Options!.Value.IncludeP6) outputs.Add(6, privateOutputs.P6);
+        }
+        var router = new BridgeRouter(outputs, privateClient3 is null ? null : privateOutputs);
         if (physicalMode && !router.ConfigurePhysical(mainSlot, rightStickFollowerOverride, focusPads,
             directRightStickSlot))
             throw new InvalidOperationException("Focus pad mapping does not match the connected virtual controllers.");
@@ -273,12 +294,21 @@ try
             auto_flask_enabled = autoFlaskEnabled,
             right_stick_follower_override = rightStickFollowerOverride,
             direct_right_stick_slot = directRightStickSlot,
+            private_client3_pid = client3Options?.Pid ?? 0,
+            private_client3_slots = client3Options?.PrivateSlots ?? [],
+            private_client3_window_handle = client3Options?.WindowHandle ?? 0,
             focus_pad_map = focusPads is null ? "" : string.Join(',', focusPads.OrderBy(entry => entry.Key)
                 .Select(entry => $"{entry.Key}:{entry.Value}")) }));
 
         Task<string?> pendingLine = Console.In.ReadLineAsync();
         while (true)
         {
+            if (privateClient3 is not null && !privateOutputs.IsReady)
+            {
+                router.NeutralAll();
+                Console.Error.WriteLine("Client 3 private input is no longer ready.");
+                return 1;
+            }
             var finished = await Task.WhenAny(pendingLine, Task.Delay(10));
             if (finished == pendingLine)
             {
@@ -287,7 +317,9 @@ try
                 pendingLine = Console.In.ReadLineAsync();
                 if (pairingGate is not null && BridgeProtocol.TryParsePairingControl(line, out var control))
                 {
-                    if (control.Type == "arm_pairing" && slots.Contains(control.Slot) &&
+                    if (control.Type == "arm_pairing" && outputs.ContainsKey(control.Slot) &&
+                        (control.Slot is not (5 or 6) || client3Options is { } expectedClient3 &&
+                         expectedClient3.MatchesPairingTarget(control)) &&
                         ForegroundWindowProbe.IsExistingTarget(control.Pid, control.WindowHandle) &&
                         pairingGate.Arm(control.Slot))
                     {

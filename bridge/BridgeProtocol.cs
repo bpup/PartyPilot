@@ -49,7 +49,7 @@ internal static class BridgeProtocol
                 return true;
             }
             if (name != "arm_pairing" || !root.TryGetProperty("slot", out var slot) ||
-                !slot.TryGetInt32(out var value) || value is < 1 or > 4 ||
+                !slot.TryGetInt32(out var value) || value is < 1 or > 6 ||
                 !root.TryGetProperty("pid", out var pidElement) || !pidElement.TryGetInt32(out var pid) || pid <= 0 ||
                 !root.TryGetProperty("window_handle", out var handleElement) ||
                 !handleElement.TryGetInt64(out var handle) || handle <= 0)

@@ -15,9 +15,17 @@ internal interface IPadOutput
     void SetReport(PadReport report);
 }
 
+internal interface IReportBatch
+{
+    void BeginBatch();
+    void EndBatch();
+    void AbortBatch();
+}
+
 internal sealed class BridgeRouter
 {
     private readonly Dictionary<int, PadRoute> _routes;
+    private readonly IReportBatch? _reportBatch;
     private IReadOnlyDictionary<int, int> _focusPads = new Dictionary<int, int>();
     private bool _physicalMode;
     private bool _menuGuardActive;
@@ -37,9 +45,10 @@ internal sealed class BridgeRouter
 
     public int FocusedSlot => _physicalMode ? _focusedSlot : 0;
 
-    public BridgeRouter(IReadOnlyDictionary<int, IPadOutput> outputs)
+    public BridgeRouter(IReadOnlyDictionary<int, IPadOutput> outputs, IReportBatch? reportBatch = null)
     {
         _routes = outputs.ToDictionary(entry => entry.Key, entry => new PadRoute(entry.Value));
+        _reportBatch = reportBatch;
     }
 
     public bool ConfigurePhysical(int mainSlot, bool rightStickFollowerOverride = false,
@@ -234,19 +243,31 @@ internal sealed class BridgeRouter
         _allowDirectRightStick = false;
         _previousButtons = 0;
         _previousLeftTrigger = 0;
-        foreach (var route in _routes.Values)
+        _reportBatch?.BeginBatch();
+        try
         {
-            route.Automation = default;
-            route.Active = false;
-            route.EligibleForManualMovement = false;
-            route.LifeUntilUtc = route.ManaUntilUtc = DateTime.MinValue;
-            route.Output.SetReport(default);
+            foreach (var route in _routes.Values)
+            {
+                route.Automation = default;
+                route.Active = false;
+                route.EligibleForManualMovement = false;
+                route.LifeUntilUtc = route.ManaUntilUtc = DateTime.MinValue;
+                route.Output.SetReport(default);
+            }
+            _reportBatch?.EndBatch();
         }
+        catch { _reportBatch?.AbortBatch(); throw; }
     }
 
     private void RenderAll()
     {
-        foreach (var (slot, route) in _routes) Render(slot, route);
+        _reportBatch?.BeginBatch();
+        try
+        {
+            foreach (var (slot, route) in _routes) Render(slot, route);
+            _reportBatch?.EndBatch();
+        }
+        catch { _reportBatch?.AbortBatch(); throw; }
     }
 
     private void Render(int slot, PadRoute route)

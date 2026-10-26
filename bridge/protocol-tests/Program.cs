@@ -100,6 +100,38 @@ if (!FocusPadMap.TryParse(["--focus-pad-map", "1:1,2:3"], [1, 3], out var splitF
     FocusPadMap.TryParse(["--focus-pad-map", "1:1,3:3"], [1, 3], out _) ||
     FocusPadMap.TryParse(["--focus-pad-map", "1:1,2:2"], [1, 3], out _))
     throw new Exception("Logical player to virtual pad focus mapping was accepted ambiguously.");
+if (!FocusPadMap.TryParse(["--focus-pad-map", "1:1,2:3,3:5,4:6"],
+        [1, 3], [5, 6], out var compositeFocus) || compositeFocus is null ||
+    compositeFocus[3] != 5 || compositeFocus[4] != 6 ||
+    FocusPadMap.TryParse(["--focus-pad-map", "1:1,2:3,3:5"], [1, 3], [5, 6], out _) ||
+    FocusPadMap.TryParse(["--focus-pad-map", "1:1,2:3,3:6"], [1, 3], [5], out _) ||
+    FocusPadMap.TryParse(["--focus-pad-map", "1:1,2:3,4:5"], [1, 3], [5], out _))
+    throw new Exception("Composite focus map accepted an omitted or unassigned private slot.");
+if (!CompositeClient3Options.TryParse([], out var absentClient3) || absentClient3 is not null ||
+    !CompositeClient3Options.TryParse(["--client3-pid", "123", "--client3-window-handle", "456",
+        "--client3-game-exe", "/tmp/PathOfExile_x64.exe", "--client3-players", "5,6"],
+        out var compositeOptions) || compositeOptions is not { IncludeP6: true, Pid: 123,
+            WindowHandle: 456 } ||
+    CompositeClient3Options.TryParse(["--client3-pid", "123"], out _) ||
+    CompositeClient3Options.TryParse(["--client3-pid", "123", "--client3-pid", "456",
+        "--client3-window-handle", "456", "--client3-game-exe",
+        "/tmp/PathOfExile_x64.exe", "--client3-players", "5"], out _) ||
+    CompositeClient3Options.TryParse(["--client3-pid", "123", "--client3-window-handle", "456",
+        "--client3-game-exe", "/tmp/PathOfExile_x64.exe", "--client3-players", "6"], out _))
+    throw new Exception("Composite Client 3 binding arguments were accepted ambiguously.");
+if (compositeOptions is not { } boundClient3 ||
+    !boundClient3.MatchesThirdGamePath(["/tmp/first.exe", "/tmp/second.exe",
+        "/tmp/PathOfExile_x64.exe"]) ||
+    boundClient3.MatchesThirdGamePath(["/tmp/PathOfExile_x64.exe"]) ||
+    boundClient3.MatchesThirdGamePath(["/tmp/first.exe", "/tmp/second.exe",
+        "/tmp/unrelated.exe"]) ||
+    !boundClient3.MatchesPairingTarget(new PairingControl("arm_pairing", 5, 123, 456)) ||
+    !boundClient3.MatchesPairingTarget(new PairingControl("arm_pairing", 6, 123, 456)) ||
+    boundClient3.MatchesPairingTarget(new PairingControl("arm_pairing", 5, 999, 456)) ||
+    boundClient3.MatchesPairingTarget(new PairingControl("arm_pairing", 6, 123, 999)) ||
+    (boundClient3 with { IncludeP6 = false }).MatchesPairingTarget(
+        new PairingControl("arm_pairing", 6, 123, 456)))
+    throw new Exception("Composite Client 3 accepted another process or window for private pairing.");
 var now = new DateTime(2026, 10, 26, 10, 0, 0, DateTimeKind.Utc);
 var menuGuard = new MenuGuardTracker();
 menuGuard.Observe(1, 0, now);
@@ -270,9 +302,23 @@ if (gate.Observe(default, now.AddMilliseconds(2899), true, true).Completed ||
 if (!BridgeProtocol.TryParsePairingControl("{\"type\":\"arm_pairing\",\"slot\":3,\"pid\":123,\"window_handle\":456}", out var arm) ||
     arm.Slot != 3 || arm.Pid != 123 || arm.WindowHandle != 456 ||
     !BridgeProtocol.TryParsePairingControl("{\"type\":\"finish_pairing\"}", out _) ||
-    BridgeProtocol.TryParsePairingControl("{\"type\":\"arm_pairing\",\"slot\":5,\"pid\":123,\"window_handle\":456}", out _) ||
+    !BridgeProtocol.TryParsePairingControl("{\"type\":\"arm_pairing\",\"slot\":5,\"pid\":123,\"window_handle\":456}", out _) ||
+    BridgeProtocol.TryParsePairingControl("{\"type\":\"arm_pairing\",\"slot\":7,\"pid\":123,\"window_handle\":456}", out _) ||
     BridgeProtocol.TryParsePairingControl("{\"type\":\"arm_pairing\",\"slot\":3}", out _))
     throw new Exception("Protected pairing command validation failed.");
+var privateGate = new ProtectedPairingGate();
+if (!privateGate.Arm(5)) throw new Exception("Private P5 pairing could not be armed.");
+privateGate.Observe(default, now, true, true);
+privateGate.Observe(default, now.AddMilliseconds(300), true, true);
+if (privateGate.Observe(heldA, now.AddMilliseconds(800), true, true).Forwarded.Buttons != 0x1000 ||
+    privateGate.Observe(heldA, now.AddMilliseconds(1149), true, true).ReleasedSlot != 0 ||
+    privateGate.Observe(heldA, now.AddMilliseconds(1150), true, true).ReleasedSlot != 5)
+    throw new Exception("Private P5 did not receive the first local pairing pulse.");
+var pairingChord = privateGate.Observe(new XInputGamepad { Buttons = 0x0001,
+    LeftTrigger = 180 }, now.AddMilliseconds(1160), true, true);
+if (pairingChord.Forwarded.Buttons != 0 || pairingChord.Forwarded.LeftTrigger != 0 ||
+    !privateGate.Arm(6))
+    throw new Exception("Private pairing forwarded a focus chord or rejected the next slot.");
 var focusGate = new ProtectedPairingGate();
 focusGate.Arm(1);
 focusGate.Observe(default, now, false, true);

@@ -907,10 +907,13 @@ public sealed class MainWindow : Window
 
     private void UpdateBridgeControls()
     {
-        var slots = _selectedTopology?.Slots.Select(slot => slot.RuntimePad).ToArray() ?? [];
-        var useWgi = _selectedTopology?.Id == "4-balanced";
+        var slots = _selectedTopology?.Slots.Where(slot => slot.Client != 3)
+            .Select(slot => slot.RuntimePad).ToArray() ?? [];
+        var useWgi = slots.Length == 4;
+        var privateReady = _selectedTopology?.ClientCount != 3 ||
+            PrivateClient3Plan.TryCreate(_selectedTopology, _launchedClients, out _);
         var supported = slots.All(slot => slot is >= 1 and <= 4) &&
-            (slots.Length is >= 1 and <= 3 || useWgi && slots.Length == 4);
+            (slots.Length is >= 1 and <= 3 || useWgi) && privateReady;
         var gamePathsReady = _selectedTopology is not null &&
             Enumerable.Range(0, _selectedTopology.ClientCount)
                 .All(index => !string.IsNullOrWhiteSpace(_paths[index]?.Text));
@@ -937,7 +940,7 @@ public sealed class MainWindow : Window
         }
         if (_bridge is null && _selectedTopology is not null && !supported)
         {
-            _pairingStatus.Text = "此布局需要第三客户端进程内输入和跨桥接配对；当前桌面流程尚未接通，未开始配对。";
+            _pairingStatus.Text = "此布局需要先启动或绑定三个游戏窗口，并核对第三客户端进程身份；当前尚未开始配对。";
         }
         UpdateFollowControls();
     }
@@ -959,8 +962,16 @@ public sealed class MainWindow : Window
             _pairingStatus.Text = "手柄桥接需要 Windows、已选布局与空闲桥接会话。";
             return;
         }
-        var slots = _selectedTopology.Slots.Select(slot => slot.RuntimePad).ToArray();
-        var useWgi = _selectedTopology.Id == "4-balanced";
+        var slots = _selectedTopology.Slots.Where(slot => slot.Client != 3)
+            .Select(slot => slot.RuntimePad).ToArray();
+        var useWgi = slots.Length == 4;
+        PrivateClient3Plan? privatePlan = null;
+        if (_selectedTopology.ClientCount == 3 &&
+            !PrivateClient3Plan.TryCreate(_selectedTopology, _launchedClients, out privatePlan))
+        {
+            _pairingStatus.Text = "请先启动或绑定三个游戏窗口，核对第三客户端的进程与窗口身份。";
+            return;
+        }
         if (slots.Length is < 1 or > 4 || slots.Any(slot => slot is < 1 or > 4) ||
             (slots.Length == 4 && !useWgi) ||
             (!useWgi && _physicalIndex.SelectedIndex is < 0 or > 3) ||
@@ -985,7 +996,8 @@ public sealed class MainWindow : Window
                 .Select(index => _paths[index].Text?.Trim() ?? "").ToArray();
             var session = await BridgeSession.StartAsync(executable, _selectedTopology.Slots, _physicalIndex.SelectedIndex,
                 _physicalDevice.Text.Trim(), gameExecutables, _rightStickFollowerOverride.IsChecked == true,
-                _selectedTopology.Id == "2-split" && _autoFlask.IsChecked == true, useWgi);
+                _selectedTopology.Id == "2-split" && _autoFlask.IsChecked == true,
+                useWgi, privatePlan);
             session.AReleased += BridgeAReleased;
             session.PairingArmed += BridgePairingArmed;
             session.PairingCompleted += BridgePairingCompleted;

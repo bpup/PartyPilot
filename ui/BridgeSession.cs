@@ -33,17 +33,25 @@ internal sealed class BridgeSession : IAsyncDisposable
 
     public static async Task<BridgeSession> StartAsync(string executable, IReadOnlyList<PartySlot> partySlots, int physicalIndex,
         string deviceInstance, IReadOnlyList<string> gameExecutables, bool rightStickFollowerOverride,
-        bool autoFlaskEnabled = false, bool useWgi = false)
+        bool autoFlaskEnabled = false, bool useWgi = false, PrivateClient3Plan? privatePlan = null)
     {
-        var slots = partySlots.Select(item => item.RuntimePad).ToArray();
+        var slots = partySlots.Where(item => item.Client != 3).Select(item => item.RuntimePad).ToArray();
+        var privateSlots = partySlots.Where(item => item.Client == 3)
+            .Select(item => item.RuntimePad).ToArray();
         if (slots.Length is < 1 or > 4 || slots.Any(slot => slot is < 1 or > 4) ||
             slots.Distinct().Count() != slots.Length ||
             (!useWgi && (physicalIndex is < 0 or > 3 || slots.Length > 3)) ||
-            !partySlots.Select(item => item.PartyPlayer).SequenceEqual(Enumerable.Range(1, slots.Length)) ||
+            !partySlots.Select(item => item.PartyPlayer).SequenceEqual(Enumerable.Range(1, partySlots.Count)) ||
             string.IsNullOrWhiteSpace(deviceInstance) || gameExecutables.Count is < 1 or > 3 ||
-            gameExecutables.Any(string.IsNullOrWhiteSpace))
+            gameExecutables.Any(string.IsNullOrWhiteSpace) ||
+            (privatePlan is null && privateSlots.Length != 0) ||
+            (privatePlan is not null &&
+             (!privateSlots.SequenceEqual(privatePlan.IncludePad6 ? [5, 6] : [5]) ||
+              gameExecutables.Count != 3 ||
+              !string.Equals(Path.GetFullPath(gameExecutables[2]), privatePlan.Executable,
+                  StringComparison.OrdinalIgnoreCase))))
         {
-            throw new ArgumentException("The bridge needs 1–4 P1–P4 pads, a selected HidHide device, and 1–3 game paths.");
+            throw new ArgumentException("The bridge needs assigned public pads, a selected HidHide device, and a matching Client 3 binding when used.");
         }
         var focusPadMap = string.Join(',', partySlots.Select(item => $"{item.PartyPlayer}:{item.RuntimePad}"));
         var directRightStickSlot = rightStickFollowerOverride && partySlots.Count == 2 &&
@@ -78,6 +86,16 @@ internal sealed class BridgeSession : IAsyncDisposable
             start.ArgumentList.Add("--game-exe");
             start.ArgumentList.Add(game);
         }
+        if (privatePlan is not null)
+        {
+            foreach (var argument in new[]
+            {
+                "--client3-pid", privatePlan.Pid.ToString(),
+                "--client3-window-handle", privatePlan.WindowHandle.ToString(),
+                "--client3-game-exe", privatePlan.Executable,
+                "--client3-players", privatePlan.IncludePad6 ? "5,6" : "5"
+            }) start.ArgumentList.Add(argument);
+        }
         if (rightStickFollowerOverride) start.ArgumentList.Add("--right-stick-follower-override");
         if (autoFlaskEnabled) start.ArgumentList.Add("--enable-auto-flask");
         if (directRightStickSlot != 0)
@@ -89,9 +107,10 @@ internal sealed class BridgeSession : IAsyncDisposable
         var readError = process.StandardError.ReadToEndAsync();
         try
         {
-            var readyLine = await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            var readyLine = await process.StandardOutput.ReadLineAsync().WaitAsync(
+                TimeSpan.FromSeconds(privatePlan is null ? 15 : 45));
             if (readyLine is null || !IsExpectedReady(readyLine, slots, focusPadMap,
-                rightStickFollowerOverride, directRightStickSlot, autoFlaskEnabled, useWgi))
+                rightStickFollowerOverride, directRightStickSlot, autoFlaskEnabled, useWgi, privatePlan))
             {
                 throw new InvalidOperationException("Virtual controller bridge did not confirm the requested pad slots.");
             }
@@ -114,8 +133,9 @@ internal sealed class BridgeSession : IAsyncDisposable
         _readEvents = ReadEventsAsync();
     }
 
-    private static bool IsExpectedReady(string line, int[] slots, string focusPadMap,
-        bool rightStickFollowerOverride, int directRightStickSlot, bool autoFlaskEnabled, bool useWgi)
+    internal static bool IsExpectedReady(string line, int[] slots, string focusPadMap,
+        bool rightStickFollowerOverride, int directRightStickSlot, bool autoFlaskEnabled, bool useWgi,
+        PrivateClient3Plan? privatePlan)
     {
         try
         {
@@ -135,7 +155,15 @@ internal sealed class BridgeSession : IAsyncDisposable
                    root.TryGetProperty("focus_pad_map", out var focusMap) &&
                    focusMap.GetString() == focusPadMap &&
                    root.TryGetProperty("slots", out var selected) &&
-                   selected.EnumerateArray().Select(value => value.GetInt32()).SequenceEqual(slots.Order());
+                   selected.EnumerateArray().Select(value => value.GetInt32()).SequenceEqual(slots.Order()) &&
+                   root.TryGetProperty("private_client3_pid", out var privatePid) &&
+                   privatePid.GetInt32() == (privatePlan?.Pid ?? 0) &&
+                   root.TryGetProperty("private_client3_window_handle", out var privateWindow) &&
+                   privateWindow.GetInt64() == (privatePlan?.WindowHandle ?? 0) &&
+                   root.TryGetProperty("private_client3_slots", out var privatePads) &&
+                   privatePads.EnumerateArray().Select(value => value.GetInt32())
+                       .SequenceEqual(privatePlan is null ? [] :
+                           privatePlan.IncludePad6 ? [5, 6] : [5]);
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException)
         {

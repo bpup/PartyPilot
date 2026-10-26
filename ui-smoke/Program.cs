@@ -422,10 +422,18 @@ if (pathFields.Any(field => !field.IsEffectivelyVisible))
 {
     throw new Exception("The three-single-client 3P option did not request three game windows.");
 }
+if (prepare.IsEnabled)
+    throw new Exception("Three-client bridge preparation was enabled before Client 3 process binding.");
 if (fpsPathFields.Any(field => !field.IsEffectivelyVisible))
     throw new Exception("Three-client layout did not show all FPS rows.");
 if (resourceCpuFields.Any(field => !field.IsEffectivelyVisible))
     throw new Exception("Three-client layout did not show all resource rows.");
+if (args.Contains("--client3-ui-only"))
+{
+    window.Close();
+    Console.WriteLine("Three-client bridge stayed disabled before Client 3 identity binding.");
+    return;
+}
 clientCount.SelectedIndex = 1;
 Dispatcher.UIThread.RunJobs();
 variant.SelectedIndex = 0;

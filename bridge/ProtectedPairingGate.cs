@@ -24,7 +24,7 @@ internal sealed class ProtectedPairingGate
 
     public bool Arm(int slot)
     {
-        if (slot is < 1 or > 4 || Phase is not (ProtectedPairingPhase.Idle or ProtectedPairingPhase.InGame)) return false;
+        if (slot is < 1 or > 6 || Phase is not (ProtectedPairingPhase.Idle or ProtectedPairingPhase.InGame)) return false;
         _slot = slot;
         _foregroundSince = null;
         _neutralSince = null;
@@ -138,6 +138,11 @@ internal sealed class ProtectedPairingGate
     private XInputGamepad MaskHeldAAndFocus(XInputGamepad physical)
     {
         physical.Buttons &= unchecked((ushort)~FocusHotkeys);
+        if (physical.LeftTrigger >= 30 && (physical.Buttons & 0x0003) != 0)
+        {
+            physical.Buttons &= unchecked((ushort)~0x0003);
+            physical.LeftTrigger = 0;
+        }
         if (_requireRelease) physical.Buttons &= unchecked((ushort)~A);
         return physical;
     }
