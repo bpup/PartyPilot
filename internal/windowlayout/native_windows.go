@@ -157,12 +157,22 @@ func DiscoverWindows(pids []int) ([]Window, error) {
 }
 
 func Apply(windows []Window, plan Plan) error {
-	if plan.Borderless {
-		return fmt.Errorf("full borderless style is not implemented")
-	}
 	if len(windows) < 1 || len(windows) > 3 || len(windows) != len(plan.Placements) {
 		return fmt.Errorf("window count does not match plan")
 	}
+	path, err := styleStatePath()
+	if err != nil {
+		return err
+	}
+	stored, err := loadStyleState(path)
+	if err != nil {
+		return err
+	}
+	type preparedStyle struct {
+		created         uint64
+		before, desired windowStyle
+	}
+	prepared := make([]preparedStyle, len(windows))
 	for index, window := range windows {
 		var pid uint32
 		thread, _, _ := procGetWindowPID.Call(window.Handle, uintptr(unsafe.Pointer(&pid)))
@@ -173,6 +183,51 @@ func Apply(windows []Window, plan Plan) error {
 		if placement.Width < 320 || placement.Height < 240 {
 			return fmt.Errorf("client %d placement is below game window minimum", index+1)
 		}
+		created, err := processCreation(window.PID)
+		if err != nil {
+			return fmt.Errorf("client %d creation time: %w", index+1, err)
+		}
+		before, err := readWindowStyle(window.Handle)
+		if err != nil {
+			return fmt.Errorf("client %d read style: %w", index+1, err)
+		}
+		original, saved := matchingStyle(stored, window.PID, window.Handle, created)
+		if !saved {
+			original = before
+		}
+		desired := original.borderless()
+		if !plan.Borderless {
+			if saved {
+				desired = original
+			} else {
+				desired = before.defaultWindowed()
+			}
+		}
+		prepared[index] = preparedStyle{created: created, before: before, desired: desired}
+	}
+	if plan.Borderless {
+		for index, window := range windows {
+			if _, saved := matchingStyle(stored, window.PID, window.Handle, prepared[index].created); !saved {
+				stored = withStyle(stored, savedStyle{PID: window.PID, Handle: window.Handle, Created: prepared[index].created, Original: prepared[index].before})
+			}
+		}
+		if err := saveStyleState(path, stored); err != nil {
+			return fmt.Errorf("save original window styles: %w", err)
+		}
+	}
+	changed := 0
+	rollback := func() {
+		for changed > 0 {
+			changed--
+			_ = writeWindowStyle(windows[changed].Handle, prepared[changed].before)
+		}
+	}
+	for index, window := range windows {
+		if err := writeWindowStyle(window.Handle, prepared[index].desired); err != nil {
+			rollback()
+			return fmt.Errorf("client %d set style: %w", index+1, err)
+		}
+		changed++
 	}
 	for index, window := range windows {
 		placement := plan.Placements[index]
@@ -182,6 +237,7 @@ func Apply(windows []Window, plan Plan) error {
 			uintptr(int64(placement.Left)), uintptr(int64(placement.Top)),
 			uintptr(placement.Width), uintptr(placement.Height), 0x4054)
 		if result == 0 {
+			rollback()
 			return fmt.Errorf("client %d SetWindowPos: %w", index+1, err)
 		}
 	}
@@ -195,11 +251,29 @@ func Apply(windows []Window, plan Plan) error {
 			}
 		}
 		if matched {
+			if !plan.Borderless {
+				remaining := stored[:0]
+				for _, entry := range stored {
+					selected := false
+					for index, window := range windows {
+						if entry.PID == window.PID && entry.Handle == window.Handle && entry.Created == prepared[index].created {
+							selected = true
+						}
+					}
+					if !selected {
+						remaining = append(remaining, entry)
+					}
+				}
+				if err := saveStyleState(path, remaining); err != nil {
+					return fmt.Errorf("window placement applied but could not update saved style state: %w", err)
+				}
+			}
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return fmt.Errorf("windows did not settle at requested positions")
+	rollback()
+	return fmt.Errorf("windows did not settle at requested positions; original window styles restored")
 }
 
 func windowRect(handle uintptr) (Rect, error) {

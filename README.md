@@ -63,7 +63,7 @@ PartyPilot-WindowLayout.exe -pids 1234,5678 -monitors 1,1 -mode stacked -size sm
 go run ./cmd/windowlayout -displays-file testdata/layout-displays.json -monitors 1,2 -mode multiple
 ```
 
-Windows 版只接受所提供版本识别的游戏进程名，并在应用前复核窗口属于相应进程。屏幕位置、窗口位置和布局计算已用人工屏幕数据验证；窗口发现与移动仅通过 Windows 目标编译，尚未在 Windows/PoE2 运行。`-size full` 可预览全屏叠放计划，实际无边框样式尚未实现，`-apply` 会拒绝；此布局工具不负责启动游戏或账号流程。
+Windows 版只接受所提供版本识别的游戏进程名，并在应用前复核窗口属于相应进程。屏幕位置、窗口位置和布局计算已用人工屏幕数据验证；窗口发现与移动仅通过 Windows 目标编译，尚未在 Windows/PoE2 运行。`-size full -apply` 会请求无边框全屏叠放，并在本地配置目录保存原窗口样式；随后对同一游戏进程应用普通布局时会恢复原样式。恢复时同时核对进程 ID、窗口句柄和进程创建时间，避免旧记录作用于新进程。样式切换仅通过 Windows 目标编译，尚未在 Windows/PoE2 实测；此布局工具不负责启动游戏或账号流程。
 
 `release/PartyPilot-ClientLaunch.exe` 补上直接从游戏程序启动到等待窗口的基本流程。重复 `-exe` 按客户端顺序指定 1–3 个游戏程序；启动前检查文件、目标进程名及安装目录互不相同。程序逐个启动客户端，按新进程 ID 最多等待每个窗口 60 秒；可用 `-apply-layout -monitors 1,2 -mode multiple` 在全部窗口出现后安排位置。`-check` 只做路径与布局预检，不启动游戏；在 macOS 上可配合 `-displays-file testdata/layout-displays.json` 验证人工屏幕数据。已启动客户端若后续步骤失败，会在输出中保留其进程 ID，不会静默关闭游戏。
 
