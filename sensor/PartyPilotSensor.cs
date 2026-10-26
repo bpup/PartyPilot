@@ -82,73 +82,40 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 var localAddress = player?.Address ?? 0;
                 ingameDataAddress ??= FormatAddress(data.Address);
                 observedLocalAddress ??= FormatAddress(localAddress);
+                var paths = new Dictionary<long, string>();
+                var visiblePositions = new Dictionary<long, (float X, float Y, float Z)>();
+                foreach (var entity in GameController.Entities)
+                {
+                    if (entity?.GetComponent<Player>() == null || entity.Address <= 0) continue;
+                    paths.TryAdd(entity.Address, entity.Path ?? "");
+                    var pos = entity.Pos;
+                    if (float.IsFinite(pos.X) && float.IsFinite(pos.Y) && float.IsFinite(pos.Z))
+                        visiblePositions.TryAdd(entity.Address, (pos.X, pos.Y, pos.Z));
+                    if (paths.Count == 256) break;
+                }
+                byte[]? ReadCandidate(long address, int size)
+                {
+                    try { return data.M.ReadMem(address, size); }
+                    catch { return null; }
+                }
+                string? ReadMissingPath(long address) =>
+                    RawCharacterPathReader.Read(address, ReadCandidate);
                 if (_slotCandidates == null || stateAddress != _lastSlotScanStateAddress ||
                     data.Address != _lastSlotScanDataAddress ||
                     localAddress != _lastSlotScanLocalAddress || now - _lastSlotScanUtc >= TimeSpan.FromSeconds(1))
                 {
-                    var paths = new Dictionary<long, string>();
-                    foreach (var entity in GameController.Entities)
-                    {
-                        if (entity?.GetComponent<Player>() == null || entity.Address <= 0) continue;
-                        paths.TryAdd(entity.Address, entity.Path ?? "");
-                        if (paths.Count == 256) break;
-                    }
-                    byte[]? ReadCandidate(long address, int size)
-                    {
-                        try { return data.M.ReadMem(address, size); }
-                        catch { return null; } // An unreadable candidate is not an overall scan failure.
-                    }
                     _slotCandidates = LocalSlotCandidateScanner.Scan(stateAddress, data.Address, localAddress,
-                        paths, ReadCandidate,
-                        address => RawCharacterPathReader.Read(address, ReadCandidate));
-                    if (_slotCandidates.Status is "single_slot_candidate" or "two_slot_candidate")
-                    {
-                        var positions = _slotCandidates.OrderedAddresses.Select(address =>
-                            long.TryParse(address.AsSpan(2),
-                                System.Globalization.NumberStyles.HexNumber,
-                                System.Globalization.CultureInfo.InvariantCulture, out var entity)
-                                ? RawRenderPositionReader.Read(entity, ReadCandidate) : null).ToArray();
-                        var localIndex = Array.IndexOf(_slotCandidates.OrderedAddresses,
-                            FormatAddress(localAddress));
-                        var comparison = localIndex >= 0 && positions[localIndex] is { } localRaw
-                            ? RawRenderPositionReader.CompareLocal(localRaw,
-                                render.Pos.X, render.Pos.Y, render.Pos.Z) : null;
-                        var visiblePositions = new Dictionary<long, (float X, float Y, float Z)>();
-                        foreach (var entity in GameController.Entities)
-                        {
-                            if (entity?.GetComponent<Player>() == null || entity.Address <= 0) continue;
-                            var pos = entity.Pos;
-                            if (float.IsFinite(pos.X) && float.IsFinite(pos.Y) && float.IsFinite(pos.Z))
-                                visiblePositions.TryAdd(entity.Address, (pos.X, pos.Y, pos.Z));
-                            if (visiblePositions.Count == 256) break;
-                        }
-                        var visibleComparisons = _slotCandidates.OrderedAddresses.Select((address, index) =>
-                        {
-                            if (positions[index] is not { } raw ||
-                                !long.TryParse(address.AsSpan(2),
-                                    System.Globalization.NumberStyles.HexNumber,
-                                    System.Globalization.CultureInfo.InvariantCulture, out var entity) ||
-                                !visiblePositions.TryGetValue(entity, out var pos))
-                                return null;
-                            return RawRenderPositionReader.CompareLocal(raw, pos.X, pos.Y, pos.Z);
-                        }).ToArray();
-                        if (LocalSlotCandidateScanner.Revalidate(_slotCandidates, localAddress,
-                                paths, ReadCandidate,
-                                address => RawCharacterPathReader.Read(address, ReadCandidate)))
-                            _slotCandidates = _slotCandidates with
-                            {
-                                RawPositions = positions,
-                                RawPositionsSeenUtc = now,
-                                ObservedLocalPositionComparison = comparison,
-                                VisiblePositionComparisons = visibleComparisons
-                            };
-                    }
+                        paths, ReadCandidate, ReadMissingPath);
                     _lastSlotScanStateAddress = stateAddress;
                     _lastSlotScanDataAddress = data.Address;
                     _lastSlotScanLocalAddress = localAddress;
                     _lastSlotScanUtc = now;
                 }
-                _slotCandidateStatus = "ok";
+                if (_slotCandidates is { Status: "single_slot_candidate" or "two_slot_candidate" } candidate)
+                    _slotCandidates = LocalSlotMotionSampler.Capture(candidate, localAddress,
+                        paths, visiblePositions, ReadCandidate, ReadMissingPath,
+                        render.Pos.X, render.Pos.Y, render.Pos.Z, now);
+                _slotCandidateStatus = _slotCandidates == null ? "scan_failed" : "ok";
             }
             catch
             {

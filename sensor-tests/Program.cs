@@ -41,6 +41,38 @@ Require(two.VectorHeaderAddress == "0x1005C8" &&
     LocalSlotCandidateScanner.Revalidate(two, local, paths, Read),
     "The selected vector header was not revalidated.");
 var vectorStart = BitConverter.ToInt64(memory[data + 1408 + 72], 0);
+var motionSeen = DateTime.UtcNow;
+var visiblePositions = new Dictionary<long, (float X, float Y, float Z)>
+{
+    [local] = (10, 20, 5), [other] = (30, 40, 5)
+};
+float secondWorldX = 30;
+RawRenderPositionReader.Position? ReadSyntheticPosition(long entity, Func<long, int, byte[]?> _) =>
+    entity == local ? new(10, 20, 5, 1, 2, "0x500000") :
+    entity == other ? new(secondWorldX, 40, 5, secondWorldX / 10.869565f,
+        40 / 10.869565f, "0x600000") : null;
+var motion = LocalSlotMotionSampler.Capture(two, local, paths, visiblePositions, Read,
+    _ => null, 10, 20, 5, motionSeen, ReadSyntheticPosition);
+Require(motion?.RawPositions is { Length: 2 } &&
+    motion.RawPositions[1]?.WorldX == 30 &&
+    motion.RawPositionsSeenUtc == motionSeen &&
+    motion.ObservedLocalPositionComparison?.WorldXYDistance == 0 &&
+    motion.VisiblePositionComparisons?[1]?.WorldXYDistance == 0,
+    "A complete revalidated diagnostic position frame was not captured.");
+secondWorldX = 35;
+var nextMotion = LocalSlotMotionSampler.Capture(two, local, paths, visiblePositions, Read,
+    _ => null, 10, 20, 5, motionSeen.AddMilliseconds(100), ReadSyntheticPosition);
+Require(nextMotion?.RawPositions?[1]?.WorldX == 35 &&
+    nextMotion.RawPositionsSeenUtc == motionSeen.AddMilliseconds(100),
+    "A cached vector retained the prior position instead of refreshing it.");
+RawRenderPositionReader.Position? ReorderDuringRead(long entity, Func<long, int, byte[]?> read)
+{
+    memory[vectorStart] = new[] { other, local }.SelectMany(BitConverter.GetBytes).ToArray();
+    return ReadSyntheticPosition(entity, read);
+}
+Require(LocalSlotMotionSampler.Capture(two, local, paths, visiblePositions, Read,
+        _ => null, 10, 20, 5, motionSeen, ReorderDuringRead) == null,
+    "A vector reordered during position capture remained usable.");
 memory[vectorStart] = new[] { other, local }.SelectMany(BitConverter.GetBytes).ToArray();
 Require(!LocalSlotCandidateScanner.Revalidate(two, local, paths, Read),
     "A reordered vector was accepted from a cached candidate.");

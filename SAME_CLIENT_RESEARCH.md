@@ -20,6 +20,8 @@
 
 静态反编译所提供的 `NoddPilot.Offsets.dll` 可见：`MonsterEntityReader.TryReadWorldPosition` 先按名称解析实体的 `Render` 组件，再从该组件读取三个 float；`EntityMapOffsets.Default` 的位置偏移为 312，世界坐标除以 10.869565 得到网格坐标。独立版现仅在已找到 1–2 个有序角色候选时，按这套公开默认偏移尝试只读组件链，并在读完后重验槽位向量；输出 `RawPositions`、`RawPositionsSeenUtc` 与 `RenderComponentAddress` 作为最多缓存一秒的候选诊断。合成内存检查覆盖组件归属与无效坐标。目标版可加载不同的运行时偏移；目前没有实机数据证明这些地址或坐标正确，也没有证据证明它们与 ExileCore2 的当前角色坐标语义一致。`RawPositions` 不参与实时跟随、角色绑定或手柄输入。
 
+现在全量候选搜索仍最多每秒一次，但缓存向量会在每次 10Hz 传感器发送前后各重验一次，并重读两名候选的原始位置；向量、路径或顺序在采样期间变化就清空该帧候选，下一帧重新搜索。`RawPositionsSeenUtc` 随实际重读更新，合成内存检查覆盖连续帧位置变化和采样中途角色调序。这仍是只读候选诊断，不会发布 `ordered_client` 控制报文。
+
 ExileCore2 参考程序集的 `Render.Pos` 暴露三维向量，但反编译代码不足以确认它与上面原始“世界/网格”值的单位关系。诊断现对**同一已观察本地实体**同时计算 `Render.Pos` XY 到原始世界 XY、网格 XY 的欧氏距离，输出 `ObservedLocalPositionComparison`；不设置“匹配”阈值，也不从较小的距离自动选择坐标系。实机采样时可连同 `RawPositionsSeenUtc` 观察两种距离的分布，再决定是否存在可用的坐标对应关系。
 
 同一次候选扫描现在还按实体地址将每个有序候选与 ExileCore2 当前可见的 `Player` 实体对照，输出等长的 `VisiblePositionComparisons`。不可见或原始位置不可读的槽位为 `null`；有值时分别记录公开坐标到原始世界/网格坐标的 XY 距离。接收端校验数组长度和距离计算。此项用于实机时逐槽检查坐标一致性，不能单凭“两个值接近”证明第二个实体属于本地双人槽位。
