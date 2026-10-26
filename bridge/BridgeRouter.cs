@@ -49,9 +49,9 @@ internal sealed class BridgeRouter
         if (directRightStickSlot != 0 && (!rightStickFollowerOverride ||
             directRightStickSlot == mainSlot || !_routes.ContainsKey(directRightStickSlot))) return false;
         var explicitFocusPads = focusPads is not null;
-        focusPads ??= _routes.Keys.Where(slot => slot is >= 1 and <= 4)
+        focusPads ??= _routes.Keys.Where(slot => slot is >= 1 and <= 6)
             .ToDictionary(slot => slot, slot => slot);
-        if (focusPads.Count == 0 || focusPads.Any(entry => entry.Key is < 1 or > 4 ||
+        if (focusPads.Count == 0 || focusPads.Any(entry => entry.Key is < 1 or > 6 ||
             !_routes.ContainsKey(entry.Value)) || focusPads.Values.Distinct().Count() != focusPads.Count ||
             (explicitFocusPads && (!focusPads.TryGetValue(1, out var firstPad) || firstPad != mainSlot)))
             return false;
@@ -102,6 +102,8 @@ internal sealed class BridgeRouter
         if (!_physicalMode) return;
         const ushort leftThumb = 0x0040;
         const ushort rightThumb = 0x0080;
+        const ushort dpadUp = 0x0001;
+        const ushort dpadDown = 0x0002;
         var nowUtc = observedAtUtc ?? DateTime.UtcNow;
         var previousFocus = _focusedSlot;
         var previousIsolation = _isolatedSlot;
@@ -109,16 +111,28 @@ internal sealed class BridgeRouter
         var right = (gamepad.Buttons & rightThumb) != 0;
         var previousLeft = (_previousButtons & leftThumb) != 0;
         var previousRight = (_previousButtons & rightThumb) != 0;
+        var up = (gamepad.Buttons & dpadUp) != 0;
+        var down = (gamepad.Buttons & dpadDown) != 0;
+        var previousUp = (_previousButtons & dpadUp) != 0;
+        var previousDown = (_previousButtons & dpadDown) != 0;
         var leftTrigger = gamepad.LeftTrigger >= 30;
         var previousLeftTrigger = _previousLeftTrigger >= 30;
         var leftRole = leftTrigger && _focusPads.ContainsKey(3) ? 3 : 1;
         var rightRole = leftTrigger && _focusPads.ContainsKey(4) ? 4 : 2;
         var leftEdge = left && (!previousLeft || (leftRole == 3 && !previousLeftTrigger));
         var rightEdge = right && (!previousRight || (rightRole == 4 && !previousLeftTrigger));
-        var pressedRole = leftEdge == rightEdge ? 0 : leftEdge ? leftRole : rightRole;
-        var promoteChord = pressedRole is 3 or 4 &&
+        var fifthEdge = leftTrigger && _focusPads.ContainsKey(5) && up &&
+            (!previousUp || !previousLeftTrigger);
+        var sixthEdge = leftTrigger && _focusPads.ContainsKey(6) && down &&
+            (!previousDown || !previousLeftTrigger);
+        var edgeCount = (leftEdge ? 1 : 0) + (rightEdge ? 1 : 0) +
+            (fifthEdge ? 1 : 0) + (sixthEdge ? 1 : 0);
+        var pressedRole = edgeCount == 1
+            ? fifthEdge ? 5 : sixthEdge ? 6 : leftEdge ? leftRole : rightRole : 0;
+        var promoteChord = (pressedRole is 3 or 4 &&
             _isolatedSlot == (_focusPads.TryGetValue(pressedRole - 2, out var prefixPad) ? prefixPad : -1) &&
-            (pressedRole == 3 ? previousLeft : previousRight) && !previousLeftTrigger;
+            (pressedRole == 3 ? previousLeft : previousRight) && !previousLeftTrigger) ||
+            (pressedRole is 5 or 6 && _isolatedSlot != 0);
         if (pressedRole != 0 && _focusPads.TryGetValue(pressedRole, out var pressedSlot) &&
             (promoteChord || nowUtc - _lastFocusToggleUtc >= TimeSpan.FromMilliseconds(350)))
         {
@@ -129,7 +143,12 @@ internal sealed class BridgeRouter
         _previousButtons = gamepad.Buttons;
         _previousLeftTrigger = gamepad.LeftTrigger;
         gamepad.Buttons &= unchecked((ushort)~(leftThumb | rightThumb));
-        if (leftTrigger && ((left && leftRole == 3) || (right && rightRole == 4)))
+        if (leftTrigger && ((up && _focusPads.ContainsKey(5)) ||
+                            (down && _focusPads.ContainsKey(6))))
+            gamepad.Buttons &= unchecked((ushort)~(dpadUp | dpadDown));
+        if (leftTrigger && ((left && leftRole == 3) || (right && rightRole == 4) ||
+                            (up && _focusPads.ContainsKey(5)) ||
+                            (down && _focusPads.ContainsKey(6))))
             gamepad.LeftTrigger = 0;
         _physicalConnected = true;
         _allowDirectRightStick = allowDirectRightStick;

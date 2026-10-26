@@ -40,6 +40,7 @@ PrivateSlotConfigTests.Run();
 PrivateSlotPublisherTests.Run();
 Client3FocusRoutingTests.Run();
 Client3InputPublisherTests.Run();
+Client3PadOutputsTests.Run();
 PrivateClient3CommandRouterTests.Run();
 if (!Client3RuntimeAttach.IsKnownGameExecutable(@"C:\PoE2\PathOfExile_x64Steam.exe") ||
     Client3RuntimeAttach.IsKnownGameExecutable(@"C:\Other\notepad.exe") ||
@@ -380,6 +381,34 @@ if (fourthRouter.FocusedSlot != 4 || fourthPads[4].X != 602 ||
     fourthPads[4].Report.LeftTrigger != 0 ||
     fourthPads.Take(3).Any(entry => entry.Value.Report != default))
     throw new Exception("LT+R3 did not isolate the fourth public pad.");
+fourthRouter.SetPhysical(default, now.AddMilliseconds(10));
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0001, LeftTrigger = 180 },
+    now.AddMilliseconds(400));
+if (fourthRouter.FocusedSlot != 4 || fourthPads[4].Report.Buttons != 0x0001 ||
+    fourthPads[4].Report.LeftTrigger != 180)
+    throw new Exception("Four-player mode suppressed an unassigned LT+D-pad action.");
+var sixPads = Enumerable.Range(1, 6).ToDictionary(slot => slot, _ => new FakePad());
+var sixRouter = new BridgeRouter(sixPads.ToDictionary(entry => entry.Key,
+    entry => (IPadOutput)entry.Value));
+if (!sixRouter.ConfigurePhysical(1,
+        focusPads: Enumerable.Range(1, 6).ToDictionary(slot => slot, slot => slot)))
+    throw new Exception("Six-player physical focus mapping was rejected.");
+sixRouter.SetPhysical(new XInputGamepad { Buttons = 0x0001, LeftTrigger = 180, LeftX = 605 }, now);
+if (sixRouter.FocusedSlot != 5 || sixPads[5].X != 605 ||
+    sixPads[5].Report.Buttons != 0 || sixPads[5].Report.LeftTrigger != 0 ||
+    sixPads.Where(entry => entry.Key != 5).Any(entry => entry.Value.Report != default))
+    throw new Exception("LT+D-pad Up did not isolate private P5 and suppress its hotkey.");
+sixRouter.SetPhysical(default, now.AddMilliseconds(10));
+sixRouter.SetPhysical(new XInputGamepad { Buttons = 0x0002, LeftTrigger = 180, LeftX = 606 },
+    now.AddMilliseconds(100));
+if (sixRouter.FocusedSlot != 6 || sixPads[6].X != 606 || sixPads[5].Report != default ||
+    sixPads[6].Report.Buttons != 0 || sixPads[6].Report.LeftTrigger != 0)
+    throw new Exception("Focused P5 did not promote LT+D-pad Down to private P6.");
+sixRouter.SetPhysical(default, now.AddMilliseconds(110));
+sixRouter.SetPhysical(new XInputGamepad { Buttons = 0x0002, LeftTrigger = 180, LeftX = 601 },
+    now.AddMilliseconds(500));
+if (sixRouter.FocusedSlot != 1 || sixPads[1].X != 601 || sixPads[6].Report != default)
+    throw new Exception("Repeating private P6 focus did not restore MAIN.");
 var overrideMain = new FakePad();
 var overrideFollower = new FakePad();
 var overrideHolding = new FakePad();
