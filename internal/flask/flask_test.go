@@ -5,8 +5,6 @@ import (
 	"time"
 )
 
-func number(value float64) *float64 { return &value }
-
 func vitals(life, mana float64) Vitals {
 	return Vitals{Life: Pool{number(life), number(100)}, Mana: Pool{number(mana), number(100)}}
 }
@@ -94,5 +92,49 @@ func TestCompanionMinimumDeficitAndSeparatePlayerState(t *testing.T) {
 	}
 	if _, err := engine.Step(2, now, vitals(30, 100), rules, false, false); err == nil {
 		t.Fatal("out-of-order frame accepted")
+	}
+}
+
+func TestEnergyShieldCanReplaceOrSupplementLife(t *testing.T) {
+	rules, _ := ResetProfiles(1)
+	rules.Mana.Enabled = false
+	now := time.Unix(100, 0)
+	ci := Vitals{Life: Pool{number(1), number(1)}, EnergyShield: Pool{number(20), number(100)}}
+	if got, err := New().Step(1, now, ci, rules, false, false); err != nil || len(got) != 1 || got[0].Percent != 20 {
+		t.Fatalf("CI did not use energy shield: %+v %v", got, err)
+	}
+	combined := Vitals{Life: Pool{number(100), number(100)}, EnergyShield: Pool{number(0), number(100)}}
+	if got, err := New().Step(1, now, combined, rules, false, false); err != nil || len(got) != 0 {
+		t.Fatalf("ES supplemented life without rule: %+v %v", got, err)
+	}
+	rules.CombinedDefence = true
+	if got, err := New().Step(1, now, combined, rules, false, false); err != nil || len(got) != 1 || got[0].Percent != 50 {
+		t.Fatalf("combined defence did not use both pools: %+v %v", got, err)
+	}
+}
+
+func TestWardDefersLifeAndBreakForcesOneDecision(t *testing.T) {
+	rules, _ := ResetProfiles(1)
+	rules.Mana.Enabled = false
+	engine := New()
+	now := time.Unix(100, 0)
+	withWard := vitals(20, 100)
+	withWard.Ward = Pool{Current: number(10)}
+	if got, err := engine.Step(1, now, withWard, rules, false, false); err != nil || len(got) != 0 {
+		t.Fatalf("active ward did not defer life: %+v %v", got, err)
+	}
+	broken := vitals(20, 100)
+	broken.Ward = Pool{Current: number(0)}
+	if got, err := engine.Step(1, now.Add(100*time.Millisecond), broken, rules, false, false); err != nil || len(got) != 1 || got[0].Reason != "ward_break" {
+		t.Fatalf("ward break did not fire: %+v %v", got, err)
+	}
+	if got, err := engine.Step(1, now.Add(200*time.Millisecond), broken, rules, false, false); err != nil || len(got) != 0 {
+		t.Fatalf("ward break repeated: %+v %v", got, err)
+	}
+	unknown := vitals(100, 100)
+	engine.Step(2, now, withWard, rules, false, false)
+	engine.Step(2, now.Add(100*time.Millisecond), unknown, rules, false, false)
+	if got, err := engine.Step(2, now.Add(200*time.Millisecond), broken, rules, false, false); err != nil || len(got) != 1 || got[0].Reason == "ward_break" {
+		t.Fatalf("missing ward was treated as a break: %+v %v", got, err)
 	}
 }

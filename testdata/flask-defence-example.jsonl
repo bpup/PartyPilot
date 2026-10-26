@@ -1,0 +1,3 @@
+{"now":"2026-10-26T00:00:00Z","player":1,"menu_open":false,"recovering":false,"vitals":{"life":{"current":20,"maximum":100},"ward":{"current":10}}}
+{"now":"2026-10-26T00:00:00.1Z","player":1,"menu_open":false,"recovering":false,"vitals":{"life":{"current":20,"maximum":100},"ward":{"current":0}}}
+{"now":"2026-10-26T00:00:00.2Z","player":3,"menu_open":false,"recovering":false,"vitals":{"life":{"current":1,"maximum":1},"energy_shield":{"current":20,"maximum":100}}}

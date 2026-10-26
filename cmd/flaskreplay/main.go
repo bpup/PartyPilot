@@ -26,7 +26,7 @@ type result struct {
 	Activations []flask.Activation `json:"activations"`
 }
 
-func run(path string) error {
+func run(path string, combinedDefence bool) error {
 	if path == "" {
 		return errors.New("-replay requires a JSONL file")
 	}
@@ -53,6 +53,7 @@ func run(path string) error {
 		if err != nil {
 			return fmt.Errorf("line %d: %w", line, err)
 		}
+		settings.CombinedDefence = combinedDefence
 		if input.Reset {
 			engine.ResetPlayer(input.Player)
 		}
@@ -72,8 +73,9 @@ func run(path string) error {
 
 func main() {
 	path := flag.String("replay", "", "JSONL frames with explicit menu and recovery state")
+	combinedDefence := flag.Bool("combined-defence", false, "combine life and energy shield for life-flask decisions")
 	flag.Parse()
-	if err := run(*path); err != nil {
+	if err := run(*path, *combinedDefence); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

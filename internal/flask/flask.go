@@ -12,8 +12,10 @@ type Pool struct {
 }
 
 type Vitals struct {
-	Life Pool `json:"life"`
-	Mana Pool `json:"mana"`
+	Life         Pool `json:"life"`
+	Mana         Pool `json:"mana"`
+	EnergyShield Pool `json:"energy_shield"`
+	Ward         Pool `json:"ward"`
 }
 
 type Rule struct {
@@ -27,8 +29,14 @@ type Rule struct {
 }
 
 type Settings struct {
-	Life Rule
-	Mana Rule
+	Life                Rule
+	Mana                Rule
+	EsTrigger           float64
+	ChaosInoculation    bool
+	CombinedDefence     bool
+	WardEnabled         bool
+	WardDelaysLife      bool
+	FireLifeOnWardBreak bool
 }
 
 type Activation struct {
@@ -48,6 +56,7 @@ type playerState struct {
 	lastStep time.Time
 	life     ruleState
 	mana     ruleState
+	lastWard *float64
 }
 
 type Engine struct {
@@ -59,15 +68,17 @@ func New() *Engine { return &Engine{players: make(map[int]*playerState)} }
 // ResetPlayer clears cooldown and threshold state after a player session changes.
 func (engine *Engine) ResetPlayer(player int) { delete(engine.players, player) }
 
-// ResetProfiles match the life and mana reset profiles observed in 0.6.17.
-// Ward, ES, custom actions, support and empty-flask detection are separate rules.
+// ResetProfiles match the resource reset profiles observed in 0.6.17.
+// Custom actions, support and empty-flask detection are separate rules.
 func ResetProfiles(player int) (Settings, error) {
 	if player < 1 || player > 6 {
 		return Settings{}, errors.New("player must be 1–6")
 	}
 	settings := Settings{
-		Life: Rule{Enabled: true, Trigger: 70, Cooldown: 200 * time.Millisecond, MinMissing: 0, SkipRecovering: true},
-		Mana: Rule{Enabled: true, Trigger: 45, Cooldown: 800 * time.Millisecond, MinMissing: 0},
+		Life:      Rule{Enabled: true, Trigger: 70, Cooldown: 200 * time.Millisecond, MinMissing: 0, SkipRecovering: true},
+		Mana:      Rule{Enabled: true, Trigger: 45, Cooldown: 800 * time.Millisecond, MinMissing: 0},
+		EsTrigger: 35, ChaosInoculation: true, WardEnabled: true,
+		WardDelaysLife: true, FireLifeOnWardBreak: true,
 	}
 	if player%2 == 0 {
 		settings.Life.Cooldown = 400 * time.Millisecond
@@ -87,7 +98,8 @@ func ResetProfiles(player int) (Settings, error) {
 
 func (engine *Engine) Step(player int, now time.Time, vitals Vitals, rules Settings, menuOpen, recovering bool) ([]Activation, error) {
 	if player < 1 || player > 6 || now.IsZero() || !validRule(rules.Life) || !validRule(rules.Mana) ||
-		!validPool(vitals.Life) || !validPool(vitals.Mana) {
+		math.IsNaN(rules.EsTrigger) || math.IsInf(rules.EsTrigger, 0) || rules.EsTrigger < 0 || rules.EsTrigger > 100 ||
+		!validPool(vitals.Life) || !validPool(vitals.Mana) || !validPool(vitals.EnergyShield) || !validWard(vitals.Ward) {
 		return nil, errors.New("invalid player, time, rule, or vitals")
 	}
 	state := engine.players[player]
@@ -103,16 +115,36 @@ func (engine *Engine) Step(player int, now time.Time, vitals Vitals, rules Setti
 		return nil, nil
 	}
 	var activations []Activation
-	if result := evaluate("life", player, now, vitals.Life, rules.Life, &state.life, rules.Life.SkipRecovering && recovering); result != nil {
+	wardBroke := state.lastWard != nil && *state.lastWard > 0 && vitals.Ward.Current != nil && *vitals.Ward.Current <= 0
+	state.lastWard = copyNumber(vitals.Ward.Current)
+	lifePool := vitals.Life
+	lifeRule := rules.Life
+	if rules.ChaosInoculation && vitals.Life.Maximum != nil && *vitals.Life.Maximum <= 1 &&
+		vitals.EnergyShield.Maximum != nil && *vitals.EnergyShield.Maximum > 0 {
+		lifePool = vitals.EnergyShield
+		lifeRule.Trigger = rules.EsTrigger
+	} else if rules.CombinedDefence && vitals.Life.Current != nil && vitals.Life.Maximum != nil &&
+		vitals.EnergyShield.Current != nil && vitals.EnergyShield.Maximum != nil {
+		lifePool = Pool{Current: number(*vitals.Life.Current + *vitals.EnergyShield.Current),
+			Maximum: number(*vitals.Life.Maximum + *vitals.EnergyShield.Maximum)}
+	}
+	if wardBroke && rules.FireLifeOnWardBreak && vitals.Life.Current != nil && vitals.Life.Maximum != nil {
+		forced := Rule{Enabled: true, Trigger: 100, Emergency: number(100)}
+		if result := evaluate("life", player, now, vitals.Life, forced, &state.life, false, true); result != nil {
+			activations = append(activations, *result)
+		}
+	} else if result := evaluate("life", player, now, lifePool, lifeRule, &state.life,
+		(rules.Life.SkipRecovering && recovering) || (rules.WardEnabled && rules.WardDelaysLife &&
+			vitals.Ward.Current != nil && *vitals.Ward.Current > 0), false); result != nil {
 		activations = append(activations, *result)
 	}
-	if result := evaluate("mana", player, now, vitals.Mana, rules.Mana, &state.mana, false); result != nil {
+	if result := evaluate("mana", player, now, vitals.Mana, rules.Mana, &state.mana, false, false); result != nil {
 		activations = append(activations, *result)
 	}
 	return activations, nil
 }
 
-func evaluate(resource string, player int, now time.Time, pool Pool, rule Rule, state *ruleState, held bool) *Activation {
+func evaluate(resource string, player int, now time.Time, pool Pool, rule Rule, state *ruleState, held, force bool) *Activation {
 	if !rule.Enabled {
 		state.latched, state.emergency = false, false
 		return nil
@@ -133,14 +165,16 @@ func evaluate(resource string, player int, now time.Time, pool Pool, rule Rule, 
 	if emergencyEdge {
 		state.emergency = true
 	}
-	if !emergencyEdge && state.latched && !rule.Sustained {
+	if !force && !emergencyEdge && state.latched && !rule.Sustained {
 		return nil
 	}
-	if !emergencyEdge && !state.last.IsZero() && now.Sub(state.last) < rule.Cooldown {
+	if !force && !emergencyEdge && !state.last.IsZero() && now.Sub(state.last) < rule.Cooldown {
 		return nil
 	}
 	reason := "threshold"
-	if emergencyEdge {
+	if force {
+		reason = "ward_break"
+	} else if emergencyEdge {
 		reason = "emergency"
 	} else if state.latched && rule.Sustained {
 		reason = "sustained"
@@ -148,6 +182,15 @@ func evaluate(resource string, player int, now time.Time, pool Pool, rule Rule, 
 	state.latched = true
 	state.last = now
 	return &Activation{Player: player, Resource: resource, Percent: percent, Reason: reason}
+}
+
+func number(value float64) *float64 { return &value }
+
+func copyNumber(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	return number(*value)
 }
 
 func validRule(rule Rule) bool {
@@ -172,4 +215,14 @@ func validPool(pool Pool) bool {
 		}
 	}
 	return true
+}
+
+func validWard(ward Pool) bool {
+	if ward.Current == nil {
+		return ward.Maximum == nil
+	}
+	if math.IsNaN(*ward.Current) || math.IsInf(*ward.Current, 0) || *ward.Current < 0 {
+		return false
+	}
+	return ward.Maximum == nil || !math.IsNaN(*ward.Maximum) && !math.IsInf(*ward.Maximum, 0) && *ward.Maximum >= 0
 }
