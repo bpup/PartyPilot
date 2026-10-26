@@ -1,6 +1,9 @@
 package telemetry
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDecodeOptionalVitals(t *testing.T) {
 	base := `{"ProcessId":123,"SeenUtc":"2026-10-26T00:00:00Z","X":1,"Y":2,"Z":3`
@@ -42,6 +45,31 @@ func TestVisiblePlayerDiagnosticsCannotDeclareTwoLocalEntities(t *testing.T) {
 	} {
 		if _, err := Decode([]byte(base + suffix)); err == nil {
 			t.Fatalf("invalid visible entity evidence accepted: %s", suffix)
+		}
+	}
+}
+
+func TestVisiblePlayerAddressEvidenceIsDiagnosticOnly(t *testing.T) {
+	base := `{"ProcessId":123,"SeenUtc":"2026-10-26T00:00:00Z","X":1,"Y":2,"Z":3,` +
+		`"IngameDataAddress":"0x100000","ObservedLocalAddress":"0x200000",` +
+		`"VisiblePlayersStatus":"ok","VisiblePlayers":[` +
+		`{"EntityId":11,"Address":"0x200000","Path":"Metadata/Characters/Player","Name":"One",` +
+		`"X":1,"Y":2,"Z":3,"IsObservedLocal":true},` +
+		`{"EntityId":12,"Address":"0x300000","Path":"Metadata/Characters/Player","Name":"Two",` +
+		`"X":4,"Y":5,"Z":6,"IsObservedLocal":false}]}`
+	sample, err := Decode([]byte(base))
+	if err != nil || sample.IngameDataAddress != "0x100000" || sample.ObservedLocalAddress != "0x200000" ||
+		sample.VisiblePlayers[1].Address != "0x300000" {
+		t.Fatalf("address diagnostic evidence was not preserved: %+v, %v", sample, err)
+	}
+	for _, value := range []string{
+		`"ObservedLocalAddress":"0x999999"`,
+		`"ObservedLocalAddress":"200000"`,
+		`"ObservedLocalAddress":"0x0"`,
+	} {
+		changed := strings.Replace(base, `"ObservedLocalAddress":"0x200000"`, value, 1)
+		if _, err := Decode([]byte(changed)); err == nil {
+			t.Fatalf("invalid local address evidence accepted: %s", value)
 		}
 	}
 }

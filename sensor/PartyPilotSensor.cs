@@ -26,11 +26,15 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         var vitals = player?.GetComponent<Life>();
         object[]? visiblePlayers = null;
         string? visiblePlayersStatus = null;
+        string? ingameDataAddress = null;
+        string? observedLocalAddress = null;
         if (Settings.DiagnoseVisiblePlayers.Value)
         {
             try
             {
                 visiblePlayers = ReadVisiblePlayers(player?.Id);
+                ingameDataAddress = FormatAddress(GameController.IngameState.Data.Address);
+                observedLocalAddress = FormatAddress(player?.Address ?? 0);
                 visiblePlayersStatus = "ok";
             }
             catch
@@ -57,6 +61,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             ManaMax = vitals?.MaxMana,
             EnergyShield = vitals?.CurES,
             EnergyShieldMax = vitals?.MaxES,
+            IngameDataAddress = ingameDataAddress,
+            ObservedLocalAddress = observedLocalAddress,
             VisiblePlayers = visiblePlayers,
             VisiblePlayersStatus = visiblePlayersStatus
         });
@@ -79,6 +85,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             players.Add(new
             {
                 EntityId = entity.Id,
+                Address = FormatAddress(entity.Address),
+                Path = entity.Path,
                 Name = component.PlayerName.Trim(),
                 X = position.X,
                 Y = position.Y,
@@ -89,4 +97,6 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         }
         return players.ToArray();
     }
+
+    private static string? FormatAddress(long address) => address > 0 ? $"0x{address:X}" : null;
 }
