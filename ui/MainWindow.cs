@@ -28,6 +28,9 @@ public sealed class MainWindow : Window
     private readonly TextBox[] _uris = new TextBox[3];
     private readonly TextBlock[] _clientLabels = new TextBlock[3];
     private readonly StackPanel[] _clientRows = new StackPanel[3];
+    private readonly AccountProfileStore _accountProfiles = new();
+    private readonly StackPanel[] _accountRows = new StackPanel[3];
+    private readonly TextBlock[] _accountResults = new TextBlock[3];
     private readonly Button _check = new();
     private readonly Button _launch = new();
     private readonly Button _attach = new();
@@ -140,6 +143,7 @@ public sealed class MainWindow : Window
         content.Children.Add(Label("独立版工作区 · 游戏窗口启动与有限布局的手柄配对引导", 13, MutedBrush));
         content.Children.Add(BuildInputStep());
         content.Children.Add(BuildClientStep());
+        content.Children.Add(BuildAccountStep());
         content.Children.Add(BuildLaunchStep());
         content.Children.Add(BuildAutoPartyStep());
         content.Children.Add(BuildFollowStep());
@@ -301,6 +305,53 @@ public sealed class MainWindow : Window
             _uris[index] = uri;
             _clientLabels[index] = clientLabel;
             _clientRows[index] = row;
+            panel.Children.Add(row);
+        }
+        return Card(panel);
+    }
+
+    private Border BuildAccountStep()
+    {
+        var panel = Step("2A", "ACCOUNTS · 账号资料",
+            "按客户端保存独立 PoE 账号；密码只写入当前 Windows 用户保护的本地资料。登录画面校准与自动填入尚未接入。");
+        for (var index = 0; index < 3; index++)
+        {
+            var client = index + 1;
+            var row = new StackPanel { Spacing = 6, Margin = new Thickness(0, 8, 0, 0) };
+            row.Children.Add(Label($"客户端 {client} · 独立账号", 13, Brushes.White, FontWeight.SemiBold));
+            var email = new TextBox { Watermark = "PoE 账号邮箱", Width = 250,
+                HorizontalAlignment = HorizontalAlignment.Left };
+            var password = new TextBox { Watermark = "密码", PasswordChar = '•', Width = 250,
+                HorizontalAlignment = HorizontalAlignment.Left };
+            row.Children.Add(email);
+            row.Children.Add(password);
+            var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 10 };
+            var save = new Button { Content = "保存账号资料", IsEnabled = OperatingSystem.IsWindows() };
+            var remove = new Button { Content = "删除账号资料", IsEnabled = OperatingSystem.IsWindows() };
+            save.Click += (_, _) =>
+            {
+                var result = _accountProfiles.Save(client, email.Text, password.Text);
+                if (result.Success) password.Text = string.Empty;
+                _accountResults[client - 1].Text = result.Success
+                    ? _accountProfiles.Describe(client) + " · 自动登录尚未接入。" : result.Message;
+            };
+            remove.Click += (_, _) =>
+            {
+                var result = _accountProfiles.Delete(client);
+                if (result.Success)
+                {
+                    email.Text = string.Empty;
+                    password.Text = string.Empty;
+                }
+                _accountResults[client - 1].Text = result.Message;
+            };
+            actions.Children.Add(save);
+            actions.Children.Add(remove);
+            row.Children.Add(actions);
+            var status = Label(_accountProfiles.Describe(client), 12, MutedBrush);
+            row.Children.Add(status);
+            _accountResults[index] = status;
+            _accountRows[index] = row;
             panel.Children.Add(row);
         }
         return Card(panel);
@@ -608,6 +659,7 @@ public sealed class MainWindow : Window
         for (var index = 0; index < _clientRows.Length; index++)
         {
             _clientRows[index].IsVisible = index < count;
+            _accountRows[index].IsVisible = index < count;
             _fpsRows[index].IsVisible = index < count;
             _resourceRows[index].IsVisible = index < count;
             if (index < count)

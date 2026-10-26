@@ -7,6 +7,7 @@ using Avalonia.Threading;
 using PartyPilot.Desktop;
 
 PartyRosterCounterSmoke.Run();
+AccountProfileSmoke.Run();
 AutoPartyCoordinatorSmoke.Run();
 AutoPartyInviteSmoke.Run();
 AutoPartyRecoverySmoke.Run();
@@ -33,6 +34,11 @@ AppBuilder.Configure<SmokeApp>()
 var window = new MainWindow();
 window.Show();
 window.UpdateLayout();
+if (window.GetLogicalDescendants().OfType<TextBox>().Count(field =>
+        field.Watermark?.ToString() == "PoE 账号邮箱") != 3 ||
+    window.GetLogicalDescendants().OfType<TextBox>().Count(field =>
+        field.Watermark?.ToString() == "密码" && field.PasswordChar == '•') != 3)
+    throw new Exception("The desktop did not expose one protected account profile per client.");
 var radarPayload = System.Text.Encoding.UTF8.GetBytes(
     "{\"ProcessId\":123,\"RadarStatus\":\"ok\",\"RadarSeenUtc\":\"" + DateTime.UtcNow.ToString("O") +
     "\",\"X\":100,\"Y\":200,\"RadarEntities\":[" +
