@@ -1,6 +1,6 @@
 # PartyPilot
 
-独立开发的 PoE2 多角色跟随软件工作区。当前交付是 **跟随决策内核与回放工具**，尚不能控制游戏。它与 `bpup/poe2-scripts` 没有代码或构建依赖。
+独立开发的 PoE2 多角色跟随软件工作区。当前交付包含 **跟随决策内核、实时诊断链路与回放工具**；Windows 和 PoE2 游戏内控制尚未验收。它与 `bpup/poe2-scripts` 没有代码或构建依赖。
 
 ## 当前可运行功能
 
@@ -53,6 +53,14 @@ GOOS=windows GOARCH=amd64 go build -o PartyPilot.exe ./cmd/partypilot
 `release/PartyPilot-RosterWatch.exe` 使用 `-roster 1:进程ID,2:进程ID,... -leader 1 -max-age 750ms` 对 1–6 个明确配置的游戏进程做只读监视。它按角色槽位输出队长是否缺失/过期，以及每个队员的缺失、过期、区域不一致或同区域候选状态；拒绝重复槽位、重复进程 ID 和乱序旧样本。该程序已用本机模拟 UDP 报文验证三角色状态变化，仍未接到真实 PoE2。区域名称与哈希相等仍只是候选，不会进入自动控制。
 
 `release/PartyPilot-AreaLogWatch.exe` 通过重复的 `-log 槽位=Client.txt路径` 参数只读监视 2–6 份明确指定、互不相同的客户端日志。例如 `-log "1=C:\\PoE2-A\\logs\\Client.txt" -log "2=C:\\PoE2-B\\logs\\Client.txt" -leader 1 -max-age 30s`。也可用 `-exe 槽位=游戏程序路径`，从该程序所在目录推导 `logs/Client.txt`；每个槽位只能指定一种来源。默认读取每份日志末尾最多 512 KiB 的完整历史行，历史吻合仅显示 `historical_candidate`；用 `-prime-history=false` 可跳过历史。随后只接收新写入的完整 `Generating level … area "…" with seed …` 行；两端区域 ID 与 seed 相同且都未过期时输出 `candidate_same_instance`，不同则输出 `different_area`。日志缺失、共用同一文件或文件读取错误会退出。`[SCENE]` 名称不足以区分实例，因此不参与这一匹配。当前仅用合成日志验证了行为，尚无真实 `Client.txt` 样本，也未核实每个日志文件与游戏进程、角色槽位的对应关系。候选结果不会进入自动控制。
+
+`release/PartyPilot-LiveFollow.exe` 把现有传感器 UDP 位置流与每客户端独立日志接入跟随内核，输出与 `BridgeFeed` 兼容的逐帧决策。它要求 `-roster 1:进程ID,2:进程ID`、每槽位 `-log` 或 `-exe`、队长和显式距离/时效参数；当前仅支持 2–3 个游戏进程且每进程一名角色。启动前的日志记录不会让实时决策开始移动；两份日志都必须在启动后写入相同区域 ID 与 seed，且各自再收到新的位置样本。进程、日志、位置或区域证据缺失、过期或不一致时输出等待命令。示例中的距离是受控测试值，不是目标软件参数：
+
+```sh
+PartyPilot-LiveFollow.exe -roster 1:1234,2:5678 -leader 1 -exe "1=C:\\PoE2-A\\PathOfExile.exe" -exe "2=C:\\PoE2-B\\PathOfExile.exe" -stop 2 -resume 3 -catchup 10 -max-age 750ms -log-max-age 30m
+```
+
+该链路已用合成 UDP 与日志验证“等待 → 追赶 → 样本过期等待”，并交叉编译 Windows 程序。没有真实 Windows/PoE2 运行证据，也没有验证 ExileCore2 的坐标系与虚拟摇杆方向映射，因此输出仍属于 **implementation-aligned / integration-pending**。
 
 `PartyReplay` 读取受控数据中的明确实例标识，计算各队员命令。显式启用 `-last-focused-leads` 后，手动聚焦的角色成为跟随目标，原 P1 会转为自动跟随；返回 P1 焦点时恢复原队长。未启用该选项时仍按固定队长计算。`-follow-targets 2:3` 指定 P2 跟随 P3；未指定的队员跟随当前 MAIN。`BridgeFeed -slot 2` 选择一个队员，`BridgeFeed -all` 输出所有队员命令及焦点切换事件。手动接管或等待会松开相应自动化摇杆。上述管道已在 macOS 用模拟数据贯通到 C# 桥接协议解析器。Windows 上可以另传 `-pace 100ms`，再把 `BridgeFeed -all` 的输出接到 `PartyPilot.Bridge.exe --enable-controller --slots 1,2 --physical-index 0 --main-slot 1 --physical-hidden-confirmed` 做受控手柄测试；**这条 Windows/游戏输入管道尚未运行验证**。真实传感器尚不能提供经验证的实例标识，所以当前的只读监视器不会自动连接这条控制管道。
 
