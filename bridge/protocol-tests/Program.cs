@@ -1,6 +1,18 @@
 using PartyPilot.Bridge;
 using System.Runtime.InteropServices;
 
+if (!ControllerDeviceId.TryReadVidPid(@"HID\VID_1234&PID_ABCD\DEVICE", out var vendor, out var product) ||
+    vendor != 0x1234 || product != 0xabcd ||
+    ControllerDeviceId.TryReadVidPid(@"HID\VID_123&PID_ABCD\DEVICE", out _, out _) ||
+    ControllerDeviceId.TryReadVidPid("XInput 0", out _, out _))
+    throw new Exception("WGI physical source accepted an unbound or invalid VID/PID.");
+var fourPublic = new Dictionary<int, int> { [1] = 0, [2] = 1, [3] = 2, [4] = 3 };
+if (!PublicSlotGuard.TryCreate(fourPublic, out var publicGuard) || publicGuard is null ||
+    !publicGuard.Matches(new Dictionary<int, int> { [4] = 3, [2] = 1, [1] = 0, [3] = 2 }) ||
+    publicGuard.Matches(new Dictionary<int, int> { [1] = 0, [2] = 1, [3] = 2, [4] = 2 }) ||
+    PublicSlotGuard.TryCreate(new Dictionary<int, int> { [1] = 0, [2] = 1, [3] = 2, [5] = 3 }, out _))
+    throw new Exception("Four public virtual slots were not guarded by exact XInput indices.");
+
 if (args.Contains("--stdin"))
 {
     string? line;
@@ -352,6 +364,17 @@ thirdRouter.SetPhysical(new XInputGamepad { Buttons = 0x0040, LeftTrigger = 180,
 if (thirdRouter.FocusedSlot != 4 || thirdThird.X != 432 || thirdThird.Report.LeftTrigger != 0 ||
     thirdMain.Report != default)
     throw new Exception("LT+L3 did not promote P1 focus to logical P3 without waiting for debounce.");
+var fourthPads = Enumerable.Range(1, 4).ToDictionary(slot => slot, _ => new FakePad());
+var fourthRouter = new BridgeRouter(fourthPads.ToDictionary(entry => entry.Key,
+    entry => (IPadOutput)entry.Value));
+if (!fourthRouter.ConfigurePhysical(1,
+        focusPads: new Dictionary<int, int> { [1] = 1, [2] = 2, [3] = 3, [4] = 4 }))
+    throw new Exception("Four-player focus mapping was rejected.");
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080, LeftTrigger = 180, LeftX = 602 }, now);
+if (fourthRouter.FocusedSlot != 4 || fourthPads[4].X != 602 ||
+    fourthPads[4].Report.LeftTrigger != 0 ||
+    fourthPads.Take(3).Any(entry => entry.Value.Report != default))
+    throw new Exception("LT+R3 did not isolate the fourth public pad.");
 var overrideMain = new FakePad();
 var overrideFollower = new FakePad();
 var overrideHolding = new FakePad();

@@ -213,7 +213,7 @@ public sealed class MainWindow : Window
 
     private Border BuildInputStep()
     {
-        var panel = Step("1", "CHOOSE INPUT · 选择输入", "以下仅适用于最多三个系统虚拟手柄的布局；需先在 Windows 上完成实体手柄对游戏的隔离。");
+        var panel = Step("1", "CHOOSE INPUT · 选择输入", "四人双客户端布局由 Windows Gaming Input 读取唯一匹配的实体手柄；其他可配对布局使用所选 XInput 编号。需先完成实体手柄对游戏的隔离。");
         _physicalIndex.PlaceholderText = "实体手柄 XInput 编号";
         _physicalIndex.ItemsSource = Enumerable.Range(0, 4).Select(index => $"XInput {index}").ToArray();
         _physicalIndex.Width = 190;
@@ -908,12 +908,15 @@ public sealed class MainWindow : Window
     private void UpdateBridgeControls()
     {
         var slots = _selectedTopology?.Slots.Select(slot => slot.RuntimePad).ToArray() ?? [];
-        var supported = slots.Length is >= 1 and <= 3 && slots.All(slot => slot is >= 1 and <= 4);
+        var useWgi = _selectedTopology?.Id == "4-balanced";
+        var supported = slots.All(slot => slot is >= 1 and <= 4) &&
+            (slots.Length is >= 1 and <= 3 || useWgi && slots.Length == 4);
         var gamePathsReady = _selectedTopology is not null &&
             Enumerable.Range(0, _selectedTopology.ClientCount)
                 .All(index => !string.IsNullOrWhiteSpace(_paths[index]?.Text));
         _prepareBridge.IsEnabled = !_busy && _bridge is null && supported &&
-            _physicalIndex.SelectedIndex is >= 0 and <= 3 && _isolationConfirmed.IsChecked == true &&
+            (useWgi || _physicalIndex.SelectedIndex is >= 0 and <= 3) &&
+            _isolationConfirmed.IsChecked == true &&
             !string.IsNullOrWhiteSpace(_physicalDevice.Text) && gamePathsReady;
         _stopBridge.IsEnabled = _bridge is not null;
         _armPairing.IsEnabled = _bridge is not null && _pairing?.Current is not null &&
@@ -922,7 +925,7 @@ public sealed class MainWindow : Window
         _confirmRole.IsEnabled = _bridge is not null && _pairing?.AReleased == true;
         _playerCount.IsEnabled = _bridge is null && !_busy;
         _topologyVariant.IsEnabled = _bridge is null && !_busy;
-        _physicalIndex.IsEnabled = _bridge is null && !_busy;
+        _physicalIndex.IsEnabled = _bridge is null && !_busy && !useWgi;
         _physicalDevice.IsEnabled = _bridge is null && !_busy;
         _isolationConfirmed.IsEnabled = _bridge is null && !_busy;
         _rightStickFollowerOverride.IsEnabled = _bridge is null && !_busy;
@@ -934,7 +937,7 @@ public sealed class MainWindow : Window
         }
         if (_bridge is null && _selectedTopology is not null && !supported)
         {
-            _pairingStatus.Text = "此布局需要四个以上系统手柄或第三客户端进程内 P5/P6 输入；当前桥接不支持，未开始配对。";
+            _pairingStatus.Text = "此布局需要第三客户端进程内输入和跨桥接配对；当前桌面流程尚未接通，未开始配对。";
         }
         UpdateFollowControls();
     }
@@ -957,8 +960,11 @@ public sealed class MainWindow : Window
             return;
         }
         var slots = _selectedTopology.Slots.Select(slot => slot.RuntimePad).ToArray();
-        if (slots.Length is < 1 or > 3 || slots.Any(slot => slot is < 1 or > 4) ||
-            _physicalIndex.SelectedIndex is < 0 or > 3 || _isolationConfirmed.IsChecked != true ||
+        var useWgi = _selectedTopology.Id == "4-balanced";
+        if (slots.Length is < 1 or > 4 || slots.Any(slot => slot is < 1 or > 4) ||
+            (slots.Length == 4 && !useWgi) ||
+            (!useWgi && _physicalIndex.SelectedIndex is < 0 or > 3) ||
+            _isolationConfirmed.IsChecked != true ||
             string.IsNullOrWhiteSpace(_physicalDevice.Text))
         {
             _pairingStatus.Text = "当前布局或实体手柄隔离条件不满足桥接要求。";
@@ -979,7 +985,7 @@ public sealed class MainWindow : Window
                 .Select(index => _paths[index].Text?.Trim() ?? "").ToArray();
             var session = await BridgeSession.StartAsync(executable, _selectedTopology.Slots, _physicalIndex.SelectedIndex,
                 _physicalDevice.Text.Trim(), gameExecutables, _rightStickFollowerOverride.IsChecked == true,
-                _selectedTopology.Id == "2-split" && _autoFlask.IsChecked == true);
+                _selectedTopology.Id == "2-split" && _autoFlask.IsChecked == true, useWgi);
             session.AReleased += BridgeAReleased;
             session.PairingArmed += BridgePairingArmed;
             session.PairingCompleted += BridgePairingCompleted;

@@ -8,6 +8,8 @@
   <ItemGroup>
     <Compile Include="../BridgeProtocol.cs" Link="BridgeProtocol.cs" />
     <Compile Include="../BridgeSlots.cs" Link="BridgeSlots.cs" />
+    <Compile Include="../ControllerDeviceId.cs" Link="ControllerDeviceId.cs" />
+    <Compile Include="../PublicSlotGuard.cs" Link="PublicSlotGuard.cs" />
     <Compile Include="../FocusPadMap.cs" Link="FocusPadMap.cs" />
     <Compile Include="../BridgeRouter.cs" Link="BridgeRouter.cs" />
     <Compile Include="../Client3FocusRouting.cs" Link="Client3FocusRouting.cs" />

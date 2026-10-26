@@ -33,16 +33,17 @@ internal sealed class BridgeSession : IAsyncDisposable
 
     public static async Task<BridgeSession> StartAsync(string executable, IReadOnlyList<PartySlot> partySlots, int physicalIndex,
         string deviceInstance, IReadOnlyList<string> gameExecutables, bool rightStickFollowerOverride,
-        bool autoFlaskEnabled = false)
+        bool autoFlaskEnabled = false, bool useWgi = false)
     {
         var slots = partySlots.Select(item => item.RuntimePad).ToArray();
-        if (slots.Length is < 1 or > 3 || slots.Any(slot => slot is < 1 or > 4) ||
-            slots.Distinct().Count() != slots.Length || physicalIndex is < 0 or > 3 ||
+        if (slots.Length is < 1 or > 4 || slots.Any(slot => slot is < 1 or > 4) ||
+            slots.Distinct().Count() != slots.Length ||
+            (!useWgi && (physicalIndex is < 0 or > 3 || slots.Length > 3)) ||
             !partySlots.Select(item => item.PartyPlayer).SequenceEqual(Enumerable.Range(1, slots.Length)) ||
             string.IsNullOrWhiteSpace(deviceInstance) || gameExecutables.Count is < 1 or > 3 ||
             gameExecutables.Any(string.IsNullOrWhiteSpace))
         {
-            throw new ArgumentException("The current bridge needs 1–3 P1–P4 pads, a selected HidHide device, and 1–3 game paths.");
+            throw new ArgumentException("The bridge needs 1–4 P1–P4 pads, a selected HidHide device, and 1–3 game paths.");
         }
         var focusPadMap = string.Join(',', partySlots.Select(item => $"{item.PartyPlayer}:{item.RuntimePad}"));
         var directRightStickSlot = rightStickFollowerOverride && partySlots.Count == 2 &&
@@ -60,11 +61,17 @@ internal sealed class BridgeSession : IAsyncDisposable
         {
             "--enable-controller", "--slots", string.Join(',', slots),
             "--focus-pad-map", focusPadMap,
-            "--physical-index", physicalIndex.ToString(), "--main-slot", slots[0].ToString(),
+            "--main-slot", slots[0].ToString(),
             "--physical-hidden-confirmed", "--pairing-protected", "--device-instance", deviceInstance
         })
         {
             start.ArgumentList.Add(argument);
+        }
+        if (useWgi) start.ArgumentList.Add("--physical-wgi");
+        else
+        {
+            start.ArgumentList.Add("--physical-index");
+            start.ArgumentList.Add(physicalIndex.ToString());
         }
         foreach (var game in gameExecutables)
         {
@@ -84,7 +91,7 @@ internal sealed class BridgeSession : IAsyncDisposable
         {
             var readyLine = await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15));
             if (readyLine is null || !IsExpectedReady(readyLine, slots, focusPadMap,
-                rightStickFollowerOverride, directRightStickSlot, autoFlaskEnabled))
+                rightStickFollowerOverride, directRightStickSlot, autoFlaskEnabled, useWgi))
             {
                 throw new InvalidOperationException("Virtual controller bridge did not confirm the requested pad slots.");
             }
@@ -108,7 +115,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     }
 
     private static bool IsExpectedReady(string line, int[] slots, string focusPadMap,
-        bool rightStickFollowerOverride, int directRightStickSlot, bool autoFlaskEnabled)
+        bool rightStickFollowerOverride, int directRightStickSlot, bool autoFlaskEnabled, bool useWgi)
     {
         try
         {
@@ -116,6 +123,7 @@ internal sealed class BridgeSession : IAsyncDisposable
             var root = json.RootElement;
             return root.TryGetProperty("event", out var kind) && kind.GetString() == "ready" &&
                    root.TryGetProperty("physical_mode", out var mode) && mode.GetBoolean() &&
+                   (!useWgi || root.TryGetProperty("physical_wgi", out var source) && source.GetBoolean()) &&
                    root.TryGetProperty("pairing_protected", out var protectedMode) && protectedMode.GetBoolean() &&
                    root.TryGetProperty("hidhide_preflight", out var preflight) && preflight.GetBoolean() &&
                    root.TryGetProperty("auto_flask_enabled", out var flaskMode) &&

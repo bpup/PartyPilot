@@ -12,6 +12,11 @@ if (args.Contains("--client3-plan-only"))
     Console.WriteLine("Client 3 desktop binding and ready contract checked.");
     return;
 }
+if (args.Contains("--pipeline-only"))
+{
+    await ProcessPipelineSmoke.RunAsync();
+    return;
+}
 
 AppBuilder.Configure<SmokeApp>()
     .UseSkia()
@@ -364,13 +369,30 @@ if (!attach.IsEnabled) throw new Exception("Existing-window attachment was unava
 physicalIndex.SelectedIndex = 0;
 isolation.IsChecked = true;
 Dispatcher.UIThread.RunJobs();
-if (prepare.IsEnabled) throw new Exception("Four virtual pads incorrectly enabled the physical bridge.");
+if (prepare.IsEnabled) throw new Exception("Four virtual pads ignored missing device and game paths.");
 var pathFields = window.GetLogicalDescendants().OfType<TextBox>()
     .Where(item => item.Watermark?.ToString()?.Contains("PathOfExile_x64.exe") == true)
     .ToArray();
 if (pathFields.Length != 3 || !pathFields[0].IsEffectivelyVisible || !pathFields[1].IsEffectivelyVisible || pathFields[2].IsEffectivelyVisible)
 {
     throw new Exception($"Client selection did not show exactly two game path fields: {pathFields.Length} fields, effective visibility {string.Join(',', pathFields.Select(field => field.IsEffectivelyVisible))}.");
+}
+physicalIndex.SelectedIndex = -1;
+deviceInstance.Text = @"HID\VID_1234&PID_5678\DEVICE";
+pathFields[0].Text = "C:/GameA.exe";
+pathFields[1].Text = "D:/GameB.exe";
+Dispatcher.UIThread.RunJobs();
+if (!prepare.IsEnabled || physicalIndex.IsEnabled)
+    throw new Exception("Four-player WGI layout still required a public XInput physical index.");
+pathFields[0].Text = pathFields[1].Text = "";
+deviceInstance.Text = "";
+physicalIndex.SelectedIndex = 0;
+Dispatcher.UIThread.RunJobs();
+if (args.Contains("--four-pad-ui-only"))
+{
+    window.Close();
+    Console.WriteLine("Four-player WGI bridge preparation controls checked in the headless desktop.");
+    return;
 }
 var fpsPathFields = window.GetLogicalDescendants().OfType<TextBox>()
     .Where(item => item.Watermark?.ToString() == "配置文件绝对路径").ToArray();

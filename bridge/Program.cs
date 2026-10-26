@@ -123,7 +123,8 @@ if (!args.Contains("--enable-controller") || !BridgeSlots.TryParse(args, out var
     Console.Error.WriteLine("Usage: PartyPilot.Bridge --enable-controller --slots 1,2 [--focus-pad-map 1:1,2:2] [--physical-index 0 --main-slot 1 --physical-hidden-confirmed --device-instance HID\\... --game-exe C:\\Game\\PathOfExile.exe [--pairing-protected] [--right-stick-follower-override --direct-right-stick-slot 2]]");
     return 2;
 }
-var physicalMode = args.Contains("--physical-index") || args.Contains("--main-slot") ||
+var wgiMode = args.Contains("--physical-wgi");
+var physicalMode = wgiMode || args.Contains("--physical-index") || args.Contains("--main-slot") ||
     args.Contains("--physical-hidden-confirmed") || args.Contains("--right-stick-follower-override");
 var autoFlaskEnabled = args.Contains("--enable-auto-flask");
 var rightStickFollowerOverride = args.Contains("--right-stick-follower-override");
@@ -161,8 +162,10 @@ if (directRightStickSlot != 0 &&
     Console.Error.WriteLine("Direct right-stick movement is limited to a protected P1/P2 pair in one game client.");
     return 2;
 }
-if ((protectedPairing && !physicalMode) || (physicalMode && (physicalIndexPosition < 0 || physicalIndexPosition + 1 >= args.Length ||
-    !uint.TryParse(args[physicalIndexPosition + 1], out physicalIndex) || physicalIndex > 3 ||
+if ((protectedPairing && !physicalMode) ||
+    (wgiMode && physicalIndexPosition >= 0) ||
+    (physicalMode && ((!wgiMode && (physicalIndexPosition < 0 || physicalIndexPosition + 1 >= args.Length ||
+    !uint.TryParse(args[physicalIndexPosition + 1], out physicalIndex) || physicalIndex > 3)) ||
     mainSlotPosition < 0 || mainSlotPosition + 1 >= args.Length ||
     !int.TryParse(args[mainSlotPosition + 1], out mainSlot) || !slots.Contains(mainSlot) ||
     !args.Contains("--physical-hidden-confirmed") ||
@@ -170,7 +173,7 @@ if ((protectedPairing && !physicalMode) || (physicalMode && (physicalIndexPositi
     string.IsNullOrWhiteSpace(args[devicePosition + 1]) || gamePaths.Length is < 1 or > 3 ||
     gamePaths.Any(path => !Path.IsPathFullyQualified(path) || !File.Exists(path)))))
 {
-    Console.Error.WriteLine("Physical mode requires the XInput index, selected HidHide device instance, game executables, main slot, and confirmed input isolation.");
+    Console.Error.WriteLine("Physical mode requires one input source, selected HidHide device instance, game executables, main slot, and confirmed input isolation.");
     return 2;
 }
 if (!OperatingSystem.IsWindows())
@@ -199,7 +202,17 @@ try
             }
         }
     }
-    if (physicalMode && !XInputNative.TryRead(physicalIndex, out _))
+    WgiPhysicalSource? wgiSource = null;
+    if (wgiMode)
+    {
+        wgiSource = WgiPhysicalSource.Open(args[devicePosition + 1]);
+        if (!wgiSource.TryRead(out _))
+        {
+            Console.Error.WriteLine("The uniquely matched Windows Gaming Input controller is not readable.");
+            return 2;
+        }
+    }
+    else if (physicalMode && !XInputNative.TryRead(physicalIndex, out _))
     {
         Console.Error.WriteLine("The selected physical controller is not connected before virtual pads start.");
         return 2;
@@ -215,8 +228,12 @@ try
             pads.Add(slot, controller);
         }
         PhysicalSlotGuard? physicalGuard = null;
-        if (physicalMode && !PhysicalSlotGuard.TryCreate(physicalIndex,
-            pads.ToDictionary(entry => entry.Key, entry => entry.Value.UserIndex), out physicalGuard))
+        PublicSlotGuard? publicGuard = null;
+        var initialIndices = pads.ToDictionary(entry => entry.Key, entry => entry.Value.UserIndex);
+        var indicesValid = wgiMode
+            ? PublicSlotGuard.TryCreate(initialIndices, out publicGuard)
+            : !physicalMode || PhysicalSlotGuard.TryCreate(physicalIndex, initialIndices, out physicalGuard);
+        if (!indicesValid)
         {
             Console.Error.WriteLine("Virtual XInput indices are unknown, duplicated, or overlap the physical controller. Controllers stopped.");
             return 2;
@@ -251,6 +268,7 @@ try
         var pairingTargetPid = 0;
         long pairingTargetWindow = 0;
         Console.WriteLine(JsonSerializer.Serialize(new { @event = "ready", slots, physical_mode = physicalMode,
+            physical_wgi = wgiMode,
             pairing_protected = protectedPairing, hidhide_preflight = physicalMode,
             auto_flask_enabled = autoFlaskEnabled,
             right_stick_follower_override = rightStickFollowerOverride,
@@ -325,13 +343,22 @@ try
             if (physicalMode)
             {
                 var currentIndices = pads.ToDictionary(entry => entry.Key, entry => entry.Value.UserIndex);
-                if (physicalGuard is null || !physicalGuard.Matches(currentIndices))
+                if (wgiMode ? publicGuard is null || !publicGuard.Matches(currentIndices) :
+                    physicalGuard is null || !physicalGuard.Matches(currentIndices))
                 {
                     router.NeutralAll();
                     Console.Error.WriteLine("Virtual XInput assignment changed; controllers stopped.");
                     return 1;
                 }
-                if (!XInputNative.TryRead(physicalIndex, out var state))
+                XInputGamepad gamepad = default;
+                bool physicalReadable;
+                if (wgiMode) physicalReadable = wgiSource is not null && wgiSource.TryRead(out gamepad);
+                else
+                {
+                    physicalReadable = XInputNative.TryRead(physicalIndex, out var state);
+                    gamepad = state.Gamepad;
+                }
+                if (!physicalReadable)
                 {
                     router.NeutralAll();
                     pairingSignals.Reset();
@@ -371,7 +398,7 @@ try
                             Console.WriteLine(JsonSerializer.Serialize(new { @event = "login_status", source = sourceName }));
                         }
                     }
-                    var observation = pairingGate.Observe(state.Gamepad, observedAt,
+                    var observation = pairingGate.Observe(gamepad, observedAt,
                         stable && foreground, loginReadiness.Ready);
                     router.SetPhysical(observation.Forwarded, observedAt,
                         allowDirectRightStick: pairingGate.Phase == ProtectedPairingPhase.Complete);
@@ -393,11 +420,11 @@ try
                 }
                 else
                 {
-                    router.SetPhysical(state.Gamepad);
-                    var changes = menuGuard.Observe(router.FocusedSlot, state.Gamepad.Buttons, DateTime.UtcNow);
+                    router.SetPhysical(gamepad);
+                    var changes = menuGuard.Observe(router.FocusedSlot, gamepad.Buttons, DateTime.UtcNow);
                     router.SetMenuGuardActive(menuGuard.AnyActive);
                     PublishMenuChanges(changes);
-                    var pairedSlot = pairingSignals.Observe((state.Gamepad.Buttons & 0x1000) != 0, router.FocusedSlot);
+                    var pairedSlot = pairingSignals.Observe((gamepad.Buttons & 0x1000) != 0, router.FocusedSlot);
                     if (pairedSlot != 0)
                         Console.WriteLine(JsonSerializer.Serialize(new { @event = "a_release", slot = pairedSlot }));
                 }

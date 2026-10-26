@@ -11,6 +11,7 @@ internal static class ProcessPipelineSmoke
         var log = Path.Combine(directory, "bridge-input.jsonl");
         var bridgeExe = Path.Combine(directory, "fake-bridge");
         var couchBridgeExe = Path.Combine(directory, "fake-couch-bridge");
+        var wgiBridgeExe = Path.Combine(directory, "fake-wgi-bridge");
         var followExe = Path.Combine(directory, "fake-follow");
         try
         {
@@ -30,9 +31,15 @@ internal static class ProcessPipelineSmoke
                 "if '--right-stick-follower-override' not in sys.argv or '--direct-right-stick-slot' not in sys.argv or sys.argv[sys.argv.index('--direct-right-stick-slot')+1] != '2': sys.exit(2)\n" +
                 "print('{\"event\":\"ready\",\"slots\":[1,2],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"auto_flask_enabled\":false,\"right_stick_follower_override\":true,\"direct_right_stick_slot\":2,\"focus_pad_map\":\"1:1,2:2\"}', flush=True)\n" +
                 "for line in sys.stdin: pass\n");
+            File.WriteAllText(wgiBridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
+                "if '--physical-wgi' not in sys.argv or '--physical-index' in sys.argv: sys.exit(2)\n" +
+                "if '--focus-pad-map' not in sys.argv or sys.argv[sys.argv.index('--focus-pad-map')+1] != '1:1,2:2,3:3,4:4': sys.exit(2)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,2,3,4],\"physical_mode\":true,\"physical_wgi\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:2,3:3,4:4\"}', flush=True)\n" +
+                "for line in sys.stdin: pass\n");
             File.SetUnixFileMode(bridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(followExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(couchBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(wgiBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             Console.WriteLine("Pipeline smoke: starting fake bridge.");
             var topology = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-split");
             await using var bridge = await BridgeSession.StartAsync(bridgeExe, topology.Slots, 0,
@@ -71,6 +78,14 @@ internal static class ProcessPipelineSmoke
                 pairedBridge.StartReading();
             }
             Console.WriteLine("Same-client right-stick bridge startup arguments checked with a local fake executable.");
+            var four = PartyTopologies.ForPlayerCount(4).Single();
+            await using (var wgiBridge = await BridgeSession.StartAsync(wgiBridgeExe, four.Slots, -1,
+                @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"],
+                false, useWgi: true))
+            {
+                wgiBridge.StartReading();
+            }
+            Console.WriteLine("Four public pads and WGI startup arguments checked with a local fake executable.");
         }
         finally
         {
