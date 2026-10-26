@@ -111,7 +111,7 @@ PartyPilot-FpsConfig.exe -config "C:\Users\Me\Documents\My Games\Path of Exile 2
 PartyPilot-FpsConfig.exe -config "C:\Users\Me\Documents\My Games\Path of Exile 2\poe2_production_Config.ini" -foreground keep -background 30 -apply
 ```
 
-这对应所提供 0.6.17 静态实现中的两组 FPS 配置键及 `KeepCurrent`、`Unlimited`、指定帧数的语义；目前只通过合成 INI 文件测试，尚未在 Windows/PoE2 的真实配置上应用或验证游戏内帧率，也未接入桌面设置界面。
+这对应所提供 0.6.17 静态实现中的两组 FPS 配置键及 `KeepCurrent`、`Unlimited`、指定帧数的语义。桌面入口现有按客户端分开的 FPS 配置卡片：每个客户端需明确填写配置文件路径，可先预览，再勾选已关闭全部游戏客户端后应用；程序还会只读检查已知 PoE2 进程是否仍在运行。同一路径若被不同客户端填写为不同策略，会拒绝应用。桌面到本机工具的预览、应用和备份已在临时配置文件上贯通；尚未在 Windows/PoE2 的真实配置上应用或验证游戏内帧率。
 
 `release/PartyPilot-FlaskReplay.exe` 提供自动药剂的**离线决策回放**。传感器现在额外只读发送当前及最大生命、魔力、能量护盾；这些字段已按本地 ExileCore2 程序集的 `Life` 组件元数据编译验证，但尚未在游戏中核对数值含义。回放工具采用提供版本静态代码中的 P1–P6 生命/魔力“重置规则”，要求每帧显式给出 `menu_open` 与 `recovering`，只输出建议触发，不发送按键。它覆盖普通阈值、紧急阈值、冷却、恢复后的重新触发和显式持续使用规则，还可在离线样本中演示能量护盾替代/合并生命、Ward 暂缓生命药剂及 Ward 破裂触发。已加入静态代码中的空瓶判定：触发后等待至少 900 毫秒，以资源恢复 1.5 个百分点为有效结果；连续三次未生效后不再输出该药剂，资源比停用时回升 3 个百分点后重新启用。该判断仅在持续收到相应资源读数时运行；离线回放本身不发送按键，也不能替代游戏内空瓶确认。当前传感器没有可靠的 Ward 来源；共享药剂和自定义动作仍未实现。示例：
 

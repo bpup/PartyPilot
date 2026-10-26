@@ -36,6 +36,9 @@ func Prepare(path string, policy Policy, apply bool) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if keys == nil {
+		keys = []string{}
+	}
 	result := Result{Path: path, ChangedKeys: keys}
 	if !apply || len(keys) == 0 {
 		return result, nil

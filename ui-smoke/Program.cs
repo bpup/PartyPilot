@@ -63,7 +63,8 @@ var labels = window.GetLogicalDescendants().OfType<TextBlock>().Select(item => i
 if (!labels.Contains("PLAY") || !labels.Any(item => item?.Contains("HOW MANY CHARACTERS") == true) ||
     !labels.Any(item => item?.Contains("PREPARE & START") == true) ||
     !labels.Any(item => item?.Contains("FOLLOW · 跟随") == true) ||
-    !labels.Any(item => item?.Contains("RADAR · 雷达") == true))
+    !labels.Any(item => item?.Contains("RADAR · 雷达") == true) ||
+    !labels.Any(item => item?.Contains("PERFORMANCE · FPS") == true))
 {
     throw new Exception("The launcher steps were not created in the window tree.");
 }
@@ -72,6 +73,37 @@ if (!LiveFollowPlan.TryCreate("2", "3", "10", "750ms", "30m", "Leader", out var 
     LiveFollowPlan.TryCreate("3", "2", "10", "750ms", "30m", null, out _) ||
     LiveFollowPlan.TryCreate("2", "3", "10", "0ms", "30m", null, out _))
     throw new Exception("Follow distance or freshness parameters were accepted without a valid explicit plan.");
+var fpsPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "poe2_production_Config.ini"));
+if (!FpsConfigPlan.TryCreate(fpsPath, "keep", "30", out var fpsPlan) || fpsPlan is null ||
+    FpsConfigPlan.TryCreate(fpsPath, "-1", "30", out _) ||
+    FpsConfigPlan.TryCreate("", "keep", "30", out _))
+    throw new Exception("FPS config plan accepted a missing path or invalid limit.");
+if (!FpsConfigPlan.TryCreate(fpsPath, "keep", "60", out var conflictingFps) ||
+    !fpsPlan.ConflictsWith(conflictingFps!) ||
+    !FpsConfigPlan.TryCreate(fpsPath, "0", "30", out var equivalentZero) ||
+    !FpsConfigPlan.TryCreate(fpsPath, "unlimited", "30", out var equivalentUnlimited) ||
+    equivalentZero!.ConflictsWith(equivalentUnlimited!))
+    throw new Exception("Shared config conflicts or zero FPS mode were mapped incorrectly.");
+var fpsArguments = FpsConfigTool.StartInfo(
+    Path.Combine(Path.GetTempPath(), "PartyPilot-FpsConfig.exe"), fpsPlan, true).ArgumentList.ToArray();
+if (!fpsArguments.SequenceEqual(new[] { "-config", fpsPath, "-foreground", "keep",
+        "-background", "30", "-apply" }))
+    throw new Exception("FPS config command did not retain the selected client policy.");
+var fpsReply = System.Text.Json.JsonSerializer.Serialize(new
+{
+    path = fpsPath,
+    changed_keys = new[] { "DISPLAY.background_framerate_limit" },
+    applied = true,
+    backup = fpsPath + ".bak"
+});
+if (FpsConfigTool.Parse(fpsReply, true, fpsPath).Backup != fpsPath + ".bak")
+    throw new Exception("FPS tool result lost its backup path.");
+try
+{
+    FpsConfigTool.Parse(fpsReply, false, fpsPath);
+    throw new Exception("FPS apply result was accepted as a preview.");
+}
+catch (InvalidDataException) { }
 var movement = LiveFollowFrame.Parse(
     "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0}}}", 2, 3);
 var waiting = LiveFollowFrame.Parse(
@@ -172,6 +204,11 @@ if (pathFields.Length != 3 || !pathFields[0].IsEffectivelyVisible || !pathFields
 {
     throw new Exception($"Client selection did not show exactly two game path fields: {pathFields.Length} fields, effective visibility {string.Join(',', pathFields.Select(field => field.IsEffectivelyVisible))}.");
 }
+var fpsPathFields = window.GetLogicalDescendants().OfType<TextBox>()
+    .Where(item => item.Watermark?.ToString() == "配置文件绝对路径").ToArray();
+if (fpsPathFields.Length != 3 || !fpsPathFields[0].IsEffectivelyVisible ||
+    !fpsPathFields[1].IsEffectivelyVisible || fpsPathFields[2].IsEffectivelyVisible)
+    throw new Exception("FPS config rows did not follow the selected client count.");
 var configured = Path.Combine(Path.GetDirectoryName(output)!, Path.GetFileNameWithoutExtension(output) + "-configured.png");
 (window.CaptureRenderedFrame() ?? throw new Exception("The configured window did not render.")).Save(configured);
 Console.WriteLine($"Four-player, two-client preview saved to {configured}.");
@@ -190,6 +227,8 @@ if (pathFields.Any(field => !field.IsEffectivelyVisible))
 {
     throw new Exception("The three-single-client 3P option did not request three game windows.");
 }
+if (fpsPathFields.Any(field => !field.IsEffectivelyVisible))
+    throw new Exception("Three-client layout did not show all FPS rows.");
 clientCount.SelectedIndex = 1;
 Dispatcher.UIThread.RunJobs();
 variant.SelectedIndex = 0;
@@ -238,6 +277,42 @@ foreach (var invalid in new[]
     catch (InvalidOperationException) { }
 }
 window.Close();
+var fpsWindow = new MainWindow();
+var fpsCount = fpsWindow.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(item => item.PlaceholderText == "选择 1–6 人");
+fpsCount.SelectedIndex = 3;
+fpsWindow.Show();
+fpsWindow.UpdateLayout();
+var fpsScroll = fpsWindow.GetLogicalDescendants().OfType<ScrollViewer>().First();
+fpsScroll.Offset = new Vector(0, Math.Max(0, fpsScroll.Extent.Height - fpsScroll.Viewport.Height));
+fpsWindow.UpdateLayout();
+var fpsOutput = Path.Combine(Path.GetDirectoryName(output)!, "PartyPilot-fps-preview.png");
+(fpsWindow.CaptureRenderedFrame() ?? throw new Exception("FPS preview did not render.")).Save(fpsOutput);
+fpsWindow.Close();
+if (args.Length > 1)
+{
+    var folder = Directory.CreateTempSubdirectory("partypilot-fps-smoke-");
+    try
+    {
+        var config = Path.Combine(folder.FullName, "poe2_production_Config.ini");
+        const string original = "[DISPLAY]\nframerate_limit_enabled=true\nframerate_limit=144\nbackground_framerate_limit_enabled=false\nbackground_framerate_limit=60\n[UI]\ncolor=blue\n";
+        File.WriteAllText(config, original);
+        if (!FpsConfigPlan.TryCreate(config, "keep", "30", out var integrationPlan) || integrationPlan is null)
+            throw new Exception("Temporary FPS config plan was rejected.");
+        var preview = await FpsConfigTool.RunAsync(args[1], integrationPlan, false).ConfigureAwait(false);
+        if (preview.Applied || preview.ChangedKeys.Count != 2 || File.ReadAllText(config) != original)
+            throw new Exception("Desktop FPS preview wrote the config or lost target keys.");
+        var applied = await FpsConfigTool.RunAsync(args[1], integrationPlan, true).ConfigureAwait(false);
+        if (!applied.Applied || applied.Backup is null || File.ReadAllText(applied.Backup) != original ||
+            !File.ReadAllText(config).Contains("background_framerate_limit=30"))
+            throw new Exception("Desktop FPS apply did not retain an exact backup.");
+        Console.WriteLine("Desktop FPS tool preview, apply, and backup checked on a temporary config.");
+    }
+    finally
+    {
+        folder.Delete(true);
+    }
+}
 await Task.Run(ProcessPipelineSmoke.RunAsync).ConfigureAwait(false);
 
 sealed class SmokeApp : Application

@@ -53,6 +53,14 @@ public sealed class MainWindow : Window
     private readonly Button _startRadar = new();
     private readonly Button _stopRadar = new();
     private readonly TextBlock _radarStatus = new();
+    private readonly StackPanel[] _fpsRows = new StackPanel[3];
+    private readonly TextBox[] _fpsPaths = new TextBox[3];
+    private readonly TextBox[] _fpsForeground = new TextBox[3];
+    private readonly TextBox[] _fpsBackground = new TextBox[3];
+    private readonly Button[] _fpsPreview = new Button[3];
+    private readonly Button[] _fpsApply = new Button[3];
+    private readonly TextBlock[] _fpsResults = new TextBlock[3];
+    private readonly CheckBox _fpsGamesClosed = new();
     private PartyTopology? _selectedTopology;
     private BridgeSession? _bridge;
     private LiveFollowSession? _follow;
@@ -65,6 +73,7 @@ public sealed class MainWindow : Window
     private bool _pairingSettled;
     private bool _followStopping;
     private bool _radarStopping;
+    private bool _fpsBusy;
     private string _loginStatus = "waiting";
     private bool _busy;
 
@@ -92,6 +101,7 @@ public sealed class MainWindow : Window
         content.Children.Add(BuildLaunchStep());
         content.Children.Add(BuildFollowStep());
         content.Children.Add(BuildRadarStep());
+        content.Children.Add(BuildFpsStep());
         content.Children.Add(BuildStatusCard());
 
         shell.Children.Add(new ScrollViewer { Content = content });
@@ -339,6 +349,58 @@ public sealed class MainWindow : Window
         return Card(panel);
     }
 
+    private Border BuildFpsStep()
+    {
+        var panel = Step("6", "PERFORMANCE · FPS", "按客户端分别预览前台与后台帧率配置。仅修改明确指定的 PoE2 配置文件；应用前需关闭所有游戏窗口。");
+        _fpsGamesClosed.Content = "应用前已关闭所有 PoE2 游戏客户端";
+        _fpsGamesClosed.IsCheckedChanged += (_, _) => UpdateFpsControls();
+        panel.Children.Add(_fpsGamesClosed);
+        for (var index = 0; index < 3; index++)
+        {
+            var client = index;
+            var row = new StackPanel { Spacing = 7, Margin = new Thickness(0, 8, 0, 0) };
+            row.Children.Add(Label($"客户端 {client + 1} · FPS 配置", 13, Brushes.White, FontWeight.SemiBold));
+            row.Children.Add(Label("该客户端的 poe2_production_Config.ini 完整路径", 12, MutedBrush));
+            var path = new TextBox { Watermark = "配置文件绝对路径" };
+            path.TextChanged += (_, _) => UpdateFpsControls();
+            row.Children.Add(path);
+            var modes = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
+            var foreground = new TextBox { Text = "keep", Width = 180, Watermark = "前台：keep / unlimited / 帧数" };
+            var background = new TextBox { Text = "keep", Width = 180, Watermark = "后台：keep / unlimited / 帧数" };
+            foreground.TextChanged += (_, _) => UpdateFpsControls();
+            background.TextChanged += (_, _) => UpdateFpsControls();
+            var foregroundField = new StackPanel { Spacing = 4 };
+            foregroundField.Children.Add(Label("前台 FPS", 12, MutedBrush));
+            foregroundField.Children.Add(foreground);
+            var backgroundField = new StackPanel { Spacing = 4 };
+            backgroundField.Children.Add(Label("后台 FPS", 12, MutedBrush));
+            backgroundField.Children.Add(background);
+            modes.Children.Add(foregroundField);
+            modes.Children.Add(backgroundField);
+            row.Children.Add(modes);
+            row.Children.Add(Label("前台 / 后台：keep 保持原值；unlimited 或 0 不限帧；正整数为目标帧数。", 12, MutedBrush));
+            var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
+            var preview = new Button { Content = "预览变更" };
+            var apply = new Button { Content = "备份并应用" };
+            preview.Click += async (_, _) => await RunFpsAsync(client, false);
+            apply.Click += async (_, _) => await RunFpsAsync(client, true);
+            actions.Children.Add(preview);
+            actions.Children.Add(apply);
+            row.Children.Add(actions);
+            var result = Label("尚未预览。", 12, MutedBrush);
+            row.Children.Add(result);
+            _fpsRows[index] = row;
+            _fpsPaths[index] = path;
+            _fpsForeground[index] = foreground;
+            _fpsBackground[index] = background;
+            _fpsPreview[index] = preview;
+            _fpsApply[index] = apply;
+            _fpsResults[index] = result;
+            panel.Children.Add(row);
+        }
+        return Card(panel);
+    }
+
     private void UpdateClientRows()
     {
         var selection = _topologyVariant.SelectedItem as PartyTopology;
@@ -357,6 +419,7 @@ public sealed class MainWindow : Window
         for (var index = 0; index < _clientRows.Length; index++)
         {
             _clientRows[index].IsVisible = index < count;
+            _fpsRows[index].IsVisible = index < count;
             if (index < count)
             {
                 var players = _selectedTopology!.Clients[index];
@@ -368,6 +431,7 @@ public sealed class MainWindow : Window
         _attach.IsEnabled = !_busy && !_pairingHasStarted && count > 0;
         UpdateBridgeControls();
         UpdateRadarControls();
+        UpdateFpsControls();
     }
 
     private void ClearLaunchedClients()
@@ -387,6 +451,95 @@ public sealed class MainWindow : Window
         _startRadar.IsEnabled = OperatingSystem.IsWindows() && !_busy && !_radarStopping &&
             _radar is null && ready;
         _stopRadar.IsEnabled = _radar is not null;
+    }
+
+    private void UpdateFpsControls()
+    {
+        for (var index = 0; index < _fpsRows.Length; index++)
+        {
+            if (_fpsRows[index] is null) continue;
+            var ready = FpsConfigPlan.TryCreate(_fpsPaths[index].Text,
+                _fpsForeground[index].Text, _fpsBackground[index].Text, out _);
+            _fpsPreview[index].IsEnabled = OperatingSystem.IsWindows() && !_busy && !_fpsBusy &&
+                _fpsRows[index].IsVisible && ready;
+            _fpsApply[index].IsEnabled = _fpsPreview[index].IsEnabled && _fpsGamesClosed.IsChecked == true;
+        }
+    }
+
+    private async Task RunFpsAsync(int index, bool apply)
+    {
+        if (!OperatingSystem.IsWindows() || _busy || _fpsBusy ||
+            index < 0 || index >= _fpsRows.Length || !_fpsRows[index].IsVisible ||
+            !FpsConfigPlan.TryCreate(_fpsPaths[index].Text,
+                _fpsForeground[index].Text, _fpsBackground[index].Text, out var plan) || plan is null) return;
+        if (apply && (_fpsGamesClosed.IsChecked != true || KnownGameIsRunning()))
+        {
+            _fpsResults[index].Text = "请先关闭所有 PoE2 游戏客户端，再应用配置。";
+            return;
+        }
+        if (apply)
+        {
+            for (var other = 0; other < _fpsRows.Length; other++)
+            {
+                if (other == index || !_fpsRows[other].IsVisible ||
+                    !FpsConfigPlan.TryCreate(_fpsPaths[other].Text,
+                        _fpsForeground[other].Text, _fpsBackground[other].Text, out var otherPlan) ||
+                    otherPlan is null || !plan.ConflictsWith(otherPlan)) continue;
+                _fpsResults[index].Text = $"客户端 {index + 1} 与 {other + 1} 指向同一配置文件，却填写了不同的帧率模式。";
+                return;
+            }
+        }
+        var tool = FindTool("PartyPilot-FpsConfig.exe");
+        if (tool is null)
+        {
+            _fpsResults[index].Text = "找不到 PartyPilot-FpsConfig.exe；请使用完整预览包。";
+            return;
+        }
+        _fpsBusy = true;
+        UpdateFpsControls();
+        _fpsResults[index].Text = apply ? "正在备份并应用 FPS 配置…" : "正在预览 FPS 配置…";
+        try
+        {
+            var result = await FpsConfigTool.RunAsync(tool, plan, apply);
+            _fpsResults[index].Text = result.ChangedKeys.Count == 0
+                ? "所选前台和后台 FPS 配置已保持原值或无需修改。"
+                : result.Applied
+                    ? $"已修改 {string.Join("、", result.ChangedKeys)}；原文件备份：{result.Backup}"
+                    : $"预览：将修改 {string.Join("、", result.ChangedKeys)}；尚未写入文件。";
+        }
+        catch (Exception exception)
+        {
+            _fpsResults[index].Text = $"FPS 配置未完成：{exception.Message}";
+        }
+        finally
+        {
+            _fpsBusy = false;
+            UpdateFpsControls();
+        }
+    }
+
+    private static bool KnownGameIsRunning()
+    {
+        try
+        {
+            foreach (var name in new[] { "PathOfExile", "PathOfExile_x64", "PathOfExileSteam",
+                "PathOfExile_x64Steam", "PathOfExileEGS", "PathOfExile_x64EGS" })
+            {
+                foreach (var process in Process.GetProcessesByName(name))
+                {
+                    using (process)
+                    {
+                        if (!process.HasExited) return true;
+                    }
+                }
+            }
+            return false;
+        }
+        catch
+        {
+            // If process inspection fails, do not claim the game is closed.
+            return true;
+        }
     }
 
     private void StartRadar()
@@ -833,7 +986,11 @@ public sealed class MainWindow : Window
             startInfo.ArgumentList.Add("-attach");
         }
 
-        if (action != ClientAction.Check) await StopRadarAsync();
+        if (action != ClientAction.Check)
+        {
+            _fpsGamesClosed.IsChecked = false;
+            await StopRadarAsync();
+        }
         _busy = true;
         if (action != ClientAction.Check) _launchedClients = [];
         UpdateClientRows();
@@ -884,7 +1041,11 @@ public sealed class MainWindow : Window
 
     private static string? FindLauncher()
     {
-        var file = "PartyPilot-ClientLaunch.exe";
+        return FindTool("PartyPilot-ClientLaunch.exe");
+    }
+
+    private static string? FindTool(string file)
+    {
         var candidates = new[]
         {
             Path.Combine(AppContext.BaseDirectory, file),
