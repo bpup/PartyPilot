@@ -185,18 +185,13 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 	}
 	positions := make(map[int]follow.Position, len(e.slots))
 	deadFollowers := make(map[int]bool)
-	leaderArea, hasLeaderArea := e.areas[e.leader]
 	for _, slot := range e.slots {
 		sample, hasSample := e.samples[slot]
 		area, hasArea := e.areas[slot]
 		if !hasSample || !hasArea || sample.SeenUTC.Before(area.ObservedAt) {
 			continue
 		}
-		if slot != e.leader {
-			if !hasLeaderArea || arealog.Compare(now, e.logAge, e.leader, slot, &leaderArea, &area).Status != "candidate_same_instance" {
-				continue
-			}
-		} else if area.Origin != "live" || area.ObservedAt.After(now) || now.Sub(area.ObservedAt) > e.logAge {
+		if area.Origin != "live" || area.ObservedAt.After(now) || now.Sub(area.ObservedAt) > e.logAge {
 			continue
 		}
 		if slot != e.leader && sample.Life != nil && *sample.Life <= 0 {
@@ -207,7 +202,7 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 		}
 		positions[slot] = follow.Position{
 			X: sample.X, Y: sample.Y, Seen: sample.SeenUTC, Valid: true,
-			Area: strings.ToLower(leaderArea.AreaID) + fmt.Sprintf(":%d", leaderArea.Seed),
+			Area: strings.ToLower(area.AreaID) + fmt.Sprintf(":%d", area.Seed),
 		}
 	}
 	commands := e.coordinator.Step(now, positions)

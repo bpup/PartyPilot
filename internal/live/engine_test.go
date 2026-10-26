@@ -168,6 +168,41 @@ func TestLiveFollowUsesConfiguredTargetAndCurrentMainFallback(t *testing.T) {
 	}
 }
 
+func TestLiveFollowChecksTheSelectedTargetsInstance(t *testing.T) {
+	now := time.Now().UTC()
+	engine, err := New(map[int]int{1: 101, 2: 202, 3: 303}, 1,
+		follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for slot, pid := range map[int]int{1: 101, 2: 202, 3: 303} {
+		seed := int64(77)
+		if slot == 1 {
+			seed = 88
+		}
+		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: seed,
+			ObservedAt: now, Origin: "live"})
+		engine.ObserveSample(telemetry.Sample{ProcessID: pid, SeenUTC: now.Add(time.Millisecond),
+			X: map[int]float64{1: 0, 2: 0, 3: 20}[slot]})
+	}
+	at := now.Add(time.Millisecond)
+	if command := engine.Step(at)[2]; command.State != follow.Waiting {
+		t.Fatalf("default MAIN in another instance moved P2: %+v", command)
+	}
+	if err := engine.SetFollowTarget(2, 3); err != nil {
+		t.Fatal(err)
+	}
+	if command := engine.Step(at)[2]; command.State != follow.CatchingUp || command.X <= 0 {
+		t.Fatalf("P2 did not follow selected P3 in its own instance: %+v", command)
+	}
+	engine.ObserveArea(arealog.Signal{Slot: 3, AreaID: "G2_4", Seed: 99,
+		ObservedAt: at.Add(time.Millisecond), Origin: "live"})
+	engine.ObserveSample(telemetry.Sample{ProcessID: 303, SeenUTC: at.Add(2 * time.Millisecond), X: 20})
+	if command := engine.Step(at.Add(2 * time.Millisecond))[2]; command.State != follow.Waiting {
+		t.Fatalf("P2 moved after selected P3 entered another instance: %+v", command)
+	}
+}
+
 func TestNamedDepartureTracksCurrentManualMain(t *testing.T) {
 	config := follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}
 	engine, err := New(map[int]int{1: 101, 2: 202}, 1, config, time.Minute)
