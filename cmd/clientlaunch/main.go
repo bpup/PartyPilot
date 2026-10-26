@@ -25,6 +25,25 @@ func (e *executables) Set(path string) error {
 	return nil
 }
 
+type launchURIs map[int]string
+
+func (value *launchURIs) String() string { return fmt.Sprint(map[int]string(*value)) }
+func (value *launchURIs) Set(raw string) error {
+	slotText, uri, found := strings.Cut(raw, "=")
+	slot, err := strconv.Atoi(slotText)
+	if !found || err != nil || slot < 1 || slot > 3 || uri == "" {
+		return errors.New("-uri requires SLOT=launch-URI for client 1–3")
+	}
+	if *value == nil {
+		*value = make(map[int]string)
+	}
+	if _, exists := (*value)[slot]; exists {
+		return fmt.Errorf("duplicate launch URI for client %d", slot)
+	}
+	(*value)[slot] = uri
+	return nil
+}
+
 func monitorIDs(value string, displays []windowlayout.Display, count int) ([]string, error) {
 	parts := strings.Split(value, ",")
 	if value == "" || len(parts) != count {
@@ -43,6 +62,7 @@ func monitorIDs(value string, displays []windowlayout.Display, count int) ([]str
 
 type output struct {
 	Checked       []string              `json:"checked_executables"`
+	LaunchURIs    map[int]string        `json:"checked_launch_uris,omitempty"`
 	Clients       []clientlaunch.Client `json:"clients,omitempty"`
 	Plan          *windowlayout.Plan    `json:"plan,omitempty"`
 	LayoutApplied bool                  `json:"layout_applied"`
@@ -51,7 +71,9 @@ type output struct {
 
 func main() {
 	var paths executables
+	var uris launchURIs
 	flag.Var(&paths, "exe", "repeat for each game client in launch order")
+	flag.Var(&uris, "uri", "optional SLOT=Steam-or-Epic-launch-URI, bound to the matching -exe")
 	check := flag.Bool("check", false, "validate paths and layout without launching")
 	timeout := flag.Duration("timeout", 60*time.Second, "time to wait for each game window")
 	applyLayout := flag.Bool("apply-layout", false, "arrange windows after each client is ready")
@@ -65,7 +87,10 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
-	response := output{Checked: validated}
+	if err := clientlaunch.ValidateURIs(validated, uris); err != nil {
+		fail(err)
+	}
+	response := output{Checked: validated, LaunchURIs: uris}
 	if *displaysFile != "" && !*check {
 		fail(errors.New("offline display fixture requires -check"))
 	}
@@ -105,7 +130,7 @@ func main() {
 		write(response)
 		return
 	}
-	launched, launchErr := clientlaunch.Start(validated, *timeout)
+	launched, launchErr := clientlaunch.Start(validated, uris, *timeout)
 	response.Clients = launched.Clients
 	if launchErr != nil {
 		response.Error = launchErr.Error()

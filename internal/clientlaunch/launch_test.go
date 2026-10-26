@@ -38,3 +38,25 @@ func TestLaunchValidationRequiresDistinctInstallations(t *testing.T) {
 		t.Fatal("unrelated executable accepted")
 	}
 }
+
+func TestStoreURIsRequireMatchingExecutable(t *testing.T) {
+	paths := []string{"/Steam/PathOfExile_x64Steam.exe", "/Epic/PathOfExile_x64EGS.exe"}
+	valid := map[int]string{
+		1: "steam://rungameid/2694490",
+		2: "com.epicgames.launcher://apps/namespace%3Aitem%3APathOfExile2?action=launch&silent=true",
+	}
+	if err := ValidateURIs(paths, valid); err != nil {
+		t.Fatal(err)
+	}
+	for _, uris := range []map[int]string{
+		{3: valid[1]},
+		{1: "steam://rungameid/123"},
+		{2: "steam://rungameid/2694490"},
+		{1: "file:///other.exe"},
+		{2: "com.epicgames.launcher://apps/other?action=launch&silent=true&action=other"},
+	} {
+		if err := ValidateURIs(paths, uris); err == nil {
+			t.Fatalf("invalid store binding accepted: %+v", uris)
+		}
+	}
+}

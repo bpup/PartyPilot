@@ -67,11 +67,14 @@ Windows 版只接受所提供版本识别的游戏进程名，并在应用前复
 
 `release/PartyPilot-ClientLaunch.exe` 补上直接从游戏程序启动到等待窗口的基本流程。重复 `-exe` 按客户端顺序指定 1–3 个游戏程序；启动前检查文件、目标进程名及安装目录互不相同。程序逐个启动客户端，按新进程 ID 最多等待每个窗口 60 秒；可用 `-apply-layout -monitors 1,2 -mode multiple` 在全部窗口出现后安排位置，也可用 `-mode stacked -size full -monitors 1,1 -apply-layout` 请求无边框全屏叠放。`-check` 只做路径与布局预检，不启动游戏；在 macOS 上可配合 `-displays-file testdata/layout-displays.json` 验证人工屏幕数据。已启动客户端若后续步骤失败，会在输出中保留其进程 ID，不会静默关闭游戏。
 
+商店客户端可按槽位增加 `-uri 槽位=启动URI`，同时仍须用相应 `-exe` 指定预期游戏程序。Steam 只接受所提供版本使用的 PoE2 游戏 URI；Epic URI 应从该安装的 Epic 清单取得。工具在发送 URI 前记录同名进程，随后只把新出现、程序路径与 `-exe` 一致且具有游戏窗口的唯一进程归入该槽位；多个匹配进程会报错。URI 启动无法从商店协议直接取得游戏进程 ID，因此若同时有其他方式启动同一程序，进程归属仍需人工核对。
+
 ```sh
 PartyPilot-ClientLaunch.exe -exe "C:\\PoE2-A\\PathOfExile_x64.exe" -exe "D:\\PoE2-B\\PathOfExile_x64.exe" -apply-layout -monitors 1,2 -mode multiple
+PartyPilot-ClientLaunch.exe -exe "C:\\Steam\\PathOfExile_x64Steam.exe" -uri 1=steam://rungameid/2694490 -check
 ```
 
-该工具只支持明确的游戏程序文件。所提供版本可用启动 URI，且相同独立版安装目录的额外实例使用专门的多实例运行时；这些流程、控制器启动前保护、账号准备和自动登录仍未实现。启动等待及布局应用尚未在 Windows/PoE2 运行验证。
+相同独立版安装目录的额外实例仍未实现；目标版本使用专门的多实例运行时，不能用重复启动普通程序代替。控制器启动前保护、账号准备和自动登录仍未实现。启动 URI、进程归属、窗口等待及布局应用只通过参数测试和 Windows 目标编译，尚未在 Windows/PoE2 运行验证。
 
 `release/PartyPilot-ResourceWatch.exe` 提供独立的前后台进程资源策略工具。根据所提供版本的静态实现，它按明确的 1–3 个游戏进程 ID 监视前台窗口；在后台可设置 CPU 硬上限、处理器亲和性或进程内存硬限制，回到前台时请求恢复。RAM 告警只观察工作集，不施加内存限制。默认输出配置预览，只有加 `-apply` 才开始管理进程；按 Ctrl+C 退出时也会请求恢复。程序会核对进程程序名、保持进程句柄，并在进程结束时停止操作。示例中的数值只用于说明参数，不代表 0.6.17 的默认配置：
 
