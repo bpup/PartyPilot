@@ -10,7 +10,7 @@ func ptr[T any](value T) *T { return &value }
 func testWorld() World {
 	players := make(map[int]Player)
 	for number := 1; number <= 6; number++ {
-		players[number] = Player{Alive: ptr(true), Loading: ptr(false), HealthPercent: ptr(100.0)}
+		players[number] = Player{Alive: ptr(true), Loading: ptr(false), ActiveCombo: ptr(false), HealthPercent: ptr(100.0)}
 	}
 	monster := func(id, rarity string) Monster {
 		distance := make(map[int]float64)
@@ -91,11 +91,11 @@ func TestSafetyEvidenceBlocksPlans(t *testing.T) {
 	world.UI.ChatOpen = ptr(true)
 	check(world, "BLOCK_UI_OPEN")
 	world.UI.ChatOpen = ptr(false)
-	world.Players[1] = Player{Alive: ptr(false), Loading: ptr(false)}
+	world.Players[1] = Player{Alive: ptr(false), Loading: ptr(false), ActiveCombo: ptr(false)}
 	check(world, "BLOCK_CHARACTER_DEAD")
-	world.Players[1] = Player{Alive: ptr(true), Loading: ptr(true)}
+	world.Players[1] = Player{Alive: ptr(true), Loading: ptr(true), ActiveCombo: ptr(false)}
 	check(world, "BLOCK_LOADING")
-	world.Players[1] = Player{Alive: ptr(true), Loading: ptr(false)}
+	world.Players[1] = Player{Alive: ptr(true), Loading: ptr(false), ActiveCombo: ptr(false)}
 	world.UI.AnyMenuOpen = nil
 	if _, err := Evaluate(profile, world); err == nil {
 		t.Fatal("missing UI menu evidence was treated as closed")
@@ -114,5 +114,38 @@ func TestSafetyEvidenceBlocksPlans(t *testing.T) {
 	world.Monsters[0].Rarity = "unknown"
 	if _, err := Evaluate(profile, world); err == nil {
 		t.Fatal("unknown monster rarity was guessed")
+	}
+}
+
+func TestActiveComboUsesTargetExitRadiusAndSinglePackEnemy(t *testing.T) {
+	profile := DefaultProfile()
+	profile.Enabled = true
+	world := testWorld()
+	world.Monsters = world.Monsters[:1]
+	world.Monsters[0].DistanceByPlayer[1] = 70
+	world.Monsters[0].DistanceFromMainM = ptr(70.0)
+	encounter := &Encounter{State: "active", Tags: []string{"pack"}}
+
+	plans, err := EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[0].Status != "waiting_no_eligible_encounter" {
+		t.Fatalf("inactive role should require three enemies within 60 m: %+v, %v", plans, err)
+	}
+	player := world.Players[1]
+	player.ActiveCombo = ptr(true)
+	world.Players[1] = player
+	plans, err = EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[0].ComboID != "primary-clear" || plans[0].Status != "planned_only" ||
+		plans[1].Status != "waiting_no_eligible_encounter" {
+		t.Fatalf("active role should retain a single enemy within 81 m: %+v, %v", plans, err)
+	}
+	world.Monsters[0].DistanceByPlayer[1] = 82
+	plans, err = EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[0].Status != "waiting_no_eligible_encounter" {
+		t.Fatalf("active role should reject enemy beyond 81 m: %+v, %v", plans, err)
+	}
+	player.ActiveCombo = nil
+	world.Players[1] = player
+	if _, err := EvaluateEncounter(profile, world, encounter); err == nil {
+		t.Fatal("missing active-combo evidence was accepted")
 	}
 }

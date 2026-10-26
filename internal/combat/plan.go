@@ -34,6 +34,7 @@ type UI struct {
 type Player struct {
 	Alive         *bool    `json:"alive"`
 	Loading       *bool    `json:"loading"`
+	ActiveCombo   *bool    `json:"activeCombo"`
 	HealthPercent *float64 `json:"healthPercent,omitempty"`
 }
 
@@ -64,7 +65,7 @@ func (w World) Validate() error {
 		return errors.New("world safety or area evidence is incomplete")
 	}
 	for id, player := range w.Players {
-		if id < 1 || id > 6 || player.Alive == nil || player.Loading == nil ||
+		if id < 1 || id > 6 || player.Alive == nil || player.Loading == nil || player.ActiveCombo == nil ||
 			player.HealthPercent != nil && (!finite(*player.HealthPercent) ||
 				*player.HealthPercent < 0 || *player.HealthPercent > 100) {
 			return fmt.Errorf("player %d evidence is invalid", id)
@@ -143,7 +144,7 @@ func EvaluateEncounter(profile Profile, world World, encounter *Encounter) ([]Pl
 			} else if encounter.hasTag("rare-present") || encounter.hasTag("dangerous") {
 				behavior = "rare"
 			}
-			plan.Behavior, plan.ComboID = chooseBehavior(role, behavior, world.Monsters)
+			plan.Behavior, plan.ComboID = chooseBehavior(role, behavior, world.Monsters, *player.ActiveCombo)
 			if plan.ComboID == "" {
 				plan.Status = "waiting_no_eligible_encounter"
 			} else {
@@ -174,8 +175,14 @@ func globalBlock(profile Profile, world World) string {
 	return ""
 }
 
-func chooseBehavior(role Role, preferred string, monsters []Monster) (string, string) {
+func chooseBehavior(role Role, preferred string, monsters []Monster, activeCombo bool) (string, string) {
 	chain := []string{preferred}
+	radius := 60.0
+	minimumPack := 3
+	if activeCombo {
+		radius = math.Max(radius*1.35, radius+8)
+		minimumPack = 1
+	}
 	if preferred == "boss" {
 		chain = []string{"boss", "rare", "pack"}
 	}
@@ -185,7 +192,7 @@ func chooseBehavior(role Role, preferred string, monsters []Monster) (string, st
 	for _, behavior := range chain {
 		if behavior == "emergency" {
 			for _, monster := range monsters {
-				if distance, ok := monster.DistanceByPlayer[role.Player]; ok && *monster.Alive && distance <= 60 {
+				if distance, ok := monster.DistanceByPlayer[role.Player]; ok && *monster.Alive && distance <= radius {
 					return behavior, role.Behaviors[behavior]
 				}
 			}
@@ -194,7 +201,7 @@ func chooseBehavior(role Role, preferred string, monsters []Monster) (string, st
 		pack, rare, unique := 0, 0, 0
 		for _, monster := range monsters {
 			distance, ok := monster.DistanceByPlayer[role.Player]
-			if !*monster.Alive || !ok || distance > 60 {
+			if !*monster.Alive || !ok || distance > radius {
 				continue
 			}
 			switch monster.Rarity {
@@ -207,7 +214,7 @@ func chooseBehavior(role Role, preferred string, monsters []Monster) (string, st
 			}
 		}
 		if behavior == "boss" && unique > 0 || behavior == "rare" && rare > 0 ||
-			behavior == "pack" && pack >= 3 {
+			behavior == "pack" && pack >= minimumPack {
 			return behavior, role.Behaviors[behavior]
 		}
 	}
