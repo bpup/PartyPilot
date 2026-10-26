@@ -9,21 +9,34 @@ import (
 
 // Encounter is read-only replay state for the supplied default profile.
 type Encounter struct {
-	ID            string     `json:"id"`
-	Version       int        `json:"version"`
-	State         string     `json:"state"`
-	Tags          []string   `json:"tags"`
-	Centroid      Point      `json:"centroid"`
-	StartedAt     time.Time  `json:"startedAt"`
-	UpdatedAt     time.Time  `json:"updatedAt"`
-	EngagedAt     *time.Time `json:"engagedAt,omitempty"`
-	WindingDownAt *time.Time `json:"windingDownAt,omitempty"`
-	CompletedAt   *time.Time `json:"completedAt,omitempty"`
+	ID              string       `json:"id"`
+	Version         int          `json:"version"`
+	State           string       `json:"state"`
+	Tags            []string     `json:"tags"`
+	Centroid        Point        `json:"centroid"`
+	StartedAt       time.Time    `json:"startedAt"`
+	UpdatedAt       time.Time    `json:"updatedAt"`
+	EngagedAt       *time.Time   `json:"engagedAt,omitempty"`
+	WindingDownAt   *time.Time   `json:"windingDownAt,omitempty"`
+	CompletedAt     *time.Time   `json:"completedAt,omitempty"`
+	MonsterIDs      []string     `json:"monsterIds"`
+	Counts          RarityCounts `json:"counts"`
+	ClosestEnemyM   *float64     `json:"closestEnemyM"`
+	ClosestRareM    *float64     `json:"closestRareM"`
+	UniqueDistanceM *float64     `json:"uniqueDistanceM"`
+	PrimaryThreatID *string      `json:"primaryThreatId"`
 
 	ids           map[string]bool
 	counts        [4]int
 	primaryThreat string
 	engagedAt     time.Time
+}
+
+type RarityCounts struct {
+	Normal int `json:"normal"`
+	Magic  int `json:"magic"`
+	Rare   int `json:"rare"`
+	Unique int `json:"unique"`
 }
 
 // EncounterTracker models the default 60 m entry radius, 75 m exit radius,
@@ -75,6 +88,7 @@ func (t *EncounterTracker) Update(world World) (*Encounter, error) {
 			primaryThreat: primaryThreat(entry), Centroid: monsterCentroid(entry),
 			StartedAt: world.Timestamp, UpdatedAt: world.Timestamp}
 		t.current.Tags = classifyEncounter(world, entry, time.Time{})
+		setEncounterMetrics(t.current, entry)
 		if len(t.current.Tags) > 0 {
 			t.current.Version++
 		}
@@ -132,8 +146,48 @@ func (t *EncounterTracker) Update(world World) (*Encounter, error) {
 	t.current.Tags = tags
 	t.current.Centroid = monsterCentroid(selected)
 	t.current.UpdatedAt = world.Timestamp
+	setEncounterMetrics(t.current, selected)
 	return t.current, nil
 }
+
+func setEncounterMetrics(encounter *Encounter, monsters []Monster) {
+	encounter.MonsterIDs = make([]string, 0, len(monsters))
+	encounter.Counts = RarityCounts{}
+	encounter.ClosestEnemyM = nil
+	encounter.ClosestRareM = nil
+	encounter.UniqueDistanceM = nil
+	encounter.PrimaryThreatID = nil
+	for _, monster := range monsters {
+		encounter.MonsterIDs = append(encounter.MonsterIDs, monster.ID)
+		distance := nearestDistance(monster)
+		if encounter.ClosestEnemyM == nil || distance < *encounter.ClosestEnemyM {
+			encounter.ClosestEnemyM = floatPointer(distance)
+		}
+		switch monster.Rarity {
+		case "normal":
+			encounter.Counts.Normal++
+		case "magic":
+			encounter.Counts.Magic++
+		case "rare":
+			encounter.Counts.Rare++
+			if encounter.ClosestRareM == nil || distance < *encounter.ClosestRareM {
+				encounter.ClosestRareM = floatPointer(distance)
+			}
+		case "unique":
+			encounter.Counts.Unique++
+			if encounter.UniqueDistanceM == nil || distance < *encounter.UniqueDistanceM {
+				encounter.UniqueDistanceM = floatPointer(distance)
+			}
+		}
+	}
+	sort.Strings(encounter.MonsterIDs)
+	if encounter.primaryThreat != "" {
+		encounter.PrimaryThreatID = stringPointer(encounter.primaryThreat)
+	}
+}
+
+func floatPointer(value float64) *float64 { return &value }
+func stringPointer(value string) *string  { return &value }
 
 func timePointer(value time.Time) *time.Time { return &value }
 

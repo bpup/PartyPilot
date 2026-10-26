@@ -188,3 +188,37 @@ func TestEncounterCentroidAndLifecycleTimes(t *testing.T) {
 		t.Fatal("monster with missing position was accepted")
 	}
 }
+
+func TestEncounterThreatCountsAndNearestDistances(t *testing.T) {
+	world := testWorld()
+	world.Monsters[2].DistanceByPlayer[3] = 7
+	var tracker EncounterTracker
+	encounter, err := tracker.Update(world)
+	if err != nil || encounter == nil || len(encounter.MonsterIDs) != 3 ||
+		encounter.MonsterIDs[0] != "a" || encounter.MonsterIDs[2] != "c" ||
+		encounter.Counts != (RarityCounts{Normal: 2, Magic: 1}) ||
+		encounter.ClosestEnemyM == nil || *encounter.ClosestEnemyM != 7 ||
+		encounter.ClosestRareM != nil || encounter.UniqueDistanceM != nil ||
+		encounter.PrimaryThreatID == nil || *encounter.PrimaryThreatID != "c" {
+		t.Fatalf("initial threat summary differs: %+v, %v", encounter, err)
+	}
+	world.Monsters[0].Rarity = "rare"
+	world.Monsters[1].Rarity = "unique"
+	world.Timestamp = world.Timestamp.Add(time.Millisecond)
+	encounter, err = tracker.Update(world)
+	if err != nil || encounter == nil || encounter.Counts != (RarityCounts{Magic: 1, Rare: 1, Unique: 1}) ||
+		encounter.ClosestRareM == nil || *encounter.ClosestRareM != 20 ||
+		encounter.UniqueDistanceM == nil || *encounter.UniqueDistanceM != 20 ||
+		encounter.PrimaryThreatID == nil || *encounter.PrimaryThreatID != "b" {
+		t.Fatalf("rare and unique summary differs: %+v, %v", encounter, err)
+	}
+	world.Monsters = []Monster{}
+	world.Timestamp = world.Timestamp.Add(time.Millisecond)
+	encounter, err = tracker.Update(world)
+	if err != nil || encounter == nil || encounter.MonsterIDs == nil || len(encounter.MonsterIDs) != 0 ||
+		encounter.Counts != (RarityCounts{}) || encounter.ClosestEnemyM != nil ||
+		encounter.ClosestRareM != nil || encounter.UniqueDistanceM != nil ||
+		encounter.PrimaryThreatID != nil {
+		t.Fatalf("empty encounter metrics must remain explicit: %+v, %v", encounter, err)
+	}
+}

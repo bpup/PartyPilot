@@ -22,6 +22,8 @@
 
 `CombatDirectorEncounterRuntime` 还保存当前遭遇怪物的二维质心及开始、更新、进入战斗、收尾和完成时间。回放现要求每只怪物显式提供 `position.x/y`，对当帧遭遇集合求质心；集合为空时质心为 `(0, 0)`。这只是合成回放的空间数据，尚未证明游戏坐标、单位或六角色相对位置可由当前传感器可靠取得。
 
+回放现还输出当前遭遇怪物 ID 集合、Normal/Magic/Rare/Unique 数量、最近敌人、最近 Rare、最近 Unique 的距离，以及主要威胁 ID。主要威胁按目标版的 Unique → Rare → Magic → Normal 优先级，同级按距离选择；无怪物时 ID 列表为空、四类数量为零，距离和威胁 ID 用 `null` 表示。目标版内部的最近敌人距离在空集合时为正无穷；`null` 是独立 JSON 输出对“无敌人”的显式表示，不用于实时战斗判断。
+
 ```sh
 PartyPilot-CombatReplay.exe -replay testdata/combat-example.jsonl -enable-planning
 ```
