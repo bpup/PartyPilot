@@ -13,6 +13,7 @@ REQUIRED = {
     "release/desktop/PartyPilot.Desktop.exe",
     "release/bridge/PartyPilot.Bridge.exe",
     "release/PartyPilot-LiveFollow.exe",
+    "release/PartyPilot-FpsConfig.exe",
     "release/PartyPilot.Sensor.dll",
     "release/PartyPilot.Sensor.deps.json",
 }

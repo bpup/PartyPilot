@@ -104,6 +104,15 @@ PartyPilot-ResourceWatch.exe -pids 1234,5678 -cpu 25 -affinity 0x3 -ram-warning 
 
 该工具已通过策略单元测试、配置预览和 Windows 目标编译；尚未在 Windows 或 PoE2 上执行。Job Object 分配、现有作业嵌套、前后台切换和限制恢复都需要 Windows 实机验证。它目前是独立命令行工具，尚未接入启动器或设置界面。
 
+`release/PartyPilot-FpsConfig.exe` 为明确指定的 PoE2 配置文件分别设置前台和后台帧率。两项都必须显式填写：`keep` 保留对应原值，`unlimited` 或 `0` 只关闭该项限制，正整数开启限制并写入该帧率。默认只预览将变动的 `DISPLAY` 键；关闭所有游戏客户端后加 `-apply` 才备份原文件并替换。它只改 `framerate_limit_enabled`、`framerate_limit`、`background_framerate_limit_enabled`、`background_framerate_limit` 中所需的键，不触碰输入模式或其他节。支持 UTF-8、带 BOM 的 UTF-8 与带 BOM 的 UTF-16；重复 `DISPLAY` 节或目标键会拒绝修改。示例路径和帧数仅用于说明，不代表目标版默认值：
+
+```sh
+PartyPilot-FpsConfig.exe -config "C:\Users\Me\Documents\My Games\Path of Exile 2\poe2_production_Config.ini" -foreground keep -background 30
+PartyPilot-FpsConfig.exe -config "C:\Users\Me\Documents\My Games\Path of Exile 2\poe2_production_Config.ini" -foreground keep -background 30 -apply
+```
+
+这对应所提供 0.6.17 静态实现中的两组 FPS 配置键及 `KeepCurrent`、`Unlimited`、指定帧数的语义；目前只通过合成 INI 文件测试，尚未在 Windows/PoE2 的真实配置上应用或验证游戏内帧率，也未接入桌面设置界面。
+
 `release/PartyPilot-FlaskReplay.exe` 提供自动药剂的**离线决策回放**。传感器现在额外只读发送当前及最大生命、魔力、能量护盾；这些字段已按本地 ExileCore2 程序集的 `Life` 组件元数据编译验证，但尚未在游戏中核对数值含义。回放工具采用提供版本静态代码中的 P1–P6 生命/魔力“重置规则”，要求每帧显式给出 `menu_open` 与 `recovering`，只输出建议触发，不发送按键。它覆盖普通阈值、紧急阈值、冷却、恢复后的重新触发和显式持续使用规则，还可在离线样本中演示能量护盾替代/合并生命、Ward 暂缓生命药剂及 Ward 破裂触发。已加入静态代码中的空瓶判定：触发后等待至少 900 毫秒，以资源恢复 1.5 个百分点为有效结果；连续三次未生效后不再输出该药剂，资源比停用时回升 3 个百分点后重新启用。该判断仅在持续收到相应资源读数时运行；离线回放本身不发送按键，也不能替代游戏内空瓶确认。当前传感器没有可靠的 Ward 来源；共享药剂和自定义动作仍未实现。示例：
 
 ```sh
