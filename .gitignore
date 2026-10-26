@@ -1,4 +1,6 @@
 bridge/bin/
 bridge/obj/
+sensor/bin/
+sensor/obj/
 release/
 PartyPilot.exe
