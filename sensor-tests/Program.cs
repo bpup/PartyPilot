@@ -68,4 +68,11 @@ var crossAreaConflict = LocalSlotCandidateScanner.Scan(state, data, local, paths
 Require(crossAreaConflict.Status == "conflicting_candidates" &&
     crossAreaConflict.CandidateAreaAddresses.SequenceEqual(["0x100000", "0x900000"]),
     "Conflicting orders from different area anchors were accepted.");
-Console.WriteLine("Local slot candidate diagnostics passed.");
+Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
+    RadarClassifier.Category("Metadata/MiscellaneousObjects/Waypoint") == "waypoint" &&
+    RadarClassifier.Category("Metadata/Effects/PortalFlash") == null &&
+    RadarClassifier.Category("Metadata/Items/ChestPiece") == null &&
+    RadarClassifier.Category("Metadata/Monsters/PortalGuardian") == "monster" &&
+    RadarClassifier.IsNavigation("waypoint") && !RadarClassifier.IsNavigation("monster"),
+    "Path-only radar categories admitted unsupported entities or lost navigation markers.");
+Console.WriteLine("Sensor diagnostics passed.");

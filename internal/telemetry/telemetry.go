@@ -27,6 +27,9 @@ type Sample struct {
 	ObservedLocalAddress     string               `json:"ObservedLocalAddress,omitempty"`
 	LocalSlotCandidates      *LocalSlotCandidates `json:"LocalSlotCandidates,omitempty"`
 	LocalSlotCandidateStatus string               `json:"LocalSlotCandidateStatus,omitempty"`
+	RadarEntities            []RadarEntity        `json:"RadarEntities,omitempty"`
+	RadarStatus              string               `json:"RadarStatus,omitempty"`
+	RadarSeenUTC             *time.Time           `json:"RadarSeenUtc,omitempty"`
 	VisiblePlayers           []VisiblePlayer      `json:"VisiblePlayers,omitempty"`
 	VisiblePlayersStatus     string               `json:"VisiblePlayersStatus,omitempty"`
 }
@@ -42,6 +45,17 @@ type VisiblePlayer struct {
 	Y               float64 `json:"Y"`
 	Z               float64 `json:"Z"`
 	IsObservedLocal bool    `json:"IsObservedLocal"`
+}
+
+// RadarEntity is a path-and-position observation; category does not assert
+// hostility, loot value, quest state, or interaction availability.
+type RadarEntity struct {
+	EntityID uint64  `json:"EntityId"`
+	Category string  `json:"Category"`
+	Path     string  `json:"Path"`
+	X        float64 `json:"X"`
+	Y        float64 `json:"Y"`
+	Z        float64 `json:"Z"`
 }
 
 // LocalSlotCandidates are read-only hints from an unverified memory anchor.
@@ -71,10 +85,49 @@ func Decode(data []byte) (Sample, error) {
 		!validAddress(item.IngameDataAddress) || !validAddress(item.ObservedLocalAddress) ||
 		!validLocalSlotCandidates(item.LocalSlotCandidates, item.LocalSlotCandidateStatus,
 			item.ObservedLocalAddress, item.IngameDataAddress) ||
+		!validRadar(item.RadarEntities, item.RadarStatus, item.RadarSeenUTC) ||
 		!validVisiblePlayers(item.VisiblePlayers, item.ObservedLocalAddress) {
 		return Sample{}, ErrInvalidSample
 	}
 	return item, nil
+}
+
+func validRadar(entities []RadarEntity, status string, seen *time.Time) bool {
+	if status == "" {
+		return seen == nil && entities == nil
+	}
+	if seen == nil || seen.IsZero() || (status != "ok" && status != "scan_failed") {
+		return false
+	}
+	if status == "scan_failed" {
+		return entities == nil
+	}
+	if entities == nil {
+		return false
+	}
+	if len(entities) > 96 {
+		return false
+	}
+	ids := make(map[uint64]bool, len(entities))
+	for _, entity := range entities {
+		if entity.EntityID == 0 || ids[entity.EntityID] || len(entity.Path) > 256 ||
+			!strings.HasPrefix(entity.Path, "Metadata/") ||
+			!validRadarCategory(entity.Category) ||
+			!finite(entity.X) || !finite(entity.Y) || !finite(entity.Z) {
+			return false
+		}
+		ids[entity.EntityID] = true
+	}
+	return true
+}
+
+func validRadarCategory(category string) bool {
+	switch category {
+	case "monster", "checkpoint", "waypoint", "portal", "transition", "npc", "chest", "shrine":
+		return true
+	default:
+		return false
+	}
 }
 
 func validLocalSlotCandidates(candidate *LocalSlotCandidates, scanStatus, observed, dataAddress string) bool {

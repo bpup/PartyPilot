@@ -64,6 +64,8 @@ GOOS=windows GOARCH=amd64 go build -o PartyPilot.exe ./cmd/partypilot
 
 需要同窗口槽位取证时，还可单独开启默认关闭的 `DiagnoseLocalSlotCandidates`。它每秒从 ExileCore2 的游戏数据地址，以及“游戏状态地址 + 目标版公开静态默认偏移 656”所指向的地址分别只读寻找本地角色向量，并报告这两种基址是否相等及候选来自哪一个。偏移和基址关系均未实机验证，输出仅为候选，不能用于自动绑定 P2。合成向量检查可用 `DOTNET_ROLL_FORWARD=Major dotnet run --project sensor-tests/PartyPilot.Sensor.Tests.csproj -c Release`；本机只有 .NET 9，因此测试运行时需允许从目标 .NET 8 向上滚动。详见[同窗口角色身份核对](SAME_CLIENT_RESEARCH.md)。
 
+传感器还提供默认关闭的 `DiagnoseRadarEntities`，每 500 毫秒发送最多 96 个当前可见实体的路径类别与坐标，作为独立雷达的数据起点。它尚无游戏上方可视覆盖层、休眠实体、掉落标签或地形路线；详见[雷达数据与目标版差距](RADAR_RESEARCH.md)。
+
 `release/PartyPilot-PartyMonitor.exe` 可用 `-leader-pid`、`-follower-pid` 和 `-max-age` 监视两个进程的只读位置流。它区分数据缺失、过期、区域不一致及“同名同哈希候选”；候选**不等于已证实处于同一实例**，因此监视器不输出任何手柄命令。模拟双进程 UDP 数据已验证这些状态切换。
 
 `release/PartyPilot-RosterWatch.exe` 使用 `-roster 1:进程ID,2:进程ID,... -leader 1 -max-age 750ms` 对 1–6 个明确配置的游戏进程做只读监视。它按角色槽位输出队长是否缺失/过期，以及每个队员的缺失、过期、区域不一致或同区域候选状态；拒绝重复槽位、重复进程 ID 和乱序旧样本。该程序已用本机模拟 UDP 报文验证三角色状态变化，仍未接到真实 PoE2。区域名称与哈希相等仍只是候选，不会进入自动控制。

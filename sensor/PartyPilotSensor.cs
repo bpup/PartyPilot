@@ -18,6 +18,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     private long _lastSlotScanLocalAddress;
     private LocalSlotCandidateScanner.Result? _slotCandidates;
     private string? _slotCandidateStatus;
+    private DateTime _lastRadarSentUtc;
 
     public override void Render()
     {
@@ -95,6 +96,24 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             _slotCandidateStatus = null;
         }
 
+        object[]? radarEntities = null;
+        string? radarStatus = null;
+        DateTime? radarSeenUtc = null;
+        if (Settings.DiagnoseRadarEntities.Value && now - _lastRadarSentUtc >= TimeSpan.FromMilliseconds(500))
+        {
+            _lastRadarSentUtc = now;
+            radarSeenUtc = now;
+            try
+            {
+                radarEntities = ReadRadarEntities(player!.Id, render.Pos.X, render.Pos.Y);
+                radarStatus = "ok";
+            }
+            catch
+            {
+                radarStatus = "scan_failed";
+            }
+        }
+
         var position = render.Pos;
         // AreaName is diagnostic only. It does not identify a specific instance.
         var message = JsonSerializer.Serialize(new
@@ -116,6 +135,9 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             ObservedLocalAddress = observedLocalAddress,
             LocalSlotCandidates = Settings.DiagnoseLocalSlotCandidates.Value ? _slotCandidates : null,
             LocalSlotCandidateStatus = Settings.DiagnoseLocalSlotCandidates.Value ? _slotCandidateStatus : null,
+            RadarEntities = radarEntities,
+            RadarStatus = radarStatus,
+            RadarSeenUtc = radarSeenUtc,
             VisiblePlayers = visiblePlayers,
             VisiblePlayersStatus = visiblePlayersStatus
         });
@@ -152,4 +174,34 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     }
 
     private static string? FormatAddress(long address) => address > 0 ? $"0x{address:X}" : null;
+
+    private object[] ReadRadarEntities(uint observedLocalId, float localX, float localY)
+    {
+        var seen = new HashSet<uint>();
+        var candidates = new List<(object Value, bool Navigation, double Distance)>();
+        foreach (var entity in GameController.Entities)
+        {
+            if (entity == null || entity.Id == 0 || entity.Id == observedLocalId || !seen.Add(entity.Id))
+                continue;
+            var path = entity.Path;
+            if (path == null || Encoding.UTF8.GetByteCount(path) > 256) continue;
+            var category = RadarClassifier.Category(path);
+            if (category == null) continue;
+            var pos = entity.Pos;
+            if (!float.IsFinite(pos.X) || !float.IsFinite(pos.Y) || !float.IsFinite(pos.Z)) continue;
+            var dx = (double)pos.X - localX;
+            var dy = (double)pos.Y - localY;
+            candidates.Add((new
+            {
+                EntityId = entity.Id,
+                Category = category,
+                Path = path,
+                X = pos.X,
+                Y = pos.Y,
+                Z = pos.Z
+            }, RadarClassifier.IsNavigation(category), dx * dx + dy * dy));
+        }
+        return candidates.OrderByDescending(item => item.Navigation)
+            .ThenBy(item => item.Distance).Take(96).Select(item => item.Value).ToArray();
+    }
 }
