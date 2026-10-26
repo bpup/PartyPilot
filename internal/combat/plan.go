@@ -97,6 +97,16 @@ func (w World) Validate() error {
 }
 
 func Evaluate(profile Profile, world World) ([]Plan, error) {
+	var tracker EncounterTracker
+	encounter, err := tracker.Update(world)
+	if err != nil {
+		return nil, err
+	}
+	return EvaluateEncounter(profile, world, encounter)
+}
+
+// EvaluateEncounter uses state retained across ordered replay frames.
+func EvaluateEncounter(profile Profile, world World, encounter *Encounter) ([]Plan, error) {
 	if err := world.Validate(); err != nil {
 		return nil, err
 	}
@@ -105,19 +115,6 @@ func Evaluate(profile Profile, world World) ([]Plan, error) {
 	}
 	plans := make([]Plan, 0, len(profile.Roles))
 	global := globalBlock(profile, world)
-	aliveCount, rareCount, uniqueCount := 0, 0, 0
-	for _, monster := range world.Monsters {
-		if !*monster.Alive {
-			continue
-		}
-		aliveCount++
-		switch monster.Rarity {
-		case "rare":
-			rareCount++
-		case "unique":
-			uniqueCount++
-		}
-	}
 	for _, role := range profile.Roles {
 		plan := Plan{Player: role.Player}
 		if !profile.Enabled {
@@ -130,18 +127,20 @@ func Evaluate(profile Profile, world World) ([]Plan, error) {
 			plan.Status = "BLOCK_LOADING"
 		} else if profile.Safety.PauseDead && !*player.Alive {
 			plan.Status = "BLOCK_CHARACTER_DEAD"
-		} else if aliveCount == 0 {
+		} else if encounter == nil {
 			plan.Status = "waiting_no_encounter"
+		} else if encounter.State == "winding-down" || encounter.State == "complete" {
+			plan.Status = "waiting_fight_ending"
 		} else {
 			behavior := "pack"
 			if *world.EmergencyActive || player.HealthPercent != nil && *player.HealthPercent <= 30 {
 				behavior = "emergency"
-			} else if uniqueCount > 0 {
+			} else if encounter.hasTag("boss") {
 				behavior = "boss"
-				if role.Kind == "companion-dps" && rareCount >= 2 {
+				if role.Kind == "companion-dps" && encounter.hasTag("multi-rare") {
 					behavior = "rare"
 				}
-			} else if rareCount > 0 {
+			} else if encounter.hasTag("rare-present") || encounter.hasTag("dangerous") {
 				behavior = "rare"
 			}
 			plan.Behavior, plan.ComboID = chooseBehavior(role, behavior, world.Monsters)

@@ -27,6 +27,7 @@ func main() {
 	defer file.Close()
 	profile := combat.DefaultProfile()
 	profile.Enabled = *enabled
+	var encounters combat.EncounterTracker
 	var targets combat.TargetCoordinator
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -47,16 +48,21 @@ func main() {
 		if err := decoder.Decode(&extra); err != io.EOF {
 			fail(fmt.Errorf("line %d: extra JSON value", line))
 		}
-		plans, err := combat.Evaluate(profile, world)
+		encounter, err := encounters.Update(world)
+		if err != nil {
+			fail(fmt.Errorf("line %d: %w", line, err))
+		}
+		plans, err := combat.EvaluateEncounter(profile, world, encounter)
 		if err != nil {
 			fail(fmt.Errorf("line %d: %w", line, err))
 		}
 		targets.Assign(profile, world, plans)
 		result, err := json.Marshal(struct {
-			Timestamp string        `json:"timestamp"`
-			Area      string        `json:"areaInstance"`
-			Plans     []combat.Plan `json:"plans"`
-		}{world.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"), world.AreaInstance, plans})
+			Timestamp string            `json:"timestamp"`
+			Area      string            `json:"areaInstance"`
+			Encounter *combat.Encounter `json:"encounter,omitempty"`
+			Plans     []combat.Plan     `json:"plans"`
+		}{world.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"), world.AreaInstance, encounter, plans})
 		if err != nil {
 			fail(err)
 		}

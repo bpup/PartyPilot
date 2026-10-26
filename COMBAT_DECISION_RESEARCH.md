@@ -8,8 +8,10 @@
 
 目标版的 `CombatDirectorDefaults.cs` 为各角色配置不同目标策略，`CombatDirectorTargetCoordinator.cs` 按威胁、距离、主号目标或多 Rare 分配目标，并保留 Normal/Magic 400 毫秒、Rare 800 毫秒、Unique 1200 毫秒的短期占用。本回放现可在连续 JSONL 帧上输出 `targetId`，并按这些默认策略保留与释放目标。目标分配只读，不代表技能条件或游戏中的选怪动作已验证。
 
+`CombatDirectorEncounterManager.cs` 的默认设置以 60 米和三只怪为普通怪群进入条件，单只 Rare/Unique 也可触发；进入确认 150 毫秒，退出半径 75 米，结束确认 800 毫秒。回放现在保留遭遇 ID 与 `approaching`、`engaged`、`active`、`winding-down`、`complete` 阶段，怪物离开时不立即视为新遭遇；处于结束阶段时不输出新连招。场景标签来自当前遭遇中的怪物，不会由视野外的 Boss 改写当前怪群计划。`encounter` 字段及时间行为仅在按时间顺序提供的合成帧上验证。
+
 ```sh
 PartyPilot-CombatReplay.exe -replay testdata/combat-example.jsonl -enable-planning
 ```
 
-该示例是合成怪群，不代表游戏采集数据。命令仅输出规划 JSON，不向手柄桥接发送任何消息。目标版解析器还有角色与主号距离、角色允许攻击的稀有度、目标生命门槛、持续战斗时扩大的退出范围、目标锁定和危险怪群等判断；这些尚未进入本次规划。角色技能槽位、武器切换、目标的游戏内操作、连招计时、重复/冷却、跨客户端协调和手动接管也未接入实时执行。当前传感器只有候选技能绑定与有限雷达实体，不能构成目标版要求的可靠战斗世界快照；因此规划层仍为 **implementation-aligned / integration-pending**。
+该示例是合成怪群，不代表游戏采集数据。命令仅输出规划 JSON，不向手柄桥接发送任何消息。遭遇回放尚未包含质心、角色队形标签和完整的目标版版本号变更规则；解析器中的角色与主号距离、角色允许攻击的稀有度、目标生命门槛、持续战斗时扩大的退出范围、目标锁定等判断也尚未进入本次规划。角色技能槽位、武器切换、目标的游戏内操作、连招计时、重复/冷却、跨客户端协调和手动接管仍未接入实时执行。当前传感器只有候选技能绑定与有限雷达实体，不能构成目标版要求的可靠战斗世界快照；因此规划层仍为 **implementation-aligned / integration-pending**。

@@ -106,7 +106,7 @@ func TestSafetyEvidenceBlocksPlans(t *testing.T) {
 	check(world, "waiting_no_encounter")
 	world.Monsters = testWorld().Monsters[:1]
 	world.Monsters[0].DistanceByPlayer[1] = 100
-	check(world, "waiting_no_eligible_encounter")
+	check(world, "waiting_no_encounter")
 	world.Monsters = []Monster{}
 	delete(world.Players, 1)
 	check(world, "BLOCK_PLAYER_DATA_UNAVAILABLE")
