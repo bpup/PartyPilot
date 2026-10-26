@@ -10,7 +10,8 @@ func ptr[T any](value T) *T { return &value }
 func testWorld() World {
 	players := make(map[int]Player)
 	for number := 1; number <= 6; number++ {
-		players[number] = Player{Alive: ptr(true), Loading: ptr(false), ActiveCombo: ptr(false), HealthPercent: ptr(100.0)}
+		players[number] = Player{Alive: ptr(true), Loading: ptr(false), ActiveCombo: ptr(false),
+			DistanceFromMainM: ptr(0.0), HealthPercent: ptr(100.0)}
 	}
 	monster := func(id, rarity string) Monster {
 		distance := make(map[int]float64)
@@ -91,11 +92,11 @@ func TestSafetyEvidenceBlocksPlans(t *testing.T) {
 	world.UI.ChatOpen = ptr(true)
 	check(world, "BLOCK_UI_OPEN")
 	world.UI.ChatOpen = ptr(false)
-	world.Players[1] = Player{Alive: ptr(false), Loading: ptr(false), ActiveCombo: ptr(false)}
+	world.Players[1] = Player{Alive: ptr(false), Loading: ptr(false), ActiveCombo: ptr(false), DistanceFromMainM: ptr(0.0)}
 	check(world, "BLOCK_CHARACTER_DEAD")
-	world.Players[1] = Player{Alive: ptr(true), Loading: ptr(true), ActiveCombo: ptr(false)}
+	world.Players[1] = Player{Alive: ptr(true), Loading: ptr(true), ActiveCombo: ptr(false), DistanceFromMainM: ptr(0.0)}
 	check(world, "BLOCK_LOADING")
-	world.Players[1] = Player{Alive: ptr(true), Loading: ptr(false), ActiveCombo: ptr(false)}
+	world.Players[1] = Player{Alive: ptr(true), Loading: ptr(false), ActiveCombo: ptr(false), DistanceFromMainM: ptr(0.0)}
 	world.UI.AnyMenuOpen = nil
 	if _, err := Evaluate(profile, world); err == nil {
 		t.Fatal("missing UI menu evidence was treated as closed")

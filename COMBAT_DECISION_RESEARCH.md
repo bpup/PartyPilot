@@ -8,6 +8,8 @@
 
 回放现还要求每名已报告角色显式提供 `activeCombo`。它对应目标版 `CombatDirectorEngine.Evaluate` 传给行为解析器的 `activePlayers` 集合成员资格，由回放提供者负责记录；遭遇处于 `active` 阶段不能代替该证据。角色已有连招运行时，默认 60 米选怪半径按目标版公式扩大到 81 米，普通怪群的最低数量由三只降为一只；此规则仅改变只读计划，不驱动游戏输入。
 
+每名已报告角色还须显式提供 `distanceFromMainM`。目标版 `CombatDirectorThreatClassifier` 在任一角色距离 MAIN 严格大于 15 米时给遭遇增加 `FormationBroken` 标签；独立回放用 `formation-broken` 表示这一只读标签。示例距离是合成输入，不代表传感器已能可靠获取六名角色的相对位置。
+
 目标版的 `CombatDirectorDefaults.cs` 为各角色配置不同目标策略，`CombatDirectorTargetCoordinator.cs` 按威胁、距离、主号目标或多 Rare 分配目标，并保留 Normal/Magic 400 毫秒、Rare 800 毫秒、Unique 1200 毫秒的短期占用。本回放现可在连续 JSONL 帧上输出 `targetId`，并按这些默认策略保留与释放目标。目标分配只读，不代表技能条件或游戏中的选怪动作已验证。
 
 `CombatDirectorEncounterManager.cs` 的默认设置以 60 米和三只怪为普通怪群进入条件，单只 Rare/Unique 也可触发；进入确认 150 毫秒，退出半径 75 米，结束确认 800 毫秒。回放现在保留遭遇 ID 与 `approaching`、`engaged`、`active`、`winding-down`、`complete` 阶段，怪物离开时不立即视为新遭遇；处于结束阶段时不输出新连招。场景标签来自当前遭遇中的怪物，不会由视野外的 Boss 改写当前怪群计划。`encounter` 字段及时间行为仅在按时间顺序提供的合成帧上验证。

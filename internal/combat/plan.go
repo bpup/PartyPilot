@@ -32,10 +32,11 @@ type UI struct {
 }
 
 type Player struct {
-	Alive         *bool    `json:"alive"`
-	Loading       *bool    `json:"loading"`
-	ActiveCombo   *bool    `json:"activeCombo"`
-	HealthPercent *float64 `json:"healthPercent,omitempty"`
+	Alive             *bool    `json:"alive"`
+	Loading           *bool    `json:"loading"`
+	ActiveCombo       *bool    `json:"activeCombo"`
+	DistanceFromMainM *float64 `json:"distanceFromMainM"`
+	HealthPercent     *float64 `json:"healthPercent,omitempty"`
 }
 
 type Monster struct {
@@ -66,6 +67,7 @@ func (w World) Validate() error {
 	}
 	for id, player := range w.Players {
 		if id < 1 || id > 6 || player.Alive == nil || player.Loading == nil || player.ActiveCombo == nil ||
+			player.DistanceFromMainM == nil || !finite(*player.DistanceFromMainM) || *player.DistanceFromMainM < 0 ||
 			player.HealthPercent != nil && (!finite(*player.HealthPercent) ||
 				*player.HealthPercent < 0 || *player.HealthPercent > 100) {
 			return fmt.Errorf("player %d evidence is invalid", id)

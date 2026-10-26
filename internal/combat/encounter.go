@@ -122,7 +122,7 @@ func classifyEncounter(world World, selected []Monster, engagedAt time.Time) []s
 	for _, monster := range selected {
 		counts[monster.Rarity]++
 	}
-	tags := make([]string, 0, 11)
+	tags := make([]string, 0, 12)
 	add := func(yes bool, name string) {
 		if yes {
 			tags = append(tags, name)
@@ -147,6 +147,14 @@ func classifyEncounter(world World, selected []Monster, engagedAt time.Time) []s
 	add(len(selected) == 1 && counts["rare"]+counts["unique"] == 1, "isolated-threat")
 	add(!engagedAt.IsZero() && world.Timestamp.Sub(engagedAt) >= 8*time.Second &&
 		counts["rare"]+counts["unique"] > 0, "long-fight")
+	formationBroken := false
+	for _, player := range world.Players {
+		if *player.DistanceFromMainM > 15 {
+			formationBroken = true
+			break
+		}
+	}
+	add(formationBroken, "formation-broken")
 	sort.Strings(tags)
 	return tags
 }

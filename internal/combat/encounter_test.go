@@ -81,3 +81,27 @@ func TestEncounterThreatAndTagScope(t *testing.T) {
 		t.Fatalf("remote unique should not change pack plan: %+v, %v", plans, err)
 	}
 }
+
+func TestFormationBrokenUsesExplicitPlayerDistance(t *testing.T) {
+	world := testWorld()
+	player := world.Players[2]
+	player.DistanceFromMainM = ptr(15.0)
+	world.Players[2] = player
+	var tracker EncounterTracker
+	encounter, err := tracker.Update(world)
+	if err != nil || encounter == nil || encounter.hasTag("formation-broken") {
+		t.Fatalf("15 m must not break formation: %+v, %v", encounter, err)
+	}
+	player.DistanceFromMainM = ptr(15.01)
+	world.Players[2] = player
+	world.Timestamp = world.Timestamp.Add(time.Millisecond)
+	encounter, err = tracker.Update(world)
+	if err != nil || encounter == nil || !encounter.hasTag("formation-broken") {
+		t.Fatalf("distance beyond 15 m must break formation: %+v, %v", encounter, err)
+	}
+	player.DistanceFromMainM = nil
+	world.Players[2] = player
+	if _, err := tracker.Update(world); err == nil {
+		t.Fatal("missing player distance was accepted")
+	}
+}
