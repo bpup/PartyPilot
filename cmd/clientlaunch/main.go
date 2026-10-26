@@ -97,9 +97,6 @@ func main() {
 		if err != nil {
 			fail(err)
 		}
-		if plan.Borderless {
-			fail(errors.New("full borderless style is not implemented"))
-		}
 		response.Plan = &plan
 	} else if *monitors != "" {
 		fail(errors.New("-monitors requires -apply-layout"))
