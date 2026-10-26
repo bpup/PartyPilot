@@ -43,3 +43,38 @@ func TestAllCommandsAndFocus(t *testing.T) {
 		t.Fatalf("unexpected focus or command order: %q", output.String())
 	}
 }
+
+func TestMappedPartyPlayerUsesRuntimePad(t *testing.T) {
+	input := strings.NewReader("{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0}}}\n" +
+		"{\"focused\":2,\"commands\":{\"2\":{\"state\":\"waiting\"}}}\n")
+	var output strings.Builder
+	if err := selectCommandsMapped(input, &output, 0, padMap{1: 1, 2: 3}); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	if len(lines) != 4 || !strings.Contains(lines[0], `"type":"focus","slot":1`) ||
+		!strings.Contains(lines[1], `"slot":3`) ||
+		!strings.Contains(lines[2], `"type":"focus","slot":3`) ||
+		!strings.Contains(lines[3], `"slot":3,"state":"waiting"`) {
+		t.Fatalf("party role did not map to runtime pad: %q", output.String())
+	}
+}
+
+func TestPadMapRequiresFullUnambiguousMapping(t *testing.T) {
+	var mapping padMap
+	if err := mapping.Set("1:1"); err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range []string{"1:2", "2:1", "2:5", "0:2", "x:2"} {
+		if err := mapping.Set(invalid); err == nil {
+			t.Fatalf("accepted invalid mapping %q", invalid)
+		}
+	}
+	var output strings.Builder
+	if err := selectCommandsMapped(strings.NewReader("{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}}}\n"), &output, 0, mapping); err == nil {
+		t.Fatal("unmapped party role was forwarded")
+	}
+	if output.Len() != 0 {
+		t.Fatalf("invalid frame emitted a partial focus command: %q", output.String())
+	}
+}
