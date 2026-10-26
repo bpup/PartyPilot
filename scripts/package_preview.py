@@ -16,6 +16,8 @@ REQUIRED = {
     "release/PartyPilot-FpsConfig.exe",
     "release/PartyPilot.Sensor.dll",
     "release/PartyPilot.Sensor.deps.json",
+    "release/native/PartyPilot.PrivateSlots.dll",
+    "release/native/PartyPilot.PrivateSlots.Smoke.exe",
 }
 
 

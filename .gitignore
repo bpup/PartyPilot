@@ -11,4 +11,5 @@ ui/obj/
 ui-smoke/bin/
 ui-smoke/obj/
 release/
+native/private-slot-runtime/.build/
 PartyPilot.exe
