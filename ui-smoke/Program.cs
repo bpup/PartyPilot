@@ -8,6 +8,7 @@ using PartyPilot.Desktop;
 
 PartyRosterCounterSmoke.Run();
 FollowTargetChoicesSmoke.Run();
+FollowTargetPreferenceSmoke.Run();
 AccountProfileSmoke.Run();
 LoginCalibrationSmoke.Run();
 await AutoLoginFillSmoke.RunAsync();
@@ -46,7 +47,10 @@ AppBuilder.Configure<SmokeApp>()
     .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false })
     .SetupWithoutStarting();
 
-var window = new MainWindow();
+var followPreferencePath = Path.Combine(Path.GetTempPath(),
+    "partypilot-follow-ui-" + Guid.NewGuid().ToString("N"), "follow-targets.json");
+var followPreferenceStore = new FollowTargetPreferenceStore(followPreferencePath);
+var window = new MainWindow(followPreferenceStore);
 window.Show();
 window.UpdateLayout();
 if (window.GetLogicalDescendants().OfType<TextBox>().Count(field =>
@@ -488,6 +492,10 @@ var p2Target = window.GetLogicalDescendants().OfType<ComboBox>()
 if (!p2Target.IsEffectivelyVisible ||
     !p2Target.ItemsSource!.Cast<string>().SequenceEqual(["Current MAIN", "P1", "P3"]))
     throw new Exception("Three independent clients did not expose P2's active follow targets.");
+p2Target.SelectedItem = "P3";
+Dispatcher.UIThread.RunJobs();
+if (followPreferenceStore.Load() is not { Success: true, Targets: [0, 3, 0, 0, 0, 0] })
+    throw new Exception("P2's selected target was not saved by the desktop control.");
 if (pathFields.Any(field => !field.IsEffectivelyVisible))
 {
     throw new Exception("The three-single-client 3P option did not request three game windows.");

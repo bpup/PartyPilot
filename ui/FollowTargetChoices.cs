@@ -19,4 +19,10 @@ internal static class FollowTargetChoices
         if (choice == CurrentMain) return true;
         return int.TryParse(choice![1..], out target);
     }
+
+    internal static string Normalize(PartyTopology topology, int player, int target)
+    {
+        var choice = $"P{target}";
+        return For(topology, player).Contains(choice) ? choice : CurrentMain;
+    }
 }

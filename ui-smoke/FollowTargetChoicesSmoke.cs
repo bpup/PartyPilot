@@ -16,7 +16,10 @@ internal static class FollowTargetChoicesSmoke
         var split = PartyTopologies.ForPlayerCount(2)
             .Single(topology => topology.Id == "2-split");
         if (!FollowTargetChoices.For(split, 1).SequenceEqual(["Current MAIN", "P2"]) ||
-            FollowTargetChoices.For(split, 3).Length != 0)
+            FollowTargetChoices.For(split, 3).Length != 0 ||
+            FollowTargetChoices.Normalize(split, 1, 3) != "Current MAIN" ||
+            FollowTargetChoices.Normalize(split, 2, 2) != "Current MAIN" ||
+            FollowTargetChoices.Normalize(three, 2, 3) != "P3")
             throw new Exception("Two-client follow choices included an inactive player.");
     }
 }

@@ -82,6 +82,12 @@ public sealed class MainWindow : Window
     private readonly TextBox _followLeaderName = new();
     private readonly ComboBox[] _followTargets = new ComboBox[6];
     private readonly StackPanel[] _followTargetRows = new StackPanel[6];
+    private readonly FollowTargetPreferenceStore _followTargetPreferences;
+    private int[] _configuredFollowTargets = new int[6];
+    private bool _followTargetPreferenceReady;
+    private readonly bool[] _followTargetsRecovered = new bool[6];
+    private bool _updatingFollowTargetChoices;
+    private readonly TextBlock _followTargetPreferenceStatus = new();
     private readonly Button _startFollow = new();
     private readonly Button _stopFollow = new();
     private readonly TextBlock _followStatus = new();
@@ -138,8 +144,11 @@ public sealed class MainWindow : Window
     private string _loginStatus = "waiting";
     private bool _busy;
 
-    public MainWindow()
+    public MainWindow() : this(new FollowTargetPreferenceStore()) { }
+
+    internal MainWindow(FollowTargetPreferenceStore followTargetPreferences)
     {
+        _followTargetPreferences = followTargetPreferences;
         Title = "PartyPilot · Play";
         Width = 1120;
         Height = 800;
@@ -607,9 +616,18 @@ public sealed class MainWindow : Window
                 ItemsSource = new[] { FollowTargetChoices.CurrentMain }, SelectedIndex = 0 };
             _followTargets[index] = choice;
             _followTargetRows[index] = row;
+            var player = index + 1;
+            choice.SelectionChanged += (_, _) => SaveFollowTargetChoice(player);
             row.Children.Add(choice);
             panel.Children.Add(row);
         }
+        var loadedTargets = _followTargetPreferences.Load();
+        _configuredFollowTargets = loadedTargets.Targets;
+        _followTargetPreferenceReady = loadedTargets.Success;
+        _followTargetPreferenceStatus.Text = loadedTargets.Message;
+        _followTargetPreferenceStatus.Foreground = MutedBrush;
+        _followTargetPreferenceStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_followTargetPreferenceStatus);
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
         _startFollow.Content = "开始跟随";
         _startFollow.Click += async (_, _) => await StartFollowAsync();
@@ -838,17 +856,50 @@ public sealed class MainWindow : Window
     private void UpdateFollowTargetChoices()
     {
         var supported = _selectedTopology?.Id is "2-split" or "3-three-singles";
-        for (var index = 0; index < _followTargets.Length; index++)
+        if (!_followTargetPreferenceReady) Array.Clear(_followTargetsRecovered);
+        _updatingFollowTargetChoices = true;
+        try
         {
-            if (_followTargets[index] is null) continue;
-            var player = index + 1;
-            var options = supported ? FollowTargetChoices.For(_selectedTopology!, player) : [];
-            var previous = _followTargets[index].SelectedItem as string;
-            _followTargetRows[index].IsVisible = options.Length > 0;
-            _followTargets[index].ItemsSource = options;
-            _followTargets[index].SelectedItem = options.Contains(previous)
-                ? previous : options.FirstOrDefault();
+            for (var index = 0; index < _followTargets.Length; index++)
+            {
+                if (_followTargets[index] is null) continue;
+                var player = index + 1;
+                var options = supported ? FollowTargetChoices.For(_selectedTopology!, player) : [];
+                _followTargetRows[index].IsVisible = options.Length > 0;
+                _followTargets[index].ItemsSource = options;
+                _followTargets[index].SelectedItem = _followTargetPreferenceReady && options.Length > 0
+                    ? FollowTargetChoices.Normalize(_selectedTopology!, player, _configuredFollowTargets[index])
+                    : null;
+            }
         }
+        finally
+        {
+            _updatingFollowTargetChoices = false;
+        }
+        UpdateFollowControls();
+    }
+
+    private void SaveFollowTargetChoice(int player)
+    {
+        if (_updatingFollowTargetChoices || _selectedTopology is null ||
+            _selectedTopology.Id is not ("2-split" or "3-three-singles")) return;
+        if (!FollowTargetChoices.TryRead(_selectedTopology, player,
+                _followTargets[player - 1].SelectedItem as string, out var target)) return;
+        var next = (int[])_configuredFollowTargets.Clone();
+        next[player - 1] = target;
+        _configuredFollowTargets = next;
+        _followTargetsRecovered[player - 1] = true;
+        if (!_followTargetPreferenceReady && _selectedTopology.Slots.Any(slot =>
+                !_followTargetsRecovered[slot.PartyPlayer - 1]))
+        {
+            _followTargetPreferenceStatus.Text = "请为当前布局的每个角色明确选择跟随目标。";
+            UpdateFollowControls();
+            return;
+        }
+        var saved = _followTargetPreferences.Save(next);
+        _followTargetPreferenceReady = saved.Success;
+        _followTargetPreferenceStatus.Text = saved.Message;
+        UpdateFollowControls();
     }
 
     private void ClearLaunchedClients()
@@ -1544,7 +1595,7 @@ public sealed class MainWindow : Window
         var valid = LiveFollowPlan.TryCreate(_followStop.Text, _followResume.Text, _followCatchup.Text,
             _followMaxAge.Text, _followLogAge.Text, _followLeaderName.Text, out _);
         _startFollow.IsEnabled = OperatingSystem.IsWindows() && !_busy && !_followStopping && _follow is null &&
-            _bridge is not null && _pairingSettled &&
+            _followTargetPreferenceReady && _bridge is not null && _pairingSettled &&
             _selectedTopology?.Id is "2-split" or "3-three-singles" &&
             _launchedClients.Count == _selectedTopology.ClientCount && valid;
         _stopFollow.IsEnabled = _follow is not null;
@@ -1826,6 +1877,7 @@ public sealed class MainWindow : Window
     private async Task StartFollowAsync()
     {
         if (_bridge is null || !_pairingSettled || _selectedTopology is null || _follow is not null || _followStopping ||
+            !_followTargetPreferenceReady ||
             !LiveFollowPlan.TryCreate(_followStop.Text, _followResume.Text, _followCatchup.Text,
                 _followMaxAge.Text, _followLogAge.Text, _followLeaderName.Text, out var plan) || plan is null) return;
         var executable = LiveFollowSession.FindExecutable();
