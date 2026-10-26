@@ -149,3 +149,23 @@ func TestManualOverrideRequiresFreshLivingFollower(t *testing.T) {
 		t.Fatalf("stale follower should not allow manual movement: %+v", command)
 	}
 }
+
+func TestVisiblePlayerDiagnosticDoesNotBecomeFollowerEvidence(t *testing.T) {
+	now := time.Now().UTC()
+	config := follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}
+	engine, err := New(map[int]int{1: 101, 2: 202}, 1, config, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, slot := range []int{1, 2} {
+		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123, ObservedAt: now, Origin: "live"})
+	}
+	engine.ObserveSample(telemetry.Sample{ProcessID: 101, SeenUTC: now.Add(time.Millisecond), X: 12,
+		VisiblePlayers: []telemetry.VisiblePlayer{
+			{EntityID: 11, Name: "Leader", X: 12, IsObservedLocal: true},
+			{EntityID: 12, Name: "Other", X: 0},
+		}})
+	if command := engine.Step(now.Add(time.Millisecond))[2]; command.State != follow.Waiting {
+		t.Fatalf("visible entity candidate was treated as an identified follower: %+v", command)
+	}
+}

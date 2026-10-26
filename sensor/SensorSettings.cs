@@ -6,4 +6,5 @@ namespace PartyPilot.Sensor;
 public sealed class SensorSettings : ISettings
 {
     public ToggleNode Enable { get; set; } = new(false);
+    public ToggleNode DiagnoseVisiblePlayers { get; set; } = new(false);
 }
