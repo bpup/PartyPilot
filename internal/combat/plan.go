@@ -38,11 +38,12 @@ type Player struct {
 }
 
 type Monster struct {
-	ID               string          `json:"id"`
-	Rarity           string          `json:"rarity"`
-	Alive            *bool           `json:"alive"`
-	DistanceByPlayer map[int]float64 `json:"distanceByPlayerM"`
-	HealthPercent    *float64        `json:"healthPercent,omitempty"`
+	ID                string          `json:"id"`
+	Rarity            string          `json:"rarity"`
+	Alive             *bool           `json:"alive"`
+	DistanceFromMainM *float64        `json:"distanceFromMainM"`
+	DistanceByPlayer  map[int]float64 `json:"distanceByPlayerM"`
+	HealthPercent     *float64        `json:"healthPercent,omitempty"`
 }
 
 type Plan struct {
@@ -50,6 +51,7 @@ type Plan struct {
 	Status   string `json:"status"`
 	Behavior string `json:"behavior,omitempty"`
 	ComboID  string `json:"comboId,omitempty"`
+	TargetID string `json:"targetId,omitempty"`
 	Reason   string `json:"reason,omitempty"`
 }
 
@@ -73,7 +75,8 @@ func (w World) Validate() error {
 		if monster.ID == "" || seen[monster.ID] || monster.Alive == nil ||
 			monster.Rarity != "normal" && monster.Rarity != "magic" &&
 				monster.Rarity != "rare" && monster.Rarity != "unique" ||
-			monster.DistanceByPlayer == nil || monster.HealthPercent == nil ||
+			monster.DistanceFromMainM == nil || !finite(*monster.DistanceFromMainM) ||
+			*monster.DistanceFromMainM < 0 || monster.DistanceByPlayer == nil || monster.HealthPercent == nil ||
 			(!finite(*monster.HealthPercent) ||
 				*monster.HealthPercent < 0 || *monster.HealthPercent > 100) {
 			return errors.New("monster evidence is invalid")
@@ -182,7 +185,12 @@ func chooseBehavior(role Role, preferred string, monsters []Monster) (string, st
 	}
 	for _, behavior := range chain {
 		if behavior == "emergency" {
-			return behavior, role.Behaviors[behavior]
+			for _, monster := range monsters {
+				if distance, ok := monster.DistanceByPlayer[role.Player]; ok && *monster.Alive && distance <= 60 {
+					return behavior, role.Behaviors[behavior]
+				}
+			}
+			return "", ""
 		}
 		pack, rare, unique := 0, 0, 0
 		for _, monster := range monsters {

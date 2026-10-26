@@ -18,7 +18,7 @@ func testWorld() World {
 			distance[number] = 20
 		}
 		return Monster{ID: id, Rarity: rarity, Alive: ptr(true),
-			DistanceByPlayer: distance, HealthPercent: ptr(100.0)}
+			DistanceFromMainM: ptr(20.0), DistanceByPlayer: distance, HealthPercent: ptr(100.0)}
 	}
 	return World{Timestamp: time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC),
 		AreaInstance: "synthetic-area", DataAgeMS: ptr(100), SafeZone: ptr(false),
@@ -104,6 +104,10 @@ func TestSafetyEvidenceBlocksPlans(t *testing.T) {
 	world.Monsters = []Monster{}
 	world.EmergencyActive = ptr(true)
 	check(world, "waiting_no_encounter")
+	world.Monsters = testWorld().Monsters[:1]
+	world.Monsters[0].DistanceByPlayer[1] = 100
+	check(world, "waiting_no_eligible_encounter")
+	world.Monsters = []Monster{}
 	delete(world.Players, 1)
 	check(world, "BLOCK_PLAYER_DATA_UNAVAILABLE")
 	world = testWorld()

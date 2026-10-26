@@ -27,6 +27,7 @@ func main() {
 	defer file.Close()
 	profile := combat.DefaultProfile()
 	profile.Enabled = *enabled
+	var targets combat.TargetCoordinator
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	line := 0
@@ -50,6 +51,7 @@ func main() {
 		if err != nil {
 			fail(fmt.Errorf("line %d: %w", line, err))
 		}
+		targets.Assign(profile, world, plans)
 		result, err := json.Marshal(struct {
 			Timestamp string        `json:"timestamp"`
 			Area      string        `json:"areaInstance"`
