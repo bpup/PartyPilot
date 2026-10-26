@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -94,5 +96,53 @@ func TestPackedTerrainReplayReadsRawFileAndRejectsTwoSources(t *testing.T) {
 	encoded, _ = json.Marshal(item)
 	if err := replay(bytes.NewReader(append(encoded, '\n')), &bytes.Buffer{}, config); err == nil {
 		t.Fatal("accepted terrain file shorter than declared dimensions")
+	}
+}
+
+func TestPackedTerrainReplayLoadsValidatedDiagnosticCapture(t *testing.T) {
+	data := bytes.Repeat([]byte{0x11}, 46*92)
+	for y := 4; y <= 10; y++ {
+		data[y*46+5] = 0x10
+	}
+	directory := t.TempDir()
+	dataPath := filepath.Join(directory, "terrain.packed")
+	metaPath := filepath.Join(directory, "terrain.json")
+	if err := os.WriteFile(dataPath, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(data)
+	meta := map[string]any{
+		"Status": "candidate_capture_only", "ProcessId": 123,
+		"AreaHash": "77", "AreaAddress": "0x100000", "Anchor": "ingame_data_address",
+		"PackedStart": "0x200000", "RawGridX": 4, "RawGridY": 7,
+		"Width": 92, "Height": 92, "BytesPerRow": 46, "PackedBytes": len(data),
+		"PatchX": 4, "PatchY": 7, "PatchRows": []string{"111"},
+		"Sha256": hex.EncodeToString(digest[:]), "DataFile": "terrain.packed",
+	}
+	encodedMeta, _ := json.Marshal(meta)
+	if err := os.WriteFile(metaPath, encodedMeta, 0600); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
+	item := frame{Now: at,
+		Leader:        follow.Position{X: 16, Y: 7, Area: "a", Seen: at, Valid: true},
+		Follower:      follow.Position{X: 4, Y: 7, Area: "a", Seen: at, Valid: true},
+		PackedTerrain: &packedTerrain{Area: "a", CellSize: 1, CaptureFile: metaPath}}
+	encodedFrame, _ := json.Marshal(item)
+	config := follow.Config{StopDistance: 1, ResumeDistance: 2,
+		CatchUpDistance: 30, MaxAge: time.Second}
+	var output bytes.Buffer
+	if err := replay(bytes.NewReader(append(encodedFrame, '\n')), &output, config); err != nil {
+		t.Fatal(err)
+	}
+	var command follow.Command
+	if err := json.Unmarshal(output.Bytes(), &command); err != nil ||
+		command.State != follow.Following || command.Y == 0 {
+		t.Fatalf("validated capture did not detour: %+v, %v", command, err)
+	}
+	item.PackedTerrain.BytesPerRow = 46
+	encodedFrame, _ = json.Marshal(item)
+	if err := replay(bytes.NewReader(append(encodedFrame, '\n')), &bytes.Buffer{}, config); err == nil {
+		t.Fatal("capture and manual dimensions were both accepted")
 	}
 }

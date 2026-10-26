@@ -34,6 +34,7 @@ type packedTerrain struct {
 	Rows        int     `json:"rows"`
 	Data        []byte  `json:"data"`
 	DataFile    string  `json:"data_file,omitempty"`
+	CaptureFile string  `json:"capture_metadata_file,omitempty"`
 }
 
 func replay(reader io.Reader, writer io.Writer, config follow.Config) error {
@@ -60,6 +61,16 @@ func replay(reader io.Reader, writer io.Writer, config follow.Config) error {
 				return fmt.Errorf("line %d: two terrain sources", line)
 			}
 			p := item.PackedTerrain
+			if p.CaptureFile != "" {
+				if p.DataFile != "" || len(p.Data) != 0 || p.BytesPerRow != 0 || p.Rows != 0 {
+					return fmt.Errorf("line %d: ambiguous packed terrain source", line)
+				}
+				capture, loadErr := navigation.LoadCandidateCapture(p.CaptureFile)
+				if loadErr != nil {
+					return fmt.Errorf("line %d: %w", line, loadErr)
+				}
+				p.Data, p.BytesPerRow, p.Rows = capture.Data, capture.BytesPerRow, capture.Rows
+			}
 			if p.DataFile != "" {
 				if len(p.Data) != 0 {
 					return fmt.Errorf("line %d: two packed terrain sources", line)

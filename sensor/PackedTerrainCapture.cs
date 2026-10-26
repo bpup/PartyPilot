@@ -12,12 +12,19 @@ internal static class PackedTerrainCapture
     internal sealed record Outcome(string Status, string? DataFile = null);
 
     internal static Outcome Save(PackedTerrainProbe.PackedSource source,
+        PackedTerrainProbe.Observation observation,
+        RawRenderPositionReader.Position position, float observedWorldX, float observedWorldY,
         Func<long, int, byte[]?> read, string directory, int processId,
         string areaHash, string areaAddress, string anchor, DateTime seenUtc)
     {
         var length = (long)source.BytesPerRow * source.Rows;
         if (source.Start < 0x10000 || source.BytesPerRow <= 0 || source.Rows <= 0 ||
-            length is < 4096 or > MaxBytes || processId <= 0)
+            length is < 4096 or > MaxBytes || processId <= 0 ||
+            observation.Width != source.BytesPerRow * 2 || observation.Height != source.Rows ||
+            !float.IsFinite(position.GridX) || !float.IsFinite(position.GridY) ||
+            !float.IsFinite(observedWorldX) || !float.IsFinite(observedWorldY) ||
+            position.GridX < 0 || position.GridY < 0 ||
+            position.GridX >= observation.Width || position.GridY >= observation.Height)
             return new Outcome("invalid_source");
 
         string? temporary = null;
@@ -55,6 +62,8 @@ internal static class PackedTerrainCapture
                 !Matches(read(source.Start, first.Length), first) ||
                 !Matches(read(lastAddress, last.Length), last))
                 return new Outcome("changed_during_read");
+            if (!MatchesPatch(temporary, observation, source.BytesPerRow))
+                return new Outcome("patch_mismatch");
 
             var digest = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
             File.Move(temporary, dataFile);
@@ -67,6 +76,15 @@ internal static class PackedTerrainCapture
                 AreaAddress = areaAddress,
                 Anchor = anchor,
                 PackedStart = $"0x{source.Start:X}",
+                RawGridX = position.GridX,
+                RawGridY = position.GridY,
+                RawWorldX = position.WorldX,
+                RawWorldY = position.WorldY,
+                ObservedWorldX = observedWorldX,
+                ObservedWorldY = observedWorldY,
+                PatchX = observation.PatchX,
+                PatchY = observation.PatchY,
+                PatchRows = observation.PatchRows,
                 SeenUtc = seenUtc,
                 Width = source.BytesPerRow * 2,
                 Height = source.Rows,
@@ -91,6 +109,29 @@ internal static class PackedTerrainCapture
 
     private static bool Matches(byte[]? current, byte[] original) =>
         current != null && current.AsSpan().SequenceEqual(original);
+
+    private static bool MatchesPatch(string path, PackedTerrainProbe.Observation patch,
+        int bytesPerRow)
+    {
+        if (patch.PatchX < 0 || patch.PatchY < 0 || patch.PatchRows.Length is < 1 or > 9 ||
+            patch.PatchY + patch.PatchRows.Length > patch.Height) return false;
+        using var stream = File.OpenRead(path);
+        foreach (var (row, rowIndex) in patch.PatchRows.Select((row, index) => (row, index)))
+        {
+            if (row.Length is < 1 or > 9 || patch.PatchX + row.Length > patch.Width)
+                return false;
+            for (var x = 0; x < row.Length; x++)
+            {
+                stream.Position = (long)(patch.PatchY + rowIndex) * bytesPerRow +
+                    (patch.PatchX + x) / 2;
+                var value = stream.ReadByte();
+                if (value < 0) return false;
+                var nibble = ((patch.PatchX + x) & 1) == 0 ? value & 15 : value >> 4;
+                if (row[x] != (nibble == 0 ? '0' : '1')) return false;
+            }
+        }
+        return true;
+    }
 
     private static void TryDelete(string path)
     {

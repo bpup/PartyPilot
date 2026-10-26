@@ -294,7 +294,7 @@ func validPackedCapture(captureStatus, probeStatus string) bool {
 		return false
 	}
 	switch captureStatus {
-	case "captured_local", "already_captured", "invalid_source", "read_failed", "changed_during_read", "write_failed":
+	case "captured_local", "already_captured", "invalid_source", "read_failed", "changed_during_read", "patch_mismatch", "write_failed":
 		return true
 	default:
 		return false

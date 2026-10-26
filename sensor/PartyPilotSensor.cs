@@ -298,7 +298,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                     {
                         var directory = Path.Combine(Environment.GetFolderPath(
                             Environment.SpecialFolder.LocalApplicationData), "PartyPilot", "terrain");
-                        var capture = PackedTerrainCapture.Save(source, ReadTerrain, directory,
+                        var capture = PackedTerrainCapture.Save(source, observation,
+                            positionCandidate!, render.Pos.X, render.Pos.Y, ReadTerrain, directory,
                             processId, areaHash, observation.AreaAddress, observation.Anchor, now);
                         packedTerrainCaptureStatus = capture.Status;
                         if (capture.Status == "captured_local") _capturedTerrainKeys.Add(captureKey);

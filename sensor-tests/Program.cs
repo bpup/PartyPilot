@@ -235,17 +235,28 @@ void TestPackedTerrainProbe()
     Require(anchored.Source is { Start: packedStart, BytesPerRow: bytesPerRow, Rows: rows },
         "The unique candidate lost its packed memory range.");
     var captureDirectory = Path.Combine(Path.GetTempPath(), "partypilot-terrain-test-" + Guid.NewGuid());
+    var capturePosition = new RawRenderPositionReader.Position(108.69565f, 217.3913f,
+        5, 10, 20, "0x123456");
     try
     {
-        var capture = PackedTerrainCapture.Save(anchored.Source!, Read, captureDirectory,
+        var capture = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate!,
+            capturePosition, 108.69565f, 217.3913f, Read, captureDirectory,
             123, "test-area", anchored.Candidate!.AreaAddress, anchored.Candidate.Anchor, DateTime.UtcNow);
         Require(capture.Status == "captured_local" && capture.DataFile != null &&
             File.ReadAllBytes(capture.DataFile).SequenceEqual(packed) &&
             File.Exists(Path.ChangeExtension(capture.DataFile, ".json")),
             "A candidate full-map export was incomplete.");
+        using var metadata = System.Text.Json.JsonDocument.Parse(
+            File.ReadAllText(Path.ChangeExtension(capture.DataFile!, ".json")));
+        Require(metadata.RootElement.GetProperty("RawGridX").GetSingle() == 10 &&
+            metadata.RootElement.GetProperty("PatchRows").GetArrayLength() == 9 &&
+            metadata.RootElement.GetProperty("Sha256").GetString() ==
+                Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(packed)).ToLowerInvariant(),
+            "The capture lost position, patch or file integrity evidence.");
         byte[]? ShortRead(long address, int size) =>
             address == packedStart ? new byte[size - 1] : Read(address, size);
-        var failed = PackedTerrainCapture.Save(anchored.Source!, ShortRead, captureDirectory,
+        var failed = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate,
+            capturePosition, 108.69565f, 217.3913f, ShortRead, captureDirectory,
             123, "test-area", anchored.Candidate.AreaAddress, anchored.Candidate.Anchor, DateTime.UtcNow);
         Require(failed.Status == "read_failed" &&
             Directory.GetFiles(captureDirectory, "*.tmp").Length == 0 &&
@@ -258,12 +269,23 @@ void TestPackedTerrainProbe()
             if (address == packedStart && ++reads == 2 && bytes != null) bytes[0] ^= 1;
             return bytes;
         }
-        var changed = PackedTerrainCapture.Save(anchored.Source!, ChangingRead, captureDirectory,
+        var changed = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate,
+            capturePosition, 108.69565f, 217.3913f, ChangingRead, captureDirectory,
             123, "test-area", anchored.Candidate.AreaAddress, anchored.Candidate.Anchor, DateTime.UtcNow);
         Require(changed.Status == "changed_during_read" &&
             Directory.GetFiles(captureDirectory, "*.tmp").Length == 0 &&
             Directory.GetFiles(captureDirectory, "*.packed").Length == 1,
             "A changing packed export was retained.");
+        var wrongPatch = anchored.Candidate with
+        {
+            PatchRows = anchored.Candidate.PatchRows.Select(row => row.Replace('1', '0')).ToArray()
+        };
+        var mismatch = PackedTerrainCapture.Save(anchored.Source!, wrongPatch,
+            capturePosition, 108.69565f, 217.3913f, Read, captureDirectory,
+            123, "test-area", anchored.Candidate.AreaAddress, anchored.Candidate.Anchor, DateTime.UtcNow);
+        Require(mismatch.Status == "patch_mismatch" &&
+            Directory.GetFiles(captureDirectory, "*.packed").Length == 1,
+            "A full-map export inconsistent with the observed patch was retained.");
     }
     finally { if (Directory.Exists(captureDirectory)) Directory.Delete(captureDirectory, true); }
     byte[]? ReadTwoAreas(long address, int size) =>
