@@ -8,9 +8,28 @@ public static class RawRenderPositionReader
 {
     public sealed record Position(float WorldX, float WorldY, float WorldZ,
         float GridX, float GridY, string RenderComponentAddress);
+    public sealed record LocalComparison(float ObservedX, float ObservedY, float ObservedZ,
+        double WorldXYDistance, double GridXYDistance);
 
     private const long MaxPointer = 0x7FFF_FFFF_FFFF;
     private const float WorldToGridRatio = 10.869565f;
+
+    public static LocalComparison? CompareLocal(Position raw,
+        float observedX, float observedY, float observedZ)
+    {
+        if (!float.IsFinite(observedX) || !float.IsFinite(observedY) ||
+            !float.IsFinite(observedZ)) return null;
+        return new LocalComparison(observedX, observedY, observedZ,
+            Distance(raw.WorldX, raw.WorldY, observedX, observedY),
+            Distance(raw.GridX, raw.GridY, observedX, observedY));
+    }
+
+    private static double Distance(float x1, float y1, float x2, float y2)
+    {
+        var dx = (double)x1 - x2;
+        var dy = (double)y1 - y2;
+        return Math.Sqrt(dx * dx + dy * dy);
+    }
 
     public static Position? Read(long entity, Func<long, int, byte[]?> read)
     {

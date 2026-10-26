@@ -91,13 +91,19 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                                 System.Globalization.NumberStyles.HexNumber,
                                 System.Globalization.CultureInfo.InvariantCulture, out var entity)
                                 ? RawRenderPositionReader.Read(entity, ReadCandidate) : null).ToArray();
+                        var localIndex = Array.IndexOf(_slotCandidates.OrderedAddresses,
+                            FormatAddress(localAddress));
+                        var comparison = localIndex >= 0 && positions[localIndex] is { } localRaw
+                            ? RawRenderPositionReader.CompareLocal(localRaw,
+                                render.Pos.X, render.Pos.Y, render.Pos.Z) : null;
                         if (LocalSlotCandidateScanner.Revalidate(_slotCandidates, localAddress,
                                 paths, ReadCandidate,
                                 address => RawCharacterPathReader.Read(address, ReadCandidate)))
                             _slotCandidates = _slotCandidates with
                             {
                                 RawPositions = positions,
-                                RawPositionsSeenUtc = now
+                                RawPositionsSeenUtc = now,
+                                ObservedLocalPositionComparison = comparison
                             };
                     }
                     _lastSlotScanStateAddress = stateAddress;

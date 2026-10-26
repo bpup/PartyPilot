@@ -110,7 +110,9 @@ func TestRawLocalSlotPositionsRemainDiagnostic(t *testing.T) {
 		`"CandidateAreaAddresses":["0x100000"],"StatePointerAreaAddress":"0x100000",` +
 		`"VectorHeaderAddress":"0x1005C8","RawPositionsSeenUtc":"2026-10-26T00:00:00Z","RawPositions":[` +
 		`{"WorldX":108.69565,"WorldY":217.3913,"WorldZ":5,` +
-		`"GridX":10,"GridY":20,"RenderComponentAddress":"0x400000"},null]}}`
+		`"GridX":10,"GridY":20,"RenderComponentAddress":"0x400000"},null],` +
+		`"ObservedLocalPositionComparison":{"ObservedX":10,"ObservedY":20,"ObservedZ":5,` +
+		`"WorldXYDistance":220.69018,"GridXYDistance":0}}}`
 	got, err := Decode([]byte(base))
 	if err != nil || got.LocalSlotCandidates == nil ||
 		len(got.LocalSlotCandidates.RawPositions) != 2 ||
@@ -124,6 +126,9 @@ func TestRawLocalSlotPositionsRemainDiagnostic(t *testing.T) {
 		strings.Replace(base, `"RenderComponentAddress":"0x400000"`, `"RenderComponentAddress":"bad"`, 1),
 		strings.Replace(base, `"GridX":10`, `"GridX":1e999`, 1),
 		strings.Replace(base, `},null]`, `}]`, 1),
+		strings.Replace(base, `"GridXYDistance":0`, `"GridXYDistance":-1`, 1),
+		strings.Replace(base, `"WorldXYDistance":220.69018`, `"WorldXYDistance":1`, 1),
+		strings.Replace(base, `"0x200000","0x300000"`, `"0x300000","0x400000"`, 1),
 	} {
 		if _, err := Decode([]byte(changed)); err == nil {
 			t.Fatalf("invalid raw diagnostic position accepted: %s", changed)

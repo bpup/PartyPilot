@@ -163,6 +163,11 @@ void TestRawRenderPositionReader()
         Math.Abs(position.GridY - 20) < 0.001 && position.WorldZ == 5 &&
         position.RenderComponentAddress == "0x1060000",
         "Default-offset Render position candidate was not read.");
+    var comparison = RawRenderPositionReader.CompareLocal(position!, 10, 20, 5);
+    Require(comparison != null && comparison.GridXYDistance < 0.001 &&
+        comparison.WorldXYDistance > 200 &&
+        RawRenderPositionReader.CompareLocal(position!, float.NaN, 20, 5) == null,
+        "Independent local Render position was not compared in both candidate scales.");
     raw[render + 8] = BitConverter.GetBytes(entity + 8);
     Require(RawRenderPositionReader.Read(entity, ReadRaw) == null,
         "Render component with a different owner was accepted.");
