@@ -2,7 +2,8 @@ using System.Text.Json;
 
 namespace PartyPilot.Bridge;
 
-internal readonly record struct BridgeCommand(int Slot, short X, short Y, bool Active, bool EligibleForManualMovement);
+internal readonly record struct BridgeCommand(int Slot, short X, short Y, bool Active,
+    bool EligibleForManualMovement, bool SprintDown);
 internal readonly record struct PairingControl(string Type, int Slot, int Pid, long WindowHandle);
 internal readonly record struct FlaskCommand(int Slot, string Resource);
 internal readonly record struct AutoPartyControl(string Type, int Slot, ushort Buttons, int HoldMilliseconds);
@@ -146,10 +147,17 @@ internal static class BridgeProtocol
                 if (manualValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return false;
                 manualEligible = manualValue.GetBoolean();
             }
+            var sprintDown = false;
+            if (root.TryGetProperty("sprint_down", out var sprintValue))
+            {
+                if (sprintValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return false;
+                sprintDown = sprintValue.GetBoolean();
+            }
+            if (sprintDown && state != "catching_up") return false;
             if (state is "waiting" or "holding")
             {
                 if (state == "waiting" && manualEligible) return false;
-                command = new BridgeCommand(slot, 0, 0, false, manualEligible);
+                command = new BridgeCommand(slot, 0, 0, false, manualEligible, false);
                 return true;
             }
             if (state is not ("following" or "catching_up") ||
@@ -168,7 +176,7 @@ internal static class BridgeProtocol
                 slot,
                 (short)Math.Clamp(Math.Round(x * 32767), short.MinValue, short.MaxValue),
                 (short)Math.Clamp(Math.Round(y * 32767), short.MinValue, short.MaxValue),
-                true, manualEligible);
+                true, manualEligible, sprintDown);
             return true;
         }
         catch (JsonException)

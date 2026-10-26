@@ -119,7 +119,10 @@ internal sealed class BridgeRouter
             NeutralAll();
             return false;
         }
-        route.Automation = command.Active ? PadReport.FromMovement(command.X, command.Y) : default;
+        route.Automation = command.Active
+            ? PadReport.FromMovement(command.X, command.Y) with
+                { Buttons = command.SprintDown ? (ushort)0x2000 : (ushort)0 }
+            : default;
         route.Active = command.Active;
         route.EligibleForManualMovement = command.EligibleForManualMovement;
         route.LastUpdateUtc = nowUtc;

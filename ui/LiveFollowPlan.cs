@@ -80,6 +80,15 @@ public static class LiveFollowFrame
                 throw new InvalidDataException("Live follow returned an invalid manual override flag.");
             manualEligible = eligibleValue.GetBoolean();
         }
+        var sprintDown = false;
+        if (follower.TryGetProperty("sprint_down", out var sprintValue))
+        {
+            if (sprintValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                throw new InvalidDataException("Live follow returned an invalid sprint flag.");
+            sprintDown = sprintValue.GetBoolean();
+        }
+        if (sprintDown && state != "catching_up")
+            throw new InvalidDataException("Sprint requires active catch-up.");
         var flasks = new List<FlaskBridgeRequest>();
         if (root.TryGetProperty("flasks", out var flaskValue))
         {
@@ -121,9 +130,13 @@ public static class LiveFollowFrame
             !double.IsFinite(x) || !double.IsFinite(y) ||
             Math.Sqrt(x * x + y * y) is < 0.001 or > 1.001)
             throw new InvalidDataException("Live follow returned an invalid movement direction.");
-        var movement = manualEligible
-            ? JsonSerializer.Serialize(new { slot = followerPad, state, x, y, manual_override_eligible = true })
-            : JsonSerializer.Serialize(new { slot = followerPad, state, x, y });
+        var movement = sprintDown
+            ? manualEligible
+                ? JsonSerializer.Serialize(new { slot = followerPad, state, x, y, manual_override_eligible = true, sprint_down = true })
+                : JsonSerializer.Serialize(new { slot = followerPad, state, x, y, sprint_down = true })
+            : manualEligible
+                ? JsonSerializer.Serialize(new { slot = followerPad, state, x, y, manual_override_eligible = true })
+                : JsonSerializer.Serialize(new { slot = followerPad, state, x, y });
         return new FollowBridgeFrame(movement, state, reason)
             { Flasks = flasks, FocusedPlayer = expectedLeader, FollowerPad = followerPad,
                 PadCommands = [new FollowPadCommand(followerPartyPlayer, followerPad, movement, state, reason)] };

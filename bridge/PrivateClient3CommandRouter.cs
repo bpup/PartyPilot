@@ -27,7 +27,10 @@ internal sealed class PrivateClient3CommandRouter
             NeutralAll();
             return false;
         }
-        var report = command.Active ? PadReport.FromMovement(command.X, command.Y) : default;
+        var report = command.Active
+            ? PadReport.FromMovement(command.X, command.Y) with
+                { Buttons = command.SprintDown ? (ushort)0x2000 : (ushort)0 }
+            : default;
         if (command.Slot == 5)
         {
             _p5 = report;

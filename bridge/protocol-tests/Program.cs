@@ -84,6 +84,12 @@ if (!Client3AttachRequest.TryParsePreResume(["--prepare-private-client3", "--pid
     throw new Exception("Client 3 pre-resume binding arguments were accepted ambiguously.");
 
 Expect("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", true, 2, true);
+if (!BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"catching_up\",\"x\":1,\"y\":0,\"sprint_down\":true}", out var sprintCommand) ||
+    !sprintCommand.SprintDown ||
+    BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0,\"sprint_down\":true}", out _) ||
+    BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"waiting\",\"sprint_down\":true}", out _) ||
+    BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"catching_up\",\"x\":1,\"y\":0,\"sprint_down\":1}", out _))
+    throw new Exception("Sprint bridge command was not limited to catch-up movement.");
 Expect("{\"slot\":3,\"state\":\"holding\"}", true, 3, false);
 Expect("{\"slot\":2,\"state\":\"waiting\"}", true, 2, false);
 if (!BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"holding\",\"manual_override_eligible\":true}", out var manualHolding) ||
@@ -206,6 +212,26 @@ if (pad3.X != 0) throw new Exception("Stale controller was not centered.");
 router.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", now);
 if (router.ApplyLine("{\"slot\":6,\"state\":\"following\",\"x\":1,\"y\":0}", now) || pad2.X != 0)
     throw new Exception("Unknown slot was not rejected safely.");
+var sprintMain = new FakePad();
+var sprintFollower = new FakePad();
+var sprintRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
+    { [1] = sprintMain, [2] = sprintFollower });
+if (!sprintRouter.ConfigurePhysical(1)) throw new Exception("Sprint focus setup failed.");
+sprintRouter.SetPhysical(default, now);
+var sprintLine = "{\"slot\":2,\"state\":\"catching_up\",\"x\":1,\"y\":0,\"sprint_down\":true}";
+if (!sprintRouter.ApplyLine(sprintLine, now) || sprintFollower.Report.Buttons != 0x2000)
+    throw new Exception("Catch-up did not press the follower sprint button.");
+if (!sprintRouter.ApplyLine("{\"slot\":2,\"state\":\"holding\"}", now.AddMilliseconds(100)) ||
+    sprintFollower.Report != default)
+    throw new Exception("Holding did not release the sprint button.");
+sprintRouter.ApplyLine(sprintLine, now);
+sprintRouter.Tick(now.AddMilliseconds(501));
+if (sprintFollower.Report != default)
+    throw new Exception("Expired sprint command retained its button.");
+sprintRouter.ApplyLine(sprintLine, now.AddMilliseconds(600));
+sprintRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080 }, now.AddMilliseconds(600));
+if (sprintFollower.Report.Buttons != 0)
+    throw new Exception("Manual focus retained the synthetic sprint button.");
 if (Marshal.SizeOf<XInputGamepad>() != 12 || Marshal.SizeOf<XInputState>() != 16)
     throw new Exception("XInput native structure sizes do not match the Windows API.");
 if (HidHidePreflight.GetWhitelistCode != 2147573760u ||
@@ -567,16 +593,16 @@ var overrideRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
     [1] = overrideMain, [2] = overrideFollower, [3] = overrideHolding, [4] = overrideWaiting
 });
 overrideRouter.ConfigurePhysical(1, rightStickFollowerOverride: true);
-overrideRouter.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0,\"manual_override_eligible\":true}", now);
+overrideRouter.ApplyLine("{\"slot\":2,\"state\":\"catching_up\",\"x\":1,\"y\":0,\"manual_override_eligible\":true,\"sprint_down\":true}", now);
 overrideRouter.ApplyLine("{\"slot\":3,\"state\":\"holding\",\"manual_override_eligible\":true}", now);
 overrideRouter.ApplyLine("{\"slot\":4,\"state\":\"waiting\"}", now);
 overrideRouter.SetPhysical(new XInputGamepad { LeftX = 111, RightX = 12000, RightY = -9000 });
 if (overrideMain.X != 111 || overrideMain.Report.RightX != 0 || overrideMain.Report.RightY != 0 ||
-    overrideFollower.X != 12000 || overrideFollower.Y != -9000 ||
+    overrideFollower.X != 12000 || overrideFollower.Y != -9000 || overrideFollower.Report.Buttons != 0 ||
     overrideHolding.X != 12000 || overrideHolding.Y != -9000 || overrideWaiting.Report != default)
     throw new Exception("Right stick did not move only eligible followers while keeping MAIN aim neutral.");
 overrideRouter.SetPhysical(new XInputGamepad { LeftX = 111, RightX = 8000 });
-if (overrideFollower.X != 32767 || overrideHolding.Report != default)
+if (overrideFollower.X != 32767 || overrideFollower.Report.Buttons != 0x2000 || overrideHolding.Report != default)
     throw new Exception("Neutral right stick did not restore automated movement.");
 overrideRouter.SetPhysical(new XInputGamepad { RightX = 12000 });
 overrideRouter.ApplyLine("{\"slot\":2,\"state\":\"waiting\"}", now.AddMilliseconds(100));

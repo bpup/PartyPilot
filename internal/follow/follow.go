@@ -32,6 +32,7 @@ type Command struct {
 	Distance               float64 `json:"distance"`
 	Reason                 string  `json:"reason,omitempty"`
 	ManualOverrideEligible bool    `json:"manual_override_eligible,omitempty"`
+	SprintDown             bool    `json:"sprint_down,omitempty"`
 }
 
 type Config struct {
@@ -73,26 +74,32 @@ func (e *Engine) Reset() {
 	e.holdingTarget = false
 	e.heldTarget = point{}
 	e.stopBubbleHolding = false
+	e.sprint.Reset()
+	e.lastSprintObservation = time.Time{}
+	e.sprintDown = false
 }
 
 type point struct{ x, y float64 }
 
 type Engine struct {
-	config             Config
-	moving             bool
-	catchingUp         bool
-	trail              []point
-	lastLeader         point
-	hasLeader          bool
-	trailArea          string
-	trailBlocked       bool
-	terrainSeen        bool
-	initialHeading     point
-	lastLeaderSampleAt time.Time
-	leaderSpeedAverage float64
-	holdingTarget      bool
-	heldTarget         point
-	stopBubbleHolding  bool
+	config                Config
+	moving                bool
+	catchingUp            bool
+	trail                 []point
+	lastLeader            point
+	hasLeader             bool
+	trailArea             string
+	trailBlocked          bool
+	terrainSeen           bool
+	initialHeading        point
+	lastLeaderSampleAt    time.Time
+	leaderSpeedAverage    float64
+	holdingTarget         bool
+	heldTarget            point
+	stopBubbleHolding     bool
+	sprint                classicSprint
+	lastSprintObservation time.Time
+	sprintDown            bool
 }
 
 func New(config Config) (*Engine, bool) {
@@ -171,6 +178,9 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 		e.catchingUp = false
 		e.holdingTarget = false
 		e.heldTarget = point{}
+		e.sprint.Reset()
+		e.sprintDown = false
+		e.lastSprintObservation = time.Time{}
 		if e.config.TrailSpacing > 0 {
 			e.trail = []point{{leader.X, leader.Y}}
 		}
@@ -192,6 +202,9 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 		if e.holdingTarget {
 			e.moving = false
 			e.catchingUp = false
+			e.sprint.Reset()
+			e.sprintDown = false
+			e.lastSprintObservation = time.Time{}
 			return Command{State: Holding, Distance: distance}
 		}
 		// The supplied build detours around the leader when the direct trail
@@ -231,18 +244,34 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 	// The supplied build ships with ClassicSprintCatchUp enabled: the hold
 	// branch above releases catch-up only at the configured stop distance.
 	entryDistance := math.Max(e.config.StopDistance+1, e.config.CatchUpDistance)
+	if e.config.TargetTrail {
+		entryDistance = math.Max(entryDistance, 20)
+	}
 	if !e.catchingUp && distance >= entryDistance {
 		e.catchingUp = true
 	}
 	if e.catchingUp {
 		state = CatchingUp
 	}
+	if e.config.TargetTrail {
+		observedAt := leader.Seen
+		if follower.Seen.After(observedAt) {
+			observedAt = follower.Seen
+		}
+		if observedAt.After(e.lastSprintObservation) {
+			e.sprintDown = e.sprint.Update(e.catchingUp,
+				distance >= e.config.StopDistance+5, false,
+				point{follower.X, follower.Y}, observedAt)
+			e.lastSprintObservation = observedAt
+		}
+	}
 	return Command{
-		State:    state,
-		X:        dx,
-		Y:        dy,
-		Distance: distance,
-		Reason:   reason,
+		State:      state,
+		X:          dx,
+		Y:          dy,
+		Distance:   distance,
+		Reason:     reason,
+		SprintDown: e.sprintDown,
 	}
 }
 

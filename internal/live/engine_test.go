@@ -93,6 +93,30 @@ func TestLiveFollowTurnsAlongRecordedLeaderTrail(t *testing.T) {
 	}
 }
 
+func TestLiveCatchUpSprintClearsOnLatchedStop(t *testing.T) {
+	now := time.Now().UTC()
+	engine, err := New(map[int]int{1: 101, 2: 202}, 1,
+		follow.Config{StopDistance: 2, ResumeDistance: 5, CatchUpDistance: 30,
+			MaxAge: time.Second, TargetTrail: true}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, slot := range []int{1, 2} {
+		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
+			ObservedAt: now, Origin: "live"})
+	}
+	at := now.Add(time.Millisecond)
+	observeGridSample(engine, telemetry.Sample{ProcessID: 101, SeenUTC: at, X: 40})
+	observeGridSample(engine, telemetry.Sample{ProcessID: 202, SeenUTC: at, X: 0})
+	if got := engine.Step(at)[2]; got.State != follow.CatchingUp || !got.SprintDown {
+		t.Fatalf("live catch-up did not carry sprint: %+v", got)
+	}
+	engine.Stop("operator stop")
+	if got := engine.Step(at.Add(time.Millisecond))[2]; got.State != follow.Waiting || got.SprintDown {
+		t.Fatalf("latched stop retained sprint: %+v", got)
+	}
+}
+
 func TestLiveFollowRequiresFreshMatchingLogAndNewSamples(t *testing.T) {
 	now := time.Now().UTC()
 	config := follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}

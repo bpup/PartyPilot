@@ -14,16 +14,16 @@ internal static class PrivateClient3CommandRouterTests
         var router = new PrivateClient3CommandRouter(output, includeP6: true);
         var now = new DateTime(2026, 10, 27, 0, 0, 0, DateTimeKind.Utc);
         if (!router.Apply("{\"slot\":5,\"state\":\"following\",\"x\":1,\"y\":0}", now) ||
-            !router.Apply("{\"slot\":6,\"state\":\"catching_up\",\"x\":0,\"y\":-1}",
+            !router.Apply("{\"slot\":6,\"state\":\"catching_up\",\"x\":0,\"y\":-1,\"sprint_down\":true}",
                 now.AddMilliseconds(200)))
             throw new Exception("Private Client 3 rejected P5/P6 movement commands.");
         var (p5, p6) = Read(observer);
-        if (p5.LeftX != 32767 || p6.LeftY != -32767)
+        if (p5.LeftX != 32767 || p6.LeftY != -32767 || p6.Buttons != 0x2000)
             throw new Exception("Private Client 3 mixed the two movement slots.");
         if (!router.Tick(now.AddMilliseconds(501)))
             throw new Exception("Private Client 3 failed to advance its command timeout.");
         (p5, p6) = Read(observer);
-        if (p5 != default || p6.LeftY != -32767)
+        if (p5 != default || p6.LeftY != -32767 || p6.Buttons != 0x2000)
             throw new Exception("P5 command expiry affected P6 or retained P5 movement.");
         if (router.Apply("{\"slot\":6,\"state\":\"following\",\"x\":2,\"y\":0}",
                 now.AddMilliseconds(550)))
