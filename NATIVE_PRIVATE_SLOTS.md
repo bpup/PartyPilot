@@ -3,6 +3,7 @@
 ## 已实现
 
 - `bridge/PrivateSlotPublisher.cs` 创建以明确进程 ID 命名的 76 字节共享内存。P5 和 P6 报告各有独立的包号、写入序号、按键、扳机、摇杆和采样时间；消费者尚未确认 `Ready` 时，发布器拒绝输入。
+- `bridge/Client3FocusRouting.cs` 按目标版可读取的静态焦点规则组合 P5/P6：实体手柄只属于当前聚焦角色，明确的辅助按键与扳机仍能到达后台角色，辅助报告的摇杆轴不覆盖手动输入。`bridge/Client3InputPublisher.cs` 把组合结果写入独立双槽映射；未就绪、目标进程退出时拒绝发送，停止时回中。匿名映射测试已覆盖 P5 聚焦、后台辅助和双槽回中。此模块尚未接入桥接主循环。
 - `native/private-slot-runtime/private_slots.c` 独立解析报文：拒绝错误标识、版本、槽位、停止状态和写入中的报告；报告超过现有桥接的 500 毫秒命令时效后返回回中状态。
 - `native/private-slot-runtime/runtime.c` 是独立的 Windows x64 DLL。加载到目标进程后，它等待本进程的共享内存和已加载的 XInput 1.4/1.3/9.1.0 模块，并尝试拦截 `XInputGetState`、`XInputGetCapabilities` 和 `XInputSetState`。P5/P6 的本地 XInput 索引必须由目标进程环境变量 `PARTYPILOT_P5_LOCAL_INDEX`、`PARTYPILOT_P6_LOCAL_INDEX` 显式提供，值为不同的 0–3；仅 P5 模式不要求 P6。缺失或冲突时拒绝就绪。索引的真实值**待 Windows/PoE2 实测**。
 - 原生钩子使用 vendored [MinHook v1.3.4](https://github.com/TsudaKageyu/minhook/tree/v1.3.4)，对应许可证在 `native/private-slot-runtime/vendor/minhook/LICENSE.txt`。这份 DLL 使用 PartyPilot 自己的共享内存标识和协议版本，不连接目标软件的私有运行时。

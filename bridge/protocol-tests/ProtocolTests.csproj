@@ -10,6 +10,8 @@
     <Compile Include="../BridgeSlots.cs" Link="BridgeSlots.cs" />
     <Compile Include="../FocusPadMap.cs" Link="FocusPadMap.cs" />
     <Compile Include="../BridgeRouter.cs" Link="BridgeRouter.cs" />
+    <Compile Include="../Client3FocusRouting.cs" Link="Client3FocusRouting.cs" />
+    <Compile Include="../Client3InputPublisher.cs" Link="Client3InputPublisher.cs" />
     <Compile Include="../PrivateSlotFrame.cs" Link="PrivateSlotFrame.cs" />
     <Compile Include="../PrivateSlotPublisher.cs" Link="PrivateSlotPublisher.cs" />
     <Compile Include="../XInputNative.cs" Link="XInputNative.cs" />
