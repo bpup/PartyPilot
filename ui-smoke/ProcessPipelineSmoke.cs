@@ -37,6 +37,7 @@ internal static class ProcessPipelineSmoke
                 $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(dynamicLog)}, 'a') as out: out.write(line)\n");
             File.WriteAllText(dynamicFollowExe, "#!/usr/bin/env python3\nimport sys,json,time\n" +
                 "if '-last-focused-leads' not in sys.argv: sys.exit(2)\n" +
+                "if '-member-name' not in sys.argv or sys.argv[sys.argv.index('-member-name')+1] != '2=Second': sys.exit(2)\n" +
                 "focus=json.loads(sys.stdin.readline())\n" +
                 "if focus != {'type':'manual_focus','slot':2}: sys.exit(2)\n" +
                 "print('{\"focused\":2,\"commands\":{\"1\":{\"state\":\"following\",\"x\":0,\"y\":1}}}', flush=True)\n" +
@@ -108,7 +109,8 @@ internal static class ProcessPipelineSmoke
                 if (dynamicBridge.LastManualFocusedSlot != 3)
                     throw new Exception("The fake bridge did not report P2 manual focus.");
                 await using (var dynamicFollow = await LiveFollowSession.StartAsync(dynamicFollowExe,
-                    topology, clients, dynamicBridge, plan))
+                    topology, clients, dynamicBridge, plan,
+                    new Dictionary<int, string> { [2] = "Second" }))
                 {
                     if (dynamicFollow.Current.FocusedPlayer != 2 || dynamicFollow.Current.FollowerPad != 1)
                         throw new Exception("The desktop did not start live follow with P2 as MAIN.");

@@ -37,6 +37,22 @@ func (e *Engine) SetLeaderName(name string) {
 	e.leaderName = e.memberNames[e.leader]
 }
 
+func (e *Engine) SetMemberName(slot int, name string) error {
+	known := false
+	for _, candidate := range e.slots {
+		known = known || candidate == slot
+	}
+	name = strings.TrimSpace(name)
+	if !known || name == "" || len(name) > 128 {
+		return fmt.Errorf("invalid member name for slot %d", slot)
+	}
+	e.memberNames[slot] = name
+	if e.leader == slot {
+		e.leaderName = name
+	}
+	return nil
+}
+
 func (e *Engine) SetLastFocusedLeads(enabled bool) {
 	e.lastFocusedLeads = enabled
 	e.coordinator.SetLastFocusedLeads(enabled)

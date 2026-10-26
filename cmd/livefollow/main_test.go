@@ -41,6 +41,18 @@ func TestSourcesAndRoster(t *testing.T) {
 	}
 }
 
+func TestMemberNamesRequireExplicitKnownSlots(t *testing.T) {
+	var names memberNames
+	if err := names.Set("2=Second"); err != nil || names[2] != "Second" {
+		t.Fatalf("valid member name rejected: %v", err)
+	}
+	for _, value := range []string{"2=Duplicate", "3=", "0=Nope", "bad=Nope"} {
+		if err := names.Set(value); err == nil {
+			t.Fatalf("invalid member name accepted: %q", value)
+		}
+	}
+}
+
 func TestMenuInputRequiresBoundPlayerAndOpenStream(t *testing.T) {
 	session, err := live.NewFlaskSession(map[int]int{1: 101, 2: 202}, time.Second)
 	if err != nil {

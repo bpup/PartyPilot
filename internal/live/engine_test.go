@@ -133,6 +133,32 @@ func TestManualFocusChangesLiveMainAndFormerLeaderFollows(t *testing.T) {
 	}
 }
 
+func TestNamedDepartureTracksCurrentManualMain(t *testing.T) {
+	config := follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}
+	engine, err := New(map[int]int{1: 101, 2: 202}, 1, config, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.SetLastFocusedLeads(true)
+	engine.SetLeaderName("First")
+	if err := engine.SetMemberName(2, "Second"); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.ObserveManualFocus(2); err != nil {
+		t.Fatal(err)
+	}
+	if engine.ObserveParty(partylog.Event{Kind: partylog.MemberLeft, ClientSlot: 1, MemberName: "First"}) {
+		t.Fatal("former MAIN departure stopped the current follow target")
+	}
+	if !engine.ObserveParty(partylog.Event{Kind: partylog.MemberLeft, ClientSlot: 1, MemberName: "second"}) ||
+		engine.Step(time.Now().UTC())[1].Reason != "followed member left party" {
+		t.Fatal("current P2 MAIN departure did not stop following")
+	}
+	if err := engine.SetMemberName(3, "Unknown"); err == nil {
+		t.Fatal("unknown member slot accepted")
+	}
+}
+
 func TestLiveFollowRejectsUnknownAndOldSamples(t *testing.T) {
 	now := time.Now().UTC()
 	config := follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}

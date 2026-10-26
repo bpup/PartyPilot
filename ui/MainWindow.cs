@@ -1446,8 +1446,17 @@ public sealed class MainWindow : Window
         _followStatus.Text = "正在核对进程、日志与传感器输入…";
         try
         {
+            IReadOnlyDictionary<int, string>? memberNames = null;
+            if (AutoPartyInviteNames.TryCreate(_selectedTopology,
+                    _inviteNames.Take(_selectedTopology.PlayerCount).Select(box => box.Text).ToArray(),
+                    out var inviteNames) && inviteNames is not null)
+            {
+                var confirmed = new Dictionary<int, string> { [2] = inviteNames.ForClient(2) };
+                if (plan.LeaderName.Length == 0) confirmed[1] = inviteNames.ForClient(1);
+                memberNames = confirmed;
+            }
             var session = await LiveFollowSession.StartAsync(executable, _selectedTopology,
-                _launchedClients, _bridge, plan);
+                _launchedClients, _bridge, plan, memberNames);
             session.StatusChanged += FollowStatusChanged;
             session.Ended += FollowEnded;
             _follow = session;

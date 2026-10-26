@@ -26,6 +26,26 @@ import (
 
 type sources map[int]string
 
+type memberNames map[int]string
+
+func (names *memberNames) String() string { return fmt.Sprint(map[int]string(*names)) }
+func (names *memberNames) Set(value string) error {
+	slotText, name, ok := strings.Cut(value, "=")
+	slot, err := strconv.Atoi(slotText)
+	name = strings.TrimSpace(name)
+	if !ok || err != nil || slot < 1 || slot > 6 || name == "" || len(name) > 128 {
+		return errors.New("member name must be SLOT=NAME")
+	}
+	if *names == nil {
+		*names = make(memberNames)
+	}
+	if _, exists := (*names)[slot]; exists {
+		return fmt.Errorf("duplicate member name for slot %d", slot)
+	}
+	(*names)[slot] = name
+	return nil
+}
+
 func (s *sources) String() string { return fmt.Sprint(map[int]string(*s)) }
 func (s *sources) Set(value string) error {
 	slotText, path, ok := strings.Cut(value, "=")
@@ -263,8 +283,10 @@ func main() {
 	autoFlask := flag.Bool("auto-flask", false, "enable life and mana flask decisions for explicitly bound clients")
 	address := flag.String("listen", "127.0.0.1:47617", "loopback sensor address")
 	var logs, exes sources
+	var names memberNames
 	flag.Var(&logs, "log", "SLOT=Client.txt path")
 	flag.Var(&exes, "exe", "SLOT=game executable path")
+	flag.Var(&names, "member-name", "SLOT=confirmed character name for departure detection")
 	flag.Parse()
 	roster, err := parseRoster(*rosterText)
 	if err != nil {
@@ -287,6 +309,12 @@ func main() {
 		os.Exit(2)
 	}
 	engine.SetLeaderName(*leaderName)
+	for slot, name := range names {
+		if err := engine.SetMemberName(slot, name); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	}
 	engine.SetLastFocusedLeads(*lastFocusedLeads)
 	var flaskSession *live.FlaskSession
 	var menuCommands <-chan menuInput

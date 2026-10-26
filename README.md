@@ -142,10 +142,10 @@ PartyPilot-FlaskReplay.exe -replay testdata/flask-combined-example.jsonl -combin
 `release/PartyPilot-LiveFollow.exe` 把现有传感器 UDP 位置流与每客户端独立日志接入跟随内核，输出与 `BridgeFeed` 兼容的逐帧决策。它要求 `-roster 1:进程ID,2:进程ID`、每槽位 `-log` 或 `-exe`、队长和显式距离/时效参数；当前仅支持 2–3 个游戏进程且每进程一名角色。在 Windows 上，启动与运行期间会只读查询各进程的程序路径，要求指定日志与该程序目录下的 `logs/Client.txt` 为同一文件；校验失败时输出等待命令并退出。macOS 上只运行合成数据测试，无法执行该 Windows 进程校验。启动前的日志记录不会让实时决策开始移动；两份日志都必须在启动后写入相同区域 ID 与 seed，且各自再收到新的位置样本。进程、日志、位置或区域证据缺失、过期或不一致时输出等待命令。识别到队伍解散或任一已配置客户端本地离队时，跟随停止并锁定到本次进程结束；指定 `-leader-name` 后，被跟随角色离队也会触发同样的停止。其他成员离队不会触发该规则。示例中的距离是受控测试值，不是目标软件参数：
 
 ```sh
-PartyPilot-LiveFollow.exe -roster 1:1234,2:5678 -leader 1 -leader-name Leader -exe "1=C:\\PoE2-A\\PathOfExile.exe" -exe "2=C:\\PoE2-B\\PathOfExile.exe" -stop 2 -resume 3 -catchup 10 -max-age 750ms -log-max-age 30m
+PartyPilot-LiveFollow.exe -roster 1:1234,2:5678 -leader 1 -leader-name Leader -member-name 2=Second -exe "1=C:\\PoE2-A\\PathOfExile.exe" -exe "2=C:\\PoE2-B\\PathOfExile.exe" -stop 2 -resume 3 -catchup 10 -max-age 750ms -log-max-age 30m
 ```
 
-桌面入口现可在“双客户端、每端一名角色”完成手柄配对后启动此实时决策程序。最近手动聚焦 P2 后，P2 保持 MAIN，P1 的方向送到系统虚拟手柄槽位 P1；再次手动聚焦 P1 后，P2 的方向送到槽位 P3。切换跟随槽位时先撤销旧槽位的自动方向；可随时停止，或在桥接退出时撤销自动方向。停止、恢复、追赶距离与位置/日志有效期必须由操作者明确填写；可选填初始队长角色名以启用已有的被跟随成员离队停机规则。切换 MAIN 到 P2 后，由于尚无经验证的 P2 角色名来源，该离队规则不能识别 P2 的具名离队。界面区分缺少位置、区域实例证据不足、位置过期以及队伍解散/离队的锁定停机，不借用测试示例作为默认配置。无界面检查还用本机模拟子进程验证了“等待 → 跟随 → 退出后回中”、药剂请求，以及 P2 已成为 MAIN 时 P1 指令到正确手柄槽位的桌面到桥接传递；这未执行真实 Windows 手柄或游戏输入。Windows 目标编译已通过，真实传感器、区域身份、角色绑定和移动方向仍待 Windows/PoE2 验证。
+桌面入口现可在“双客户端、每端一名角色”完成手柄配对后启动此实时决策程序。最近手动聚焦 P2 后，P2 保持 MAIN，P1 的方向送到系统虚拟手柄槽位 P1；再次手动聚焦 P1 后，P2 的方向送到槽位 P3。切换跟随槽位时先撤销旧槽位的自动方向；可随时停止，或在桥接退出时撤销自动方向。停止、恢复、追赶距离与位置/日志有效期必须由操作者明确填写；可选填初始队长角色名以启用已有的被跟随成员离队停机规则。若组队邀请区已填写并校验 P1/P2 的准确角色名，实时跟随也会把 P2 名称传给离队检测；P2 成为 MAIN 后，日志中的同名离队会锁定停止本次跟随。未填写或未校验名称时，不会按猜测的名字停机。界面区分缺少位置、区域实例证据不足、位置过期以及队伍解散/离队的锁定停机，不借用测试示例作为默认配置。无界面检查还用本机模拟子进程验证了“等待 → 跟随 → 退出后回中”、药剂请求，以及 P2 已成为 MAIN 时 P1 指令到正确手柄槽位的桌面到桥接传递；这未执行真实 Windows 手柄或游戏输入。Windows 目标编译已通过，真实传感器、区域身份、角色绑定和移动方向仍待 Windows/PoE2 验证。
 
 该链路已用合成 UDP 与日志验证“等待 → 追赶 → 样本过期等待”、“追赶 → 被跟随成员离队后持续等待”和“追赶 → 日志消失后等待并退出”，并交叉编译 Windows 程序。进程路径读取采用 Microsoft 文档中的 [OpenProcess](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openprocess) 与 [QueryFullProcessImageNameW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-queryfullprocessimagenamew)。离队文案及角色名仍缺真实 `Client.txt` 样本验证；没有真实 Windows/PoE2 运行证据，也没有验证 ExileCore2 的坐标系与虚拟摇杆方向映射，因此输出仍属于 **implementation-aligned / integration-pending**。
 

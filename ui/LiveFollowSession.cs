@@ -57,7 +57,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     }
 
     public static async Task<LiveFollowSession> StartAsync(string executable, PartyTopology topology,
-        IReadOnlyList<LaunchedClient> clients, BridgeSession bridge, LiveFollowPlan plan)
+        IReadOnlyList<LaunchedClient> clients, BridgeSession bridge, LiveFollowPlan plan,
+        IReadOnlyDictionary<int, string>? memberNames = null)
     {
         if (topology.Id != "2-split" || clients.Count != 2 ||
             topology.Slots.Count != 2 || topology.Slots[1].PartyPlayer != 2 ||
@@ -85,6 +86,16 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         {
             start.ArgumentList.Add("-leader-name");
             start.ArgumentList.Add(plan.LeaderName);
+        }
+        if (memberNames is not null)
+        {
+            foreach (var (player, name) in memberNames.OrderBy(item => item.Key))
+            {
+                if (player is not (1 or 2) || string.IsNullOrWhiteSpace(name) || name.Length > 128)
+                    throw new ArgumentException("Live follow member names require a bound P1 or P2 name.");
+                start.ArgumentList.Add("-member-name");
+                start.ArgumentList.Add($"{player}={name.Trim()}");
+            }
         }
         if (bridge.AutoFlaskEnabled) start.ArgumentList.Add("-auto-flask");
         if (bridge.LastFocusedLeadsEnabled) start.ArgumentList.Add("-last-focused-leads");
