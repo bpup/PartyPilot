@@ -240,11 +240,19 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 		bound := e.terrains[slot]
 		for other, position := range positions {
 			if position.Area == bound.grid.Area &&
-				(e.samples[other].AreaHash != bound.binding.AreaHash ||
+				(e.terrains[other].grid == nil ||
+					e.samples[other].AreaHash != bound.binding.AreaHash ||
 					!bound.grid.ContainsPoint(position.X, position.Y)) {
 				terrainWait[slot] = true
 				delete(terrains, slot)
 				break
+			}
+		}
+	}
+	if len(e.terrains) > 0 {
+		for _, slot := range e.slots {
+			if slot != e.leader && e.terrains[slot].grid == nil {
+				terrainWait[slot] = true
 			}
 		}
 	}

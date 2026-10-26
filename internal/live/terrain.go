@@ -31,6 +31,7 @@ type TerrainBinding struct {
 type boundTerrain struct {
 	binding TerrainBinding
 	grid    *navigation.Grid
+	capture *navigation.CandidateCapture
 	seen    time.Time
 }
 
@@ -55,7 +56,7 @@ func LoadTerrainBinding(path string) (TerrainBinding, error) {
 }
 
 func (e *Engine) SetTerrainBinding(slot int, binding TerrainBinding) error {
-	if slot == e.leader || binding.ProcessID <= 0 || e.pidToSlot[binding.ProcessID] != slot ||
+	if binding.ProcessID <= 0 || e.pidToSlot[binding.ProcessID] != slot ||
 		strings.TrimSpace(binding.CaptureMetadataFile) == "" || strings.TrimSpace(binding.AreaID) == "" ||
 		binding.Seed <= 0 || binding.AreaHash == 0 || math.IsNaN(binding.OriginX) ||
 		math.IsInf(binding.OriginX, 0) || math.IsNaN(binding.OriginY) ||
@@ -74,10 +75,23 @@ func (e *Engine) SetTerrainBinding(slot int, binding TerrainBinding) error {
 	if err != nil || !grid.ContainsPoint(capture.RawGridX, capture.RawGridY) {
 		return fmt.Errorf("slot %d: capture coordinate mapping is outside terrain", slot)
 	}
+	for otherSlot, other := range e.terrains {
+		if otherSlot == slot || other.grid.Area != grid.Area {
+			continue
+		}
+		if other.binding.AreaHash != binding.AreaHash ||
+			other.grid.OriginX != grid.OriginX || other.grid.OriginY != grid.OriginY ||
+			other.grid.CellSize != grid.CellSize {
+			return fmt.Errorf("slot %d: area hash or coordinate mapping differs from slot %d", slot, otherSlot)
+		}
+		if correlated, _ := capture.CorrelatedLayout(other.capture); !correlated {
+			return fmt.Errorf("slot %d: terrain layout differs from slot %d", slot, otherSlot)
+		}
+	}
 	if e.terrains == nil {
 		e.terrains = make(map[int]boundTerrain)
 	}
-	e.terrains[slot] = boundTerrain{binding: binding, grid: grid, seen: capture.SeenUTC}
+	e.terrains[slot] = boundTerrain{binding: binding, grid: grid, capture: capture, seen: capture.SeenUTC}
 	e.coordinator.ResetFollow()
 	return nil
 }

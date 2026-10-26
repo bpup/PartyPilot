@@ -15,15 +15,23 @@ import (
 	"partypilot/internal/telemetry"
 )
 
-func testTerrainCapture(t *testing.T, seen time.Time) string {
+func testTerrainCapture(t *testing.T, seen time.Time, pid int, changedCells ...int) string {
 	t.Helper()
 	dir := t.TempDir()
 	data := bytes.Repeat([]byte{0x11}, 64*64)
+	for _, cell := range changedCells {
+		index := cell / 2
+		if cell&1 == 0 {
+			data[index] &= 0xf0
+		} else {
+			data[index] &= 0x0f
+		}
+	}
 	if err := os.WriteFile(filepath.Join(dir, "map.packed"), data, 0600); err != nil {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(data)
-	meta := map[string]any{"Status": "candidate_capture_only", "ProcessId": 202,
+	meta := map[string]any{"Status": "candidate_capture_only", "ProcessId": pid,
 		"AreaHash": "77", "AreaAddress": "0x100000", "Anchor": "ingame_data_address",
 		"PackedStart": "0x200000", "RawGridX": 10, "RawGridY": 20,
 		"Width": 128, "Height": 64, "BytesPerRow": 64, "PackedBytes": len(data),
@@ -42,7 +50,9 @@ func testTerrainCapture(t *testing.T, seen time.Time) string {
 
 func TestLiveTerrainBindingRequiresMatchingCaptureAndLiveEvidence(t *testing.T) {
 	start := time.Now().UTC()
-	path := testTerrainCapture(t, start.Add(time.Millisecond))
+	path := testTerrainCapture(t, start.Add(time.Millisecond), 202)
+	leaderPath := testTerrainCapture(t, start.Add(time.Millisecond), 101)
+	badLeaderPath := testTerrainCapture(t, start.Add(time.Millisecond), 101, 0, 1)
 	e, err := New(map[int]int{1: 101, 2: 202}, 1,
 		follow.Config{StopDistance: 2, ResumeDistance: 5, CatchUpDistance: 30,
 			MaxAge: time.Second, TargetTrail: true}, time.Minute)
@@ -58,6 +68,19 @@ func TestLiveTerrainBindingRequiresMatchingCaptureAndLiveEvidence(t *testing.T) 
 		t.Fatal("capture hash mismatch accepted")
 	}
 	if err := e.SetTerrainBinding(2, binding); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.Step(start)[2]; got.State != follow.Waiting {
+		t.Fatalf("missing target terrain moved: %+v", got)
+	}
+	leaderBinding := binding
+	leaderBinding.ProcessID = 101
+	leaderBinding.CaptureMetadataFile = badLeaderPath
+	if err := e.SetTerrainBinding(1, leaderBinding); err == nil {
+		t.Fatal("uncorrelated leader layout accepted")
+	}
+	leaderBinding.CaptureMetadataFile = leaderPath
+	if err := e.SetTerrainBinding(1, leaderBinding); err != nil {
 		t.Fatal(err)
 	}
 	preCapture := start.Add(500 * time.Microsecond)
@@ -102,7 +125,7 @@ func TestLiveTerrainBindingRequiresMatchingCaptureAndLiveEvidence(t *testing.T) 
 }
 
 func TestTerrainBindingFileResolvesCaptureBesideBinding(t *testing.T) {
-	path := testTerrainCapture(t, time.Now().UTC())
+	path := testTerrainCapture(t, time.Now().UTC(), 202)
 	bindingFile := filepath.Join(filepath.Dir(path), "binding.json")
 	if err := os.WriteFile(bindingFile, []byte(`{"capture_metadata_file":"map.json"}`), 0600); err != nil {
 		t.Fatal(err)

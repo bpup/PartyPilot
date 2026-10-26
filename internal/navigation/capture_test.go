@@ -59,3 +59,25 @@ func TestCandidateCaptureRequiresFileHashAndObservedPatch(t *testing.T) {
 		t.Fatal("capture path traversal accepted")
 	}
 }
+
+func TestCandidateCaptureCorrelatedLayoutMatchesTargetBoundedRule(t *testing.T) {
+	base := &CandidateCapture{Data: bytes.Repeat([]byte{0x11}, 50*100), BytesPerRow: 50, Rows: 100}
+	peer := &CandidateCapture{Data: bytes.Clone(base.Data), BytesPerRow: 50, Rows: 100}
+	peer.Data[0] = 0x20 // One blocked cell; another nonzero nibble remains walkable.
+	peer.Data[1] = 0x10
+	if correlated, different := base.CorrelatedLayout(peer); !correlated || different != 2 {
+		t.Fatalf("two dynamic cells should correlate: %v, %d", correlated, different)
+	}
+	peer.Data[2] = 0x10
+	if correlated, different := base.CorrelatedLayout(peer); correlated || different != 3 {
+		t.Fatalf("third different cell should reject layout: %v, %d", correlated, different)
+	}
+	peer.Data[0], peer.Data[1], peer.Data[2] = 0x22, 0x11, 0x11
+	if correlated, different := base.CorrelatedLayout(peer); !correlated || different != 0 {
+		t.Fatalf("nonzero nibble magnitude changed walkability: %v, %d", correlated, different)
+	}
+	peer.Rows++
+	if correlated, _ := base.CorrelatedLayout(peer); correlated {
+		t.Fatal("different dimensions accepted")
+	}
+}

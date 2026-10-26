@@ -27,6 +27,33 @@ type CandidateCapture struct {
 	RawGridY    float64
 }
 
+// CorrelatedLayout applies the supplied build's bounded walkability comparison
+// to two immutable packed captures. Nibble magnitudes are normalized to
+// blocked/nonblocked before comparison, as in NavigationTerrain.
+func (c *CandidateCapture) CorrelatedLayout(other *CandidateCapture) (bool, int) {
+	if c == nil || other == nil || c.BytesPerRow != other.BytesPerRow ||
+		c.Rows != other.Rows || c.BytesPerRow <= 0 || c.Rows <= 0 ||
+		len(c.Data) != c.BytesPerRow*c.Rows || len(other.Data) != len(c.Data) {
+		return false, 0
+	}
+	cellCount := len(c.Data) * 2
+	limit := min(4096, cellCount/5000)
+	different := 0
+	for index, value := range c.Data {
+		peer := other.Data[index]
+		if (value&15 == 0) != (peer&15 == 0) {
+			different++
+		}
+		if (value>>4 == 0) != (peer>>4 == 0) {
+			different++
+		}
+		if different > limit {
+			return false, different
+		}
+	}
+	return true, different
+}
+
 type captureMetadata struct {
 	Status      string    `json:"Status"`
 	ProcessID   int       `json:"ProcessId"`
