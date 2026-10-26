@@ -14,5 +14,6 @@
     <Compile Include="../PairingSignalTracker.cs" Link="PairingSignalTracker.cs" />
     <Compile Include="../ProtectedPairingGate.cs" Link="ProtectedPairingGate.cs" />
     <Compile Include="../WindowStabilityTracker.cs" Link="WindowStabilityTracker.cs" />
+    <Compile Include="../LoginVisualTracker.cs" Link="LoginVisualTracker.cs" />
   </ItemGroup>
 </Project>

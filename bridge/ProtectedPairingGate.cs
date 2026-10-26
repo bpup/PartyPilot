@@ -4,7 +4,7 @@ internal enum ProtectedPairingPhase { Idle, Preparing, Pulsing, InGame, Settling
 
 internal readonly record struct ProtectedPairingObservation(XInputGamepad Forwarded, int ReleasedSlot, bool Completed);
 
-// The UI supplies login readiness manually. This gate never infers it from a controller press.
+// Login readiness is supplied by the visual tracker or its explicitly marked timeout path.
 internal sealed class ProtectedPairingGate
 {
     private const ushort A = 0x1000;
@@ -42,7 +42,8 @@ internal sealed class ProtectedPairingGate
         return true;
     }
 
-    public ProtectedPairingObservation Observe(XInputGamepad physical, DateTime nowUtc, bool targetForeground)
+    public ProtectedPairingObservation Observe(XInputGamepad physical, DateTime nowUtc,
+        bool targetForeground, bool loginReady)
     {
         var aDown = (physical.Buttons & A) != 0;
         var neutral = IsNeutral(physical);
@@ -59,6 +60,13 @@ internal sealed class ProtectedPairingGate
                     return default;
                 }
                 _foregroundSince ??= nowUtc;
+                if (!loginReady)
+                {
+                    _neutralSince = null;
+                    if (aDown) _requireRelease = true;
+                    _wasADown = aDown;
+                    return default;
+                }
                 if (_requireRelease)
                 {
                     if (neutral) { _requireRelease = false; _neutralSince = nowUtc; }

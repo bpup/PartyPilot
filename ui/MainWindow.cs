@@ -45,6 +45,7 @@ public sealed class MainWindow : Window
     private bool _armRequested;
     private bool _pairingSettling;
     private bool _pairingSettled;
+    private string _loginStatus = "waiting";
     private bool _busy;
 
     public MainWindow()
@@ -148,7 +149,7 @@ public sealed class MainWindow : Window
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12, LineSpacing = 8 };
         _prepareBridge.Content = "准备虚拟手柄";
         _prepareBridge.Click += async (_, _) => await PrepareBridgeAsync();
-        _armPairing.Content = "当前登录画面已就绪，允许 A 键";
+        _armPairing.Content = "开始检测当前登录画面";
         _armPairing.Click += async (_, _) => await ArmPairingAsync();
         _stopBridge.Content = "停止手柄桥接";
         _stopBridge.Click += async (_, _) => await StopBridgeAsync();
@@ -343,6 +344,7 @@ public sealed class MainWindow : Window
             session.AReleased += BridgeAReleased;
             session.PairingArmed += BridgePairingArmed;
             session.PairingCompleted += BridgePairingCompleted;
+            session.LoginStatusChanged += BridgeLoginStatusChanged;
             session.Ended += BridgeEnded;
             _bridge = session;
             _pairing = new PairingGuide(_selectedTopology);
@@ -374,6 +376,7 @@ public sealed class MainWindow : Window
             _launchedClients.Count != _selectedTopology?.ClientCount) return;
         var client = _launchedClients[current.Client - 1];
         _armRequested = true;
+        _loginStatus = "waiting";
         UpdateBridgeControls();
         _pairingStatus.Text = "已发送当前角色的配对准备请求；等待桥接确认。";
         try
@@ -406,6 +409,12 @@ public sealed class MainWindow : Window
         UpdateClientRows();
     }
 
+    private void BridgeLoginStatusChanged(string source)
+    {
+        _loginStatus = source;
+        ShowCurrentPairingStep();
+    }
+
     private void BridgePairingCompleted()
     {
         if (_pairing?.IsComplete != true || !_pairingSettling) return;
@@ -426,6 +435,7 @@ public sealed class MainWindow : Window
         try
         {
             var next = _pairing.ConfirmInGame();
+            _loginStatus = "waiting";
             if (next is null)
             {
                 _pairingSettling = true;
@@ -451,10 +461,15 @@ public sealed class MainWindow : Window
             : _pairing!.AReleased
                 ? $"已观察到 P{current.PartyPlayer} 对应虚拟手柄 A 键松开。请在游戏中选角并确认角色已加入，再继续。"
                 : _pairing.Armed
-                    ? $"P{current.PartyPlayer} 输入已准备。请让客户端 {current.Client} 保持前台、松开所有输入；等待稳定后按一次 A 键。"
+                    ? _loginStatus switch
+                    {
+                        "visual" => $"客户端 {current.Client} 登录控件画面特征已连续命中。保持窗口前台并松开输入，稳定后按一次 A 键。",
+                        "fallback_timeout" => $"客户端 {current.Client} 等待 20 秒仍未识别登录控件，已进入超时回退。请自行核对当前确是登录/选角画面，保持前台并松开输入，稳定后按一次 A 键。",
+                        _ => $"正在检测客户端 {current.Client} 的登录控件画面；保持窗口前台，暂勿按 A 键。"
+                    }
                     : _launchedClients.Count != _selectedTopology?.ClientCount
-                        ? "请先在下方启动或绑定所有游戏窗口，取得窗口身份后再确认当前登录画面就绪。"
-                        : $"请打开客户端 {current.Client} 的登录/角色画面，确认就绪后点“当前登录画面已就绪，允许 A 键”。";
+                        ? "请先在下方启动或绑定所有游戏窗口，取得窗口身份后再检测当前登录画面。"
+                        : $"请打开客户端 {current.Client} 的登录/角色画面，再点“开始检测当前登录画面”。";
     }
 
     private async Task StopBridgeAsync()
@@ -466,11 +481,13 @@ public sealed class MainWindow : Window
         _armRequested = false;
         _pairingSettling = false;
         _pairingSettled = false;
+        _loginStatus = "waiting";
         UpdateClientRows();
         if (session is null) return;
         session.AReleased -= BridgeAReleased;
         session.PairingArmed -= BridgePairingArmed;
         session.PairingCompleted -= BridgePairingCompleted;
+        session.LoginStatusChanged -= BridgeLoginStatusChanged;
         session.Ended -= BridgeEnded;
         await session.DisposeAsync();
         _pairingStatus.Text = "手柄桥接已停止，虚拟手柄已释放。";

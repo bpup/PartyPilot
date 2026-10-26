@@ -14,6 +14,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     public event Action<int>? AReleased;
     public event Action<int, int, long>? PairingArmed;
     public event Action? PairingCompleted;
+    public event Action<string>? LoginStatusChanged;
     public event Action<string>? Ended;
 
     private BridgeSession(Process process, Task<string> readError)
@@ -142,6 +143,11 @@ internal sealed class BridgeSession : IAsyncDisposable
                         Dispatcher.UIThread.Post(() => PairingArmed?.Invoke(armedSlotValue, pid, handle));
                     else if (kind.GetString() == "pairing_complete")
                         Dispatcher.UIThread.Post(() => PairingCompleted?.Invoke());
+                    else if (kind.GetString() == "login_status" &&
+                        root.TryGetProperty("source", out var source) && source.ValueKind == JsonValueKind.String &&
+                        source.GetString() is { } sourceName &&
+                        sourceName is "waiting" or "visual" or "fallback_timeout")
+                        Dispatcher.UIThread.Post(() => LoginStatusChanged?.Invoke(sourceName));
                 }
                 catch (Exception error) when (error is JsonException or InvalidOperationException)
                 {

@@ -93,6 +93,9 @@ try
         var pairingSignals = new PairingSignalTracker();
         var pairingGate = protectedPairing ? new ProtectedPairingGate() : null;
         var windowStability = new WindowStabilityTracker();
+        var loginReadiness = new LoginReadiness();
+        var nextLoginCapture = DateTime.MinValue;
+        var reportedLoginSource = LoginReadinessSource.Waiting;
         var pairingTargetPid = 0;
         long pairingTargetWindow = 0;
         Console.WriteLine(JsonSerializer.Serialize(new { @event = "ready", slots, physical_mode = physicalMode, pairing_protected = protectedPairing }));
@@ -114,6 +117,9 @@ try
                     {
                         pairingTargetPid = control.Pid;
                         pairingTargetWindow = control.WindowHandle;
+                        loginReadiness.Start(DateTime.UtcNow);
+                        nextLoginCapture = DateTime.MinValue;
+                        reportedLoginSource = LoginReadinessSource.Waiting;
                         router.NeutralAll();
                         router.ApplyLine(JsonSerializer.Serialize(new { type = "focus", slot = control.Slot }), DateTime.UtcNow);
                         Console.WriteLine(JsonSerializer.Serialize(new { @event = "pairing_armed", slot = control.Slot,
@@ -162,10 +168,38 @@ try
                 if (pairingGate is not null)
                 {
                     var observedAt = DateTime.UtcNow;
-                    var stable = windowStability.Observe(pairingTargetWindow,
-                        ForegroundWindowProbe.ReadBounds(pairingTargetPid, pairingTargetWindow), observedAt);
+                    var bounds = ForegroundWindowProbe.ReadBounds(pairingTargetPid, pairingTargetWindow);
+                    var foreground = ForegroundWindowProbe.IsExpectedForeground(pairingTargetPid, pairingTargetWindow);
+                    var stable = windowStability.Observe(pairingTargetWindow, bounds, observedAt);
+                    if (pairingGate.Phase == ProtectedPairingPhase.Preparing)
+                    {
+                        byte[]? pixels = null;
+                        var captureWidth = 0;
+                        if (observedAt >= nextLoginCapture)
+                        {
+                            nextLoginCapture = observedAt.AddMilliseconds(200);
+                            if (foreground && bounds is { } window)
+                            {
+                                var region = LoginCaptureRegion.FromWindow(window);
+                                pixels = ScreenRegionCapture.Capture(region);
+                                captureWidth = region.Width;
+                            }
+                        }
+                        var source = loginReadiness.Observe(pixels, captureWidth, observedAt);
+                        if (source != reportedLoginSource)
+                        {
+                            reportedLoginSource = source;
+                            var sourceName = source switch
+                            {
+                                LoginReadinessSource.Visual => "visual",
+                                LoginReadinessSource.FallbackTimeout => "fallback_timeout",
+                                _ => "waiting"
+                            };
+                            Console.WriteLine(JsonSerializer.Serialize(new { @event = "login_status", source = sourceName }));
+                        }
+                    }
                     var observation = pairingGate.Observe(state.Gamepad, observedAt,
-                        stable && ForegroundWindowProbe.IsExpectedForeground(pairingTargetPid, pairingTargetWindow));
+                        stable && foreground, loginReadiness.Ready);
                     router.SetPhysical(observation.Forwarded);
                     if (observation.ReleasedSlot != 0)
                         Console.WriteLine(JsonSerializer.Serialize(new { @event = "a_release", slot = observation.ReleasedSlot }));

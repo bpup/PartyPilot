@@ -94,35 +94,43 @@ if (pairingSignals.Observe(true, 2) != 0 ||
     throw new Exception("Pairing signal survived a disconnect.");
 var gate = new ProtectedPairingGate();
 var heldA = new XInputGamepad { Buttons = 0x1000 };
-if (gate.Observe(heldA, now, true).Forwarded.Buttons != 0 || gate.Finish() || !gate.Arm(1) ||
-    gate.Arm(2) || gate.Observe(default, now, true).Forwarded.Buttons != 0 ||
-    gate.Observe(heldA, now.AddMilliseconds(100), true).Forwarded.Buttons != 0)
+var blockedByLogin = new ProtectedPairingGate();
+blockedByLogin.Arm(1);
+blockedByLogin.Observe(default, now, true, false);
+if (blockedByLogin.Observe(heldA, now.AddMilliseconds(900), true, false).Forwarded.Buttons != 0)
+    throw new Exception("A press escaped before login readiness.");
+blockedByLogin.Observe(default, now.AddMilliseconds(1000), true, true);
+if (blockedByLogin.Observe(heldA, now.AddMilliseconds(1260), true, true).Forwarded.Buttons != 0x1000)
+    throw new Exception("Login readiness did not permit a neutral settled A pulse.");
+if (gate.Observe(heldA, now, true, true).Forwarded.Buttons != 0 || gate.Finish() || !gate.Arm(1) ||
+    gate.Arm(2) || gate.Observe(default, now, true, true).Forwarded.Buttons != 0 ||
+    gate.Observe(heldA, now.AddMilliseconds(100), true, true).Forwarded.Buttons != 0)
     throw new Exception("Protected pairing forwarded input before the login-ready and neutral gates.");
-gate.Observe(default, now.AddMilliseconds(120), true);
-var firstPulse = gate.Observe(heldA, now.AddMilliseconds(880), true);
+gate.Observe(default, now.AddMilliseconds(120), true, true);
+var firstPulse = gate.Observe(heldA, now.AddMilliseconds(880), true, true);
 if (firstPulse.Forwarded.Buttons != 0x1000 || gate.Phase != ProtectedPairingPhase.Pulsing ||
-    gate.Observe(heldA, now.AddMilliseconds(1100), true).ReleasedSlot != 0)
+    gate.Observe(heldA, now.AddMilliseconds(1100), true, true).ReleasedSlot != 0)
     throw new Exception("First local player did not receive a single protected A pulse.");
-var firstRelease = gate.Observe(heldA, now.AddMilliseconds(1231), true);
+var firstRelease = gate.Observe(heldA, now.AddMilliseconds(1231), true, true);
 if (firstRelease.ReleasedSlot != 1 || firstRelease.Forwarded.Buttons != 0 ||
-    gate.Observe(heldA, now.AddMilliseconds(1240), true).Forwarded.Buttons != 0)
+    gate.Observe(heldA, now.AddMilliseconds(1240), true, true).Forwarded.Buttons != 0)
     throw new Exception("Held physical A leaked beyond the first virtual pulse.");
-gate.Observe(default, now.AddMilliseconds(1250), true);
-if (gate.Observe(heldA, now.AddMilliseconds(1260), true).Forwarded.Buttons != 0x1000 ||
+gate.Observe(default, now.AddMilliseconds(1250), true, true);
+if (gate.Observe(heldA, now.AddMilliseconds(1260), true, true).Forwarded.Buttons != 0x1000 ||
     !gate.Arm(2))
     throw new Exception("In-game character input did not resume after the physical release.");
-if (gate.Observe(heldA, now.AddMilliseconds(1300), true).Forwarded.Buttons != 0)
+if (gate.Observe(heldA, now.AddMilliseconds(1300), true, true).Forwarded.Buttons != 0)
     throw new Exception("Held A leaked into the next player after rearming.");
-gate.Observe(default, now.AddMilliseconds(1320), true);
-if (gate.Observe(heldA, now.AddMilliseconds(2100), true).Forwarded.Buttons != 0x1000 ||
-    gate.Observe(heldA, now.AddMilliseconds(2115), true).ReleasedSlot != 0 ||
-    gate.Observe(heldA, now.AddMilliseconds(2125), true).ReleasedSlot != 2 || !gate.Finish())
+gate.Observe(default, now.AddMilliseconds(1320), true, true);
+if (gate.Observe(heldA, now.AddMilliseconds(2100), true, true).Forwarded.Buttons != 0x1000 ||
+    gate.Observe(heldA, now.AddMilliseconds(2115), true, true).ReleasedSlot != 0 ||
+    gate.Observe(heldA, now.AddMilliseconds(2125), true, true).ReleasedSlot != 2 || !gate.Finish())
     throw new Exception("Second local player did not receive its shorter join pulse.");
-gate.Observe(default, now.AddMilliseconds(2200), true);
-gate.Observe(new XInputGamepad { LeftX = 9000 }, now.AddMilliseconds(2450), true);
-gate.Observe(default, now.AddMilliseconds(2500), true);
-if (gate.Observe(default, now.AddMilliseconds(2899), true).Completed ||
-    !gate.Observe(default, now.AddMilliseconds(2900), true).Completed ||
+gate.Observe(default, now.AddMilliseconds(2200), true, true);
+gate.Observe(new XInputGamepad { LeftX = 9000 }, now.AddMilliseconds(2450), true, true);
+gate.Observe(default, now.AddMilliseconds(2500), true, true);
+if (gate.Observe(default, now.AddMilliseconds(2899), true, true).Completed ||
+    !gate.Observe(default, now.AddMilliseconds(2900), true, true).Completed ||
     gate.Phase != ProtectedPairingPhase.Complete)
     throw new Exception("Final neutral settling did not reset and complete after 400 ms.");
 if (!BridgeProtocol.TryParsePairingControl("{\"type\":\"arm_pairing\",\"slot\":3,\"pid\":123,\"window_handle\":456}", out var arm) ||
@@ -133,17 +141,35 @@ if (!BridgeProtocol.TryParsePairingControl("{\"type\":\"arm_pairing\",\"slot\":3
     throw new Exception("Protected pairing command validation failed.");
 var focusGate = new ProtectedPairingGate();
 focusGate.Arm(1);
-focusGate.Observe(default, now, false);
-focusGate.Observe(default, now.AddMilliseconds(1000), true);
-if (focusGate.Observe(heldA, now.AddMilliseconds(1100), true).Forwarded.Buttons != 0)
+focusGate.Observe(default, now, false, true);
+focusGate.Observe(default, now.AddMilliseconds(1000), true, true);
+if (focusGate.Observe(heldA, now.AddMilliseconds(1100), true, true).Forwarded.Buttons != 0)
     throw new Exception("Foreground settling incorrectly counted time spent on another window.");
-focusGate.Observe(default, now.AddMilliseconds(1120), true);
-if (focusGate.Observe(heldA, now.AddMilliseconds(1800), true).Forwarded.Buttons != 0x1000 ||
-    focusGate.Observe(heldA, now.AddMilliseconds(1810), false).Forwarded.Buttons != 0 ||
+focusGate.Observe(default, now.AddMilliseconds(1120), true, true);
+if (focusGate.Observe(heldA, now.AddMilliseconds(1800), true, true).Forwarded.Buttons != 0x1000 ||
+    focusGate.Observe(heldA, now.AddMilliseconds(1810), false, true).Forwarded.Buttons != 0 ||
     focusGate.Phase != ProtectedPairingPhase.Preparing)
     throw new Exception("A protected pulse continued after the game lost foreground.");
 var stability = new WindowStabilityTracker();
 var bounds = new WindowBounds(10, 20, 1280, 720);
+var region = LoginCaptureRegion.FromWindow(bounds);
+if (region != new CaptureRegion(440, 545, 420, 144))
+    throw new Exception("Lower-center login capture region changed.");
+var redFrame = new byte[40 * 40 * 4];
+for (var pixel = 0; pixel < redFrame.Length; pixel += 4) redFrame[pixel + 2] = 80;
+var darkFrame = new byte[redFrame.Length];
+var visual = new LoginVisualTracker();
+if (visual.Observe(redFrame, 40) || !visual.Observe(redFrame, 40) ||
+    !visual.Observe(darkFrame, 40) || visual.Observe(darkFrame, 40) ||
+    LoginVisualTracker.LooksLikeLoginControl(redFrame, 0))
+    throw new Exception("Two-frame login visual hysteresis failed.");
+var readiness = new LoginReadiness();
+readiness.Start(now);
+if (readiness.Observe(null, 0, now.AddSeconds(19)) != LoginReadinessSource.Waiting ||
+    readiness.Observe(null, 0, now.AddSeconds(20)) != LoginReadinessSource.FallbackTimeout ||
+    readiness.Observe(redFrame, 40, now.AddSeconds(21)) != LoginReadinessSource.FallbackTimeout ||
+    readiness.Observe(redFrame, 40, now.AddSeconds(22)) != LoginReadinessSource.Visual)
+    throw new Exception("Login readiness source was not distinguished.");
 if (stability.Observe(501, bounds, now) ||
     stability.Observe(501, bounds, now.AddMilliseconds(749)) ||
     !stability.Observe(501, bounds, now.AddMilliseconds(750)) ||
