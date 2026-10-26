@@ -57,10 +57,11 @@ type CardOwnerMatch struct {
 }
 
 type CardLootMatch struct {
-	EntityID uint64 `json:"EntityId"`
-	ItemPath string `json:"ItemPath"`
-	Name     string `json:"Name"`
-	Evidence string `json:"Evidence"`
+	EntityID        uint64 `json:"EntityId"`
+	ItemPath        string `json:"ItemPath"`
+	BaseIDCandidate string `json:"BaseIdCandidate"`
+	Name            string `json:"Name"`
+	Evidence        string `json:"Evidence"`
 }
 
 type CardSlotCandidate struct {
@@ -178,7 +179,8 @@ func validRawItemCards(cards []RawItemCard, status string, seen *time.Time,
 			card.LootMatch.Evidence != "pointer_equal_visible_world_item" ||
 			!strings.HasPrefix(card.LootMatch.ItemPath, "Metadata/Items/") ||
 			len(card.LootMatch.ItemPath) > 256 || strings.TrimSpace(card.LootMatch.Name) == "" ||
-			len(card.LootMatch.Name) > 96) {
+			len(card.LootMatch.Name) > 96 ||
+			card.LootMatch.BaseIDCandidate != itemPathBaseID(card.LootMatch.ItemPath)) {
 			return false
 		}
 		if card.SlotCandidate != nil {
@@ -194,6 +196,14 @@ func validRawItemCards(cards []RawItemCard, status string, seen *time.Time,
 		objects[card.Object] = true
 	}
 	return true
+}
+
+func itemPathBaseID(path string) string {
+	trimmed := strings.TrimRight(strings.ReplaceAll(path, `\`, "/"), "/")
+	if !strings.HasPrefix(trimmed, "Metadata/Items/") {
+		return ""
+	}
+	return trimmed[strings.LastIndexByte(trimmed, '/')+1:]
 }
 
 func validGroundHover(hover *GroundHover, status string, seen *time.Time) bool {

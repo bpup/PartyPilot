@@ -13,5 +13,6 @@
     <Compile Include="../sensor/UiItemCardTreeScanner.cs" Link="UiItemCardTreeScanner.cs" />
     <Compile Include="../sensor/UiItemCardVtableLocator.cs" Link="UiItemCardVtableLocator.cs" />
     <Compile Include="../sensor/UiItemCardCorrelator.cs" Link="UiItemCardCorrelator.cs" />
+    <Compile Include="../sensor/LootBaseIdentity.cs" Link="LootBaseIdentity.cs" />
   </ItemGroup>
 </Project>

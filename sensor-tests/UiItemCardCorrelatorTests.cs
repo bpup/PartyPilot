@@ -10,7 +10,8 @@ internal static class UiItemCardCorrelatorTests
             "Metadata/Items/Currency/CurrencyExalted", "Exalted Orb") };
         var match = UiItemCardCorrelator.Resolve(card, players, loot);
         if (match.Owner?.EntityId != 11 || match.Loot?.EntityId != 23 ||
-            match.Loot.ItemPath != "Metadata/Items/Currency/CurrencyExalted")
+            match.Loot.ItemPath != "Metadata/Items/Currency/CurrencyExalted" ||
+            match.Loot.BaseIdCandidate != "CurrencyExalted")
             throw new Exception("Exact pointer observations did not join.");
         if (UiItemCardCorrelator.Resolve(card,
                 [.. players, new UiItemCardCorrelator.Player(0x90000, 12)], loot).Owner != null ||
@@ -27,6 +28,13 @@ internal static class UiItemCardCorrelatorTests
         if (UiItemCardCorrelator.Resolve(card, players,
                 [new UiItemCardCorrelator.Loot(0x80000, 23, "Metadata/Monsters/Beast", "Beast")]).Loot != null)
             throw new Exception("A non-item path was joined to the card.");
+        if (LootBaseIdentity.FromItemPath("Metadata/Items/Gems/SkillGemUncutQuest1") !=
+                "SkillGemUncutQuest1" ||
+            LootBaseIdentity.FromItemPath("Metadata\\Items\\Currency\\CurrencyExalted/") !=
+                "CurrencyExalted" ||
+            LootBaseIdentity.FromItemPath("Metadata/Items/") != null ||
+            LootBaseIdentity.FromItemPath("Metadata/Monsters/Beast") != null)
+            throw new Exception("Item base ID candidate did not follow the verified path rule.");
         var ordered = new LocalSlotCandidateScanner.Result("two_slot_candidate", "test anchor",
             "unverified static offsets", ["0xA0000", "0x90000"], 1, "0x100000", true,
             ["0x100000"]);

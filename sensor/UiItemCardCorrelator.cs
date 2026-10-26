@@ -7,7 +7,8 @@ internal static class UiItemCardCorrelator
     internal sealed record Player(long Address, uint EntityId);
     internal sealed record Loot(long InnerItemAddress, uint EntityId, string ItemPath, string Name);
     internal sealed record OwnerMatch(uint EntityId, string Evidence);
-    internal sealed record LootMatch(uint EntityId, string ItemPath, string Name, string Evidence);
+    internal sealed record LootMatch(uint EntityId, string ItemPath, string BaseIdCandidate,
+        string Name, string Evidence);
     internal sealed record SlotCandidate(int LocalSlot, string Evidence);
     internal sealed record Match(OwnerMatch? Owner, LootMatch? Loot, SlotCandidate? Slot);
 
@@ -17,10 +18,12 @@ internal static class UiItemCardCorrelator
     {
         var ownerCandidates = players.Where(player => player.Address > 0 &&
             player.EntityId != 0 && player.Address == card.Owner).Take(2).ToArray();
-        var lootCandidates = loot.Where(item => item.InnerItemAddress > 0 &&
-            item.EntityId != 0 && item.InnerItemAddress == card.Item &&
-            item.ItemPath.StartsWith("Metadata/Items/", StringComparison.Ordinal) &&
-            !string.IsNullOrWhiteSpace(item.Name)).Take(2).ToArray();
+        var lootCandidates = loot.Select(item => (Item: item,
+            BaseId: LootBaseIdentity.FromItemPath(item.ItemPath)))
+            .Where(candidate => candidate.Item.InnerItemAddress > 0 &&
+                candidate.Item.EntityId != 0 && candidate.Item.InnerItemAddress == card.Item &&
+                candidate.BaseId != null && !string.IsNullOrWhiteSpace(candidate.Item.Name))
+            .Take(2).ToArray();
         var owner = ownerCandidates.Length == 1
             ? new OwnerMatch(ownerCandidates[0].EntityId, "pointer_equal_visible_player") : null;
         SlotCandidate? slot = null;
@@ -36,11 +39,10 @@ internal static class UiItemCardCorrelator
                 candidate => string.Equals(candidate, address, StringComparison.OrdinalIgnoreCase));
             if (index >= 0) slot = new(index + 1, "unverified_vector_order_candidate");
         }
-        return new Match(
-            owner,
-            lootCandidates.Length == 1
-                ? new LootMatch(lootCandidates[0].EntityId, lootCandidates[0].ItemPath,
-                    lootCandidates[0].Name, "pointer_equal_visible_world_item") : null,
-            slot);
+        LootMatch? lootMatch = null;
+        if (lootCandidates.Length == 1 && lootCandidates[0].BaseId is string baseId)
+            lootMatch = new(lootCandidates[0].Item.EntityId, lootCandidates[0].Item.ItemPath,
+                baseId, lootCandidates[0].Item.Name, "pointer_equal_visible_world_item");
+        return new Match(owner, lootMatch, slot);
     }
 }
