@@ -28,7 +28,15 @@ public sealed class MainWindow : Window
     private readonly Button _check = new();
     private readonly Button _launch = new();
     private readonly TextBlock _status = new();
+    private readonly ComboBox _physicalIndex = new();
+    private readonly CheckBox _isolationConfirmed = new();
+    private readonly Button _prepareBridge = new();
+    private readonly Button _confirmRole = new();
+    private readonly Button _stopBridge = new();
+    private readonly TextBlock _pairingStatus = new();
     private PartyTopology? _selectedTopology;
+    private BridgeSession? _bridge;
+    private PairingGuide? _pairing;
     private bool _busy;
 
     public MainWindow()
@@ -49,7 +57,7 @@ public sealed class MainWindow : Window
         var content = new StackPanel { Spacing = 18, Margin = new Thickness(34, 28, 34, 36) };
         content.Children.Add(Label("PLAY", 12, AccentBrush, FontWeight.Bold));
         content.Children.Add(Label("Connect. Choose. Start playing.", 29, Brushes.White, FontWeight.Bold));
-        content.Children.Add(Label("独立版工作区 · 当前只接入游戏窗口启动与布局预检", 13, MutedBrush));
+        content.Children.Add(Label("独立版工作区 · 游戏窗口启动与有限布局的手柄配对引导", 13, MutedBrush));
         content.Children.Add(BuildInputStep());
         content.Children.Add(BuildClientStep());
         content.Children.Add(BuildLaunchStep());
@@ -60,6 +68,9 @@ public sealed class MainWindow : Window
         _playerCount.SelectionChanged += (_, _) => UpdateTopologyOptions();
         _topologyVariant.SelectionChanged += (_, _) => UpdateClientRows();
         _applyLayout.IsCheckedChanged += (_, _) => UpdateLayoutControls();
+        _isolationConfirmed.IsCheckedChanged += (_, _) => UpdateBridgeControls();
+        _physicalIndex.SelectionChanged += (_, _) => UpdateBridgeControls();
+        Closed += async (_, _) => await StopBridgeAsync();
         UpdateClientRows();
         UpdateLayoutControls();
     }
@@ -116,16 +127,37 @@ public sealed class MainWindow : Window
         };
     }
 
-    private static Border BuildInputStep()
+    private Border BuildInputStep()
     {
-        var panel = Step("1", "CHOOSE INPUT · 选择输入", "目标版本提供手柄和键鼠 MAIN。此界面尚未接入实体手柄隔离与角色配对。");
-        panel.Children.Add(Label("请先在 Windows 上单独验证虚拟手柄桥接；本页不会启动角色自动控制。", 12, MutedBrush));
+        var panel = Step("1", "CHOOSE INPUT · 选择输入", "以下仅适用于最多三个系统虚拟手柄的布局；需先在 Windows 上完成实体手柄对游戏的隔离。");
+        _physicalIndex.PlaceholderText = "实体手柄 XInput 编号";
+        _physicalIndex.ItemsSource = Enumerable.Range(0, 4).Select(index => $"XInput {index}").ToArray();
+        _physicalIndex.Width = 190;
+        _physicalIndex.HorizontalAlignment = HorizontalAlignment.Left;
+        panel.Children.Add(_physicalIndex);
+        _isolationConfirmed.Content = "我已确认实体手柄对游戏隐藏，仅由桥接读取";
+        panel.Children.Add(_isolationConfirmed);
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        _prepareBridge.Content = "准备虚拟手柄";
+        _prepareBridge.Click += async (_, _) => await PrepareBridgeAsync();
+        _stopBridge.Content = "停止手柄桥接";
+        _stopBridge.Click += async (_, _) => await StopBridgeAsync();
+        _confirmRole.Content = "已在游戏内确认此角色";
+        _confirmRole.Click += async (_, _) => await ConfirmRoleAsync();
+        actions.Children.Add(_prepareBridge);
+        actions.Children.Add(_stopBridge);
+        actions.Children.Add(_confirmRole);
+        panel.Children.Add(actions);
+        _pairingStatus.Text = "选择人数、布局和实体手柄后可检查桥接支持情况。";
+        _pairingStatus.Foreground = MutedBrush;
+        _pairingStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_pairingStatus);
         return Card(panel);
     }
 
     private Border BuildClientStep()
     {
-        var panel = Step("2", "HOW MANY CHARACTERS? · 选择人数", "按目标版本的布局列出 1–6 人及其所需客户端。角色配对与每窗口第二角色尚未接入。");
+        var panel = Step("2", "HOW MANY CHARACTERS? · 选择人数", "按目标版本的布局列出 1–6 人及其所需客户端；仅部分布局支持上方的手柄配对引导。");
         _playerCount.PlaceholderText = "选择 1–6 人";
         _playerCount.ItemsSource = Enumerable.Range(1, 6).Select(count => $"{count} 人").ToArray();
         _playerCount.Width = 190;
@@ -212,6 +244,7 @@ public sealed class MainWindow : Window
         }
         _check.IsEnabled = !_busy && count > 0;
         _launch.IsEnabled = !_busy && count > 0;
+        UpdateBridgeControls();
     }
 
     private void UpdateTopologyOptions()
@@ -229,6 +262,119 @@ public sealed class MainWindow : Window
         var enabled = _applyLayout.IsChecked == true;
         _layoutMode.IsEnabled = enabled;
         _monitors.IsEnabled = enabled;
+    }
+
+    private void UpdateBridgeControls()
+    {
+        var slots = _selectedTopology?.Slots.Select(slot => slot.RuntimePad).ToArray() ?? [];
+        var supported = slots.Length is >= 1 and <= 3 && slots.All(slot => slot is >= 1 and <= 4);
+        _prepareBridge.IsEnabled = !_busy && _bridge is null && supported &&
+            _physicalIndex.SelectedIndex is >= 0 and <= 3 && _isolationConfirmed.IsChecked == true;
+        _stopBridge.IsEnabled = _bridge is not null;
+        _confirmRole.IsEnabled = _bridge is not null && _pairing?.AReleased == true;
+        _playerCount.IsEnabled = _bridge is null;
+        _topologyVariant.IsEnabled = _bridge is null;
+        if (_bridge is null && _selectedTopology is not null && !supported)
+        {
+            _pairingStatus.Text = "此布局需要四个以上系统手柄或第三客户端进程内 P5/P6 输入；当前桥接不支持，未开始配对。";
+        }
+    }
+
+    private async Task PrepareBridgeAsync()
+    {
+        if (_busy || _bridge is not null || _selectedTopology is null || !OperatingSystem.IsWindows())
+        {
+            _pairingStatus.Text = "手柄桥接需要 Windows、已选布局与空闲桥接会话。";
+            return;
+        }
+        var slots = _selectedTopology.Slots.Select(slot => slot.RuntimePad).ToArray();
+        if (slots.Length is < 1 or > 3 || slots.Any(slot => slot is < 1 or > 4) ||
+            _physicalIndex.SelectedIndex is < 0 or > 3 || _isolationConfirmed.IsChecked != true)
+        {
+            _pairingStatus.Text = "当前布局或实体手柄隔离条件不满足桥接要求。";
+            return;
+        }
+        var executable = BridgeSession.FindExecutable();
+        if (executable is null)
+        {
+            _pairingStatus.Text = "找不到 PartyPilot.Bridge.exe；请使用完整发布目录。";
+            return;
+        }
+        _busy = true;
+        UpdateBridgeControls();
+        _pairingStatus.Text = "正在检查实体手柄与虚拟手柄编号…";
+        try
+        {
+            var session = await BridgeSession.StartAsync(executable, slots, _physicalIndex.SelectedIndex);
+            session.AReleased += BridgeAReleased;
+            session.Ended += BridgeEnded;
+            _bridge = session;
+            _pairing = new PairingGuide(_selectedTopology);
+            session.StartReading();
+            ShowCurrentPairingStep();
+        }
+        catch (Exception error)
+        {
+            _pairingStatus.Text = $"手柄桥接未就绪：{error.Message}";
+        }
+        finally
+        {
+            _busy = false;
+            UpdateBridgeControls();
+        }
+    }
+
+    private void BridgeAReleased(int slot)
+    {
+        if (_pairing?.ObserveARelease(slot) != true) return;
+        ShowCurrentPairingStep();
+        UpdateBridgeControls();
+    }
+
+    private async void BridgeEnded(string reason)
+    {
+        await StopBridgeAsync();
+        _pairingStatus.Text = $"手柄桥接已停止：{reason}";
+    }
+
+    private async Task ConfirmRoleAsync()
+    {
+        if (_bridge is null || _pairing?.AReleased != true) return;
+        try
+        {
+            var next = _pairing.ConfirmInGame();
+            if (next is not null) await _bridge.FocusAsync(next.RuntimePad);
+            ShowCurrentPairingStep();
+        }
+        catch (Exception error)
+        {
+            await StopBridgeAsync();
+            _pairingStatus.Text = $"无法切换下一角色：{error.Message}";
+        }
+        UpdateBridgeControls();
+    }
+
+    private void ShowCurrentPairingStep()
+    {
+        var current = _pairing?.Current;
+        _pairingStatus.Text = current is null
+            ? "所有角色步骤已由用户确认；软件尚未验证游戏内实际配对。手柄桥接仍在运行。"
+            : _pairing!.AReleased
+                ? $"已观察到 P{current.PartyPlayer} 对应手柄 A 键松开。请在游戏中确认角色已加入，再点“已在游戏内确认此角色”。"
+                : $"请打开客户端 {current.Client} 的角色界面，为 P{current.PartyPlayer}（本地角色 {current.LocalPlayer}）按下并松开 A 键。";
+    }
+
+    private async Task StopBridgeAsync()
+    {
+        var session = _bridge;
+        _bridge = null;
+        _pairing = null;
+        UpdateBridgeControls();
+        if (session is null) return;
+        session.AReleased -= BridgeAReleased;
+        session.Ended -= BridgeEnded;
+        await session.DisposeAsync();
+        _pairingStatus.Text = "手柄桥接已停止，虚拟手柄已释放。";
     }
 
     private async Task RunLauncherAsync(bool start)

@@ -89,6 +89,8 @@ try
             entry => entry.Key,
             entry => (IPadOutput)new ViGEmPadOutput(entry.Value)));
         if (physicalMode) router.ConfigurePhysical(mainSlot);
+        var pairingSignals = new PairingSignalTracker();
+        Console.WriteLine(JsonSerializer.Serialize(new { @event = "ready", slots, physical_mode = physicalMode }));
 
         Task<string?> pendingLine = Console.In.ReadLineAsync();
         while (true)
@@ -117,10 +119,14 @@ try
                 if (!XInputNative.TryRead(physicalIndex, out var state))
                 {
                     router.NeutralAll();
+                    pairingSignals.Reset();
                     Console.Error.WriteLine("Physical controller disconnected; restart after checking its identity and isolation.");
                     return 1;
                 }
                 router.SetPhysical(state.Gamepad);
+                var pairedSlot = pairingSignals.Observe((state.Gamepad.Buttons & 0x1000) != 0, router.FocusedSlot);
+                if (pairedSlot != 0)
+                    Console.WriteLine(JsonSerializer.Serialize(new { @event = "a_release", slot = pairedSlot }));
             }
             router.Tick(DateTime.UtcNow);
         }

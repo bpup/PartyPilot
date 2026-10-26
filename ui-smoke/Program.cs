@@ -57,9 +57,21 @@ var screenshot = window.CaptureRenderedFrame() ?? throw new Exception("The deskt
 var output = Path.GetFullPath(args.FirstOrDefault() ?? "../PartyPilot-ui-preview.png");
 screenshot.Save(output);
 Console.WriteLine($"Headless preview saved to {output}.");
-var clientCount = window.GetLogicalDescendants().OfType<ComboBox>().First();
+var clientCount = window.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(item => item.PlaceholderText == "选择 1–6 人");
+var physicalIndex = window.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(item => item.PlaceholderText == "实体手柄 XInput 编号");
+var isolation = window.GetLogicalDescendants().OfType<CheckBox>()
+    .Single(item => item.Content?.ToString()?.Contains("实体手柄对游戏隐藏") == true);
+var prepare = window.GetLogicalDescendants().OfType<Button>()
+    .Single(item => item.Content?.ToString() == "准备虚拟手柄");
+if (prepare.IsEnabled) throw new Exception("Bridge preparation was enabled before explicit selections.");
 clientCount.SelectedIndex = 3;
 Dispatcher.UIThread.RunJobs();
+physicalIndex.SelectedIndex = 0;
+isolation.IsChecked = true;
+Dispatcher.UIThread.RunJobs();
+if (prepare.IsEnabled) throw new Exception("Four virtual pads incorrectly enabled the physical bridge.");
 var pathFields = window.GetLogicalDescendants().OfType<TextBox>()
     .Where(item => item.Watermark?.ToString()?.Contains("PathOfExile_x64.exe") == true)
     .ToArray();
@@ -72,7 +84,8 @@ var configured = Path.Combine(Path.GetDirectoryName(output)!, Path.GetFileNameWi
 Console.WriteLine($"Four-player, two-client preview saved to {configured}.");
 clientCount.SelectedIndex = 2;
 Dispatcher.UIThread.RunJobs();
-var variant = window.GetLogicalDescendants().OfType<ComboBox>().Skip(1).First();
+var variant = window.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(item => item.PlaceholderText == "选择角色分布");
 variant.SelectedIndex = 2;
 Dispatcher.UIThread.RunJobs();
 if (pathFields.Any(field => !field.IsEffectivelyVisible))
@@ -83,9 +96,17 @@ clientCount.SelectedIndex = 1;
 Dispatcher.UIThread.RunJobs();
 variant.SelectedIndex = 0;
 Dispatcher.UIThread.RunJobs();
+if (!prepare.IsEnabled) throw new Exception("Supported two-player topology did not enable the physical bridge.");
 if (!pathFields[0].IsEffectivelyVisible || pathFields[1].IsEffectivelyVisible)
 {
     throw new Exception("The default couch 2P option did not request one game window.");
+}
+var guide = new PairingGuide(PartyTopologies.DefaultFor(2));
+if (guide.ObserveARelease(2) || guide.AReleased || !guide.ObserveARelease(1) ||
+    guide.Current?.PartyPlayer != 1 || guide.ConfirmInGame()?.RuntimePad != 2 ||
+    !guide.ObserveARelease(2) || guide.ConfirmInGame() is not null || !guide.IsComplete)
+{
+    throw new Exception("Pairing guide accepted a wrong slot or skipped a user confirmation.");
 }
 window.Close();
 

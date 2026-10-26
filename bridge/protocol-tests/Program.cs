@@ -29,7 +29,9 @@ Expect("not JSON", false, 0, false);
 if (!BridgeSlots.TryParse(["--slots", "3,2"], out var slots) ||
     !slots.SequenceEqual([2, 3]) ||
     BridgeSlots.TryParse(["--slots", "2,2"], out _) ||
-    BridgeSlots.TryParse(["--slots", "1,2,3,4,5"], out _))
+    BridgeSlots.TryParse(["--slots", "1,2,3,4,5"], out _) ||
+    BridgeSlots.TryParse(["--slots", "5"], out _) ||
+    BridgeSlots.TryParse(["--slots", "6"], out _))
 {
     throw new Exception("Slot routing validation failed.");
 }
@@ -74,6 +76,22 @@ if (pad3.Report != default || pad2.Report != default)
     throw new Exception("Disconnect did not neutralize focused pad.");
 if (router.ApplyLine("{\"type\":\"focus\",\"slot\":6}", now) || pad3.Report != default)
     throw new Exception("Unassigned focus was not rejected safely.");
+var pairingSignals = new PairingSignalTracker();
+if (pairingSignals.Observe(false, 2) != 0 ||
+    pairingSignals.Observe(true, 2) != 0 ||
+    pairingSignals.Observe(true, 3) != 0 ||
+    pairingSignals.Observe(false, 3) != 0 ||
+    pairingSignals.Observe(false, 3) != 0)
+    throw new Exception("A release after a focus change was incorrectly treated as a pairing signal.");
+if (pairingSignals.Observe(true, 3) != 0 || pairingSignals.Observe(false, 3) != 3)
+    throw new Exception("A release did not report the focused virtual pad.");
+pairingSignals.Observe(true, 2);
+pairingSignals.Reset();
+if (pairingSignals.Observe(true, 2) != 0 ||
+    pairingSignals.Observe(false, 2) != 0 ||
+    pairingSignals.Observe(true, 2) != 0 ||
+    pairingSignals.Observe(false, 2) != 2)
+    throw new Exception("Pairing signal survived a disconnect.");
 var pad1 = new FakePad();
 var pad2ForHotkey = new FakePad();
 var hotkeyRouter = new BridgeRouter(new Dictionary<int, IPadOutput> { [1] = pad1, [2] = pad2ForHotkey });

@@ -13,7 +13,7 @@ internal static class BridgeSlots
         var parsed = new HashSet<int>();
         foreach (var value in values)
         {
-            if (!int.TryParse(value, out var slot) || slot is < 1 or > 6 || !parsed.Add(slot))
+            if (!int.TryParse(value, out var slot) || slot is < 1 or > 4 || !parsed.Add(slot))
                 return false;
         }
         slots = parsed.OrderBy(value => value).ToArray();

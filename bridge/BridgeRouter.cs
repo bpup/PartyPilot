@@ -24,6 +24,8 @@ internal sealed class BridgeRouter
     private bool _physicalConnected;
     private ushort _previousButtons;
 
+    public int FocusedSlot => _physicalMode ? _focusedSlot : 0;
+
     public BridgeRouter(IReadOnlyDictionary<int, IPadOutput> outputs)
     {
         _routes = outputs.ToDictionary(entry => entry.Key, entry => new PadRoute(entry.Value));
