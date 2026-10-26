@@ -218,11 +218,13 @@ internal sealed class BridgeSession : IAsyncDisposable
         await WriteCommandAsync(JsonSerializer.Serialize(new { type = "finish_pairing" }));
     }
 
-    internal async Task SendAutomationAsync(FollowBridgeFrame frame)
+    internal Task SendAutomationAsync(FollowBridgeFrame frame) => SendAutomationAsync(frame.Command);
+
+    internal async Task SendAutomationAsync(string command)
     {
         if (_stopping || _process.HasExited)
             throw new InvalidOperationException("Virtual controller bridge is no longer running.");
-        await WriteCommandAsync(frame.Command);
+        await WriteCommandAsync(command);
     }
 
     internal string GetMenuGuardState(int slot) => _menuStates.TryGetValue(slot, out var state) ? state : "clear";

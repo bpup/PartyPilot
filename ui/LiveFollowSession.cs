@@ -10,7 +10,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
 {
     private readonly Process _process;
     private readonly BridgeSession _bridge;
-    private int _followerPad;
+    private HashSet<int> _followerPads;
     private readonly PartyTopology _topology;
     private readonly Dictionary<int, int> _padToPlayer;
     private readonly Dictionary<int, int> _playerToPad;
@@ -34,7 +34,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         _process = process;
         _bridge = bridge;
         _topology = topology;
-        _followerPad = initialFrame.FollowerPad;
+        _followerPads = initialFrame.PadCommands.Select(command => command.Pad).ToHashSet();
         _padToPlayer = topology.Slots.ToDictionary(slot => slot.RuntimePad, slot => slot.PartyPlayer);
         _playerToPad = topology.Slots.ToDictionary(slot => slot.PartyPlayer, slot => slot.RuntimePad);
         _readError = readError;
@@ -80,10 +80,12 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         IReadOnlyList<LaunchedClient> clients, BridgeSession bridge, LiveFollowPlan plan,
         IReadOnlyDictionary<int, string>? memberNames = null)
     {
-        if (topology.Id != "2-split" || clients.Count != 2 ||
-            topology.Slots.Count != 2 || topology.Slots[1].PartyPlayer != 2 ||
-            topology.Slots[1].RuntimePad != 3)
-            throw new InvalidOperationException("Live control currently requires two separate single-role clients.");
+        if (topology.Id is not ("2-split" or "3-three-singles") ||
+            clients.Count != topology.ClientCount ||
+            topology.Slots.Count != topology.ClientCount ||
+            topology.Slots.Any(slot => slot.LocalPlayer != 1) ||
+            topology.ClientCount == 3 && !bridge.LastFocusedLeadsEnabled)
+            throw new InvalidOperationException("Live control requires a supported one-player-per-client layout.");
         var start = new ProcessStartInfo(executable)
         {
             WorkingDirectory = Path.GetDirectoryName(executable)!,
@@ -95,13 +97,18 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         };
         foreach (var argument in new[]
         {
-            "-roster", $"1:{clients[0].Pid},2:{clients[1].Pid}", "-leader", "1",
-            "-exe", $"1={clients[0].Executable}", "-exe", $"2={clients[1].Executable}",
+            "-roster", string.Join(',', topology.Slots.Select(slot =>
+                $"{slot.PartyPlayer}:{clients[slot.Client - 1].Pid}")), "-leader", "1",
             "-stop", plan.Stop.ToString("R", CultureInfo.InvariantCulture),
             "-resume", plan.Resume.ToString("R", CultureInfo.InvariantCulture),
             "-catchup", plan.Catchup.ToString("R", CultureInfo.InvariantCulture),
             "-max-age", plan.MaxAge, "-log-max-age", plan.LogMaxAge
         }) start.ArgumentList.Add(argument);
+        foreach (var slot in topology.Slots)
+        {
+            start.ArgumentList.Add("-exe");
+            start.ArgumentList.Add($"{slot.PartyPlayer}={clients[slot.Client - 1].Executable}");
+        }
         if (plan.LeaderName.Length > 0)
         {
             start.ArgumentList.Add("-leader-name");
@@ -111,8 +118,9 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         {
             foreach (var (player, name) in memberNames.OrderBy(item => item.Key))
             {
-                if (player is not (1 or 2) || string.IsNullOrWhiteSpace(name) || name.Length > 128)
-                    throw new ArgumentException("Live follow member names require a bound P1 or P2 name.");
+                if (!topology.Slots.Any(slot => slot.PartyPlayer == player) ||
+                    string.IsNullOrWhiteSpace(name) || name.Length > 128)
+                    throw new ArgumentException("Live follow member names require a bound player name.");
                 start.ArgumentList.Add("-member-name");
                 start.ArgumentList.Add($"{player}={name.Trim()}");
             }
@@ -121,6 +129,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         if (bridge.LastFocusedLeadsEnabled) start.ArgumentList.Add("-last-focused-leads");
         var process = Process.Start(start) ?? throw new InvalidOperationException("Live follow did not start.");
         var readError = process.StandardError.ReadToEndAsync();
+        FollowBridgeFrame? initialFrame = null;
         try
         {
             var initialLeader = bridge.LastFocusedLeadsEnabled
@@ -139,14 +148,25 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                     var first = await process.StandardOutput.ReadLineAsync(startup.Token);
                     if (first is null) throw new InvalidDataException("Live follow exited without a decision frame.");
                     frame = bridge.LastFocusedLeadsEnabled
-                        ? LiveFollowFrame.ParseDynamic(first, topology) : LiveFollowFrame.Parse(first, 2, 3);
+                        ? LiveFollowFrame.ParseDynamic(first, topology)
+                        : LiveFollowFrame.Parse(first, 2, topology.Slots[1].RuntimePad);
                 } while (frame.FocusedPlayer != initialLeader);
             }
-            await bridge.SendAutomationAsync(frame);
+            initialFrame = frame;
+            foreach (var command in frame.PadCommands)
+                await bridge.SendAutomationAsync(command.Command);
             return new LiveFollowSession(process, bridge, topology, readError, frame);
         }
         catch (Exception error)
         {
+            if (initialFrame is not null)
+            {
+                foreach (var pad in initialFrame.PadCommands.Select(command => command.Pad))
+                {
+                    try { await bridge.SendAutomationAsync(LiveFollowFrame.Waiting(pad)); }
+                    catch (Exception stopError) when (stopError is InvalidOperationException or IOException) { }
+                }
+            }
             if (!process.HasExited) process.Kill();
             await process.WaitForExitAsync();
             var diagnostics = (await readError).Trim();
@@ -194,21 +214,23 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 if (line is null) break;
                 var frame = _bridge.LastFocusedLeadsEnabled
                     ? LiveFollowFrame.ParseDynamic(line, _topology)
-                    : LiveFollowFrame.Parse(line, 2, _followerPad);
+                    : LiveFollowFrame.Parse(line, 2, _topology.Slots[1].RuntimePad);
                 if (_stopping) break;
-                if (frame.FollowerPad != _followerPad)
-                {
-                    await _bridge.SendAutomationAsync(LiveFollowFrame.Waiting(_followerPad));
-                    _followerPad = frame.FollowerPad;
-                }
-                await _bridge.SendAutomationAsync(frame);
+                var nextPads = frame.PadCommands.Select(command => command.Pad).ToHashSet();
+                foreach (var oldPad in _followerPads.Except(nextPads))
+                    await _bridge.SendAutomationAsync(LiveFollowFrame.Waiting(oldPad));
+                _followerPads = nextPads;
+                foreach (var command in frame.PadCommands)
+                    await _bridge.SendAutomationAsync(command.Command);
                 if (_bridge.AutoFlaskEnabled)
                 {
                     foreach (var request in frame.Flasks)
                         await _bridge.SendFlaskAsync(_playerToPad[request.Player], request.Resource);
                 }
                 var changed = Current.Status != frame.Status || Current.Reason != frame.Reason ||
-                    Current.FocusedPlayer != frame.FocusedPlayer || Current.FollowerPad != frame.FollowerPad;
+                    Current.FocusedPlayer != frame.FocusedPlayer ||
+                    !Current.PadCommands.Select(command => (command.Pad, command.Status, command.Reason))
+                        .SequenceEqual(frame.PadCommands.Select(command => (command.Pad, command.Status, command.Reason)));
                 Current = frame;
                 if (changed) Dispatcher.UIThread.Post(() => StatusChanged?.Invoke(frame));
             }
@@ -227,7 +249,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 await _process.WaitForExitAsync();
                 try
                 {
-                    await _bridge.SendAutomationAsync(LiveFollowFrame.Waiting(_followerPad));
+                    foreach (var pad in _followerPads)
+                        await _bridge.SendAutomationAsync(LiveFollowFrame.Waiting(pad));
                 }
                 catch (Exception error) when (error is InvalidOperationException or IOException) { }
                 var diagnostics = (await _readError).Trim();
@@ -266,7 +289,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         await _readError;
         try
         {
-            await _bridge.SendAutomationAsync(LiveFollowFrame.Waiting(_followerPad));
+            foreach (var pad in _followerPads)
+                await _bridge.SendAutomationAsync(LiveFollowFrame.Waiting(pad));
         }
         catch (Exception error) when (error is InvalidOperationException or IOException) { }
         _process.Dispose();

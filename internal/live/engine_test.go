@@ -159,6 +159,36 @@ func TestNamedDepartureTracksCurrentManualMain(t *testing.T) {
 	}
 }
 
+func TestThreeIndependentClientsFollowCurrentMain(t *testing.T) {
+	now := time.Now().UTC()
+	engine, err := New(map[int]int{1: 101, 2: 202, 3: 303}, 1,
+		follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.SetLastFocusedLeads(true)
+	for slot, pid := range map[int]int{1: 101, 2: 202, 3: 303} {
+		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
+			ObservedAt: now, Origin: "live"})
+		engine.ObserveSample(telemetry.Sample{ProcessID: pid, SeenUTC: now.Add(time.Millisecond),
+			X: float64((slot - 1) * 10)})
+	}
+	initial := engine.Step(now.Add(time.Millisecond))
+	if len(initial) != 2 || initial[2].State != follow.CatchingUp ||
+		initial[3].State != follow.CatchingUp || initial[2].X >= 0 || initial[3].X >= 0 {
+		t.Fatalf("three-client P1 MAIN decisions wrong: %+v", initial)
+	}
+	if err := engine.ObserveManualFocus(3); err != nil {
+		t.Fatal(err)
+	}
+	switched := engine.Step(now.Add(time.Millisecond))
+	if engine.Leader() != 3 || len(switched) != 2 ||
+		switched[1].State != follow.CatchingUp || switched[2].State != follow.CatchingUp ||
+		switched[1].X <= 0 || switched[2].X <= 0 {
+		t.Fatalf("three-client P3 MAIN decisions wrong: %+v", switched)
+	}
+}
+
 func TestLiveFollowRejectsUnknownAndOldSamples(t *testing.T) {
 	now := time.Now().UTC()
 	config := follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}

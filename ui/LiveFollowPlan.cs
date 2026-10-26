@@ -28,28 +28,32 @@ public sealed record LiveFollowPlan(double Stop, double Resume, double Catchup,
 }
 
 public sealed record FlaskBridgeRequest(int Player, string Resource);
+public sealed record FollowPadCommand(int Player, int Pad, string Command, string Status, string? Reason);
 
 public sealed record FollowBridgeFrame(string Command, string Status, string? Reason)
 {
     public IReadOnlyList<FlaskBridgeRequest> Flasks { get; init; } = [];
     public int FocusedPlayer { get; init; }
     public int FollowerPad { get; init; }
+    public IReadOnlyList<FollowPadCommand> PadCommands { get; init; } = [];
 }
 
 public static class LiveFollowFrame
 {
     public static FollowBridgeFrame Waiting(int followerPad)
     {
-        if (followerPad is < 1 or > 4) throw new ArgumentOutOfRangeException(nameof(followerPad));
-        return new FollowBridgeFrame(JsonSerializer.Serialize(new { slot = followerPad, state = "waiting" }), "waiting", null)
-            { FollowerPad = followerPad };
+        if (followerPad is < 1 or > 6) throw new ArgumentOutOfRangeException(nameof(followerPad));
+        var command = JsonSerializer.Serialize(new { slot = followerPad, state = "waiting" });
+        return new FollowBridgeFrame(command, "waiting", null)
+            { FollowerPad = followerPad, PadCommands = [new FollowPadCommand(0, followerPad, command, "waiting", null)] };
     }
 
-    // The current live sensor has exactly one follower per client and no multi-role coordinates.
+    // The live sensor has one locally identified player per client and no multi-role coordinates.
     public static FollowBridgeFrame Parse(string json, int followerPartyPlayer, int followerPad,
-        int expectedLeader = 1)
+        int expectedLeader = 1, int expectedCommandCount = 1,
+        IReadOnlySet<int>? allowedFlaskPlayers = null)
     {
-        if (followerPartyPlayer is < 1 or > 6 || followerPad is < 1 or > 4 ||
+        if (followerPartyPlayer is < 1 or > 6 || followerPad is < 1 or > 6 ||
             expectedLeader is < 1 or > 6 || expectedLeader == followerPartyPlayer)
             throw new ArgumentOutOfRangeException(nameof(followerPad));
         using var document = JsonDocument.Parse(json);
@@ -57,7 +61,7 @@ public static class LiveFollowFrame
         if (root.ValueKind != JsonValueKind.Object ||
             !root.TryGetProperty("focused", out var focused) || !focused.TryGetInt32(out var leader) || leader != expectedLeader ||
             !root.TryGetProperty("commands", out var commands) || commands.ValueKind != JsonValueKind.Object ||
-            commands.EnumerateObject().Count() != 1 ||
+            commands.EnumerateObject().Count() != expectedCommandCount ||
             !commands.TryGetProperty(followerPartyPlayer.ToString(CultureInfo.InvariantCulture), out var follower) ||
             follower.ValueKind != JsonValueKind.Object ||
             !follower.TryGetProperty("state", out var stateValue) || stateValue.ValueKind != JsonValueKind.String)
@@ -86,7 +90,8 @@ public static class LiveFollowFrame
             {
                 if (item.ValueKind != JsonValueKind.Object ||
                     !item.TryGetProperty("player", out var playerValue) || !playerValue.TryGetInt32(out var player) ||
-                    player != expectedLeader && player != followerPartyPlayer ||
+                    !(allowedFlaskPlayers?.Contains(player) ??
+                        (player == expectedLeader || player == followerPartyPlayer)) ||
                     !item.TryGetProperty("resource", out var resourceValue) || resourceValue.ValueKind != JsonValueKind.String ||
                     resourceValue.GetString() is not ("life" or "mana") ||
                     !item.TryGetProperty("percent", out var percentValue) || !percentValue.TryGetDouble(out var percent) ||
@@ -108,7 +113,8 @@ public static class LiveFollowFrame
                 ? JsonSerializer.Serialize(new { slot = followerPad, state, manual_override_eligible = true })
                 : JsonSerializer.Serialize(new { slot = followerPad, state });
             return new FollowBridgeFrame(command, state, reason)
-                { Flasks = flasks, FocusedPlayer = expectedLeader, FollowerPad = followerPad };
+                { Flasks = flasks, FocusedPlayer = expectedLeader, FollowerPad = followerPad,
+                    PadCommands = [new FollowPadCommand(followerPartyPlayer, followerPad, command, state, reason)] };
         }
         if (state is not ("following" or "catching_up") ||
             !follower.TryGetProperty("x", out var xValue) || !xValue.TryGetDouble(out var x) ||
@@ -116,22 +122,44 @@ public static class LiveFollowFrame
             !double.IsFinite(x) || !double.IsFinite(y) ||
             Math.Sqrt(x * x + y * y) is < 0.001 or > 1.001)
             throw new InvalidDataException("Live follow returned an invalid movement direction.");
-        return new FollowBridgeFrame(manualEligible
+        var movement = manualEligible
             ? JsonSerializer.Serialize(new { slot = followerPad, state, x, y, manual_override_eligible = true })
-            : JsonSerializer.Serialize(new { slot = followerPad, state, x, y }), state, reason)
-                { Flasks = flasks, FocusedPlayer = expectedLeader, FollowerPad = followerPad };
+            : JsonSerializer.Serialize(new { slot = followerPad, state, x, y });
+        return new FollowBridgeFrame(movement, state, reason)
+            { Flasks = flasks, FocusedPlayer = expectedLeader, FollowerPad = followerPad,
+                PadCommands = [new FollowPadCommand(followerPartyPlayer, followerPad, movement, state, reason)] };
     }
 
     public static FollowBridgeFrame ParseDynamic(string json, PartyTopology topology)
     {
-        if (topology.Id != "2-split") throw new ArgumentException("Dynamic live follow requires split P1/P2.");
+        if (topology.Id is not ("2-split" or "3-three-singles"))
+            throw new ArgumentException("Dynamic live follow requires one player per client.");
         using var document = JsonDocument.Parse(json);
         if (document.RootElement.ValueKind != JsonValueKind.Object ||
             !document.RootElement.TryGetProperty("focused", out var focused) ||
-            !focused.TryGetInt32(out var leader) || leader is not (1 or 2))
+            !focused.TryGetInt32(out var leader) ||
+            !topology.Slots.Any(slot => slot.PartyPlayer == leader) ||
+            !document.RootElement.TryGetProperty("commands", out var commands) ||
+            commands.ValueKind != JsonValueKind.Object)
             throw new InvalidDataException("Live follow returned an unknown MAIN.");
-        var follower = leader == 1 ? 2 : 1;
-        var pad = topology.Slots.Single(slot => slot.PartyPlayer == follower).RuntimePad;
-        return Parse(json, follower, pad, leader);
+        var followers = topology.Slots.Where(slot => slot.PartyPlayer != leader).ToArray();
+        var expected = followers.Select(slot => slot.PartyPlayer.ToString(CultureInfo.InvariantCulture))
+            .OrderBy(value => value, StringComparer.Ordinal);
+        var actual = commands.EnumerateObject().Select(item => item.Name)
+            .OrderBy(value => value, StringComparer.Ordinal);
+        if (!actual.SequenceEqual(expected))
+            throw new InvalidDataException("Live follow returned commands for the wrong players.");
+        var allowedPlayers = topology.Slots.Select(slot => slot.PartyPlayer).ToHashSet();
+        var parsed = followers.Select(slot => Parse(json, slot.PartyPlayer, slot.RuntimePad,
+            leader, followers.Length, allowedPlayers)).ToArray();
+        var padCommands = parsed.SelectMany(frame => frame.PadCommands).ToArray();
+        var sameStatus = parsed.All(frame => frame.Status == parsed[0].Status);
+        var sameReason = parsed.All(frame => frame.Reason == parsed[0].Reason);
+        return parsed[0] with
+        {
+            Status = sameStatus ? parsed[0].Status : "mixed",
+            Reason = sameReason ? parsed[0].Reason : null,
+            PadCommands = padCommands
+        };
     }
 }

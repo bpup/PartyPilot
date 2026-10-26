@@ -5,6 +5,24 @@ internal static class ProcessPipelineSmoke
 {
     public static async Task RunAsync()
     {
+        var triple = PartyTopologies.ForPlayerCount(3)
+            .Single(item => item.Id == "3-three-singles");
+        var tripleFrame = LiveFollowFrame.ParseDynamic(
+            "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0},\"3\":{\"state\":\"waiting\"}}}",
+            triple);
+        var switchedTriple = LiveFollowFrame.ParseDynamic(
+            "{\"focused\":3,\"commands\":{\"1\":{\"state\":\"waiting\"},\"2\":{\"state\":\"following\",\"x\":0,\"y\":1}}}",
+            triple);
+        if (!tripleFrame.PadCommands.Select(command => command.Pad).SequenceEqual([3, 5]) ||
+            !switchedTriple.PadCommands.Select(command => command.Pad).SequenceEqual([1, 3]))
+            throw new Exception("Three-client live follow did not map independent roles to P1/P3/P5.");
+        try
+        {
+            LiveFollowFrame.ParseDynamic(
+                "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"},\"4\":{\"state\":\"waiting\"}}}", triple);
+            throw new Exception("Three-client live follow accepted an unknown role.");
+        }
+        catch (InvalidDataException) { }
         if (OperatingSystem.IsWindows()) return; // The local fake executables use a Unix shebang.
         var directory = Path.Combine(Path.GetTempPath(), "partypilot-pipeline-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -20,6 +38,9 @@ internal static class ProcessPipelineSmoke
         var switchBridgeExe = Path.Combine(directory, "fake-switch-bridge");
         var switchFollowExe = Path.Combine(directory, "fake-switch-follow");
         var switchLog = Path.Combine(directory, "switch-bridge-input.jsonl");
+        var tripleBridgeExe = Path.Combine(directory, "fake-triple-bridge");
+        var tripleFollowExe = Path.Combine(directory, "fake-triple-follow");
+        var tripleLog = Path.Combine(directory, "triple-bridge-input.jsonl");
         try
         {
             File.WriteAllText(bridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
@@ -63,6 +84,22 @@ internal static class ProcessPipelineSmoke
                 "    if focus != {'type':'manual_focus','slot':expected}: sys.exit(2)\n" +
                 "    print(json.dumps({'focused':expected,'commands':{str(follower):{'state':'following','x':1,'y':0}}}), flush=True)\n" +
                 "time.sleep(0.3)\n");
+            File.WriteAllText(tripleBridgeExe, "#!/usr/bin/env python3\nimport sys,json\n" +
+                "if '--last-focused-leads' not in sys.argv or '--client3-players' not in sys.argv or sys.argv[sys.argv.index('--client3-players')+1] != '5': sys.exit(2)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"last_focused_leads\":true,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3,3:5\",\"private_client3_pid\":103,\"private_client3_window_handle\":203,\"private_client3_slots\":[5]}', flush=True)\n" +
+                "focused=False\n" +
+                $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(tripleLog)}, 'a') as out: out.write(line)\n" +
+                "    command=json.loads(line)\n" +
+                "    if not focused and command.get('slot')==5 and command.get('state')=='following':\n" +
+                "        print('{\"event\":\"manual_focus\",\"slot\":5}', flush=True); focused=True\n");
+            File.WriteAllText(tripleFollowExe, "#!/usr/bin/env python3\nimport sys,json,time\n" +
+                "if '-roster' not in sys.argv or sys.argv[sys.argv.index('-roster')+1] != '1:101,2:102,3:103': sys.exit(2)\n" +
+                "if '-last-focused-leads' not in sys.argv: sys.exit(2)\n" +
+                "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0},\"3\":{\"state\":\"following\",\"x\":0,\"y\":1}}}', flush=True)\n" +
+                "focus=json.loads(sys.stdin.readline())\n" +
+                "if focus != {'type':'manual_focus','slot':3}: sys.exit(2)\n" +
+                "print('{\"focused\":3,\"commands\":{\"1\":{\"state\":\"following\",\"x\":1,\"y\":0},\"2\":{\"state\":\"following\",\"x\":0,\"y\":1}}}', flush=True)\n" +
+                "time.sleep(0.3)\n");
             File.WriteAllText(couchBridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '--focus-pad-map' not in sys.argv or sys.argv[sys.argv.index('--focus-pad-map')+1] != '1:1,2:2': sys.exit(2)\n" +
                 "if '--right-stick-follower-override' not in sys.argv or '--direct-right-stick-slot' not in sys.argv or sys.argv[sys.argv.index('--direct-right-stick-slot')+1] != '2': sys.exit(2)\n" +
@@ -87,6 +124,8 @@ internal static class ProcessPipelineSmoke
             File.SetUnixFileMode(dynamicFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(switchBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(switchFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(tripleBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(tripleFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(couchBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(wgiBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(client3BridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -173,6 +212,40 @@ internal static class ProcessPipelineSmoke
                 throw new Exception("Runtime MAIN switching did not neutralize old pads and route new followers: " +
                     string.Join(" | ", switchCommands));
             Console.WriteLine("P1 to P2 to P1 live MAIN switching checked with local fake executables.");
+            var tripleGame = Path.GetFullPath(Path.Combine(directory, "Client3-PathOfExile_x64.exe"));
+            var tripleClients = new[]
+            {
+                new LaunchedClient(101, 201, "C:/GameA.exe"),
+                new LaunchedClient(102, 202, "D:/GameB.exe"),
+                new LaunchedClient(103, 203, tripleGame)
+            };
+            if (!PrivateClient3Plan.TryCreate(triple, tripleClients, out var triplePlan) || triplePlan is null)
+                throw new Exception("Three single-player clients did not produce a P5 input binding.");
+            await using (var tripleBridge = await BridgeSession.StartAsync(tripleBridgeExe, triple.Slots, 0,
+                @"HID\VID_1234&PID_5678\DEVICE", tripleClients.Select(client => client.Executable).ToArray(),
+                false, privatePlan: triplePlan, lastFocusedLeads: true))
+            {
+                tripleBridge.StartReading();
+                await using (var tripleFollow = await LiveFollowSession.StartAsync(tripleFollowExe,
+                    triple, tripleClients, tripleBridge, plan))
+                {
+                    tripleFollow.StartReading();
+                    var tripleDeadline = DateTime.UtcNow.AddSeconds(5);
+                    while ((tripleFollow.Current.FocusedPlayer != 3 ||
+                            !File.Exists(tripleLog) || File.ReadAllLines(tripleLog).Count(line =>
+                                line.Contains("\"state\":\"following\"")) < 4) &&
+                           DateTime.UtcNow < tripleDeadline)
+                        await Task.Delay(20);
+                }
+            }
+            var tripleCommands = File.Exists(tripleLog) ? File.ReadAllLines(tripleLog) : [];
+            var tripleMovementPads = tripleCommands.Where(line => line.Contains("\"state\":\"following\""))
+                .Select(line => JsonDocument.Parse(line).RootElement.GetProperty("slot").GetInt32()).ToArray();
+            if (!tripleMovementPads.SequenceEqual([3, 5, 1, 3]) ||
+                !tripleCommands.Any(line => line.Contains("\"slot\":5,\"state\":\"waiting\"")))
+                throw new Exception("Three-client MAIN switch did not route P1/P3/P5 safely: " +
+                    string.Join(" | ", tripleCommands));
+            Console.WriteLine("Three independent clients and P5 private follow routing checked with local fake executables.");
             var couch = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-couch");
             await using (var pairedBridge = await BridgeSession.StartAsync(couchBridgeExe, couch.Slots, 0,
                 @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe"], true))

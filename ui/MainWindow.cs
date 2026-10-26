@@ -396,7 +396,7 @@ public sealed class MainWindow : Window
 
     private Border BuildFollowStep()
     {
-        var panel = Step("4", "FOLLOW · 跟随", "当前实时输入仅支持双客户端各一名角色；请先完成配对，并在两个客户端启用只读位置传感器。距离与时效需要按实际游戏校准。");
+        var panel = Step("4", "FOLLOW · 跟随", "实时输入支持双客户端 2P 或三个客户端 3P，均须每端一名角色；请先完成配对，并在每个客户端启用只读位置传感器。距离与时效需要按实际游戏校准。");
         var fields = new (TextBox Box, string Label)[]
         {
             (_followStop, "停止距离"), (_followResume, "恢复距离"), (_followCatchup, "追赶距离"),
@@ -411,7 +411,7 @@ public sealed class MainWindow : Window
             box.TextChanged += (_, _) => UpdateFollowControls();
             panel.Children.Add(box);
         }
-        panel.Children.Add(Label("队长角色名（可选，用于识别离队）", 12, MutedBrush));
+        panel.Children.Add(Label("初始 MAIN 角色名（可选，用于识别离队）", 12, MutedBrush));
         _followLeaderName.Watermark = "角色名";
         _followLeaderName.Width = 190;
         _followLeaderName.HorizontalAlignment = HorizontalAlignment.Left;
@@ -1223,8 +1223,9 @@ public sealed class MainWindow : Window
         var valid = LiveFollowPlan.TryCreate(_followStop.Text, _followResume.Text, _followCatchup.Text,
             _followMaxAge.Text, _followLogAge.Text, _followLeaderName.Text, out _);
         _startFollow.IsEnabled = OperatingSystem.IsWindows() && !_busy && !_followStopping && _follow is null &&
-            _bridge is not null && _pairingSettled && _selectedTopology?.Id == "2-split" &&
-            _launchedClients.Count == 2 && valid;
+            _bridge is not null && _pairingSettled &&
+            _selectedTopology?.Id is "2-split" or "3-three-singles" &&
+            _launchedClients.Count == _selectedTopology.ClientCount && valid;
         _stopFollow.IsEnabled = _follow is not null;
     }
 
@@ -1451,7 +1452,9 @@ public sealed class MainWindow : Window
                     _inviteNames.Take(_selectedTopology.PlayerCount).Select(box => box.Text).ToArray(),
                     out var inviteNames) && inviteNames is not null)
             {
-                var confirmed = new Dictionary<int, string> { [2] = inviteNames.ForClient(2) };
+                var confirmed = _selectedTopology.Slots.Where(slot => slot.PartyPlayer != 1)
+                    .ToDictionary(slot => slot.PartyPlayer,
+                        slot => inviteNames.ForClient(slot.Client));
                 if (plan.LeaderName.Length == 0) confirmed[1] = inviteNames.ForClient(1);
                 memberNames = confirmed;
             }
@@ -1476,6 +1479,24 @@ public sealed class MainWindow : Window
 
     private void FollowStatusChanged(FollowBridgeFrame frame)
     {
+        if (_selectedTopology?.Id == "3-three-singles" &&
+            frame.Reason is not ("party disbanded" or "local client left party" or "followed member left party"))
+        {
+            var states = string.Join(" · ", frame.PadCommands.Select(command =>
+                $"P{command.Player} {command.Status switch
+                {
+                    "following" => "跟随",
+                    "catching_up" => "追赶",
+                    "holding" => "停靠",
+                    _ when command.Reason == "dead follower" => "等待（角色死亡）",
+                    _ when command.Reason == "missing position" => "等待（缺少位置）",
+                    _ when command.Reason == "different or unknown instance" => "等待（区域未核对）",
+                    _ when command.Reason == "stale position" => "等待（位置过期）",
+                    _ => "等待"
+                }}"));
+            _followStatus.Text = $"MAIN P{frame.FocusedPlayer} · {states}；游戏内效果待验证。";
+            return;
+        }
         _followStatus.Text = (frame.Status, frame.Reason) switch
         {
             ("following", _) => "已输出跟随方向；游戏内移动效果待验证。",
