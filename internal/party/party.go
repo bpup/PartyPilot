@@ -132,20 +132,37 @@ func (c *Coordinator) Focused() focus.Player {
 	return c.router.Focused()
 }
 
+// ResolvedTargets returns the same target graph that Step uses for this focus.
+func (c *Coordinator) ResolvedTargets() map[int]int {
+	activeLeader := c.leader
+	if c.lastFocusedLeads {
+		activeLeader = c.lastManualFocus
+	}
+	return c.resolveTargets(activeLeader)
+}
+
 func (c *Coordinator) Step(now time.Time, positions map[int]follow.Position) map[int]follow.Command {
 	return c.StepWithTerrain(now, positions, nil)
 }
 
 func (c *Coordinator) StepWithTerrain(now time.Time, positions map[int]follow.Position, terrain *navigation.Grid) map[int]follow.Command {
-	return c.stepWithTerrainForSlot(now, positions, func(int) *navigation.Grid { return terrain })
+	return c.stepWithTerrainForSlot(now, positions, func(int) *navigation.Grid { return terrain }, nil)
 }
 
 // StepWithTerrains supplies each follower its own caller-provided area map.
 func (c *Coordinator) StepWithTerrains(now time.Time, positions map[int]follow.Position, terrains map[int]*navigation.Grid) map[int]follow.Command {
-	return c.stepWithTerrainForSlot(now, positions, func(slot int) *navigation.Grid { return terrains[slot] })
+	return c.StepWithTerrainsAndHolds(now, positions, terrains, nil)
 }
 
-func (c *Coordinator) stepWithTerrainForSlot(now time.Time, positions map[int]follow.Position, terrainFor func(int) *navigation.Grid) map[int]follow.Command {
+// StepWithTerrainsAndHolds suppresses a follower's route evaluation while
+// retaining its observed position for another player's configured target.
+func (c *Coordinator) StepWithTerrainsAndHolds(now time.Time, positions map[int]follow.Position,
+	terrains map[int]*navigation.Grid, holds map[int]string) map[int]follow.Command {
+	return c.stepWithTerrainForSlot(now, positions, func(slot int) *navigation.Grid { return terrains[slot] }, holds)
+}
+
+func (c *Coordinator) stepWithTerrainForSlot(now time.Time, positions map[int]follow.Position,
+	terrainFor func(int) *navigation.Grid, holds map[int]string) map[int]follow.Command {
 	activeLeader := c.leader
 	if c.lastFocusedLeads {
 		activeLeader = c.lastManualFocus
@@ -156,7 +173,7 @@ func (c *Coordinator) stepWithTerrainForSlot(now time.Time, positions map[int]fo
 		}
 		c.lastActiveLeader = activeLeader
 	}
-	resolvedTargets := c.resolveTargets(activeLeader)
+	resolvedTargets := c.ResolvedTargets()
 	commands := make(map[int]follow.Command, len(c.followers)-1)
 	for slot, engine := range c.followers {
 		if slot == activeLeader {
@@ -165,6 +182,11 @@ func (c *Coordinator) stepWithTerrainForSlot(now time.Time, positions map[int]fo
 		if slot == c.router.Focused().Slot {
 			engine.Reset()
 			commands[slot] = follow.Command{State: follow.Holding, Reason: "manual control"}
+			continue
+		}
+		if reason := holds[slot]; reason != "" {
+			engine.Reset()
+			commands[slot] = follow.Command{State: follow.Waiting, Reason: reason}
 			continue
 		}
 		target := resolvedTargets[slot]

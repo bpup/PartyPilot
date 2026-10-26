@@ -60,6 +60,38 @@ func TestLiveFollowRequiresKnownWorldCoordinateSpace(t *testing.T) {
 	}
 }
 
+func TestLiveCrossClientMotionSkewHoldsOnlyAffectedFollower(t *testing.T) {
+	start := time.Now().UTC()
+	engine, err := New(map[int]int{1: 101, 2: 202, 3: 303}, 1,
+		follow.Config{StopDistance: 2, ResumeDistance: 5, CatchUpDistance: 10,
+			MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	if err := engine.SetFollowTarget(2, 3); err != nil {
+		t.Fatal(err)
+	}
+	for _, slot := range []int{1, 2, 3} {
+		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
+			ObservedAt: start, Origin: "live"})
+	}
+	observeGridSample(engine, telemetry.Sample{ProcessID: 101, SeenUTC: start.Add(time.Millisecond), X: 40})
+	observeGridSample(engine, telemetry.Sample{ProcessID: 303, SeenUTC: start.Add(150 * time.Millisecond), X: 20})
+	observeGridSample(engine, telemetry.Sample{ProcessID: 202, SeenUTC: start.Add(151 * time.Millisecond), X: 0})
+	commands := engine.Step(start.Add(151 * time.Millisecond))
+	if got := commands[3]; got.State != follow.Waiting || got.Reason != "cross-client motion skew" {
+		t.Fatalf("stale pair moved: %+v", got)
+	}
+	if got := commands[2]; got.State != follow.CatchingUp {
+		t.Fatalf("fresh configured target was suppressed by another pair: %+v", got)
+	}
+	observeGridSample(engine, telemetry.Sample{ProcessID: 101, SeenUTC: start.Add(160 * time.Millisecond), X: 40})
+	if got := engine.Step(start.Add(160 * time.Millisecond))[3]; got.State != follow.CatchingUp {
+		t.Fatalf("synchronized pair did not resume: %+v", got)
+	}
+}
+
 func TestLiveFollowTurnsAlongRecordedLeaderTrail(t *testing.T) {
 	now := time.Now().UTC()
 	engine, err := New(map[int]int{1: 101, 2: 202}, 1,

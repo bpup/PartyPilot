@@ -40,6 +40,11 @@ type Engine struct {
 // independent sensor is a world position; an unknown space is never driven.
 const worldPerGridUnit = 10.869565217391305
 
+// The supplied build holds cross-client follow when the two motion frames
+// differ by more than 100 ms. SeenUTC is the independent sensor's capture time;
+// its separate source TickMs check is not yet available here.
+const maxCrossClientMotionSkew = 100 * time.Millisecond
+
 func (e *Engine) SetLeaderName(name string) {
 	e.memberNames[e.baseLeader] = strings.TrimSpace(name)
 	e.leaderName = e.memberNames[e.leader]
@@ -200,6 +205,7 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 	positions := make(map[int]follow.Position, len(e.slots))
 	deadFollowers := make(map[int]bool)
 	terrainWait := make(map[int]bool)
+	skewWait := make(map[int]bool)
 	terrains := make(map[int]*navigation.Grid)
 	for _, slot := range e.slots {
 		sample, hasSample := e.samples[slot]
@@ -256,15 +262,28 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 			}
 		}
 	}
-	for slot := range terrainWait {
-		delete(positions, slot)
-	}
-	commands := e.coordinator.StepWithTerrains(now, positions, terrains)
-	for slot, command := range commands {
-		if terrainWait[slot] {
-			commands[slot] = follow.Command{State: follow.Waiting, Reason: "terrain binding evidence missing"}
+	for slot, target := range e.coordinator.ResolvedTargets() {
+		if slot == e.leader {
 			continue
 		}
+		follower, followerOK := positions[slot]
+		leader, leaderOK := positions[target]
+		if followerOK && leaderOK {
+			skew := follower.Seen.Sub(leader.Seen)
+			if skew > maxCrossClientMotionSkew || skew < -maxCrossClientMotionSkew {
+				skewWait[slot] = true
+			}
+		}
+	}
+	holds := make(map[int]string, len(terrainWait)+len(skewWait))
+	for slot := range terrainWait {
+		holds[slot] = "terrain binding evidence missing"
+	}
+	for slot := range skewWait {
+		holds[slot] = "cross-client motion skew"
+	}
+	commands := e.coordinator.StepWithTerrainsAndHolds(now, positions, terrains, holds)
+	for slot, command := range commands {
 		if deadFollowers[slot] {
 			commands[slot] = follow.Command{State: follow.Waiting, Reason: "dead follower"}
 			continue
