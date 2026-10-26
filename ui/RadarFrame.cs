@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace PartyPilot.Desktop;
 
 public sealed record RadarMarker(uint Id, string Category, string Path, string? Label,
-    string? ItemPath, double X, double Y);
+    string? ItemPath, int? Stack, string? Rarity, double X, double Y);
 
 public sealed record RadarFrame(int ProcessId, DateTime SeenUtc, double PlayerX, double PlayerY,
     IReadOnlyList<RadarMarker> Markers);
@@ -57,17 +57,33 @@ public static class RadarFrames
                     if (itemPathValue.ValueKind != JsonValueKind.String) return false;
                     itemPath = itemPathValue.GetString();
                 }
+                int? stack = null;
+                if (item.TryGetProperty("Stack", out var stackValue) && stackValue.ValueKind != JsonValueKind.Null)
+                {
+                    if (!stackValue.TryGetInt32(out var parsedStack)) return false;
+                    stack = parsedStack;
+                }
+                string? rarity = null;
+                if (item.TryGetProperty("Rarity", out var rarityValue) && rarityValue.ValueKind != JsonValueKind.Null)
+                {
+                    if (rarityValue.ValueKind != JsonValueKind.String) return false;
+                    rarity = rarityValue.GetString();
+                }
                 if (category == "player" &&
                     (!path.StartsWith("Metadata/Characters/", StringComparison.OrdinalIgnoreCase) ||
-                     string.IsNullOrWhiteSpace(label) || Encoding.UTF8.GetByteCount(label) > 64 || itemPath != null))
+                     string.IsNullOrWhiteSpace(label) || Encoding.UTF8.GetByteCount(label) > 64 ||
+                     itemPath != null || stack != null || rarity != null))
                     return false;
                 if (category == "loot" &&
                     (!WorldItemWrapperPath(path) || string.IsNullOrWhiteSpace(label) ||
                      Encoding.UTF8.GetByteCount(label) > 96 ||
                      itemPath?.StartsWith("Metadata/Items/", StringComparison.OrdinalIgnoreCase) != true ||
-                     Encoding.UTF8.GetByteCount(itemPath) > 256)) return false;
-                if (category is not ("player" or "loot") && (label != null || itemPath != null)) return false;
-                markers.Add(new RadarMarker(id, category, path, label, itemPath, x, y));
+                     Encoding.UTF8.GetByteCount(itemPath) > 256 ||
+                     stack is < 1 or > 999_999 ||
+                     (rarity != null && rarity is not ("normal" or "magic" or "rare" or "unique")))) return false;
+                if (category is not ("player" or "loot") &&
+                    (label != null || itemPath != null || stack != null || rarity != null)) return false;
+                markers.Add(new RadarMarker(id, category, path, label, itemPath, stack, rarity, x, y));
             }
             frame = new RadarFrame(pid, seenUtc, playerX, playerY, markers);
             return true;

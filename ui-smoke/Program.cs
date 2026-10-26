@@ -21,9 +21,10 @@ var radarPayload = System.Text.Encoding.UTF8.GetBytes(
     "{\"EntityId\":8,\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\",\"X\":95,\"Y\":205}," +
     "{\"EntityId\":9,\"Category\":\"player\",\"Path\":\"Metadata/Characters/Player\",\"Label\":\"Teammate\",\"X\":110,\"Y\":200}," +
     "{\"EntityId\":10,\"Category\":\"league\",\"Path\":\"Metadata/MiscellaneousObjects/Expedition2/Expedition2Encounter\",\"X\":105,\"Y\":210}," +
-    "{\"EntityId\":11,\"Category\":\"loot\",\"Path\":\"Metadata/MiscellaneousObjects/WorldItem@123\",\"ItemPath\":\"Metadata/Items/Currency/CurrencyIdentification\",\"Label\":\"Scroll of Wisdom\",\"X\":92,\"Y\":194}]}"
+    "{\"EntityId\":11,\"Category\":\"loot\",\"Path\":\"Metadata/MiscellaneousObjects/WorldItem@123\",\"ItemPath\":\"Metadata/Items/Currency/CurrencyIdentification\",\"Label\":\"Scroll of Wisdom\",\"Stack\":47,\"Rarity\":\"normal\",\"X\":92,\"Y\":194}]}"
 );
 if (!RadarFrames.TryParse(radarPayload, 123, DateTime.UtcNow, out var radarFrame) || radarFrame?.Markers.Count != 5 ||
+    radarFrame.Markers.Last().Stack != 47 || radarFrame.Markers.Last().Rarity != "normal" ||
     RadarFrames.TryParse(radarPayload, 124, DateTime.UtcNow, out _) ||
     RadarFrames.TryParse(radarPayload, 123, DateTime.UtcNow.AddSeconds(3), out _) ||
     RadarProjection.TryScale("0", out _) || !RadarProjection.TryScale("2", out var radarScale))
@@ -39,8 +40,20 @@ if (RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
         123, DateTime.UtcNow, out _) ||
     RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
         radarText.Replace("\"ItemPath\":\"Metadata/Items/Currency/CurrencyIdentification\"", "\"ItemPath\":null")),
+        123, DateTime.UtcNow, out _) ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        radarText.Replace("\"Stack\":47", "\"Stack\":0")),
+        123, DateTime.UtcNow, out _) ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        radarText.Replace("\"Rarity\":\"normal\"", "\"Rarity\":\"currency\"")),
         123, DateTime.UtcNow, out _))
     throw new Exception("Radar accepted duplicate or failed diagnostic markers.");
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        radarText.Replace("\"Stack\":47,\"Rarity\":\"normal\",", "")),
+        123, DateTime.UtcNow, out var oldLootFrame) ||
+    oldLootFrame is not { } parsedOldLoot ||
+    parsedOldLoot.Markers.Last().Stack != null || parsedOldLoot.Markers.Last().Rarity != null)
+    throw new Exception("Radar rejected loot without optional metadata.");
 var projected = RadarProjection.Project(radarFrame.PlayerX, radarFrame.PlayerY,
     radarFrame.Markers[0], 400, 300, radarScale);
 if (projected != (406d, 296d)) throw new Exception("Radar marker projection changed unexpectedly.");

@@ -82,10 +82,16 @@ func TestRadarLootRequiresResolvedWorldItem(t *testing.T) {
 		`"RadarEntities":[{"EntityId":9,"Category":"loot",` +
 		`"Path":"Metadata/MiscellaneousObjects/WorldItem@123",` +
 		`"ItemPath":"Metadata/Items/Currency/CurrencyIdentification",` +
-		`"Label":"Scroll of Wisdom","X":4,"Y":5,"Z":6}]}`
+		`"Label":"Scroll of Wisdom","Stack":47,"Rarity":"normal","X":4,"Y":5,"Z":6}]}`
 	if sample, err := Decode([]byte(base)); err != nil || sample.RadarEntities[0].ItemPath == nil ||
-		*sample.RadarEntities[0].ItemPath != "Metadata/Items/Currency/CurrencyIdentification" {
+		*sample.RadarEntities[0].ItemPath != "Metadata/Items/Currency/CurrencyIdentification" ||
+		sample.RadarEntities[0].Stack == nil || *sample.RadarEntities[0].Stack != 47 {
 		t.Fatalf("resolved loot observation rejected: %+v, %v", sample, err)
+	}
+	withoutOptional := strings.Replace(strings.Replace(base, `,"Stack":47`, "", 1), `,"Rarity":"normal"`, "", 1)
+	if sample, err := Decode([]byte(withoutOptional)); err != nil ||
+		sample.RadarEntities[0].Stack != nil || sample.RadarEntities[0].Rarity != nil {
+		t.Fatalf("loot without optional metadata rejected: %+v, %v", sample, err)
 	}
 	for _, changed := range []string{
 		strings.Replace(base, `"ItemPath":"Metadata/Items/Currency/CurrencyIdentification"`, `"ItemPath":null`, 1),
@@ -93,6 +99,9 @@ func TestRadarLootRequiresResolvedWorldItem(t *testing.T) {
 		strings.Replace(base, `"Label":"Scroll of Wisdom"`, `"Label":null`, 1),
 		strings.Replace(base, `"Path":"Metadata/MiscellaneousObjects/WorldItem@123"`, `"Path":"Metadata/MiscellaneousObjects/Chest"`, 1),
 		strings.Replace(base, `"Category":"loot"`, `"Category":"chest"`, 1),
+		strings.Replace(base, `"Stack":47`, `"Stack":0`, 1),
+		strings.Replace(base, `"Stack":47`, `"Stack":1000000`, 1),
+		strings.Replace(base, `"Rarity":"normal"`, `"Rarity":"currency"`, 1),
 	} {
 		if _, err := Decode([]byte(changed)); err == nil {
 			t.Fatalf("unresolved loot marker accepted: %s", changed)

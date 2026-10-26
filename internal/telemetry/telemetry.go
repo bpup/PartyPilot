@@ -55,6 +55,8 @@ type RadarEntity struct {
 	Path     string  `json:"Path"`
 	Label    *string `json:"Label,omitempty"`
 	ItemPath *string `json:"ItemPath,omitempty"`
+	Stack    *int    `json:"Stack,omitempty"`
+	Rarity   *string `json:"Rarity,omitempty"`
 	X        float64 `json:"X"`
 	Y        float64 `json:"Y"`
 	Z        float64 `json:"Z"`
@@ -120,7 +122,8 @@ func validRadar(entities []RadarEntity, status string, seen *time.Time) bool {
 		}
 		if entity.Category == "player" {
 			if !strings.HasPrefix(entity.Path, "Metadata/Characters/") || entity.Label == nil ||
-				strings.TrimSpace(*entity.Label) == "" || len(*entity.Label) > 64 || entity.ItemPath != nil {
+				strings.TrimSpace(*entity.Label) == "" || len(*entity.Label) > 64 || entity.ItemPath != nil ||
+				entity.Stack != nil || entity.Rarity != nil {
 				return false
 			}
 		} else if entity.Category == "loot" {
@@ -129,12 +132,27 @@ func validRadar(entities []RadarEntity, status string, seen *time.Time) bool {
 				entity.Label == nil || strings.TrimSpace(*entity.Label) == "" || len(*entity.Label) > 96 {
 				return false
 			}
-		} else if entity.Label != nil || entity.ItemPath != nil {
+			if entity.Stack != nil && (*entity.Stack < 1 || *entity.Stack > 999999) {
+				return false
+			}
+			if entity.Rarity != nil && !validLootRarity(*entity.Rarity) {
+				return false
+			}
+		} else if entity.Label != nil || entity.ItemPath != nil || entity.Stack != nil || entity.Rarity != nil {
 			return false
 		}
 		ids[entity.EntityID] = true
 	}
 	return true
+}
+
+func validLootRarity(rarity string) bool {
+	switch rarity {
+	case "normal", "magic", "rare", "unique":
+		return true
+	default:
+		return false
+	}
 }
 
 func worldItemWrapperPath(path string) bool {

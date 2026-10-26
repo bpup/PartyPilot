@@ -195,6 +195,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 !string.IsNullOrWhiteSpace(playerName) && Encoding.UTF8.GetByteCount(playerName) <= 64;
             string? itemPath = null;
             string? lootName = null;
+            int? lootStack = null;
+            string? lootRarity = null;
             if (RadarClassifier.IsWorldItemWrapperPath(path))
             {
                 try
@@ -208,6 +210,10 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                     {
                         itemPath = candidatePath;
                         lootName = candidateName;
+                        try { lootStack = RadarLootMetadata.Stack(item?.GetComponent<Stack>()?.Size); }
+                        catch { /* Stack remains unknown when its component is unreadable. */ }
+                        try { lootRarity = RadarLootMetadata.Rarity(item?.GetComponent<Mods>()?.ItemRarity.ToString()); }
+                        catch { /* Rarity remains unknown when its component is unreadable. */ }
                     }
                 }
                 catch
@@ -228,6 +234,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 Path = path,
                 Label = lootName ?? (isPlayer ? playerName : null),
                 ItemPath = itemPath,
+                Stack = lootStack,
+                Rarity = lootRarity,
                 X = pos.X,
                 Y = pos.Y,
                 Z = pos.Z

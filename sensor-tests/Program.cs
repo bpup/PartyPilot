@@ -99,4 +99,11 @@ var selectedLoot = RadarPacketBudget.Select(largeLoot);
 Require(selectedLoot.Length is > 0 and < 96 &&
     selectedLoot.Sum(item => System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(item).Length + 1) <= 48_000,
     "Large loot labels exceeded the radar packet budget.");
+Require(RadarLootMetadata.Stack(1) == 1 && RadarLootMetadata.Stack(999_999) == 999_999 &&
+    RadarLootMetadata.Stack(null) == null && RadarLootMetadata.Stack(0) == null &&
+    RadarLootMetadata.Stack(1_000_000) == null &&
+    RadarLootMetadata.Rarity("Normal") == "normal" &&
+    RadarLootMetadata.Rarity("Unique") == "unique" &&
+    RadarLootMetadata.Rarity("Currency") == null && RadarLootMetadata.Rarity(null) == null,
+    "Loot stack or rarity admitted an unsupported value.");
 Console.WriteLine("Sensor diagnostics passed.");
