@@ -4,6 +4,8 @@ import (
 	"math"
 	"testing"
 	"time"
+
+	"partypilot/internal/navigation"
 )
 
 func TestFollowHysteresisAndCatchUp(t *testing.T) {
@@ -33,6 +35,63 @@ func TestFollowHysteresisAndCatchUp(t *testing.T) {
 	leader.X = 11
 	if got = engine.Step(now, leader, follower); got.State != CatchingUp {
 		t.Fatalf("catch up: %+v", got)
+	}
+}
+
+func TestTerrainRouteTurnsAndMissingMapStops(t *testing.T) {
+	now := time.Unix(50, 0)
+	engine, ok := New(Config{StopDistance: 1, ResumeDistance: 2, CatchUpDistance: 20,
+		MaxAge: time.Second, RequireTerrain: true})
+	if !ok {
+		t.Fatal("invalid terrain config")
+	}
+	leader := Position{X: 4.5, Y: 2.5, Area: "instance", Seen: now, Valid: true}
+	follower := Position{X: 0.5, Y: 2.5, Area: "instance", Seen: now, Valid: true}
+	grid := &navigation.Grid{Area: "instance", CellSize: 1, Width: 5, Height: 5,
+		Blocked: []navigation.Cell{{X: 2, Y: 1}, {X: 2, Y: 2}, {X: 2, Y: 3}}}
+	if got := engine.StepWithTerrain(now, leader, follower, grid); got.State != Following || got.X != 1 || got.Y != 0 {
+		t.Fatalf("first route cell: %+v", got)
+	}
+	follower.X = 1.5
+	if got := engine.StepWithTerrain(now, leader, follower, grid); got.State != Following || got.X != 0 || got.Y != -1 {
+		t.Fatalf("route failed to turn around obstacle: %+v", got)
+	}
+	if got := engine.StepWithTerrain(now, leader, follower, nil); got.State != Waiting {
+		t.Fatalf("missing terrain produced motion: %+v", got)
+	}
+	grid.Area = "other-instance"
+	if got := engine.StepWithTerrain(now, leader, follower, grid); got.State != Waiting {
+		t.Fatalf("other-instance terrain produced motion: %+v", got)
+	}
+	grid.Area = "instance"
+	grid.Blocked = append(grid.Blocked, navigation.Cell{X: 2, Y: 0}, navigation.Cell{X: 2, Y: 4})
+	if got := engine.StepWithTerrain(now, leader, follower, grid); got.State != Waiting {
+		t.Fatalf("unreachable terrain produced motion: %+v", got)
+	}
+	optional, _ := New(Config{StopDistance: 1, ResumeDistance: 2, CatchUpDistance: 20, MaxAge: time.Second})
+	known := &navigation.Grid{Area: "instance", CellSize: 1, Width: 5, Height: 5}
+	if got := optional.StepWithTerrain(now, leader, follower, known); got.State != Following {
+		t.Fatalf("optional terrain did not route: %+v", got)
+	}
+	if got := optional.StepWithTerrain(now, leader, follower, nil); got.State != Waiting {
+		t.Fatalf("missing terrain silently fell back to direct movement: %+v", got)
+	}
+}
+
+func TestTrailAndTerrainAdvanceBeforeNextTrailSample(t *testing.T) {
+	now := time.Unix(51, 0)
+	engine, ok := New(Config{StopDistance: 1, ResumeDistance: 2, CatchUpDistance: 10,
+		MaxAge: time.Second, TrailSpacing: 5, TrailMaxStep: 6, RequireTerrain: true})
+	if !ok {
+		t.Fatal("invalid combined config")
+	}
+	grid := &navigation.Grid{Area: "instance", CellSize: 1, Width: 5, Height: 1}
+	leader := Position{X: 0.5, Y: 0.5, Area: "instance", Seen: now, Valid: true}
+	follower := leader
+	engine.StepWithTerrain(now, leader, follower, grid)
+	leader.X = 4.5
+	if got := engine.StepWithTerrain(now, leader, follower, grid); got.State != Following || got.X <= 0 {
+		t.Fatalf("unsampled trail waypoint blocked movement: %+v", got)
 	}
 }
 

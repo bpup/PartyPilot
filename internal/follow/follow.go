@@ -3,6 +3,8 @@ package follow
 import (
 	"math"
 	"time"
+
+	"partypilot/internal/navigation"
 )
 
 // Position is an observation from one game client. Area must identify the
@@ -38,6 +40,7 @@ type Config struct {
 	MaxAge          time.Duration
 	TrailSpacing    float64
 	TrailMaxStep    float64
+	RequireTerrain  bool
 }
 
 func (c Config) Valid() bool {
@@ -60,6 +63,7 @@ func (e *Engine) Reset() {
 	e.hasLeader = false
 	e.trailArea = ""
 	e.trailBlocked = false
+	e.terrainSeen = false
 }
 
 type point struct{ x, y float64 }
@@ -72,6 +76,7 @@ type Engine struct {
 	hasLeader    bool
 	trailArea    string
 	trailBlocked bool
+	terrainSeen  bool
 }
 
 func New(config Config) (*Engine, bool) {
@@ -82,11 +87,20 @@ func New(config Config) (*Engine, bool) {
 }
 
 func (e *Engine) Step(now time.Time, leader, follower Position) Command {
+	return e.StepWithTerrain(now, leader, follower, nil)
+}
+
+func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terrain *navigation.Grid) Command {
 	wait := func(reason string) Command {
 		blocked := e.trailBlocked
+		terrainSeen := e.terrainSeen
 		e.Reset()
 		e.trailBlocked = blocked
+		e.terrainSeen = terrainSeen
 		return Command{State: Waiting, Reason: reason}
+	}
+	if terrain != nil {
+		e.terrainSeen = true
 	}
 	if !leader.Valid || !follower.Valid {
 		return wait("missing position")
@@ -104,6 +118,12 @@ func (e *Engine) Step(now time.Time, leader, follower Position) Command {
 		if math.IsNaN(value) || math.IsInf(value, 0) {
 			return wait("invalid position")
 		}
+	}
+	if (e.config.RequireTerrain || e.terrainSeen) && terrain == nil {
+		return wait("terrain missing")
+	}
+	if terrain != nil && (!terrain.Valid() || terrain.Area != leader.Area) {
+		return wait("terrain unavailable or different instance")
 	}
 	if e.trailBlocked {
 		return Command{State: Waiting, Reason: "trail requires reset after leader jump"}
@@ -125,10 +145,22 @@ func (e *Engine) Step(now time.Time, leader, follower Position) Command {
 		}
 		return Command{State: Holding, Distance: distance}
 	}
-	e.moving = true
+	targetX, targetY := leader.X, leader.Y
 	if e.config.TrailSpacing > 0 {
 		waypoint := e.nextWaypoint(follower)
-		dx, dy = waypoint.x-follower.X, waypoint.y-follower.Y
+		targetX, targetY = waypoint.x, waypoint.y
+		if targetX == follower.X && targetY == follower.Y {
+			targetX, targetY = leader.X, leader.Y
+		}
+	}
+	if terrain != nil {
+		var ok bool
+		dx, dy, ok = terrain.NextDirection(follower.X, follower.Y, targetX, targetY)
+		if !ok || (dx == 0 && dy == 0) {
+			return wait("terrain route unavailable")
+		}
+	} else if e.config.TrailSpacing > 0 {
+		dx, dy = targetX-follower.X, targetY-follower.Y
 		if length := math.Hypot(dx, dy); length > 0 {
 			dx, dy = dx/length, dy/length
 		} else {
@@ -137,6 +169,7 @@ func (e *Engine) Step(now time.Time, leader, follower Position) Command {
 	} else {
 		dx, dy = dx/distance, dy/distance
 	}
+	e.moving = true
 	state := Following
 	if distance >= e.config.CatchUpDistance {
 		state = CatchingUp

@@ -14,6 +14,7 @@ import (
 
 	"partypilot/internal/focus"
 	"partypilot/internal/follow"
+	"partypilot/internal/navigation"
 	"partypilot/internal/party"
 )
 
@@ -23,6 +24,7 @@ type frame struct {
 	Focus          int                     `json:"focus,omitempty"`
 	ReturnToLeader bool                    `json:"return_to_leader,omitempty"`
 	ResetFollow    bool                    `json:"reset_follow,omitempty"`
+	Terrain        *navigation.Grid        `json:"terrain,omitempty"`
 }
 
 type result struct {
@@ -101,7 +103,7 @@ func replay(reader io.Reader, writer io.Writer, coordinator *party.Coordinator, 
 				return fmt.Errorf("line %d: %w", line, err)
 			}
 		}
-		output := result{Focused: coordinator.Focused().Slot, Commands: coordinator.Step(item.Now, item.Positions)}
+		output := result{Focused: coordinator.Focused().Slot, Commands: coordinator.StepWithTerrain(item.Now, item.Positions, item.Terrain)}
 		if err := encoder.Encode(output); err != nil {
 			return err
 		}
@@ -119,6 +121,7 @@ func main() {
 	maxAge := flag.Duration("max-age", 0, "maximum position age")
 	trailSpacing := flag.Float64("trail-spacing", 0, "leader trail sample spacing; requires -trail-max-step")
 	trailMaxStep := flag.Float64("trail-max-step", 0, "maximum leader displacement between observations")
+	requireTerrain := flag.Bool("require-terrain", false, "stop when an instance-matched terrain grid is unavailable")
 	pace := flag.Duration("pace", 0, "delay between replay frames; zero runs immediately")
 	lastFocusedLeads := flag.Bool("last-focused-leads", false, "make the manually focused player the follow leader")
 	followTargets := flag.String("follow-targets", "", "explicit follower:target pairs, e.g. 2:3")
@@ -129,7 +132,7 @@ func main() {
 		os.Exit(2)
 	}
 	config := follow.Config{StopDistance: *stop, ResumeDistance: *resume, CatchUpDistance: *catchup, MaxAge: *maxAge,
-		TrailSpacing: *trailSpacing, TrailMaxStep: *trailMaxStep}
+		TrailSpacing: *trailSpacing, TrailMaxStep: *trailMaxStep, RequireTerrain: *requireTerrain}
 	coordinator, err := party.New(players, *leader, config)
 	if err != nil || *path == "" || *pace < 0 {
 		fmt.Fprintln(os.Stderr, "usage: partyreplay -replay file.jsonl -roster 1:1,2:2 -leader 1 -stop N -resume N -catchup N -max-age 750ms")

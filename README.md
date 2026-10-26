@@ -15,6 +15,7 @@
 go test ./...
 go run ./cmd/partypilot -replay testdata/example.jsonl -stop 2 -resume 3 -catchup 10 -max-age 750ms
 go run ./cmd/partypilot -replay testdata/trail-turn-example.jsonl -stop 1 -resume 2 -catchup 30 -max-age 750ms -trail-spacing 1 -trail-max-step 5
+go run ./cmd/partypilot -replay testdata/terrain-wall-example.jsonl -stop 1 -resume 2 -catchup 10 -max-age 750ms -require-terrain
 go run ./cmd/partyreplay -replay testdata/party-example.jsonl -roster 1:1,2:2 -leader 1 -stop 2 -resume 3 -catchup 10 -max-age 750ms
 go run ./cmd/partyreplay -replay testdata/party-example.jsonl -roster 1:1,2:2 -leader 1 -last-focused-leads -stop 2 -resume 3 -catchup 10 -max-age 750ms
 go run ./cmd/partyreplay -replay testdata/party-targets-example.jsonl -roster 1:1,2:2,3:2 -leader 1 -follow-targets 2:3 -stop 2 -resume 3 -catchup 10 -max-age 750ms
@@ -35,7 +36,9 @@ GOOS=windows GOARCH=amd64 go build -o PartyPilot.exe ./cmd/partypilot
 
 当前内核只根据最多六个角色的已知坐标计算方向。示例中的距离数字仅用于回放测试，不代表 0.6.17 的参数。它没有直接读取 PoE2 内存、识别窗口、自动组队、战斗、拾取、药剂或 UI。坐标 `Area` 必须是实例标识；仅有地图名不足以证明两个角色位于同一实例。
 
-可选的 `-trail-spacing` 与 `-trail-max-step` 会让跟随者依次走向已观测的队长轨迹点，而非直接指向队长当前位置。两项必须同时显式设置，且最大步长要大于采样间距。若队长单次观测位移超过上限，轨迹跟随会保持等待，直到明确重置；单人回放帧可传 `"reset":true`，组队回放帧可传 `"reset_follow":true`。重置前应确认新的位置与实例数据可靠。轨迹点本身不能证明道路可通；当前没有地形网格、障碍物绕行或瞬移追赶。回放里的这两个数值仅用于检查拐弯与跳变，不是 MultiPilot 0.6.17 参数。
+可选的 `-trail-spacing` 与 `-trail-max-step` 会让跟随者依次走向已观测的队长轨迹点，而非直接指向队长当前位置。两项必须同时显式设置，且最大步长要大于采样间距。若队长单次观测位移超过上限，轨迹跟随会保持等待，直到明确重置；单人回放帧可传 `"reset":true`，组队回放帧可传 `"reset_follow":true`。重置前应确认新的位置与实例数据可靠。轨迹点本身不能证明道路可通；不提供经验证的地形时，轨迹模式无法绕开未知障碍。回放里的这两个数值仅用于检查拐弯与跳变，不是 MultiPilot 0.6.17 参数。
+
+受控回放帧还可提供 `terrain` 网格：明确的实例标识、原点、格子尺寸、宽高和阻挡格。网格寻路仅走上下左右相邻格，不穿过阻挡格；地图与角色实例不符、起终点超出地图、目标不可达时停止输出方向。使用 `-require-terrain` 可从第一帧开始要求有效地图；若已收到过地图，后续缺失也会等待，直到明确重置。示例网格是人工构造的，**当前没有从 PoE2 取得或验证地形数据**，也没有验证游戏世界坐标与网格坐标的对应关系；此功能只是独立路径决策原型。
 
 `bridge/PartyPilot.Bridge.csproj` 是另一个可执行程序：它使用公开的 ViGEm.NET API，按 `--slots 1,2` 等明确配置创建 1–4 个虚拟 Xbox 360 手柄，从标准输入读取带 `slot` 的 JSON 命令，将方向写入对应左摇杆；该槽位命令停止超过 500 毫秒会松开摇杆。未知槽位或无效命令会使所有手柄回中。它不会将手柄绑定到指定 PoE2 窗口，也没有验证游戏如何映射世界坐标到摇杆轴，因此目前只能用于受控桥接测试。运行需要 Windows 与已安装的 ViGEmBus。项目没有分发驱动；[ViGEm 项目已停止维护](https://docs.nefarius.at/projects/ViGEm/End-of-Life/)。
 

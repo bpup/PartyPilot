@@ -6,6 +6,7 @@ import (
 
 	"partypilot/internal/focus"
 	"partypilot/internal/follow"
+	"partypilot/internal/navigation"
 )
 
 // Coordinator combines routing and movement decisions. Input and game-data
@@ -92,6 +93,10 @@ func (c *Coordinator) Focused() focus.Player {
 }
 
 func (c *Coordinator) Step(now time.Time, positions map[int]follow.Position) map[int]follow.Command {
+	return c.StepWithTerrain(now, positions, nil)
+}
+
+func (c *Coordinator) StepWithTerrain(now time.Time, positions map[int]follow.Position, terrain *navigation.Grid) map[int]follow.Command {
 	activeLeader := c.leader
 	if c.lastFocusedLeads {
 		activeLeader = c.router.Focused().Slot
@@ -120,7 +125,7 @@ func (c *Coordinator) Step(now time.Time, positions map[int]follow.Position) map
 			engine.Reset()
 			c.lastTargets[slot] = target
 		}
-		commands[slot] = engine.Step(now, positions[target], positions[slot])
+		commands[slot] = engine.StepWithTerrain(now, positions[target], positions[slot], terrain)
 	}
 	return commands
 }
