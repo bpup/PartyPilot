@@ -50,6 +50,15 @@ if (router.ApplyLine("{\"slot\":6,\"state\":\"following\",\"x\":1,\"y\":0}", now
     throw new Exception("Unknown slot was not rejected safely.");
 if (Marshal.SizeOf<XInputGamepad>() != 12 || Marshal.SizeOf<XInputState>() != 16)
     throw new Exception("XInput native structure sizes do not match the Windows API.");
+var initialIndices = new Dictionary<int, int> { [1] = 1, [2] = 2 };
+if (!PhysicalSlotGuard.TryCreate(0, initialIndices, out var physicalGuard) || physicalGuard is null ||
+    !physicalGuard.Matches(new Dictionary<int, int> { [2] = 2, [1] = 1 }) ||
+    physicalGuard.Matches(new Dictionary<int, int> { [1] = 0, [2] = 2 }) ||
+    physicalGuard.Matches(new Dictionary<int, int> { [1] = 1, [2] = 3 }) ||
+    physicalGuard.Matches(new Dictionary<int, int> { [1] = 1, [2] = -1 }) ||
+    PhysicalSlotGuard.TryCreate(0, new Dictionary<int, int> { [1] = 1, [2] = 1 }, out _) ||
+    PhysicalSlotGuard.TryCreate(0, new Dictionary<int, int> { [1] = 1, [2] = 2, [3] = 3, [4] = 0 }, out _))
+    throw new Exception("Physical/virtual XInput index guard failed.");
 if (!router.ConfigurePhysical(2) ||
     !router.ApplyLine("{\"slot\":3,\"state\":\"following\",\"x\":1,\"y\":0}", now) ||
     pad3.X != 32767)

@@ -10,5 +10,6 @@
     <Compile Include="../BridgeSlots.cs" Link="BridgeSlots.cs" />
     <Compile Include="../BridgeRouter.cs" Link="BridgeRouter.cs" />
     <Compile Include="../XInputNative.cs" Link="XInputNative.cs" />
+    <Compile Include="../PhysicalSlotGuard.cs" Link="PhysicalSlotGuard.cs" />
   </ItemGroup>
 </Project>

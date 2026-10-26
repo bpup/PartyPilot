@@ -77,10 +77,11 @@ try
             controller.Connect();
             pads.Add(slot, controller);
         }
-        if (physicalMode && pads.Values.Any(controller =>
-            controller.UserIndex is < 0 or > 3 || controller.UserIndex == (int)physicalIndex))
+        PhysicalSlotGuard? physicalGuard = null;
+        if (physicalMode && !PhysicalSlotGuard.TryCreate(physicalIndex,
+            pads.ToDictionary(entry => entry.Key, entry => entry.Value.UserIndex), out physicalGuard))
         {
-            Console.Error.WriteLine("Virtual XInput index is unknown or overlaps the physical controller. Controllers stopped.");
+            Console.Error.WriteLine("Virtual XInput indices are unknown, duplicated, or overlap the physical controller. Controllers stopped.");
             return 2;
         }
         Console.Error.WriteLine($"Connected {pads.Count} virtual controller(s).");
@@ -106,8 +107,20 @@ try
             }
             if (physicalMode)
             {
-                if (XInputNative.TryRead(physicalIndex, out var state)) router.SetPhysical(state.Gamepad);
-                else router.PhysicalDisconnected();
+                var currentIndices = pads.ToDictionary(entry => entry.Key, entry => entry.Value.UserIndex);
+                if (physicalGuard is null || !physicalGuard.Matches(currentIndices))
+                {
+                    router.NeutralAll();
+                    Console.Error.WriteLine("Virtual XInput assignment changed; controllers stopped.");
+                    return 1;
+                }
+                if (!XInputNative.TryRead(physicalIndex, out var state))
+                {
+                    router.NeutralAll();
+                    Console.Error.WriteLine("Physical controller disconnected; restart after checking its identity and isolation.");
+                    return 1;
+                }
+                router.SetPhysical(state.Gamepad);
             }
             router.Tick(DateTime.UtcNow);
         }
