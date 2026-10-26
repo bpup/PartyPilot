@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using Avalonia;
 using Avalonia.Controls;
@@ -82,6 +83,11 @@ public sealed class MainWindow : Window
     private readonly TextBox _followLeaderName = new();
     private readonly ComboBox[] _followTargets = new ComboBox[6];
     private readonly TextBox[] _followPlayerStops = new TextBox[6];
+    private readonly FollowStopPreferenceStore _followStopPreferences;
+    private double?[] _configuredFollowStops = new double?[6];
+    private bool _followStopPreferenceReady;
+    private bool _updatingFollowStopFields;
+    private readonly TextBlock _followStopPreferenceStatus = new();
     private readonly StackPanel[] _followTargetRows = new StackPanel[6];
     private readonly FollowTargetPreferenceStore _followTargetPreferences;
     private int[] _configuredFollowTargets = new int[6];
@@ -147,9 +153,11 @@ public sealed class MainWindow : Window
 
     public MainWindow() : this(new FollowTargetPreferenceStore()) { }
 
-    internal MainWindow(FollowTargetPreferenceStore followTargetPreferences)
+    internal MainWindow(FollowTargetPreferenceStore followTargetPreferences,
+        FollowStopPreferenceStore? followStopPreferences = null)
     {
         _followTargetPreferences = followTargetPreferences;
+        _followStopPreferences = followStopPreferences ?? new FollowStopPreferenceStore();
         Title = "PartyPilot · Play";
         Width = 1120;
         Height = 800;
@@ -623,7 +631,7 @@ public sealed class MainWindow : Window
             row.Children.Add(Label($"P{player} 停止距离（不填沿用上方值）", 12, MutedBrush));
             var playerStop = new TextBox { Name = $"follow-stop-{player}", Width = 190,
                 HorizontalAlignment = HorizontalAlignment.Left, Watermark = "0–200" };
-            playerStop.TextChanged += (_, _) => UpdateFollowControls();
+            playerStop.TextChanged += (_, _) => SaveFollowStopChoice(player);
             _followPlayerStops[index] = playerStop;
             row.Children.Add(playerStop);
             panel.Children.Add(row);
@@ -635,6 +643,13 @@ public sealed class MainWindow : Window
         _followTargetPreferenceStatus.Foreground = MutedBrush;
         _followTargetPreferenceStatus.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(_followTargetPreferenceStatus);
+        var loadedStops = _followStopPreferences.Load();
+        _configuredFollowStops = loadedStops.Stops;
+        _followStopPreferenceReady = loadedStops.Success;
+        _followStopPreferenceStatus.Text = loadedStops.Message;
+        _followStopPreferenceStatus.Foreground = MutedBrush;
+        _followStopPreferenceStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_followStopPreferenceStatus);
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
         _startFollow.Content = "开始跟随";
         _startFollow.Click += async (_, _) => await StartFollowAsync();
@@ -883,6 +898,45 @@ public sealed class MainWindow : Window
         {
             _updatingFollowTargetChoices = false;
         }
+        UpdateFollowStopFields();
+        UpdateFollowControls();
+    }
+
+    private void UpdateFollowStopFields()
+    {
+        _updatingFollowStopFields = true;
+        try
+        {
+            for (var index = 0; index < _followPlayerStops.Length; index++)
+            {
+                var slot = _selectedTopology?.Slots.FirstOrDefault(item => item.PartyPlayer == index + 1);
+                _followPlayerStops[index].Text = slot is null ? string.Empty :
+                    _configuredFollowStops[slot.RuntimePad - 1]?.ToString("R", CultureInfo.InvariantCulture) ?? string.Empty;
+            }
+        }
+        finally
+        {
+            _updatingFollowStopFields = false;
+        }
+    }
+
+    private void SaveFollowStopChoice(int player)
+    {
+        if (_updatingFollowStopFields || _selectedTopology is null) return;
+        var slot = _selectedTopology.Slots.FirstOrDefault(item => item.PartyPlayer == player);
+        if (slot is null || _selectedTopology.Id is not ("2-split" or "3-three-singles")) return;
+        if (!FollowPlayerStop.TryRead(_followPlayerStops[player - 1].Text, out var value))
+        {
+            _followStopPreferenceStatus.Text = "停止距离必须为 0–200；当前输入未保存。";
+            UpdateFollowControls();
+            return;
+        }
+        var next = (double?[])_configuredFollowStops.Clone();
+        next[slot.RuntimePad - 1] = value;
+        _configuredFollowStops = next;
+        var saved = _followStopPreferences.Save(next);
+        _followStopPreferenceReady = saved.Success;
+        _followStopPreferenceStatus.Text = saved.Message;
         UpdateFollowControls();
     }
 
@@ -1607,7 +1661,7 @@ public sealed class MainWindow : Window
             valid &= _selectedTopology.Slots.All(slot =>
                 FollowPlayerStop.TryRead(_followPlayerStops[slot.PartyPlayer - 1].Text, out _));
         _startFollow.IsEnabled = OperatingSystem.IsWindows() && !_busy && !_followStopping && _follow is null &&
-            _followTargetPreferenceReady && _bridge is not null && _pairingSettled &&
+            _followTargetPreferenceReady && _followStopPreferenceReady && _bridge is not null && _pairingSettled &&
             _selectedTopology?.Id is "2-split" or "3-three-singles" &&
             _launchedClients.Count == _selectedTopology.ClientCount && valid;
         _stopFollow.IsEnabled = _follow is not null;
@@ -1889,7 +1943,7 @@ public sealed class MainWindow : Window
     private async Task StartFollowAsync()
     {
         if (_bridge is null || !_pairingSettled || _selectedTopology is null || _follow is not null || _followStopping ||
-            !_followTargetPreferenceReady ||
+            !_followTargetPreferenceReady || !_followStopPreferenceReady ||
             !LiveFollowPlan.TryCreate(_followStop.Text, _followResume.Text, _followCatchup.Text,
                 _followMaxAge.Text, _followLogAge.Text, _followLeaderName.Text, out var plan) || plan is null) return;
         var executable = LiveFollowSession.FindExecutable();

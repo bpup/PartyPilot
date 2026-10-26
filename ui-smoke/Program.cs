@@ -10,6 +10,7 @@ PartyRosterCounterSmoke.Run();
 FollowTargetChoicesSmoke.Run();
 FollowTargetPreferenceSmoke.Run();
 FollowPlayerStopSmoke.Run();
+FollowStopPreferenceSmoke.Run();
 AccountProfileSmoke.Run();
 LoginCalibrationSmoke.Run();
 await AutoLoginFillSmoke.RunAsync();
@@ -51,7 +52,9 @@ AppBuilder.Configure<SmokeApp>()
 var followPreferencePath = Path.Combine(Path.GetTempPath(),
     "partypilot-follow-ui-" + Guid.NewGuid().ToString("N"), "follow-targets.json");
 var followPreferenceStore = new FollowTargetPreferenceStore(followPreferencePath);
-var window = new MainWindow(followPreferenceStore);
+var stopPreferenceStore = new FollowStopPreferenceStore(Path.Combine(
+    Path.GetDirectoryName(followPreferencePath)!, "follow-stops.json"));
+var window = new MainWindow(followPreferenceStore, stopPreferenceStore);
 window.Show();
 window.UpdateLayout();
 if (window.GetLogicalDescendants().OfType<TextBox>().Count(field =>
@@ -503,8 +506,9 @@ if (!p2Stop.IsEffectivelyVisible)
     throw new Exception("Three independent clients did not expose P2's stop distance.");
 p2Stop.Text = "37.25";
 Dispatcher.UIThread.RunJobs();
-if (p2Stop.Text != "37.25")
-    throw new Exception("P2's individual stop distance was not editable.");
+if (stopPreferenceStore.Load() is not { Success: true,
+        Stops: [null, null, 37.25, null, null, null] })
+    throw new Exception("P2's individual stop distance was not saved for system pad P3.");
 if (pathFields.Any(field => !field.IsEffectivelyVisible))
 {
     throw new Exception("The three-single-client 3P option did not request three game windows.");
@@ -523,6 +527,46 @@ if (args.Contains("--client3-ui-only"))
 }
 clientCount.SelectedIndex = 1;
 Dispatcher.UIThread.RunJobs();
+variant.SelectedIndex = 1;
+Dispatcher.UIThread.RunJobs();
+if (p2Stop.Text != "37.25" || !p2Stop.IsEffectivelyVisible)
+    throw new Exception("System pad P3's stop distance was lost when switching to two-client split.");
+var restoredWindow = new MainWindow(followPreferenceStore, stopPreferenceStore);
+restoredWindow.Show();
+var restoredCount = restoredWindow.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(item => item.PlaceholderText == "选择 1–6 人");
+restoredCount.SelectedIndex = 2;
+Dispatcher.UIThread.RunJobs();
+var restoredVariant = restoredWindow.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(item => item.PlaceholderText == "选择角色分布");
+restoredVariant.SelectedIndex = 2;
+Dispatcher.UIThread.RunJobs();
+var restoredStop = restoredWindow.GetLogicalDescendants().OfType<TextBox>()
+    .Single(item => item.Name == "follow-stop-2");
+if (restoredStop.Text != "37.25")
+    throw new Exception("P2's stop distance did not reload in a new desktop window.");
+restoredWindow.Close();
+File.WriteAllText(Path.Combine(Path.GetDirectoryName(followPreferencePath)!, "follow-stops.json"), "{}");
+var repairWindow = new MainWindow(followPreferenceStore, stopPreferenceStore);
+repairWindow.Show();
+if (!repairWindow.GetLogicalDescendants().OfType<TextBlock>().Any(item =>
+        item.Text?.StartsWith("每角色停止距离设置无效", StringComparison.Ordinal) == true))
+    throw new Exception("A damaged stop setting was silently accepted in the desktop.");
+var repairCount = repairWindow.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(item => item.PlaceholderText == "选择 1–6 人");
+repairCount.SelectedIndex = 2;
+Dispatcher.UIThread.RunJobs();
+var repairVariant = repairWindow.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(item => item.PlaceholderText == "选择角色分布");
+repairVariant.SelectedIndex = 2;
+Dispatcher.UIThread.RunJobs();
+repairWindow.GetLogicalDescendants().OfType<TextBox>()
+    .Single(item => item.Name == "follow-stop-2").Text = "38.5";
+Dispatcher.UIThread.RunJobs();
+if (stopPreferenceStore.Load() is not { Success: true,
+        Stops: [null, null, 38.5, null, null, null] })
+    throw new Exception("Explicit stop distance edit did not repair the damaged setting.");
+repairWindow.Close();
 variant.SelectedIndex = 0;
 Dispatcher.UIThread.RunJobs();
 if (p2Target.IsEffectivelyVisible)
