@@ -5,7 +5,7 @@ using System.Threading;
 namespace PartyPilot.Bridge;
 
 // Managed producer for a future PartyPilot-owned process-local XInput runtime.
-// It remains Starting until that runtime acknowledges Ready in shared memory.
+// The runtime acknowledges Loaded before XInput appears, then Ready after hooks bind.
 internal sealed class PrivateSlotPublisher : IDisposable
 {
     private readonly object _sync = new();
@@ -77,6 +77,15 @@ internal sealed class PrivateSlotPublisher : IDisposable
         {
             lock (_sync) return !_disposed && _processAlive() && HasValidFrame() &&
                 _view.ReadInt32(12) == PrivateSlotFrame.Ready;
+        }
+    }
+
+    internal bool IsLoaded
+    {
+        get
+        {
+            lock (_sync) return !_disposed && _processAlive() && HasValidFrame() &&
+                _view.ReadInt32(12) is PrivateSlotFrame.Loaded or PrivateSlotFrame.Ready;
         }
     }
 

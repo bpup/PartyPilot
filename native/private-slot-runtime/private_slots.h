@@ -14,6 +14,7 @@
 #define PP_STATUS_READY 2u
 #define PP_STATUS_FAILED 3u
 #define PP_STATUS_STOPPING 5u
+#define PP_STATUS_LOADED 6u
 #define PP_SLOT_P5 1u
 #define PP_SLOT_P6 2u
 

@@ -15,6 +15,7 @@ internal static class PrivateSlotFrame
     internal const int Failed = 3;
     internal const int Reconfiguring = 4;
     internal const int Stopping = 5;
+    internal const int Loaded = 6;
     internal const uint P5 = 1;
     internal const uint P6 = 2;
 
@@ -31,7 +32,7 @@ internal static class PrivateSlotFrame
 
     internal static bool SetStatus(Span<byte> frame, int status)
     {
-        if (!HasHeader(frame) || status is < Starting or > Stopping) return false;
+        if (!HasHeader(frame) || status is < Starting or > Loaded) return false;
         Put32(frame, 12, (uint)status);
         return true;
     }
@@ -40,7 +41,7 @@ internal static class PrivateSlotFrame
     {
         if (!HasHeader(frame) || player is < 5 or > 6 ||
             (Get32(frame, 16) & (player == 5 ? P5 : P6)) == 0 ||
-            Get32(frame, 12) is not (Starting or Ready or Reconfiguring)) return false;
+            Get32(frame, 12) is not (Starting or Ready or Reconfiguring or Loaded)) return false;
         var offset = 20 + (player - 5) * 28;
         var oldSequence = Get32(frame, offset);
         if ((oldSequence & 1) != 0) return false;

@@ -17,12 +17,6 @@ typedef DWORD (WINAPI *get_capabilities_fn)(DWORD, DWORD, XINPUT_CAPABILITIES *)
 typedef DWORD (WINAPI *set_state_fn)(DWORD, XINPUT_VIBRATION *);
 
 int main(void) {
-    HMODULE xinput = LoadLibraryW(L"xinput1_4.dll");
-    if (xinput == NULL) { fputs("XInput 1.4 unavailable.\n", stderr); return 2; }
-    get_state_fn get_state = (get_state_fn)GetProcAddress(xinput, "XInputGetState");
-    get_capabilities_fn get_capabilities = (get_capabilities_fn)GetProcAddress(xinput, "XInputGetCapabilities");
-    set_state_fn set_state = (set_state_fn)GetProcAddress(xinput, "XInputSetState");
-    if (get_state == NULL || get_capabilities == NULL || set_state == NULL) return 2;
     wchar_t name[128];
     swprintf(name, sizeof(name) / sizeof(name[0]),
              L"Local\\PartyPilot.PrivateSlots.%lu", GetCurrentProcessId());
@@ -62,6 +56,19 @@ int main(void) {
     put64(frame + 68, GetTickCount64());
     HMODULE runtime = LoadLibraryW(L"PartyPilot.PrivateSlots.dll");
     if (runtime == NULL) { fputs("Private runtime did not load.\n", stderr); return 2; }
+    int loaded = 0;
+    for (int i = 0; i < 100; ++i) {
+        if (InterlockedCompareExchange((volatile LONG *)(frame + 12), 0, 0) ==
+            PP_STATUS_LOADED) { loaded = 1; break; }
+        Sleep(50);
+    }
+    if (!loaded) { fputs("Private mapping was not acknowledged before XInput loaded.\n", stderr); return 1; }
+    HMODULE xinput = LoadLibraryW(L"xinput1_4.dll");
+    if (xinput == NULL) { fputs("XInput 1.4 unavailable.\n", stderr); return 2; }
+    get_state_fn get_state = (get_state_fn)GetProcAddress(xinput, "XInputGetState");
+    get_capabilities_fn get_capabilities = (get_capabilities_fn)GetProcAddress(xinput, "XInputGetCapabilities");
+    set_state_fn set_state = (set_state_fn)GetProcAddress(xinput, "XInputSetState");
+    if (get_state == NULL || get_capabilities == NULL || set_state == NULL) return 2;
     int ready = 0;
     for (int i = 0; i < 100; ++i) {
         if (InterlockedCompareExchange((volatile LONG *)(frame + 12), 0, 0) ==

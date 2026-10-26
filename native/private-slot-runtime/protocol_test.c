@@ -52,6 +52,9 @@ int main(void) {
     put16(frame + 56, 0x0020);
     put64(frame + 68, 1001);
 
+    put32(frame + 12, PP_STATUS_LOADED);
+    assert(pp_read_pad(frame, sizeof(frame), 5, 1100, 500, &output) == PP_UNAVAILABLE);
+    put32(frame + 12, PP_STATUS_READY);
     assert(pp_read_pad(frame, sizeof(frame), 5, 1100, 500, &output) == PP_FRESH);
     assert(output.packet == 17 && output.buttons == 0x1000 &&
            output.left_trigger == 25 && output.right_trigger == 50 &&

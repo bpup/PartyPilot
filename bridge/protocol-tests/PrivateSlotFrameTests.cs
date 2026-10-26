@@ -8,6 +8,9 @@ internal static class PrivateSlotFrameTests
         var frame = new byte[PrivateSlotFrame.Size];
         PrivateSlotFrame.Initialize(frame, includeP6: false);
         var p5 = new PadReport(0x1000, 14, 22, -123, 456, 789, -321);
+        if (!PrivateSlotFrame.SetStatus(frame, PrivateSlotFrame.Loaded) ||
+            PrivateSlotFrame.TryReadPad(frame, 5, out _, out _, out _))
+            throw new Exception("Pre-resume loaded mapping exposed a controller before hooks became ready.");
         if (PrivateSlotFrame.TryReadPad(frame, 5, out _, out _, out _) ||
             PrivateSlotFrame.WritePad(frame, 6, p5, 1) ||
             !PrivateSlotFrame.WritePad(frame, 5, p5, 123456) ||

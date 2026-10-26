@@ -16,6 +16,7 @@ internal sealed class Client3RuntimeAttach : IDisposable, IClient3PadOutput
     private const uint WaitObject0 = 0;
     private const uint WaitTimeout = 258;
     private static readonly TimeSpan ReadyTimeout = TimeSpan.FromSeconds(35);
+    private static readonly TimeSpan LoadedTimeout = TimeSpan.FromSeconds(8);
     private readonly Process _process;
     private readonly Client3InputPublisher _publisher;
 
@@ -26,6 +27,7 @@ internal sealed class Client3RuntimeAttach : IDisposable, IClient3PadOutput
     }
 
     internal bool IsReady => _publisher.IsReady;
+    internal bool IsLoaded => _publisher.IsLoaded;
     bool IClient3PadOutput.IsReady => IsReady;
     public bool Submit(PadReport p5, PadReport p6) => _publisher.Submit(p5, p6);
     public void NeutralAll() => _publisher.NeutralAll();
@@ -43,21 +45,35 @@ internal sealed class Client3RuntimeAttach : IDisposable, IClient3PadOutput
             "pathofexile_x64steam" or "pathofexileegs" or "pathofexile_x64egs";
     }
 
-    internal static async Task<Client3RuntimeAttach> AttachAsync(int pid, long windowHandle,
-        string expectedExecutable, bool includeP6, CancellationToken cancellationToken = default)
+    internal static Task<Client3RuntimeAttach> AttachAsync(int pid, long windowHandle,
+        string expectedExecutable, bool includeP6, CancellationToken cancellationToken = default) =>
+        AttachCoreAsync(pid, windowHandle, expectedExecutable, includeP6, false, cancellationToken);
+
+    // The launcher must still own a suspended Client 3 primary thread when it calls this.
+    // Loaded acknowledges the mapping; Ready is checked only after that thread resumes.
+    internal static Task<Client3RuntimeAttach> AttachPreResumeAsync(int pid,
+        string expectedExecutable, bool includeP6, CancellationToken cancellationToken = default) =>
+        AttachCoreAsync(pid, 0, expectedExecutable, includeP6, true, cancellationToken);
+
+    private static async Task<Client3RuntimeAttach> AttachCoreAsync(int pid, long windowHandle,
+        string expectedExecutable, bool includeP6, bool preResume, CancellationToken cancellationToken)
     {
         if (!OperatingSystem.IsWindows() || !Environment.Is64BitProcess || pid <= 0 ||
-            windowHandle <= 0 || !Path.IsPathFullyQualified(expectedExecutable) ||
-            !IsKnownGameExecutable(expectedExecutable) || !File.Exists(expectedExecutable) ||
-            !ForegroundWindowProbe.IsExistingTarget(pid, windowHandle))
-            throw new InvalidOperationException("Client 3 requires a verified Windows x64 PoE2 process and window.");
+            (!preResume && (windowHandle <= 0 || !ForegroundWindowProbe.IsExistingTarget(pid, windowHandle))) ||
+            !Path.IsPathFullyQualified(expectedExecutable) ||
+            !IsKnownGameExecutable(expectedExecutable) || !File.Exists(expectedExecutable))
+            throw new InvalidOperationException(preResume
+                ? "Client 3 requires a verified Windows x64 PoE2 process."
+                : "Client 3 requires a verified Windows x64 PoE2 process and window.");
+        cancellationToken.ThrowIfCancellationRequested();
 
         var expected = Path.GetFullPath(expectedExecutable);
         var process = Process.GetProcessById(pid);
         Client3InputPublisher? publisher = null;
         try
         {
-            if (process.HasExited || !string.Equals(process.MainModule?.FileName, expected,
+            var actual = preResume ? QueryExecutablePath(pid) : process.MainModule?.FileName;
+            if (process.HasExited || !string.Equals(actual, expected,
                     StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Client 3 process path differs from its launcher binding.");
             var runtime = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -67,19 +83,22 @@ internal sealed class Client3RuntimeAttach : IDisposable, IClient3PadOutput
             // The supplied 0.6.17 DLL's XInput hook reads local 0/1 as P5/P6.
             publisher = Client3InputPublisher.OpenForProcess(process, includeP6,
                 p5LocalIndex: 0, p6LocalIndex: includeP6 ? 1 : null);
-            Inject(process, runtime, cancellationToken);
+            Inject(process, runtime, cancellationToken, verifyModule: !preResume);
             var deadline = Stopwatch.StartNew();
-            while (deadline.Elapsed < ReadyTimeout)
+            while (deadline.Elapsed < (preResume ? LoadedTimeout : ReadyTimeout))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (process.HasExited)
                     throw new InvalidOperationException("Client 3 exited before private input was ready.");
                 if (publisher.Status == PrivateSlotFrame.Failed)
                     throw new InvalidOperationException("Client 3 rejected its private XInput runtime.");
-                if (publisher.IsReady) return new Client3RuntimeAttach(process, publisher);
+                if (preResume ? publisher.IsLoaded : publisher.IsReady)
+                    return new Client3RuntimeAttach(process, publisher);
                 await Task.Delay(50, cancellationToken);
             }
-            throw new TimeoutException("Client 3 private XInput hooks did not become ready within 35 seconds.");
+            throw new TimeoutException(preResume
+                ? "Client 3 private mapping was not acknowledged before resume."
+                : "Client 3 private XInput hooks did not become ready within 35 seconds.");
         }
         catch
         {
@@ -89,7 +108,37 @@ internal sealed class Client3RuntimeAttach : IDisposable, IClient3PadOutput
         }
     }
 
-    private static void Inject(Process process, string runtime, CancellationToken cancellationToken)
+    internal async Task WaitReadyAfterResumeAsync(CancellationToken cancellationToken = default)
+    {
+        var deadline = Stopwatch.StartNew();
+        while (deadline.Elapsed < ReadyTimeout)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_process.HasExited || _publisher.Status == PrivateSlotFrame.Failed)
+                throw new InvalidOperationException("Client 3 exited or rejected private XInput hooks after resume.");
+            if (_publisher.IsReady) return;
+            await Task.Delay(50, cancellationToken);
+        }
+        throw new TimeoutException("Client 3 private XInput hooks did not become ready after resume.");
+    }
+
+    private static string QueryExecutablePath(int pid)
+    {
+        var handle = OpenProcess(0x1000, false, (uint)pid);
+        if (handle == 0) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot query Client 3 path.");
+        try
+        {
+            var buffer = new StringBuilder(32768);
+            var length = (uint)buffer.Capacity;
+            if (!QueryFullProcessImageNameW(handle, 0, buffer, ref length))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot verify suspended Client 3 path.");
+            return Path.GetFullPath(buffer.ToString());
+        }
+        finally { CloseHandle(handle); }
+    }
+
+    private static void Inject(Process process, string runtime, CancellationToken cancellationToken,
+        bool verifyModule)
     {
         var handle = OpenProcess(ProcessAccess, false, (uint)process.Id);
         if (handle == 0) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot open Client 3 for native input setup.");
@@ -133,11 +182,14 @@ internal sealed class Client3RuntimeAttach : IDisposable, IClient3PadOutput
             }
             if (!threadFinished)
                 throw new TimeoutException("Client 3's native runtime loader timed out.");
-            using var observed = Process.GetProcessById(process.Id);
-            if (!observed.Modules.Cast<ProcessModule>().Any(module =>
-                    string.Equals(Path.GetFullPath(module.FileName), runtime,
-                        StringComparison.OrdinalIgnoreCase)))
-                throw new InvalidOperationException("Client 3 did not load PartyPilot.PrivateSlots.dll.");
+            if (verifyModule)
+            {
+                using var observed = Process.GetProcessById(process.Id);
+                if (!observed.Modules.Cast<ProcessModule>().Any(module =>
+                        string.Equals(Path.GetFullPath(module.FileName), runtime,
+                            StringComparison.OrdinalIgnoreCase)))
+                    throw new InvalidOperationException("Client 3 did not load PartyPilot.PrivateSlots.dll.");
+            }
         }
         finally
         {
@@ -157,6 +209,11 @@ internal sealed class Client3RuntimeAttach : IDisposable, IClient3PadOutput
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern nint OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32.dll", EntryPoint = "QueryFullProcessImageNameW", CharSet = CharSet.Unicode,
+        SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool QueryFullProcessImageNameW(nint process, uint flags,
+        StringBuilder filename, ref uint size);
     [DllImport("kernel32.dll", EntryPoint = "GetModuleHandleW", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern nint GetModuleHandleW(string module);
     [DllImport("kernel32.dll", EntryPoint = "GetProcAddress", CharSet = CharSet.Ansi, SetLastError = true)]

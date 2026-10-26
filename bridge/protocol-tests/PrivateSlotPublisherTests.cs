@@ -15,6 +15,9 @@ internal static class PrivateSlotPublisherTests
             var p6 = new PadReport(0x0020, 2, 3, -22, 33, 44, 55);
             if (publisher.IsReady || publisher.WritePad(5, p5))
                 throw new Exception("Unacknowledged private runtime accepted input.");
+            observer.Write(12, PrivateSlotFrame.Loaded);
+            if (!publisher.IsLoaded || publisher.IsReady || publisher.WritePad(5, p5))
+                throw new Exception("Pre-resume mapping was not acknowledged separately from hook readiness.");
             observer.Write(12, PrivateSlotFrame.Ready); // Simulated process-local consumer.
             if (!publisher.IsReady || !publisher.WritePad(5, p5) || !publisher.WritePad(6, p6))
                 throw new Exception("Ready private runtime rejected P5/P6 input.");
@@ -23,7 +26,7 @@ internal static class PrivateSlotPublisherTests
                 !PrivateSlotFrame.TryReadPad(frame, 6, out var read6, out _, out _) || read6 != p6)
                 throw new Exception("Mapped private reports were not independent.");
             live = false;
-            if (publisher.IsReady || publisher.WritePad(5, p5))
+            if (publisher.IsLoaded || publisher.IsReady || publisher.WritePad(5, p5))
                 throw new Exception("Exited Client 3 still accepted reports.");
             publisher.NeutralAll();
             frame = Snapshot(observer);

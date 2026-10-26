@@ -30,6 +30,7 @@ internal sealed class Client3InputPublisher : IDisposable, IClient3PadOutput
         bool includeP6) => new(publisher, includeP6);
 
     internal bool IsReady => _publisher.IsReady;
+    internal bool IsLoaded => _publisher.IsLoaded;
     internal int Status => _publisher.Status;
     bool IClient3PadOutput.IsReady => IsReady;
 

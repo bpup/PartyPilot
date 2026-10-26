@@ -153,6 +153,7 @@ static DWORD WINAPI worker(void *unused) {
             g_p6_index = p6_index;
             g_frame = frame;
             ReleaseSRWLockExclusive(&g_frame_lock);
+            InterlockedExchange((volatile LONG *)(frame + 12), PP_STATUS_LOADED);
         } else {
             InterlockedExchange((volatile LONG *)(frame + 12), PP_STATUS_FAILED);
         }
@@ -162,7 +163,7 @@ static DWORD WINAPI worker(void *unused) {
                 header32(frame + 4) == PP_VERSION &&
                 header32(frame + 8) == PP_FRAME_SIZE &&
                 header32(frame + 16) == connected &&
-                header32(frame + 12) == PP_STATUS_STARTING)
+                header32(frame + 12) == PP_STATUS_LOADED)
                 InterlockedExchange((volatile LONG *)(frame + 12), PP_STATUS_READY);
             Sleep(100);
         }
