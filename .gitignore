@@ -1,5 +1,7 @@
 bridge/bin/
 bridge/obj/
+bridge/protocol-tests/bin/
+bridge/protocol-tests/obj/
 sensor/bin/
 sensor/obj/
 release/

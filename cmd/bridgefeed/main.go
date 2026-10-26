@@ -15,6 +15,11 @@ type partyFrame struct {
 	Commands map[int]follow.Command `json:"commands"`
 }
 
+type bridgeCommand struct {
+	Slot int `json:"slot"`
+	follow.Command
+}
+
 func selectCommands(reader io.Reader, writer io.Writer, slot int) error {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -30,7 +35,7 @@ func selectCommands(reader io.Reader, writer io.Writer, slot int) error {
 		if !exists {
 			command = follow.Command{State: follow.Waiting, Reason: "slot absent"}
 		}
-		if err := encoder.Encode(command); err != nil {
+		if err := encoder.Encode(bridgeCommand{Slot: slot, Command: command}); err != nil {
 			return err
 		}
 	}
