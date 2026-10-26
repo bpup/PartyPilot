@@ -31,6 +31,7 @@ public sealed class MainWindow : Window
     private readonly Button _attach = new();
     private readonly TextBlock _status = new();
     private readonly ComboBox _physicalIndex = new();
+    private readonly TextBox _physicalDevice = new();
     private readonly CheckBox _isolationConfirmed = new();
     private readonly Button _prepareBridge = new();
     private readonly Button _armPairing = new();
@@ -91,6 +92,7 @@ public sealed class MainWindow : Window
         _applyLayout.IsCheckedChanged += (_, _) => UpdateLayoutControls();
         _isolationConfirmed.IsCheckedChanged += (_, _) => UpdateBridgeControls();
         _physicalIndex.SelectionChanged += (_, _) => UpdateBridgeControls();
+        _physicalDevice.TextChanged += (_, _) => UpdateBridgeControls();
         Closed += async (_, _) => await StopBridgeAsync();
         UpdateClientRows();
         UpdateLayoutControls();
@@ -156,6 +158,9 @@ public sealed class MainWindow : Window
         _physicalIndex.Width = 190;
         _physicalIndex.HorizontalAlignment = HorizontalAlignment.Left;
         panel.Children.Add(_physicalIndex);
+        _physicalDevice.Watermark = "HidHide 中已隐藏的实体手柄设备 ID";
+        panel.Children.Add(_physicalDevice);
+        panel.Children.Add(Label("从 HidHide 设备列表复制当前实体手柄的设备 ID；程序会读取隔离配置，但设备与 XInput 编号的对应仍需实机核对。", 12, MutedBrush));
         _isolationConfirmed.Content = "我已确认实体手柄对游戏隐藏，仅由桥接读取";
         panel.Children.Add(_isolationConfirmed);
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12, LineSpacing = 8 };
@@ -345,8 +350,12 @@ public sealed class MainWindow : Window
     {
         var slots = _selectedTopology?.Slots.Select(slot => slot.RuntimePad).ToArray() ?? [];
         var supported = slots.Length is >= 1 and <= 3 && slots.All(slot => slot is >= 1 and <= 4);
+        var gamePathsReady = _selectedTopology is not null &&
+            Enumerable.Range(0, _selectedTopology.ClientCount)
+                .All(index => !string.IsNullOrWhiteSpace(_paths[index]?.Text));
         _prepareBridge.IsEnabled = !_busy && _bridge is null && supported &&
-            _physicalIndex.SelectedIndex is >= 0 and <= 3 && _isolationConfirmed.IsChecked == true;
+            _physicalIndex.SelectedIndex is >= 0 and <= 3 && _isolationConfirmed.IsChecked == true &&
+            !string.IsNullOrWhiteSpace(_physicalDevice.Text) && gamePathsReady;
         _stopBridge.IsEnabled = _bridge is not null;
         _armPairing.IsEnabled = _bridge is not null && _pairing?.Current is not null &&
             _launchedClients.Count == _selectedTopology?.ClientCount &&
@@ -354,10 +363,13 @@ public sealed class MainWindow : Window
         _confirmRole.IsEnabled = _bridge is not null && _pairing?.AReleased == true;
         _playerCount.IsEnabled = _bridge is null && !_busy;
         _topologyVariant.IsEnabled = _bridge is null && !_busy;
+        _physicalIndex.IsEnabled = _bridge is null && !_busy;
+        _physicalDevice.IsEnabled = _bridge is null && !_busy;
+        _isolationConfirmed.IsEnabled = _bridge is null && !_busy;
         for (var index = 0; index < _paths.Length; index++)
         {
-            if (_paths[index] is not null) _paths[index].IsEnabled = !_pairingHasStarted && !_busy;
-            if (_uris[index] is not null) _uris[index].IsEnabled = !_pairingHasStarted && !_busy;
+            if (_paths[index] is not null) _paths[index].IsEnabled = _bridge is null && !_pairingHasStarted && !_busy;
+            if (_uris[index] is not null) _uris[index].IsEnabled = _bridge is null && !_pairingHasStarted && !_busy;
         }
         if (_bridge is null && _selectedTopology is not null && !supported)
         {
@@ -385,7 +397,8 @@ public sealed class MainWindow : Window
         }
         var slots = _selectedTopology.Slots.Select(slot => slot.RuntimePad).ToArray();
         if (slots.Length is < 1 or > 3 || slots.Any(slot => slot is < 1 or > 4) ||
-            _physicalIndex.SelectedIndex is < 0 or > 3 || _isolationConfirmed.IsChecked != true)
+            _physicalIndex.SelectedIndex is < 0 or > 3 || _isolationConfirmed.IsChecked != true ||
+            string.IsNullOrWhiteSpace(_physicalDevice.Text))
         {
             _pairingStatus.Text = "当前布局或实体手柄隔离条件不满足桥接要求。";
             return;
@@ -398,10 +411,13 @@ public sealed class MainWindow : Window
         }
         _busy = true;
         UpdateBridgeControls();
-        _pairingStatus.Text = "正在检查实体手柄与虚拟手柄编号…";
+        _pairingStatus.Text = "正在检查 HidHide 隔离、实体手柄与虚拟手柄编号…";
         try
         {
-            var session = await BridgeSession.StartAsync(executable, slots, _physicalIndex.SelectedIndex);
+            var gameExecutables = Enumerable.Range(0, _selectedTopology.ClientCount)
+                .Select(index => _paths[index].Text?.Trim() ?? "").ToArray();
+            var session = await BridgeSession.StartAsync(executable, slots, _physicalIndex.SelectedIndex,
+                _physicalDevice.Text.Trim(), gameExecutables);
             session.AReleased += BridgeAReleased;
             session.PairingArmed += BridgePairingArmed;
             session.PairingCompleted += BridgePairingCompleted;

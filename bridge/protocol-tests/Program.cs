@@ -52,6 +52,33 @@ if (router.ApplyLine("{\"slot\":6,\"state\":\"following\",\"x\":1,\"y\":0}", now
     throw new Exception("Unknown slot was not rejected safely.");
 if (Marshal.SizeOf<XInputGamepad>() != 12 || Marshal.SizeOf<XInputState>() != 16)
     throw new Exception("XInput native structure sizes do not match the Windows API.");
+if (HidHidePreflight.GetWhitelistCode != 2147573760u ||
+    HidHidePreflight.GetBlacklistCode != 2147573768u ||
+    HidHidePreflight.GetActiveCode != 2147573776u ||
+    HidHidePreflight.GetInverseCode != 2147573784u)
+    throw new Exception("HidHide read-only IOCTL values differ from the published contract.");
+var hidden = @"HID\VID_1234&PID_5678\DEVICE";
+var snapshot = new HidHideSnapshot(true, false, [hidden], [@"\??\C:\Tools\PartyPilot.Bridge.exe"]);
+var isolation = HidHidePreflight.Evaluate(snapshot, hidden,
+    @"C:\Tools\PartyPilot.Bridge.exe", @"D:\Games\PathOfExile.exe");
+if (!isolation.ConfigurationMatches ||
+    HidHidePreflight.Evaluate(snapshot with { Inverse = true }, hidden,
+        @"C:\Tools\PartyPilot.Bridge.exe", @"D:\Games\PathOfExile.exe").ConfigurationMatches ||
+    HidHidePreflight.Evaluate(snapshot with { AllowedApps = [@"\??\C:\Tools\PartyPilot.Bridge.exe", @"D:\Games\PathOfExile.exe"] },
+        hidden, @"C:\Tools\PartyPilot.Bridge.exe", @"D:\Games\PathOfExile.exe").ConfigurationMatches ||
+    HidHidePreflight.Evaluate(snapshot, @"HID\OTHER", @"C:\Tools\PartyPilot.Bridge.exe",
+        @"D:\Games\PathOfExile.exe").ConfigurationMatches)
+    throw new Exception("HidHide configuration preflight accepted an unsafe configuration.");
+var encodedList = System.Text.Encoding.Unicode.GetBytes("HID\\DEVICE\0USB\\DEVICE\0\0");
+if (!HidHidePreflight.DecodeMultiString(encodedList, (uint)encodedList.Length)
+        .SequenceEqual([@"HID\DEVICE", @"USB\DEVICE"]))
+    throw new Exception("HidHide UTF-16 device list parsing failed.");
+try
+{
+    HidHidePreflight.DecodeMultiString(encodedList, (uint)(encodedList.Length - 2));
+    throw new Exception("HidHide accepted a missing list terminator.");
+}
+catch (InvalidDataException) { }
 var initialIndices = new Dictionary<int, int> { [1] = 1, [2] = 2 };
 if (!PhysicalSlotGuard.TryCreate(0, initialIndices, out var physicalGuard) || physicalGuard is null ||
     !physicalGuard.Matches(new Dictionary<int, int> { [2] = 2, [1] = 1 }) ||

@@ -90,6 +90,8 @@ var physicalIndex = window.GetLogicalDescendants().OfType<ComboBox>()
     .Single(item => item.PlaceholderText == "实体手柄 XInput 编号");
 var isolation = window.GetLogicalDescendants().OfType<CheckBox>()
     .Single(item => item.Content?.ToString()?.Contains("实体手柄对游戏隐藏") == true);
+var deviceInstance = window.GetLogicalDescendants().OfType<TextBox>()
+    .Single(item => item.Watermark?.ToString()?.Contains("实体手柄设备 ID") == true);
 var prepare = window.GetLogicalDescendants().OfType<Button>()
     .Single(item => item.Content?.ToString() == "准备虚拟手柄");
 var attach = window.GetLogicalDescendants().OfType<Button>()
@@ -131,6 +133,10 @@ if (pathFields.Any(field => !field.IsEffectivelyVisible))
 clientCount.SelectedIndex = 1;
 Dispatcher.UIThread.RunJobs();
 variant.SelectedIndex = 0;
+Dispatcher.UIThread.RunJobs();
+if (prepare.IsEnabled) throw new Exception("Bridge preparation ignored missing device and game paths.");
+deviceInstance.Text = @"HID\VID_1234&PID_5678\DEVICE";
+pathFields[0].Text = "C:/GameA.exe";
 Dispatcher.UIThread.RunJobs();
 if (!prepare.IsEnabled) throw new Exception("Supported two-player topology did not enable the physical bridge.");
 if (!pathFields[0].IsEffectivelyVisible || pathFields[1].IsEffectivelyVisible)

@@ -23,12 +23,15 @@ internal sealed class BridgeSession : IAsyncDisposable
         _readError = readError;
     }
 
-    public static async Task<BridgeSession> StartAsync(string executable, int[] slots, int physicalIndex)
+    public static async Task<BridgeSession> StartAsync(string executable, int[] slots, int physicalIndex,
+        string deviceInstance, IReadOnlyList<string> gameExecutables)
     {
         if (slots.Length is < 1 or > 3 || slots.Any(slot => slot is < 1 or > 4) ||
-            slots.Distinct().Count() != slots.Length || physicalIndex is < 0 or > 3)
+            slots.Distinct().Count() != slots.Length || physicalIndex is < 0 or > 3 ||
+            string.IsNullOrWhiteSpace(deviceInstance) || gameExecutables.Count is < 1 or > 3 ||
+            gameExecutables.Any(string.IsNullOrWhiteSpace))
         {
-            throw new ArgumentException("The current physical controller bridge supports 1–3 global pads P1–P4.");
+            throw new ArgumentException("The current bridge needs 1–3 P1–P4 pads, a selected HidHide device, and 1–3 game paths.");
         }
         var start = new ProcessStartInfo(executable)
         {
@@ -43,10 +46,15 @@ internal sealed class BridgeSession : IAsyncDisposable
         {
             "--enable-controller", "--slots", string.Join(',', slots),
             "--physical-index", physicalIndex.ToString(), "--main-slot", slots[0].ToString(),
-            "--physical-hidden-confirmed", "--pairing-protected"
+            "--physical-hidden-confirmed", "--pairing-protected", "--device-instance", deviceInstance
         })
         {
             start.ArgumentList.Add(argument);
+        }
+        foreach (var game in gameExecutables)
+        {
+            start.ArgumentList.Add("--game-exe");
+            start.ArgumentList.Add(game);
         }
         var process = Process.Start(start) ?? throw new InvalidOperationException("Virtual controller bridge did not start.");
         var readError = process.StandardError.ReadToEndAsync();
@@ -85,6 +93,7 @@ internal sealed class BridgeSession : IAsyncDisposable
             return root.TryGetProperty("event", out var kind) && kind.GetString() == "ready" &&
                    root.TryGetProperty("physical_mode", out var mode) && mode.GetBoolean() &&
                    root.TryGetProperty("pairing_protected", out var protectedMode) && protectedMode.GetBoolean() &&
+                   root.TryGetProperty("hidhide_preflight", out var preflight) && preflight.GetBoolean() &&
                    root.TryGetProperty("slots", out var selected) &&
                    selected.EnumerateArray().Select(value => value.GetInt32()).SequenceEqual(slots.Order());
         }

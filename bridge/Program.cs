@@ -4,6 +4,43 @@ using Nefarius.ViGEm.Client.Targets;
 using Nefarius.ViGEm.Client.Targets.Xbox360;
 using PartyPilot.Bridge;
 
+if (args.Length == 5 && args[0] == "--check-hidhide" && args[1] == "--device" &&
+    args[3] == "--game-exe")
+{
+    if (!OperatingSystem.IsWindows())
+    {
+        Console.Error.WriteLine("HidHide preflight runs on Windows only.");
+        return 2;
+    }
+    var bridgeExe = Environment.ProcessPath;
+    if (string.IsNullOrWhiteSpace(args[2]) || string.IsNullOrWhiteSpace(bridgeExe) ||
+        !Path.IsPathFullyQualified(args[4]) || !File.Exists(args[4]))
+    {
+        Console.Error.WriteLine("Provide a selected device instance ID and an existing absolute game executable path.");
+        return 2;
+    }
+    try
+    {
+        var result = HidHidePreflight.Evaluate(HidHidePreflight.Read(), args[2],
+            bridgeExe, Path.GetFullPath(args[4]));
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            configuration_matches = result.ConfigurationMatches,
+            cloak_active = result.CloakActive,
+            allow_list_mode = result.AllowListMode,
+            selected_device_listed = result.SelectedDeviceListed,
+            bridge_listed = result.BridgeListed,
+            game_not_listed = result.GameNotListed
+        }));
+        return result.ConfigurationMatches ? 0 : 1;
+    }
+    catch (Exception error) when (error is IOException or System.ComponentModel.Win32Exception or InvalidDataException)
+    {
+        Console.Error.WriteLine($"Cannot read HidHide configuration: {error.Message}");
+        return 1;
+    }
+}
+
 if (args.Length == 4 && args[0] == "--probe-xinput" && args[2] == "--samples" &&
     uint.TryParse(args[1], out var probeIndex) && probeIndex <= 3 &&
     int.TryParse(args[3], out var sampleCount) && sampleCount is >= 1 and <= 200)
@@ -36,7 +73,7 @@ if (args.Length == 4 && args[0] == "--probe-xinput" && args[2] == "--samples" &&
 
 if (!args.Contains("--enable-controller") || !BridgeSlots.TryParse(args, out var slots))
 {
-    Console.Error.WriteLine("Usage: PartyPilot.Bridge --enable-controller --slots 1,2 [--physical-index 0 --main-slot 1 --physical-hidden-confirmed [--pairing-protected]]");
+    Console.Error.WriteLine("Usage: PartyPilot.Bridge --enable-controller --slots 1,2 [--physical-index 0 --main-slot 1 --physical-hidden-confirmed --device-instance HID\\... --game-exe C:\\Game\\PathOfExile.exe [--pairing-protected]]");
     return 2;
 }
 var physicalMode = args.Contains("--physical-index") || args.Contains("--main-slot") ||
@@ -44,15 +81,23 @@ var physicalMode = args.Contains("--physical-index") || args.Contains("--main-sl
 var protectedPairing = args.Contains("--pairing-protected");
 var physicalIndexPosition = Array.IndexOf(args, "--physical-index");
 var mainSlotPosition = Array.IndexOf(args, "--main-slot");
+var devicePosition = Array.IndexOf(args, "--device-instance");
+var gamePaths = args.Select((value, index) => (value, index))
+    .Where(item => item.value == "--game-exe")
+    .Select(item => item.index + 1 < args.Length ? args[item.index + 1] : "")
+    .ToArray();
 uint physicalIndex = 0;
 int mainSlot = 0;
 if ((protectedPairing && !physicalMode) || (physicalMode && (physicalIndexPosition < 0 || physicalIndexPosition + 1 >= args.Length ||
     !uint.TryParse(args[physicalIndexPosition + 1], out physicalIndex) || physicalIndex > 3 ||
     mainSlotPosition < 0 || mainSlotPosition + 1 >= args.Length ||
     !int.TryParse(args[mainSlotPosition + 1], out mainSlot) || !slots.Contains(mainSlot) ||
-    !args.Contains("--physical-hidden-confirmed"))))
+    !args.Contains("--physical-hidden-confirmed") ||
+    devicePosition < 0 || devicePosition + 1 >= args.Length ||
+    string.IsNullOrWhiteSpace(args[devicePosition + 1]) || gamePaths.Length is < 1 or > 3 ||
+    gamePaths.Any(path => !Path.IsPathFullyQualified(path) || !File.Exists(path)))))
 {
-    Console.Error.WriteLine("Physical mode requires a connected physical XInput index, a configured main slot, and confirmed game input isolation.");
+    Console.Error.WriteLine("Physical mode requires the XInput index, selected HidHide device instance, game executables, main slot, and confirmed input isolation.");
     return 2;
 }
 if (!OperatingSystem.IsWindows())
@@ -63,6 +108,24 @@ if (!OperatingSystem.IsWindows())
 
 try
 {
+    if (physicalMode)
+    {
+        var bridgeExe = Environment.ProcessPath ?? throw new InvalidOperationException("Bridge executable path is unavailable.");
+        var hidHide = HidHidePreflight.Read();
+        foreach (var gamePath in gamePaths)
+        {
+            var result = HidHidePreflight.Evaluate(hidHide, args[devicePosition + 1],
+                bridgeExe, Path.GetFullPath(gamePath));
+            if (!result.ConfigurationMatches)
+            {
+                Console.Error.WriteLine($"HidHide configuration is incomplete for {Path.GetFileName(gamePath)}: " +
+                    $"cloak={result.CloakActive}, allow_list_mode={result.AllowListMode}, " +
+                    $"device_listed={result.SelectedDeviceListed}, bridge_listed={result.BridgeListed}, " +
+                    $"game_not_listed={result.GameNotListed}. No virtual controllers started.");
+                return 2;
+            }
+        }
+    }
     if (physicalMode && !XInputNative.TryRead(physicalIndex, out _))
     {
         Console.Error.WriteLine("The selected physical controller is not connected before virtual pads start.");
@@ -98,7 +161,8 @@ try
         var reportedLoginSource = LoginReadinessSource.Waiting;
         var pairingTargetPid = 0;
         long pairingTargetWindow = 0;
-        Console.WriteLine(JsonSerializer.Serialize(new { @event = "ready", slots, physical_mode = physicalMode, pairing_protected = protectedPairing }));
+        Console.WriteLine(JsonSerializer.Serialize(new { @event = "ready", slots, physical_mode = physicalMode,
+            pairing_protected = protectedPairing, hidhide_preflight = physicalMode }));
 
         Task<string?> pendingLine = Console.In.ReadLineAsync();
         while (true)
