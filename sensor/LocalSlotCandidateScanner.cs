@@ -17,6 +17,7 @@ public static class LocalSlotCandidateScanner
         public RawRenderPositionReader.Position?[]? RawPositions { get; init; }
         public DateTime? RawPositionsSeenUtc { get; init; }
         public RawRenderPositionReader.LocalComparison? ObservedLocalPositionComparison { get; init; }
+        public RawRenderPositionReader.LocalComparison?[]? VisiblePositionComparisons { get; init; }
     }
 
     public static Result Scan(long ingameStateAddress, long dataAddress, long observedLocalAddress,

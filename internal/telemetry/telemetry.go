@@ -177,18 +177,19 @@ type RadarEntity struct {
 // LocalSlotCandidates are read-only hints from an unverified memory anchor.
 // They must never be used as a controller or party slot assignment.
 type LocalSlotCandidates struct {
-	Status                          string              `json:"Status"`
-	Anchor                          string              `json:"Anchor"`
-	OffsetProfile                   string              `json:"OffsetProfile"`
-	OrderedAddresses                []string            `json:"OrderedAddresses"`
-	MatchingHeaders                 int                 `json:"MatchingHeaders"`
-	StatePointerAreaAddress         string              `json:"StatePointerAreaAddress,omitempty"`
-	StatePointerMatchesDataAddress  *bool               `json:"StatePointerMatchesDataAddress,omitempty"`
-	CandidateAreaAddresses          []string            `json:"CandidateAreaAddresses"`
-	VectorHeaderAddress             string              `json:"VectorHeaderAddress,omitempty"`
-	RawPositions                    []*RawSlotPosition  `json:"RawPositions,omitempty"`
-	RawPositionsSeenUTC             *time.Time          `json:"RawPositionsSeenUtc,omitempty"`
-	ObservedLocalPositionComparison *RawLocalComparison `json:"ObservedLocalPositionComparison,omitempty"`
+	Status                          string                `json:"Status"`
+	Anchor                          string                `json:"Anchor"`
+	OffsetProfile                   string                `json:"OffsetProfile"`
+	OrderedAddresses                []string              `json:"OrderedAddresses"`
+	MatchingHeaders                 int                   `json:"MatchingHeaders"`
+	StatePointerAreaAddress         string                `json:"StatePointerAreaAddress,omitempty"`
+	StatePointerMatchesDataAddress  *bool                 `json:"StatePointerMatchesDataAddress,omitempty"`
+	CandidateAreaAddresses          []string              `json:"CandidateAreaAddresses"`
+	VectorHeaderAddress             string                `json:"VectorHeaderAddress,omitempty"`
+	RawPositions                    []*RawSlotPosition    `json:"RawPositions,omitempty"`
+	RawPositionsSeenUTC             *time.Time            `json:"RawPositionsSeenUtc,omitempty"`
+	ObservedLocalPositionComparison *RawLocalComparison   `json:"ObservedLocalPositionComparison,omitempty"`
+	VisiblePositionComparisons      []*RawLocalComparison `json:"VisiblePositionComparisons,omitempty"`
 }
 
 // RawSlotPosition is a candidate read using supplied-build default offsets.
@@ -624,6 +625,30 @@ func validLocalSlotCandidates(candidate *LocalSlotCandidates, scanStatus, observ
 		if !consistentDistance(comparison.WorldXYDistance, worldDistance) ||
 			!consistentDistance(comparison.GridXYDistance, gridDistance) {
 			return false
+		}
+	}
+	if len(candidate.VisiblePositionComparisons) != 0 {
+		if len(candidate.VisiblePositionComparisons) != want || len(candidate.RawPositions) != want ||
+			candidate.RawPositionsSeenUTC == nil {
+			return false
+		}
+		for index, comparison := range candidate.VisiblePositionComparisons {
+			if comparison == nil {
+				continue
+			}
+			position := candidate.RawPositions[index]
+			if position == nil || !finite(comparison.ObservedX) ||
+				!finite(comparison.ObservedY) || !finite(comparison.ObservedZ) ||
+				!finite(comparison.WorldXYDistance) || !finite(comparison.GridXYDistance) ||
+				comparison.WorldXYDistance < 0 || comparison.GridXYDistance < 0 ||
+				!consistentDistance(comparison.WorldXYDistance,
+					math.Hypot(position.WorldX-comparison.ObservedX,
+						position.WorldY-comparison.ObservedY)) ||
+				!consistentDistance(comparison.GridXYDistance,
+					math.Hypot(position.GridX-comparison.ObservedX,
+						position.GridY-comparison.ObservedY)) {
+				return false
+			}
 		}
 	}
 	if (candidate.MatchingHeaders == 0 && len(candidate.CandidateAreaAddresses) != 0) ||

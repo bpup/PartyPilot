@@ -113,6 +113,25 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                         var comparison = localIndex >= 0 && positions[localIndex] is { } localRaw
                             ? RawRenderPositionReader.CompareLocal(localRaw,
                                 render.Pos.X, render.Pos.Y, render.Pos.Z) : null;
+                        var visiblePositions = new Dictionary<long, (float X, float Y, float Z)>();
+                        foreach (var entity in GameController.Entities)
+                        {
+                            if (entity?.GetComponent<Player>() == null || entity.Address <= 0) continue;
+                            var pos = entity.Pos;
+                            if (float.IsFinite(pos.X) && float.IsFinite(pos.Y) && float.IsFinite(pos.Z))
+                                visiblePositions.TryAdd(entity.Address, (pos.X, pos.Y, pos.Z));
+                            if (visiblePositions.Count == 256) break;
+                        }
+                        var visibleComparisons = _slotCandidates.OrderedAddresses.Select((address, index) =>
+                        {
+                            if (positions[index] is not { } raw ||
+                                !long.TryParse(address.AsSpan(2),
+                                    System.Globalization.NumberStyles.HexNumber,
+                                    System.Globalization.CultureInfo.InvariantCulture, out var entity) ||
+                                !visiblePositions.TryGetValue(entity, out var pos))
+                                return null;
+                            return RawRenderPositionReader.CompareLocal(raw, pos.X, pos.Y, pos.Z);
+                        }).ToArray();
                         if (LocalSlotCandidateScanner.Revalidate(_slotCandidates, localAddress,
                                 paths, ReadCandidate,
                                 address => RawCharacterPathReader.Read(address, ReadCandidate)))
@@ -120,7 +139,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                             {
                                 RawPositions = positions,
                                 RawPositionsSeenUtc = now,
-                                ObservedLocalPositionComparison = comparison
+                                ObservedLocalPositionComparison = comparison,
+                                VisiblePositionComparisons = visibleComparisons
                             };
                     }
                     _lastSlotScanStateAddress = stateAddress;

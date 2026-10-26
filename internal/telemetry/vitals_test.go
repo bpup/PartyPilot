@@ -119,6 +119,26 @@ func TestRawLocalSlotPositionsRemainDiagnostic(t *testing.T) {
 		got.LocalSlotCandidates.RawPositions[0].GridX != 10 {
 		t.Fatalf("raw diagnostic positions lost: %+v, %v", got.LocalSlotCandidates, err)
 	}
+	withVisible := strings.Replace(base, `"GridXYDistance":0}}}`,
+		`"GridXYDistance":0},"VisiblePositionComparisons":[{"ObservedX":10,"ObservedY":20,`+
+			`"ObservedZ":5,"WorldXYDistance":220.69018,"GridXYDistance":0},null]}}`, 1)
+	if got, err := Decode([]byte(withVisible)); err != nil || got.LocalSlotCandidates == nil ||
+		len(got.LocalSlotCandidates.VisiblePositionComparisons) != 2 ||
+		got.LocalSlotCandidates.VisiblePositionComparisons[0] == nil {
+		t.Fatalf("visible comparison rejected: %v", err)
+	}
+	for _, changed := range []string{
+		strings.Replace(withVisible, `},null]}}`, `}]}}`, 1),
+		strings.Replace(withVisible, `},null]}}`, `},{"ObservedX":10,"ObservedY":20,"ObservedZ":5,`+
+			`"WorldXYDistance":220.69018,"GridXYDistance":0}]}}`, 1),
+		strings.Replace(withVisible, `"WorldXYDistance":220.69018,"GridXYDistance":0},null]`,
+			`"WorldXYDistance":1,"GridXYDistance":0},null]`, 1),
+		strings.Replace(withVisible, `"GridXYDistance":0},null]`, `"GridXYDistance":-1},null]`, 1),
+	} {
+		if _, err := Decode([]byte(changed)); err == nil {
+			t.Fatalf("invalid visible comparison accepted: %s", changed)
+		}
+	}
 	for _, changed := range []string{
 		strings.Replace(base, `"VectorHeaderAddress":"0x1005C8",`, ``, 1),
 		strings.Replace(base, `"RawPositionsSeenUtc":"2026-10-26T00:00:00Z",`, ``, 1),
