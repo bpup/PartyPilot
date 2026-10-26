@@ -9,12 +9,15 @@ import (
 
 // Encounter is read-only replay state for the supplied default profile.
 type Encounter struct {
-	ID    string   `json:"id"`
-	State string   `json:"state"`
-	Tags  []string `json:"tags"`
+	ID      string   `json:"id"`
+	Version int      `json:"version"`
+	State   string   `json:"state"`
+	Tags    []string `json:"tags"`
 
-	ids       map[string]bool
-	engagedAt time.Time
+	ids           map[string]bool
+	counts        [4]int
+	primaryThreat string
+	engagedAt     time.Time
 }
 
 // EncounterTracker models the default 60 m entry radius, 75 m exit radius,
@@ -61,11 +64,17 @@ func (t *EncounterTracker) Update(world World) (*Encounter, error) {
 		}
 		t.sequence++
 		t.entryAt = world.Timestamp
-		t.current = &Encounter{ID: fmt.Sprintf("enc-%d", t.sequence), State: "approaching",
-			ids: monsterIDs(entry)}
+		t.current = &Encounter{ID: fmt.Sprintf("enc-%d", t.sequence), Version: 1,
+			State: "approaching", ids: monsterIDs(entry), counts: monsterCounts(entry),
+			primaryThreat: primaryThreat(entry)}
 		t.current.Tags = classifyEncounter(world, entry, time.Time{})
+		if len(t.current.Tags) > 0 {
+			t.current.Version++
+		}
 		return t.current, nil
 	}
+	previousState := t.current.State
+	previousTags := t.current.Tags
 	selected := make([]Monster, 0, len(alive))
 	for _, monster := range alive {
 		if t.current.ids[monster.ID] || nearestDistance(monster) <= 75 {
@@ -93,9 +102,85 @@ func (t *EncounterTracker) Update(world World) (*Encounter, error) {
 			t.current.State = "active"
 		}
 	}
-	t.current.ids = monsterIDs(selected)
-	t.current.Tags = classifyEncounter(world, selected, t.current.engagedAt)
+	ids := monsterIDs(selected)
+	counts := monsterCounts(selected)
+	threat := primaryThreat(selected)
+	if t.current.State != previousState || !sameMonsterIDs(t.current.ids, ids) ||
+		t.current.counts != counts || t.current.primaryThreat != threat {
+		t.current.Version++
+	}
+	t.current.ids = ids
+	t.current.counts = counts
+	t.current.primaryThreat = threat
+	tags := classifyEncounter(world, selected, t.current.engagedAt)
+	if !sameTags(previousTags, tags) {
+		t.current.Version++
+	}
+	t.current.Tags = tags
 	return t.current, nil
+}
+
+func sameMonsterIDs(left, right map[string]bool) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for id := range left {
+		if !right[id] {
+			return false
+		}
+	}
+	return true
+}
+
+func sameTags(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func monsterCounts(monsters []Monster) [4]int {
+	var counts [4]int
+	for _, monster := range monsters {
+		switch monster.Rarity {
+		case "normal":
+			counts[0]++
+		case "magic":
+			counts[1]++
+		case "rare":
+			counts[2]++
+		case "unique":
+			counts[3]++
+		}
+	}
+	return counts
+}
+
+func primaryThreat(monsters []Monster) string {
+	bestID := ""
+	bestRank := -1
+	bestDistance := math.Inf(1)
+	for _, monster := range monsters {
+		rank := 100
+		switch monster.Rarity {
+		case "magic":
+			rank = 200
+		case "rare":
+			rank = 300
+		case "unique":
+			rank = 400
+		}
+		distance := nearestDistance(monster)
+		if rank > bestRank || rank == bestRank && distance < bestDistance {
+			bestID, bestRank, bestDistance = monster.ID, rank, distance
+		}
+	}
+	return bestID
 }
 
 func monsterIDs(monsters []Monster) map[string]bool {

@@ -105,3 +105,31 @@ func TestFormationBrokenUsesExplicitPlayerDistance(t *testing.T) {
 		t.Fatal("missing player distance was accepted")
 	}
 }
+
+func TestEncounterVersionTracksSourceChanges(t *testing.T) {
+	world := testWorld()
+	world.Monsters[2].Rarity = "normal"
+	var tracker EncounterTracker
+	step := func(ms int, want int) {
+		t.Helper()
+		world.Timestamp = testWorld().Timestamp.Add(time.Duration(ms) * time.Millisecond)
+		encounter, err := tracker.Update(world)
+		if err != nil || encounter == nil || encounter.Version != want {
+			t.Fatalf("at %d ms wanted version %d, got %+v, %v", ms, want, encounter, err)
+		}
+	}
+	step(0, 2) // Initial manager version, then Pack tag.
+	step(1, 2) // No structural or tag change.
+	world.Monsters[1].DistanceByPlayer[1] = 19
+	step(2, 3) // Primary threat changes with the same IDs and counts.
+	world.Monsters[2].Rarity = "magic"
+	step(3, 4) // Rarity counts change; Pack tag remains.
+	player := world.Players[2]
+	player.DistanceFromMainM = ptr(16.0)
+	world.Players[2] = player
+	step(4, 5) // Only FormationBroken tag changes.
+	step(5, 5)
+	step(150, 6) // Approaching becomes engaged.
+	world.Monsters[0].Rarity = "rare"
+	step(151, 8) // Structural change and tag change each increment once.
+}
