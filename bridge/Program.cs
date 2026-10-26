@@ -87,6 +87,46 @@ if (args.Length == 5 && args[0] == "--check-hidhide" && args[1] == "--device" &&
     }
 }
 
+if (args.Length > 0 && args[0] == "--check-startup")
+{
+    if (!ControllerStartupCheckRequest.TryParse(args, out var request) || request is null ||
+        request.GameExecutables.Any(path => !Path.IsPathFullyQualified(path) || !File.Exists(path)))
+    {
+        Console.Error.WriteLine("Provide a device, one input source, and 1–3 existing absolute game executables.");
+        return 2;
+    }
+    if (!OperatingSystem.IsWindows())
+    {
+        Console.Error.WriteLine("Controller startup check runs on Windows only.");
+        return 2;
+    }
+    try
+    {
+        var bridgeExe = Environment.ProcessPath ?? throw new InvalidOperationException("Bridge path is unavailable.");
+        var snapshot = HidHidePreflight.Read();
+        var isolated = request.GameExecutables.All(path => HidHidePreflight.Evaluate(snapshot,
+            request.Device, bridgeExe, Path.GetFullPath(path)).ConfigurationMatches);
+        var readable = false;
+        if (isolated)
+        {
+            if (request.UseWgi)
+                readable = WgiPhysicalSource.Open(request.Device).TryRead(out _);
+            else
+                readable = XInputNative.TryRead((uint)request.XInputIndex!.Value, out _);
+        }
+        Console.WriteLine(JsonSerializer.Serialize(new { startup_preflight_ready = isolated && readable,
+            isolation_matches = isolated, physical_source_readable = readable }));
+        return isolated && readable ? 0 : 1;
+    }
+    catch (Exception error) when (error is IOException or System.ComponentModel.Win32Exception or
+        InvalidDataException or InvalidOperationException or UnauthorizedAccessException or
+        DllNotFoundException)
+    {
+        Console.Error.WriteLine($"Controller startup check failed: {error.Message}");
+        return 1;
+    }
+}
+
 if (args.Length == 4 && args[0] == "--probe-xinput" && args[2] == "--samples" &&
     uint.TryParse(args[1], out var probeIndex) && probeIndex <= 3 &&
     int.TryParse(args[3], out var sampleCount) && sampleCount is >= 1 and <= 200)

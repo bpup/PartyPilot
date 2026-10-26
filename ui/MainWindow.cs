@@ -1967,30 +1967,53 @@ public sealed class MainWindow : Window
             startInfo.ArgumentList.Add("-attach");
         }
 
-        if (action != ClientAction.Check)
-        {
-            _fpsGamesClosed.IsChecked = false;
-            await StopRadarAsync();
-            StopPrivacy();
-            await StopAllResourcesAsync();
-        }
         _busy = true;
-        if (action != ClientAction.Check)
-        {
-            _launchedClients = [];
-            Array.Clear(_preparedAutoLoginWindows);
-            Array.Clear(_manualAutoLoginWindows);
-            _rosterStatus.Text = "正在重新识别游戏窗口；完成绑定后可检查 Current Party。";
-        }
         UpdateClientRows();
         _status.Text = action switch
         {
-            ClientAction.Start => "正在等待游戏窗口…",
+            ClientAction.Start => "正在检查控制器隔离和实体输入…",
             ClientAction.Attach => "正在识别已运行游戏窗口…",
             _ => "正在检查配置…"
         };
         try
         {
+            if (action == ClientAction.Start)
+            {
+                if (_isolationConfirmed.IsChecked != true || string.IsNullOrWhiteSpace(_physicalDevice.Text))
+                {
+                    _status.Text = "启动前请确认实体手柄隔离并填写所选设备 ID；游戏尚未启动。";
+                    return;
+                }
+                var bridgeExecutable = BridgeSession.FindExecutable();
+                if (bridgeExecutable is null)
+                {
+                    _status.Text = "找不到 PartyPilot.Bridge.exe，无法完成启动前检查；游戏尚未启动。";
+                    return;
+                }
+                var useWgi = _selectedTopology.Slots.Count(slot => slot.Client != 3) == 4;
+                var gameExecutables = Enumerable.Range(0, _selectedTopology.ClientCount)
+                    .Select(index => _paths[index].Text?.Trim() ?? string.Empty).ToArray();
+                var preflight = await ControllerLaunchPreflight.CheckAsync(bridgeExecutable,
+                    _physicalDevice.Text.Trim(), gameExecutables,
+                    useWgi ? null : _physicalIndex.SelectedIndex, useWgi);
+                if (!preflight.Ready)
+                {
+                    _status.Text = preflight.Message;
+                    return;
+                }
+                _status.Text = "启动前只读检查通过；正在等待游戏窗口…";
+            }
+            if (action != ClientAction.Check)
+            {
+                _fpsGamesClosed.IsChecked = false;
+                await StopRadarAsync();
+                StopPrivacy();
+                await StopAllResourcesAsync();
+                _launchedClients = [];
+                Array.Clear(_preparedAutoLoginWindows);
+                Array.Clear(_manualAutoLoginWindows);
+                _rosterStatus.Text = "正在重新识别游戏窗口；完成绑定后可检查 Current Party。";
+            }
             using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("启动器未能启动");
             var output = process.StandardOutput.ReadToEndAsync();
             var error = process.StandardError.ReadToEndAsync();
@@ -2027,7 +2050,7 @@ public sealed class MainWindow : Window
         }
         catch (Exception exception)
         {
-            _status.Text = $"启动器调用失败：{exception.Message}";
+            _status.Text = $"启动或绑定失败：{exception.Message}";
         }
         finally
         {

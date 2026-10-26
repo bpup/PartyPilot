@@ -18,6 +18,15 @@ AutoPartyInviteSmoke.Run();
 AutoPartyRecoverySmoke.Run();
 await AutoPartyRecoverySchedulerSmoke.RunAsync();
 await PartyLeaveLogSmoke.RunAsync();
+await ControllerLaunchPreflightSmoke.RunAsync();
+if (!ControllerLaunchPreflight.Parse(0,
+        "{\"startup_preflight_ready\":true,\"isolation_matches\":true,\"physical_source_readable\":true}", "").Ready ||
+    ControllerLaunchPreflight.Parse(0,
+        "{\"startup_preflight_ready\":true,\"isolation_matches\":false,\"physical_source_readable\":true}", "").Ready ||
+    ControllerLaunchPreflight.Parse(1,
+        "{\"startup_preflight_ready\":true,\"isolation_matches\":true,\"physical_source_readable\":true}", "").Ready ||
+    ControllerLaunchPreflight.Parse(0, "{}", "").Ready)
+    throw new Exception("Controller startup preflight accepted an incomplete or failed check.");
 
 if (args.Contains("--client3-plan-only"))
 {

@@ -1,6 +1,22 @@
 using PartyPilot.Bridge;
 using System.Runtime.InteropServices;
 
+if (!ControllerStartupCheckRequest.TryParse(["--check-startup", "--device", "HID\\DEVICE",
+        "--physical-index", "2", "--game-exe", "C:\\Game\\PathOfExile.exe"], out var startup) ||
+    startup?.XInputIndex != 2 || startup.UseWgi || startup.GameExecutables.Length != 1 ||
+    !ControllerStartupCheckRequest.TryParse(["--check-startup", "--device", "HID\\DEVICE",
+        "--physical-wgi", "--game-exe", "C:\\Game\\PathOfExile.exe"], out var wgiStartup) ||
+    wgiStartup?.UseWgi != true)
+    throw new Exception("Controller startup check rejected a valid input source.");
+foreach (var invalid in new[]
+{
+    new[] { "--check-startup", "--device", "HID\\DEVICE", "--physical-wgi", "--physical-index", "0", "--game-exe", "C:\\Game\\PathOfExile.exe" },
+    new[] { "--check-startup", "--device", "HID\\DEVICE", "--physical-index", "4", "--game-exe", "C:\\Game\\PathOfExile.exe" },
+    new[] { "--check-startup", "--device", "HID\\DEVICE", "--physical-wgi" }
+})
+    if (ControllerStartupCheckRequest.TryParse(invalid, out _))
+        throw new Exception("Controller startup check accepted an incomplete or conflicting input source.");
+
 if (!ControllerDeviceId.TryReadVidPid(@"HID\VID_1234&PID_ABCD\DEVICE", out var vendor, out var product) ||
     vendor != 0x1234 || product != 0xabcd ||
     ControllerDeviceId.TryReadVidPid(@"HID\VID_123&PID_ABCD\DEVICE", out _, out _) ||
