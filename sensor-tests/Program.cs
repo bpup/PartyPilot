@@ -114,6 +114,7 @@ Require(crossAreaConflict.Status == "conflicting_candidates" &&
 TestRawRenderPositionReader();
 TestTerrainDiagnostic();
 TestPackedTerrainProbe();
+TestSkillBindTable();
 Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
     RadarClassifier.Category("Metadata/MiscellaneousObjects/Waypoint") == "waypoint" &&
     RadarClassifier.Category("Metadata/Effects/PortalFlash") == null &&
@@ -130,6 +131,47 @@ Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
     !RadarClassifier.IsWorldItemWrapperPath("Metadata/Items/Weapons/Sword") &&
     RadarClassifier.IsNavigation("waypoint") && !RadarClassifier.IsNavigation("monster"),
     "Path-only radar categories admitted unsupported entities or lost navigation markers.");
+
+void TestSkillBindTable()
+{
+    var raw = new byte[148];
+    void Put(int slot, uint id) => BitConverter.GetBytes(id).CopyTo(raw, (13 + slot) * 4);
+    Put(0, 0x80080D00); // inherent weapon-set action
+    Put(1, 0x85000040); // gem tile 0, action 0
+    Put(5, 0x85011040); // gem tile 1, action 1
+    Put(8, 0x80410041); // exact identity, unknown name
+    Put(12, 0x85000041); // alternate bank
+    var result = SkillBindTable.DecodeForObservedOwner(raw, 0x200000, 0x200000);
+    Require(result.Status == "decoded_unverified_source" && result.Entries.Length == 5,
+        "Valid bind entries were not decoded.");
+    Require(result.Entries[0].ReservedAction == "Weapon Swap" &&
+        result.Entries[1].Kind == "gem" && result.Entries[1].GemTile == 0 &&
+        result.Entries[2].ActionIndex == 1 && result.Entries[2].GemTile == 1,
+        "Inherent and gem bit fields were confused.");
+    Require(result.Entries[1].Button == "RT" && result.Entries[1].ButtonConfirmed &&
+        result.Entries[3].Button == "D-pad Left" && !result.Entries[3].ButtonConfirmed &&
+        result.Entries[4].Button == "LT+RB" && result.Entries[4].ButtonConfirmed &&
+        result.Entries[3].Identity == "80410041",
+        "Button confidence or raw identity was changed.");
+    var matched = SkillBindTable.Decode(raw,
+        [new SkillBindTable.PanelEntry(0, "panel", "SkillGemTwister", "Twister"),
+            new SkillBindTable.PanelEntry(5, "bind", "SkillGemWarBanner", "War Banner")]);
+    Require(matched.Entries[1].MatchedSkillName == "Twister" &&
+        matched.Entries[2].MatchedSkillName == "War Banner" &&
+        matched.Entries[3].MatchedSkillName == null,
+        "Panel tiles, bound inventory slots, or unknown names were conflated.");
+    Require(SkillBindTable.DecodeForObservedOwner(raw, 0x300000, 0x200000).Status == "owner_unverified" &&
+        SkillBindTable.DecodeForObservedOwner(raw, 0, 0).Entries.Length == 0,
+        "An unproven player owner was accepted.");
+    Put(2, 0x1000);
+    Require(SkillBindTable.Decode(raw).Status == "invalid_entry" &&
+        SkillBindTable.Decode(raw).Entries.Length == 0,
+        "A corrupt table was partially accepted.");
+    Require(SkillBindTable.Decode(raw.AsSpan(0, 147)).Status == "invalid_length",
+        "A truncated table was accepted.");
+    Require(SkillBindTable.Decode(new byte[148]).Status == "no_bindings",
+        "An empty table was reported as an observed binding.");
+}
 
 void TestRawRenderPositionReader()
 {
