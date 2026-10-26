@@ -2,6 +2,8 @@ using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 using Avalonia.Threading;
 
 namespace PartyPilot.Desktop;
@@ -11,7 +13,15 @@ public sealed class PrivacyMaskOverlayWindow : Window
     private readonly LaunchedClient _client;
     private readonly IReadOnlyList<PrivacyMaskBox> _boxes;
     private readonly Canvas _canvas = new();
+    private readonly List<Image> _images = [];
+    private readonly List<WriteableBitmap> _bitmaps = [];
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(50) };
+    private int _captureInFlight;
+    private int _generation;
+    private long _captureSequence;
+    private long _appliedSequence;
+    private bool _wasForeground;
+    private DateTime _lastFrameUtc;
     public bool TargetIsLost { get; private set; }
     public event Action? TargetLost;
 
@@ -38,12 +48,19 @@ public sealed class PrivacyMaskOverlayWindow : Window
             _timer.Start();
             SyncTarget();
         };
-        Closed += (_, _) => _timer.Stop();
+        Closed += (_, _) =>
+        {
+            _generation++;
+            _timer.Stop();
+            ClearFrames();
+        };
         _timer.Tick += (_, _) => SyncTarget();
     }
 
     private void Draw()
     {
+        _generation++;
+        ClearFrames();
         _canvas.Children.Clear();
         if (Bounds.Width <= 0 || Bounds.Height <= 0) return;
         foreach (var box in _boxes)
@@ -53,7 +70,26 @@ public sealed class PrivacyMaskOverlayWindow : Window
             Canvas.SetLeft(mask, x);
             Canvas.SetTop(mask, y);
             _canvas.Children.Add(mask);
+            var image = new Image { Width = width, Height = height, Stretch = Stretch.Fill, IsVisible = false };
+            Canvas.SetLeft(image, x);
+            Canvas.SetTop(image, y);
+            _canvas.Children.Add(image);
+            _images.Add(image);
         }
+    }
+
+    private void ClearFrames()
+    {
+        HideFrames();
+        _images.Clear();
+    }
+
+    private void HideFrames()
+    {
+        foreach (var image in _images) { image.Source = null; image.IsVisible = false; }
+        foreach (var bitmap in _bitmaps) bitmap.Dispose();
+        _bitmaps.Clear();
+        _lastFrameUtc = default;
     }
 
     private void SyncTarget()
@@ -75,7 +111,82 @@ public sealed class PrivacyMaskOverlayWindow : Window
         var scaling = RenderScaling > 0 ? RenderScaling : 1;
         Width = (rect.Right - rect.Left) / scaling;
         Height = (rect.Bottom - rect.Top) / scaling;
-        Opacity = GetForegroundWindow() == handle ? 1 : 0;
+        var foreground = GetForegroundWindow() == handle;
+        Opacity = foreground ? 1 : 0;
+        if (!foreground)
+        {
+            if (_wasForeground)
+            {
+                _generation++;
+                HideFrames();
+            }
+            _wasForeground = false;
+            return;
+        }
+        _wasForeground = true;
+        if (_lastFrameUtc != default && DateTime.UtcNow - _lastFrameUtc > TimeSpan.FromMilliseconds(250))
+            foreach (var image in _images) image.IsVisible = false;
+        RequestCapture(handle, rect.Right - rect.Left, rect.Bottom - rect.Top);
+    }
+
+    private void RequestCapture(nint handle, int width, int height)
+    {
+        if (_images.Count != _boxes.Count ||
+            Interlocked.CompareExchange(ref _captureInFlight, 1, 0) != 0) return;
+        var generation = _generation;
+        var sequence = Interlocked.Increment(ref _captureSequence);
+        _ = Task.Run(() =>
+        {
+            PrivacyBlurFrame?[]? frames = null;
+            try
+            {
+                var pixels = PrivacyWindowCapture.TryCapture(handle, width, height);
+                if (pixels is not null)
+                    frames = _boxes.Select(box => PrivacyBlur.Build(pixels, width, height, box)).ToArray();
+            }
+            catch { /* A failed capture leaves the opaque masks visible. */ }
+            finally { Interlocked.Exchange(ref _captureInFlight, 0); }
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (generation != _generation || TargetIsLost || !_wasForeground ||
+                    sequence <= _appliedSequence) return;
+                _appliedSequence = sequence;
+                if (frames is null || frames.Length != _images.Count || frames.Any(frame => frame is null))
+                {
+                    HideFrames();
+                    return;
+                }
+                try { ShowFrames(frames!); }
+                catch { HideFrames(); }
+            });
+        });
+    }
+
+    private void ShowFrames(IReadOnlyList<PrivacyBlurFrame?> frames)
+    {
+        for (var index = 0; index < frames.Count; index++)
+        {
+            var frame = frames[index]!;
+            var bitmap = new WriteableBitmap(new PixelSize(frame.Width, frame.Height),
+                new Vector(96, 96), PixelFormats.Bgra8888, AlphaFormat.Premul);
+            using (var locked = bitmap.Lock())
+            {
+                var rowBytes = frame.Width * 4;
+                for (var row = 0; row < frame.Height; row++)
+                    Marshal.Copy(frame.Pixels, row * rowBytes,
+                        locked.Address + row * locked.RowBytes, rowBytes);
+            }
+            if (_bitmaps.Count > index)
+            {
+                _images[index].Source = null;
+                _bitmaps[index].Dispose();
+                _bitmaps[index] = bitmap;
+            }
+            else _bitmaps.Add(bitmap);
+            _images[index].Source = bitmap;
+            _images[index].IsVisible = true;
+        }
+        _lastFrameUtc = DateTime.UtcNow;
     }
 
     private void EnableClickThrough()

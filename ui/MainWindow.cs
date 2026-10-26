@@ -389,7 +389,7 @@ public sealed class MainWindow : Window
     private Border BuildPrivacyStep()
     {
         var panel = Step("6", "PRIVACY · 游戏画面遮挡",
-            "在已绑定游戏窗口的指定区域显示黑色遮挡；仅当前游戏窗口在前台时显示。此阶段不识别姓名牌，也不提供目标版的画面模糊效果。");
+            "在已绑定游戏窗口的指定区域显示模糊遮挡；窗口画面无法捕获时保留黑色遮挡。仅当前游戏窗口在前台时显示，暂不自动识别姓名牌。");
         panel.Children.Add(Label("每行：客户端编号, 左边距%, 上边距%, 宽%, 高%；最多 16 行，例如 1,10,5,20,6。", 12, MutedBrush));
         _privacyBoxes.AcceptsReturn = true;
         _privacyBoxes.MinHeight = 76;
@@ -590,7 +590,7 @@ public sealed class MainWindow : Window
         {
             _privacy = PrivacyMaskSession.Start(_launchedClients, boxes);
             _privacy.Ended += PrivacyEnded;
-            _privacyStatus.Text = $"已显示 {boxes.Count} 个手动遮挡区域；失焦时隐藏。";
+            _privacyStatus.Text = $"已显示 {boxes.Count} 个手动遮挡区域；捕获失败时显示黑色，失焦时隐藏。";
         }
         catch (Exception error) { _privacyStatus.Text = $"遮挡未能打开：{error.Message}"; }
         UpdatePrivacyControls();

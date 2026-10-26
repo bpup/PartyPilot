@@ -128,6 +128,18 @@ var privacyOutput = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(args.Fir
     "PartyPilot-privacy-preview.png");
 (privacyWindow.CaptureRenderedFrame() ?? throw new Exception("Privacy mask preview did not render.")).Save(privacyOutput);
 privacyWindow.Close();
+var sourcePixels = new byte[3 * 3 * 4];
+sourcePixels[(1 * 3 + 1) * 4] = 255;
+sourcePixels[(1 * 3 + 1) * 4 + 1] = 255;
+sourcePixels[(1 * 3 + 1) * 4 + 2] = 255;
+var blurredPixels = PrivacyBlur.Build(sourcePixels, 3, 3,
+    new PrivacyMaskBox(1, 0, 0, 1, 1));
+if (blurredPixels is null || blurredPixels.Width != 3 || blurredPixels.Height != 3 ||
+    blurredPixels.Pixels[(1 * 3 + 1) * 4] != 28 ||
+    blurredPixels.Pixels[(1 * 3 + 1) * 4 + 3] != 255 ||
+    PrivacyBlur.Build(sourcePixels, 3, 3, new PrivacyMaskBox(1, 1, 1, 0, 0)) is not null ||
+    PrivacyBlur.Build([], 3, 3, new PrivacyMaskBox(1, 0, 0, 1, 1)) is not null)
+    throw new Exception("Privacy blur did not clip and blur a BGRA frame as expected.");
 var labels = window.GetLogicalDescendants().OfType<TextBlock>().Select(item => item.Text).ToArray();
 if (!labels.Contains("PLAY") || !labels.Any(item => item?.Contains("HOW MANY CHARACTERS") == true) ||
     !labels.Any(item => item?.Contains("PREPARE & START") == true) ||
