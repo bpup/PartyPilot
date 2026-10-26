@@ -12,6 +12,11 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     private static readonly IPEndPoint Receiver = new(IPAddress.Loopback, 47617);
     private readonly UdpClient _udp = new();
     private DateTime _lastSentUtc;
+    private DateTime _lastSlotScanUtc;
+    private long _lastSlotScanDataAddress;
+    private long _lastSlotScanLocalAddress;
+    private LocalSlotCandidateScanner.Result? _slotCandidates;
+    private string? _slotCandidateStatus;
 
     public override void Render()
     {
@@ -44,6 +49,48 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             }
         }
 
+        if (Settings.DiagnoseLocalSlotCandidates.Value)
+        {
+            try
+            {
+                var data = GameController.IngameState.Data;
+                var localAddress = player?.Address ?? 0;
+                ingameDataAddress ??= FormatAddress(data.Address);
+                observedLocalAddress ??= FormatAddress(localAddress);
+                if (_slotCandidates == null || data.Address != _lastSlotScanDataAddress ||
+                    localAddress != _lastSlotScanLocalAddress || now - _lastSlotScanUtc >= TimeSpan.FromSeconds(1))
+                {
+                    var paths = new Dictionary<long, string>();
+                    foreach (var entity in GameController.Entities)
+                    {
+                        if (entity?.GetComponent<Player>() == null || entity.Address <= 0) continue;
+                        paths.TryAdd(entity.Address, entity.Path ?? "");
+                        if (paths.Count == 256) break;
+                    }
+                    _slotCandidates = LocalSlotCandidateScanner.Scan(data.Address, localAddress, paths,
+                        (address, size) =>
+                        {
+                            try { return data.M.ReadMem(address, size); }
+                            catch { return null; } // An unreadable candidate is not an overall scan failure.
+                        });
+                    _lastSlotScanDataAddress = data.Address;
+                    _lastSlotScanLocalAddress = localAddress;
+                    _lastSlotScanUtc = now;
+                }
+                _slotCandidateStatus = "ok";
+            }
+            catch
+            {
+                _slotCandidates = null;
+                _slotCandidateStatus = "scan_failed";
+            }
+        }
+        else
+        {
+            _slotCandidates = null;
+            _slotCandidateStatus = null;
+        }
+
         var position = render.Pos;
         // AreaName is diagnostic only. It does not identify a specific instance.
         var message = JsonSerializer.Serialize(new
@@ -63,6 +110,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             EnergyShieldMax = vitals?.MaxES,
             IngameDataAddress = ingameDataAddress,
             ObservedLocalAddress = observedLocalAddress,
+            LocalSlotCandidates = Settings.DiagnoseLocalSlotCandidates.Value ? _slotCandidates : null,
+            LocalSlotCandidateStatus = Settings.DiagnoseLocalSlotCandidates.Value ? _slotCandidateStatus : null,
             VisiblePlayers = visiblePlayers,
             VisiblePlayersStatus = visiblePlayersStatus
         });

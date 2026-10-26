@@ -62,6 +62,8 @@ GOOS=windows GOARCH=amd64 go build -o PartyPilot.exe ./cmd/partypilot
 
 `sensor/` 是基于公开 ExileCore2 接口的只读诊断插件。它默认关闭，启用后以 10Hz 向本机 `127.0.0.1:47617` 发送进程 ID、时间、区域名称、区域哈希和玩家三维坐标。`release/PartyPilot-SensorLog.exe` 可接收并显示这些数据。另有默认关闭的 `DiagnoseVisiblePlayers` 选项，打开后在同一诊断流中列出最多 16 个可见玩家实体的名字、实体 ID、位置、地址和路径，并标明与当前本地角色 ID 相同的实体；还会报告 ExileCore2 的游戏数据对象和当前角色地址。这些地址是诊断证据，不会自动绑定 P2 或驱动同窗口自动跟随，原因见[同窗口角色身份核对](SAME_CLIENT_RESEARCH.md)。区域名称不是实例 ID；区域哈希能否唯一标识两客户端的同一实例也**待游戏实测**。预览包包含本项目的 `PartyPilot.Sensor.dll` 与同次构建的 `PartyPilot.Sensor.deps.json`；本地 ExileCore2 参考目录中的已编译插件使用 `Plugins/Compiled/<插件名>/` 结构，用户实际安装目录及加载结果仍需在 Windows 上核对。插件默认关闭，必须在对应 ExileCore2 实例中确认加载并启用；双客户端跟随要求两个游戏 PID 都收到传感器样本。插件已针对当前参考程序集编译，接收程序已用模拟数据验证；真实游戏数据仍待测试。重新编译需设置 `EXILECORE2_DIR` 为 ExileCore2 安装目录，本项目不分发 ExileCore2 本身的二进制文件。`scripts/package_preview.py` 会核验并打包上述传感器文件和 Windows 预览程序。
 
+需要同窗口槽位取证时，还可单独开启默认关闭的 `DiagnoseLocalSlotCandidates`。它每秒以未验证的数据基址和静态默认偏移只读寻找本地角色向量，输出仅为候选，不能用于自动绑定 P2。合成向量检查可用 `DOTNET_ROLL_FORWARD=Major dotnet run --project sensor-tests/PartyPilot.Sensor.Tests.csproj -c Release`；本机只有 .NET 9，因此测试运行时需允许从目标 .NET 8 向上滚动。详见[同窗口角色身份核对](SAME_CLIENT_RESEARCH.md)。
+
 `release/PartyPilot-PartyMonitor.exe` 可用 `-leader-pid`、`-follower-pid` 和 `-max-age` 监视两个进程的只读位置流。它区分数据缺失、过期、区域不一致及“同名同哈希候选”；候选**不等于已证实处于同一实例**，因此监视器不输出任何手柄命令。模拟双进程 UDP 数据已验证这些状态切换。
 
 `release/PartyPilot-RosterWatch.exe` 使用 `-roster 1:进程ID,2:进程ID,... -leader 1 -max-age 750ms` 对 1–6 个明确配置的游戏进程做只读监视。它按角色槽位输出队长是否缺失/过期，以及每个队员的缺失、过期、区域不一致或同区域候选状态；拒绝重复槽位、重复进程 ID 和乱序旧样本。该程序已用本机模拟 UDP 报文验证三角色状态变化，仍未接到真实 PoE2。区域名称与哈希相等仍只是候选，不会进入自动控制。

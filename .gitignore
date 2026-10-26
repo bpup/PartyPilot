@@ -4,6 +4,8 @@ bridge/protocol-tests/bin/
 bridge/protocol-tests/obj/
 sensor/bin/
 sensor/obj/
+sensor-tests/bin/
+sensor-tests/obj/
 ui/bin/
 ui/obj/
 ui-smoke/bin/

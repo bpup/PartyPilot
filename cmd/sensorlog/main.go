@@ -25,7 +25,7 @@ func main() {
 	}
 	defer conn.Close()
 	fmt.Fprintln(os.Stderr, "Reading diagnostic telemetry; press Ctrl+C to stop.")
-	data := make([]byte, 4096)
+	data := make([]byte, 64*1024)
 	for {
 		count, _, err := conn.ReadFromUDP(data)
 		if err != nil {

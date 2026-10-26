@@ -184,7 +184,7 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 			tail.Close()
 		}
 	}()
-	data := make([]byte, 4096)
+	data := make([]byte, 64*1024)
 	encoder := json.NewEncoder(os.Stdout)
 	fail := func(reason string, err error) error {
 		engine.Stop(reason)

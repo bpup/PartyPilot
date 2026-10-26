@@ -36,7 +36,7 @@ func main() {
 	defer conn.Close()
 	fmt.Fprintln(os.Stderr, "Read-only party monitor started; no controller output.")
 	encoder := json.NewEncoder(os.Stdout)
-	data := make([]byte, 4096)
+	data := make([]byte, 64*1024)
 	previous := telemetry.Status("")
 	for {
 		_ = conn.SetReadDeadline(time.Now().Add(250 * time.Millisecond))

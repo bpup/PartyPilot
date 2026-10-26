@@ -73,3 +73,26 @@ func TestVisiblePlayerAddressEvidenceIsDiagnosticOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestLocalSlotCandidateDiagnosticCannotAssertUnobservedOrder(t *testing.T) {
+	base := `{"ProcessId":123,"SeenUtc":"2026-10-26T00:00:00Z","X":1,"Y":2,"Z":3,` +
+		`"ObservedLocalAddress":"0x200000","LocalSlotCandidateStatus":"ok",` +
+		`"LocalSlotCandidates":{"Status":"two_slot_candidate",` +
+		`"Anchor":"ExileCore2.IngameState.Data.Address (unverified area anchor)",` +
+		`"OffsetProfile":"supplied-build static defaults (active offsets unverified)",` +
+		`"OrderedAddresses":["0x200000","0x300000"],"MatchingHeaders":1}}`
+	got, err := Decode([]byte(base))
+	if err != nil || got.LocalSlotCandidates == nil || got.LocalSlotCandidates.Status != "two_slot_candidate" {
+		t.Fatalf("candidate diagnostic rejected: %+v, %v", got, err)
+	}
+	for _, changed := range []string{
+		strings.Replace(base, `"0x200000","0x300000"`, `"0x300000","0x400000"`, 1),
+		strings.Replace(base, `"0x200000","0x300000"`, `"0x200000","0x200000"`, 1),
+		strings.Replace(base, `"LocalSlotCandidateStatus":"ok"`, `"LocalSlotCandidateStatus":"scan_failed"`, 1),
+		strings.Replace(base, `"Status":"two_slot_candidate"`, `"Status":"reliable"`, 1),
+	} {
+		if _, err := Decode([]byte(changed)); err == nil {
+			t.Fatalf("invalid candidate diagnostic accepted: %s", changed)
+		}
+	}
+}
