@@ -23,16 +23,19 @@ internal sealed class BridgeSession : IAsyncDisposable
         _readError = readError;
     }
 
-    public static async Task<BridgeSession> StartAsync(string executable, int[] slots, int physicalIndex,
+    public static async Task<BridgeSession> StartAsync(string executable, IReadOnlyList<PartySlot> partySlots, int physicalIndex,
         string deviceInstance, IReadOnlyList<string> gameExecutables, bool rightStickFollowerOverride)
     {
+        var slots = partySlots.Select(item => item.RuntimePad).ToArray();
         if (slots.Length is < 1 or > 3 || slots.Any(slot => slot is < 1 or > 4) ||
             slots.Distinct().Count() != slots.Length || physicalIndex is < 0 or > 3 ||
+            !partySlots.Select(item => item.PartyPlayer).SequenceEqual(Enumerable.Range(1, slots.Length)) ||
             string.IsNullOrWhiteSpace(deviceInstance) || gameExecutables.Count is < 1 or > 3 ||
             gameExecutables.Any(string.IsNullOrWhiteSpace))
         {
             throw new ArgumentException("The current bridge needs 1–3 P1–P4 pads, a selected HidHide device, and 1–3 game paths.");
         }
+        var focusPadMap = string.Join(',', partySlots.Select(item => $"{item.PartyPlayer}:{item.RuntimePad}"));
         var start = new ProcessStartInfo(executable)
         {
             WorkingDirectory = Path.GetDirectoryName(executable)!,
@@ -45,6 +48,7 @@ internal sealed class BridgeSession : IAsyncDisposable
         foreach (var argument in new[]
         {
             "--enable-controller", "--slots", string.Join(',', slots),
+            "--focus-pad-map", focusPadMap,
             "--physical-index", physicalIndex.ToString(), "--main-slot", slots[0].ToString(),
             "--physical-hidden-confirmed", "--pairing-protected", "--device-instance", deviceInstance
         })
@@ -62,7 +66,7 @@ internal sealed class BridgeSession : IAsyncDisposable
         try
         {
             var readyLine = await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15));
-            if (readyLine is null || !IsExpectedReady(readyLine, slots, rightStickFollowerOverride))
+            if (readyLine is null || !IsExpectedReady(readyLine, slots, focusPadMap, rightStickFollowerOverride))
             {
                 throw new InvalidOperationException("Virtual controller bridge did not confirm the requested pad slots.");
             }
@@ -85,7 +89,8 @@ internal sealed class BridgeSession : IAsyncDisposable
         _readEvents = ReadEventsAsync();
     }
 
-    private static bool IsExpectedReady(string line, int[] slots, bool rightStickFollowerOverride)
+    private static bool IsExpectedReady(string line, int[] slots, string focusPadMap,
+        bool rightStickFollowerOverride)
     {
         try
         {
@@ -97,6 +102,8 @@ internal sealed class BridgeSession : IAsyncDisposable
                    root.TryGetProperty("hidhide_preflight", out var preflight) && preflight.GetBoolean() &&
                    root.TryGetProperty("right_stick_follower_override", out var rightStick) &&
                    rightStick.GetBoolean() == rightStickFollowerOverride &&
+                   root.TryGetProperty("focus_pad_map", out var focusMap) &&
+                   focusMap.GetString() == focusPadMap &&
                    root.TryGetProperty("slots", out var selected) &&
                    selected.EnumerateArray().Select(value => value.GetInt32()).SequenceEqual(slots.Order());
         }

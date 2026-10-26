@@ -420,7 +420,7 @@ public sealed class MainWindow : Window
         {
             var gameExecutables = Enumerable.Range(0, _selectedTopology.ClientCount)
                 .Select(index => _paths[index].Text?.Trim() ?? "").ToArray();
-            var session = await BridgeSession.StartAsync(executable, slots, _physicalIndex.SelectedIndex,
+            var session = await BridgeSession.StartAsync(executable, _selectedTopology.Slots, _physicalIndex.SelectedIndex,
                 _physicalDevice.Text.Trim(), gameExecutables, _rightStickFollowerOverride.IsChecked == true);
             session.AReleased += BridgeAReleased;
             session.PairingArmed += BridgePairingArmed;

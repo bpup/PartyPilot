@@ -14,7 +14,8 @@ internal static class ProcessPipelineSmoke
         try
         {
             File.WriteAllText(bridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
-                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"right_stick_follower_override\":false}', flush=True)\n" +
+                "if '--focus-pad-map' not in sys.argv or sys.argv[sys.argv.index('--focus-pad-map')+1] != '1:1,2:3': sys.exit(2)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"right_stick_follower_override\":false,\"focus_pad_map\":\"1:1,2:3\"}', flush=True)\n" +
                 $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(log)}, 'a') as out: out.write(line)\n");
             File.WriteAllText(followExe, "#!/usr/bin/env python3\nimport time\n" +
                 "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"reason\":\"missing position\"}}}', flush=True)\n" +
@@ -23,11 +24,11 @@ internal static class ProcessPipelineSmoke
             File.SetUnixFileMode(bridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(followExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             Console.WriteLine("Pipeline smoke: starting fake bridge.");
-            await using var bridge = await BridgeSession.StartAsync(bridgeExe, [1, 3], 0,
+            var topology = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-split");
+            await using var bridge = await BridgeSession.StartAsync(bridgeExe, topology.Slots, 0,
                 @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"], false);
             Console.WriteLine("Pipeline smoke: fake bridge ready.");
             bridge.StartReading();
-            var topology = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-split");
             var clients = new[]
             {
                 new LaunchedClient(101, 201, "C:/GameA.exe"),

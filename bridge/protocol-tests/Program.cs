@@ -40,6 +40,12 @@ if (!BridgeSlots.TryParse(["--slots", "3,2"], out var slots) ||
 {
     throw new Exception("Slot routing validation failed.");
 }
+if (!FocusPadMap.TryParse(["--focus-pad-map", "1:1,2:3"], [1, 3], out var splitFocus) ||
+    splitFocus is null || splitFocus[2] != 3 ||
+    FocusPadMap.TryParse(["--focus-pad-map", "1:1,2:1"], [1, 3], out _) ||
+    FocusPadMap.TryParse(["--focus-pad-map", "1:1,3:3"], [1, 3], out _) ||
+    FocusPadMap.TryParse(["--focus-pad-map", "1:1,2:2"], [1, 3], out _))
+    throw new Exception("Logical player to virtual pad focus mapping was accepted ambiguously.");
 var now = new DateTime(2026, 10, 26, 10, 0, 0, DateTimeKind.Utc);
 var pad2 = new FakePad();
 var pad3 = new FakePad();
@@ -215,12 +221,59 @@ var pad1 = new FakePad();
 var pad2ForHotkey = new FakePad();
 var hotkeyRouter = new BridgeRouter(new Dictionary<int, IPadOutput> { [1] = pad1, [2] = pad2ForHotkey });
 hotkeyRouter.ConfigurePhysical(1);
-hotkeyRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080 | 0x1000, LeftX = 222 });
+hotkeyRouter.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", now);
+hotkeyRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080 | 0x1000, LeftX = 222 }, now);
 if (pad1.Report != default || pad2ForHotkey.Report.Buttons != 0x1000 || pad2ForHotkey.X != 222)
     throw new Exception("R3 focus switch or key suppression failed.");
-hotkeyRouter.SetPhysical(new XInputGamepad { Buttons = 0x0040 });
-if (pad1.Report.Buttons != 0 || pad2ForHotkey.Report != default)
-    throw new Exception("L3 focus switch or key suppression failed.");
+hotkeyRouter.SetPhysical(default, now.AddMilliseconds(10));
+hotkeyRouter.SetPhysical(new XInputGamepad { Buttons = 0x0040 }, now.AddMilliseconds(100));
+if (hotkeyRouter.FocusedSlot != 2 || pad2ForHotkey.Report != default)
+    throw new Exception("Focus changed inside the 350 ms debounce interval.");
+hotkeyRouter.SetPhysical(default, now.AddMilliseconds(110));
+hotkeyRouter.SetPhysical(new XInputGamepad { Buttons = 0x0040, LeftX = 333 }, now.AddMilliseconds(400));
+if (hotkeyRouter.FocusedSlot != 1 || pad1.X != 333 || pad2ForHotkey.Report != default)
+    throw new Exception("L3 did not isolate P1 and release follower automation.");
+hotkeyRouter.SetPhysical(new XInputGamepad { Buttons = 0x0040, LeftX = 333 }, now.AddMilliseconds(800));
+if (pad2ForHotkey.Report != default)
+    throw new Exception("Holding L3 toggled focus repeatedly.");
+hotkeyRouter.SetPhysical(default, now.AddMilliseconds(810));
+hotkeyRouter.SetPhysical(new XInputGamepad { Buttons = 0x0040, LeftX = 444 }, now.AddMilliseconds(1200));
+if (hotkeyRouter.FocusedSlot != 1 || pad1.X != 444 || pad2ForHotkey.X != 32767)
+    throw new Exception("Repeating L3 did not return to shared control and follower automation.");
+hotkeyRouter.SetPhysical(default, now.AddMilliseconds(1210));
+hotkeyRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080 }, now.AddMilliseconds(1600));
+hotkeyRouter.SetPhysical(default, now.AddMilliseconds(1610));
+hotkeyRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080, LeftX = 555 }, now.AddMilliseconds(2000));
+if (hotkeyRouter.FocusedSlot != 1 || pad1.X != 555 || pad2ForHotkey.X != 32767)
+    throw new Exception("Repeating R3 did not return to shared control.");
+hotkeyRouter.ApplyLine("{\"type\":\"focus\",\"slot\":2}", now);
+hotkeyRouter.ApplyLine("{\"type\":\"focus\",\"slot\":1}", now);
+if (pad2ForHotkey.X != 32767)
+    throw new Exception("External MAIN focus did not resume ordinary follower routing.");
+var splitMain = new FakePad();
+var splitFollower = new FakePad();
+var splitRouter = new BridgeRouter(new Dictionary<int, IPadOutput> { [1] = splitMain, [3] = splitFollower });
+if (!splitRouter.ConfigurePhysical(1, focusPads: splitFocus))
+    throw new Exception("Split player focus mapping was rejected.");
+splitRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080, LeftX = 321 }, now);
+if (splitRouter.FocusedSlot != 3 || splitFollower.X != 321 || splitMain.Report != default)
+    throw new Exception("R3 did not route logical P2 to runtime pad P3 in split mode.");
+splitRouter.SetPhysical(default, now.AddMilliseconds(10));
+splitRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080 }, now.AddMilliseconds(400));
+if (splitRouter.FocusedSlot != 1 || splitFollower.Report != default)
+    throw new Exception("Split P2 focus did not toggle back to shared control.");
+var thirdMain = new FakePad();
+var thirdSecond = new FakePad();
+var thirdThird = new FakePad();
+var thirdRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
+    { [1] = thirdMain, [3] = thirdSecond, [4] = thirdThird });
+thirdRouter.ConfigurePhysical(1, focusPads: new Dictionary<int, int> { [1] = 1, [2] = 3, [3] = 4 });
+thirdRouter.SetPhysical(new XInputGamepad { Buttons = 0x0040 }, now);
+thirdRouter.SetPhysical(new XInputGamepad { Buttons = 0x0040, LeftTrigger = 180, LeftX = 432 },
+    now.AddMilliseconds(30));
+if (thirdRouter.FocusedSlot != 4 || thirdThird.X != 432 || thirdThird.Report.LeftTrigger != 0 ||
+    thirdMain.Report != default)
+    throw new Exception("LT+L3 did not promote P1 focus to logical P3 without waiting for debounce.");
 var overrideMain = new FakePad();
 var overrideFollower = new FakePad();
 var overrideHolding = new FakePad();

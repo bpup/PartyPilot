@@ -18,15 +18,19 @@ internal interface IPadOutput
 internal sealed class BridgeRouter
 {
     private readonly Dictionary<int, PadRoute> _routes;
+    private IReadOnlyDictionary<int, int> _focusPads = new Dictionary<int, int>();
     private bool _physicalMode;
     private bool _rightStickFollowerOverride;
     private int _mainSlot;
     private int _focusedSlot;
+    private int _isolatedSlot;
+    private DateTime _lastFocusToggleUtc = DateTime.MinValue;
     private PadReport _physicalReport;
     private bool _physicalConnected;
     private short _manualX;
     private short _manualY;
     private ushort _previousButtons;
+    private byte _previousLeftTrigger;
 
     public int FocusedSlot => _physicalMode ? _focusedSlot : 0;
 
@@ -35,13 +39,24 @@ internal sealed class BridgeRouter
         _routes = outputs.ToDictionary(entry => entry.Key, entry => new PadRoute(entry.Value));
     }
 
-    public bool ConfigurePhysical(int mainSlot, bool rightStickFollowerOverride = false)
+    public bool ConfigurePhysical(int mainSlot, bool rightStickFollowerOverride = false,
+        IReadOnlyDictionary<int, int>? focusPads = null)
     {
         if (!_routes.ContainsKey(mainSlot)) return false;
+        var explicitFocusPads = focusPads is not null;
+        focusPads ??= _routes.Keys.Where(slot => slot is >= 1 and <= 4)
+            .ToDictionary(slot => slot, slot => slot);
+        if (focusPads.Count == 0 || focusPads.Any(entry => entry.Key is < 1 or > 4 ||
+            !_routes.ContainsKey(entry.Value)) || focusPads.Values.Distinct().Count() != focusPads.Count ||
+            (explicitFocusPads && (!focusPads.TryGetValue(1, out var firstPad) || firstPad != mainSlot)))
+            return false;
+        _focusPads = new Dictionary<int, int>(focusPads);
         _physicalMode = true;
         _rightStickFollowerOverride = rightStickFollowerOverride;
         _mainSlot = mainSlot;
         _focusedSlot = mainSlot;
+        _isolatedSlot = 0;
+        _lastFocusToggleUtc = DateTime.MinValue;
         NeutralAll();
         return true;
     }
@@ -55,6 +70,8 @@ internal sealed class BridgeRouter
                 NeutralAll();
                 return false;
             }
+            // An external focus command for MAIN resumes the ordinary shared route.
+            _isolatedSlot = focused == _mainSlot ? 0 : focused;
             _focusedSlot = focused;
             RenderAll();
             return true;
@@ -73,28 +90,50 @@ internal sealed class BridgeRouter
         return true;
     }
 
-    public void SetPhysical(XInputGamepad gamepad)
+    public void SetPhysical(XInputGamepad gamepad, DateTime? observedAtUtc = null)
     {
         if (!_physicalMode) return;
         const ushort leftThumb = 0x0040;
         const ushort rightThumb = 0x0080;
+        var nowUtc = observedAtUtc ?? DateTime.UtcNow;
         var previousFocus = _focusedSlot;
-        if ((gamepad.Buttons & leftThumb) != 0 && (_previousButtons & leftThumb) == 0 && _routes.ContainsKey(1))
-            _focusedSlot = 1;
-        else if ((gamepad.Buttons & rightThumb) != 0 && (_previousButtons & rightThumb) == 0 && _routes.ContainsKey(2))
-            _focusedSlot = 2;
+        var previousIsolation = _isolatedSlot;
+        var left = (gamepad.Buttons & leftThumb) != 0;
+        var right = (gamepad.Buttons & rightThumb) != 0;
+        var previousLeft = (_previousButtons & leftThumb) != 0;
+        var previousRight = (_previousButtons & rightThumb) != 0;
+        var leftTrigger = gamepad.LeftTrigger >= 30;
+        var previousLeftTrigger = _previousLeftTrigger >= 30;
+        var leftRole = leftTrigger && _focusPads.ContainsKey(3) ? 3 : 1;
+        var rightRole = leftTrigger && _focusPads.ContainsKey(4) ? 4 : 2;
+        var leftEdge = left && (!previousLeft || (leftRole == 3 && !previousLeftTrigger));
+        var rightEdge = right && (!previousRight || (rightRole == 4 && !previousLeftTrigger));
+        var pressedRole = leftEdge == rightEdge ? 0 : leftEdge ? leftRole : rightRole;
+        var promoteChord = pressedRole is 3 or 4 &&
+            _isolatedSlot == (_focusPads.TryGetValue(pressedRole - 2, out var prefixPad) ? prefixPad : -1) &&
+            (pressedRole == 3 ? previousLeft : previousRight) && !previousLeftTrigger;
+        if (pressedRole != 0 && _focusPads.TryGetValue(pressedRole, out var pressedSlot) &&
+            (promoteChord || nowUtc - _lastFocusToggleUtc >= TimeSpan.FromMilliseconds(350)))
+        {
+            _isolatedSlot = _isolatedSlot == pressedSlot ? 0 : pressedSlot;
+            _focusedSlot = _isolatedSlot == 0 ? _mainSlot : _isolatedSlot;
+            _lastFocusToggleUtc = nowUtc;
+        }
         _previousButtons = gamepad.Buttons;
+        _previousLeftTrigger = gamepad.LeftTrigger;
         gamepad.Buttons &= unchecked((ushort)~(leftThumb | rightThumb));
+        if (leftTrigger && ((left && leftRole == 3) || (right && rightRole == 4)))
+            gamepad.LeftTrigger = 0;
         _physicalConnected = true;
         _manualX = gamepad.RightX;
         _manualY = gamepad.RightY;
-        if (_rightStickFollowerOverride && _focusedSlot == _mainSlot)
+        if (_rightStickFollowerOverride && _isolatedSlot == 0)
         {
             gamepad.RightX = 0;
             gamepad.RightY = 0;
         }
         _physicalReport = PadReport.FromPhysical(gamepad);
-        if (previousFocus != _focusedSlot || _rightStickFollowerOverride) RenderAll();
+        if (previousFocus != _focusedSlot || previousIsolation != _isolatedSlot || _rightStickFollowerOverride) RenderAll();
         else Render(_focusedSlot, _routes[_focusedSlot]);
     }
 
@@ -102,6 +141,9 @@ internal sealed class BridgeRouter
     {
         if (!_physicalMode) return;
         NeutralAll();
+        _isolatedSlot = 0;
+        _focusedSlot = _mainSlot;
+        _lastFocusToggleUtc = DateTime.MinValue;
     }
 
     public void Tick(DateTime nowUtc)
@@ -126,6 +168,7 @@ internal sealed class BridgeRouter
         _manualX = 0;
         _manualY = 0;
         _previousButtons = 0;
+        _previousLeftTrigger = 0;
         foreach (var route in _routes.Values)
         {
             route.Automation = default;
@@ -147,7 +190,12 @@ internal sealed class BridgeRouter
             route.Output.SetReport(_physicalConnected ? _physicalReport : default);
             return;
         }
-        if (_rightStickFollowerOverride && _physicalConnected && _focusedSlot == _mainSlot &&
+        if (_physicalMode && _isolatedSlot != 0)
+        {
+            route.Output.SetReport(default);
+            return;
+        }
+        if (_rightStickFollowerOverride && _physicalConnected && _isolatedSlot == 0 &&
             route.EligibleForManualMovement &&
             (Math.Abs((int)_manualX) > 8000 || Math.Abs((int)_manualY) > 8000))
         {
