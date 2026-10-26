@@ -90,6 +90,89 @@ int main(void) {
         fputs("Stopped private slot remained connected.\n", stderr);
         return 1;
     }
+    UnmapViewOfFile(frame);
+    UnmapViewOfFile(config);
+    CloseHandle(mapping);
+    CloseHandle(config_mapping);
+
+    // The DLL stays loaded. Its worker must release both named mappings so a
+    // second producer can attach to the same game process without a restart.
+    swprintf(name, sizeof(name) / sizeof(name[0]),
+             L"Local\\PartyPilot.PrivateSlots.Config.%lu", GetCurrentProcessId());
+    config_mapping = NULL;
+    for (int i = 0; i < 100; ++i) {
+        HANDLE candidate = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL,
+            PAGE_READWRITE, 0, PP_CONFIG_SIZE, name);
+        if (candidate == NULL) return 2;
+        if (GetLastError() != ERROR_ALREADY_EXISTS) {
+            config_mapping = candidate;
+            break;
+        }
+        CloseHandle(candidate);
+        Sleep(50);
+    }
+    if (config_mapping == NULL) {
+        fputs("Private config mapping survived stop.\n", stderr);
+        return 1;
+    }
+    config = (uint8_t *)MapViewOfFile(config_mapping, FILE_MAP_READ | FILE_MAP_WRITE,
+                                     0, 0, PP_CONFIG_SIZE);
+    if (config == NULL) return 2;
+    memset(config, 0, PP_CONFIG_SIZE);
+    put32(config, PP_CONFIG_MAGIC);
+    put32(config + 4, PP_VERSION);
+    put32(config + 8, PP_CONFIG_SIZE);
+    put32(config + 12, 1);
+    put32(config + 16, PP_NO_INDEX);
+
+    swprintf(name, sizeof(name) / sizeof(name[0]),
+             L"Local\\PartyPilot.PrivateSlots.%lu", GetCurrentProcessId());
+    mapping = NULL;
+    for (int i = 0; i < 100; ++i) {
+        HANDLE candidate = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL,
+            PAGE_READWRITE, 0, PP_FRAME_SIZE, name);
+        if (candidate == NULL) return 2;
+        if (GetLastError() != ERROR_ALREADY_EXISTS) {
+            mapping = candidate;
+            break;
+        }
+        CloseHandle(candidate);
+        Sleep(50);
+    }
+    if (mapping == NULL) {
+        fputs("Private input mapping survived stop.\n", stderr);
+        return 1;
+    }
+    frame = (uint8_t *)MapViewOfFile(mapping, FILE_MAP_READ | FILE_MAP_WRITE,
+                                     0, 0, PP_FRAME_SIZE);
+    if (frame == NULL) return 2;
+    memset(frame, 0, PP_FRAME_SIZE);
+    put32(frame, PP_MAGIC);
+    put32(frame + 4, PP_VERSION);
+    put32(frame + 8, PP_FRAME_SIZE);
+    put32(frame + 12, PP_STATUS_STARTING);
+    put32(frame + 16, PP_SLOT_P5);
+    put32(frame + 20, 2);
+    put32(frame + 24, 3);
+    put16(frame + 28, 0x2000);
+    put64(frame + 40, GetTickCount64());
+    ready = 0;
+    for (int i = 0; i < 100; ++i) {
+        if (InterlockedCompareExchange((volatile LONG *)(frame + 12), 0, 0) ==
+            PP_STATUS_READY) { ready = 1; break; }
+        Sleep(50);
+    }
+    if (!ready || get_state(1, &state) != ERROR_SUCCESS ||
+        state.Gamepad.wButtons != 0x2000 ||
+        get_state(2, &state) != ERROR_DEVICE_NOT_CONNECTED) {
+        fputs("Private XInput reconnect failed.\n", stderr);
+        return 1;
+    }
+    InterlockedExchange((volatile LONG *)(frame + 12), PP_STATUS_STOPPING);
+    UnmapViewOfFile(frame);
+    UnmapViewOfFile(config);
+    CloseHandle(mapping);
+    CloseHandle(config_mapping);
     puts("Private XInput runtime smoke passed.");
     return 0;
 }

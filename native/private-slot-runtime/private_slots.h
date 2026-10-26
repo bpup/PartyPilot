@@ -10,7 +10,10 @@
 #define PP_VERSION 1u
 #define PP_CONFIG_MAGIC 0x43535050u
 #define PP_NO_INDEX 0xffffffffu
+#define PP_STATUS_STARTING 1u
 #define PP_STATUS_READY 2u
+#define PP_STATUS_FAILED 3u
+#define PP_STATUS_STOPPING 5u
 #define PP_SLOT_P5 1u
 #define PP_SLOT_P6 2u
 

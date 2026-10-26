@@ -11,8 +11,7 @@
 // The managed bridge owns the mapping. This DLL is loaded only into its
 // assigned Client 3 process; it never discovers another game process.
 static volatile uint8_t *g_frame;
-static HANDLE g_mapping;
-static HANDLE g_config_mapping;
+static SRWLOCK g_frame_lock = SRWLOCK_INIT;
 static const uint64_t kMaxSampleAgeMs = 500; // Existing bridge command timeout.
 static uint32_t g_p5_index = PP_NO_INDEX;
 static uint32_t g_p6_index = PP_NO_INDEX;
@@ -23,11 +22,17 @@ static uint32_t header32(const volatile uint8_t *p) {
 }
 
 static pp_read_result read_private(DWORD index, pp_report *report) {
-    if (g_frame == NULL) return PP_UNAVAILABLE;
+    AcquireSRWLockShared(&g_frame_lock);
+    if (g_frame == NULL) {
+        ReleaseSRWLockShared(&g_frame_lock);
+        return PP_UNAVAILABLE;
+    }
     int player = index == g_p5_index ? 5 : index == g_p6_index ? 6 : 0;
-    if (player == 0) return PP_UNAVAILABLE;
-    return pp_read_pad(g_frame, PP_FRAME_SIZE, player,
-                       GetTickCount64(), kMaxSampleAgeMs, report);
+    pp_read_result result = player == 0 ? PP_UNAVAILABLE :
+        pp_read_pad(g_frame, PP_FRAME_SIZE, player,
+                    GetTickCount64(), kMaxSampleAgeMs, report);
+    ReleaseSRWLockShared(&g_frame_lock);
+    return result;
 }
 
 static DWORD WINAPI hooked_get_state(DWORD index, XINPUT_STATE *state) {
@@ -104,49 +109,72 @@ static int hook_loaded_xinput(void) {
 
 static DWORD WINAPI worker(void *unused) {
     (void)unused;
-    wchar_t name[128];
-    swprintf(name, sizeof(name) / sizeof(name[0]),
-             L"Local\\PartyPilot.PrivateSlots.%lu", GetCurrentProcessId());
-    while (g_mapping == NULL) {
-        g_mapping = OpenFileMappingW(FILE_MAP_READ | FILE_MAP_WRITE, FALSE, name);
-        if (g_mapping == NULL) Sleep(100);
-    }
-    g_frame = (volatile uint8_t *)MapViewOfFile(g_mapping, FILE_MAP_READ | FILE_MAP_WRITE,
-                                                 0, 0, PP_FRAME_SIZE);
-    if (g_frame == NULL) return 1;
-    swprintf(name, sizeof(name) / sizeof(name[0]),
-             L"Local\\PartyPilot.PrivateSlots.Config.%lu", GetCurrentProcessId());
-    while (g_config_mapping == NULL) {
-        g_config_mapping = OpenFileMappingW(FILE_MAP_READ, FALSE, name);
-        if (g_config_mapping == NULL) Sleep(100);
-    }
-    const volatile uint8_t *config = (const volatile uint8_t *)MapViewOfFile(
-        g_config_mapping, FILE_MAP_READ, 0, 0, PP_CONFIG_SIZE);
-    if (config == NULL) {
-        InterlockedExchange((volatile LONG *)(g_frame + 12), 3);
-        return 1;
-    }
-    uint32_t connected = header32(g_frame + 16);
-    int valid_header = header32(g_frame) == PP_MAGIC &&
-        header32(g_frame + 4) == PP_VERSION &&
-        header32(g_frame + 8) == PP_FRAME_SIZE &&
-        (connected == PP_SLOT_P5 || connected == (PP_SLOT_P5 | PP_SLOT_P6));
-    if (!valid_header || !pp_read_config(config, PP_CONFIG_SIZE, connected,
-                                          &g_p5_index, &g_p6_index) || MH_Initialize() != MH_OK) {
-        if (valid_header) InterlockedExchange((volatile LONG *)(g_frame + 12), 3);
-        return 1;
-    }
+    if (MH_Initialize() != MH_OK) return 1;
     for (;;) {
-        int hooks_ready = hook_loaded_xinput();
-        connected = header32(g_frame + 16);
-        if (hooks_ready && header32(g_frame) == PP_MAGIC &&
-            header32(g_frame + 4) == PP_VERSION &&
-            header32(g_frame + 8) == PP_FRAME_SIZE &&
-            (connected == PP_SLOT_P5 || connected == (PP_SLOT_P5 | PP_SLOT_P6)) &&
-            header32(g_frame + 12) == 1) {
-            InterlockedExchange((volatile LONG *)(g_frame + 12), PP_STATUS_READY);
+        wchar_t name[128];
+        swprintf(name, sizeof(name) / sizeof(name[0]),
+                 L"Local\\PartyPilot.PrivateSlots.%lu", GetCurrentProcessId());
+        HANDLE mapping = NULL;
+        while (mapping == NULL) {
+            mapping = OpenFileMappingW(FILE_MAP_READ | FILE_MAP_WRITE, FALSE, name);
+            if (mapping == NULL) Sleep(100);
         }
-        Sleep(100);
+        volatile uint8_t *frame = (volatile uint8_t *)MapViewOfFile(
+            mapping, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, PP_FRAME_SIZE);
+        if (frame == NULL) { CloseHandle(mapping); return 1; }
+        swprintf(name, sizeof(name) / sizeof(name[0]),
+                 L"Local\\PartyPilot.PrivateSlots.Config.%lu", GetCurrentProcessId());
+        HANDLE config_mapping = NULL;
+        while (config_mapping == NULL) {
+            config_mapping = OpenFileMappingW(FILE_MAP_READ, FALSE, name);
+            if (config_mapping == NULL) Sleep(100);
+        }
+        const volatile uint8_t *config = (const volatile uint8_t *)MapViewOfFile(
+            config_mapping, FILE_MAP_READ, 0, 0, PP_CONFIG_SIZE);
+        if (config == NULL) {
+            InterlockedExchange((volatile LONG *)(frame + 12), PP_STATUS_FAILED);
+            UnmapViewOfFile((const void *)frame);
+            CloseHandle(mapping);
+            CloseHandle(config_mapping);
+            return 1;
+        }
+        uint32_t connected = header32(frame + 16);
+        uint32_t p5_index = PP_NO_INDEX;
+        uint32_t p6_index = PP_NO_INDEX;
+        int valid = header32(frame) == PP_MAGIC &&
+            header32(frame + 4) == PP_VERSION &&
+            header32(frame + 8) == PP_FRAME_SIZE &&
+            (connected == PP_SLOT_P5 || connected == (PP_SLOT_P5 | PP_SLOT_P6)) &&
+            pp_read_config(config, PP_CONFIG_SIZE, connected,
+                           &p5_index, &p6_index);
+        if (valid) {
+            AcquireSRWLockExclusive(&g_frame_lock);
+            g_p5_index = p5_index;
+            g_p6_index = p6_index;
+            g_frame = frame;
+            ReleaseSRWLockExclusive(&g_frame_lock);
+        } else {
+            InterlockedExchange((volatile LONG *)(frame + 12), PP_STATUS_FAILED);
+        }
+        while (header32(frame + 12) != PP_STATUS_STOPPING) {
+            if (valid && hook_loaded_xinput() &&
+                header32(frame) == PP_MAGIC &&
+                header32(frame + 4) == PP_VERSION &&
+                header32(frame + 8) == PP_FRAME_SIZE &&
+                header32(frame + 16) == connected &&
+                header32(frame + 12) == PP_STATUS_STARTING)
+                InterlockedExchange((volatile LONG *)(frame + 12), PP_STATUS_READY);
+            Sleep(100);
+        }
+        AcquireSRWLockExclusive(&g_frame_lock);
+        g_frame = NULL;
+        g_p5_index = PP_NO_INDEX;
+        g_p6_index = PP_NO_INDEX;
+        UnmapViewOfFile((const void *)frame);
+        ReleaseSRWLockExclusive(&g_frame_lock);
+        UnmapViewOfFile((const void *)config);
+        CloseHandle(config_mapping);
+        CloseHandle(mapping);
     }
 }
 
