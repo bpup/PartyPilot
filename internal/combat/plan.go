@@ -122,6 +122,15 @@ func EvaluateEncounter(profile Profile, world World, encounter *Encounter) ([]Pl
 		plan := Plan{Player: role.Player}
 		if !profile.Enabled {
 			plan.Status = "profile_disabled"
+		} else if encounter == nil {
+			plan.Status = "waiting_no_encounter"
+			if *world.SafeZone {
+				plan.Reason = "In town"
+			} else {
+				plan.Reason = "Waiting: no enemies in range"
+			}
+		} else if encounter.State == "winding-down" || encounter.State == "complete" {
+			plan.Status = "waiting_fight_ending"
 		} else if global != "" {
 			plan.Status = global
 		} else if player, ok := world.Players[role.Player]; !ok {
@@ -130,10 +139,6 @@ func EvaluateEncounter(profile Profile, world World, encounter *Encounter) ([]Pl
 			plan.Status = "BLOCK_LOADING"
 		} else if profile.Safety.PauseDead && !*player.Alive {
 			plan.Status = "BLOCK_CHARACTER_DEAD"
-		} else if encounter == nil {
-			plan.Status = "waiting_no_encounter"
-		} else if encounter.State == "winding-down" || encounter.State == "complete" {
-			plan.Status = "waiting_fight_ending"
 		} else {
 			behavior := "pack"
 			if *world.EmergencyActive || player.HealthPercent != nil && *player.HealthPercent <= 30 {

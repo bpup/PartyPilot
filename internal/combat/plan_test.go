@@ -108,7 +108,7 @@ func TestSafetyEvidenceBlocksPlans(t *testing.T) {
 	world.Monsters = testWorld().Monsters[:1]
 	world.Monsters[0].DistanceByPlayer[1] = 100
 	check(world, "waiting_no_encounter")
-	world.Monsters = []Monster{}
+	world.Monsters = testWorld().Monsters
 	delete(world.Players, 1)
 	check(world, "BLOCK_PLAYER_DATA_UNAVAILABLE")
 	world = testWorld()
@@ -148,5 +148,30 @@ func TestActiveComboUsesTargetExitRadiusAndSinglePackEnemy(t *testing.T) {
 	world.Players[1] = player
 	if _, err := EvaluateEncounter(profile, world, encounter); err == nil {
 		t.Fatal("missing active-combo evidence was accepted")
+	}
+}
+
+func TestNoEncounterAndEndingPrecedeSafetyGate(t *testing.T) {
+	profile := DefaultProfile()
+	profile.Enabled = true
+	world := testWorld()
+	world.Monsters = []Monster{}
+	world.SafeZone = ptr(true)
+	world.UI.AnyMenuOpen = ptr(true)
+	world.DataAgeMS = ptr(1000)
+	plans, err := Evaluate(profile, world)
+	if err != nil || plans[0].Status != "waiting_no_encounter" || plans[0].Reason != "In town" {
+		t.Fatalf("no encounter in town should precede safety checks: %+v, %v", plans, err)
+	}
+	world.SafeZone = ptr(false)
+	plans, err = Evaluate(profile, world)
+	if err != nil || plans[0].Status != "waiting_no_encounter" ||
+		plans[0].Reason != "Waiting: no enemies in range" {
+		t.Fatalf("no encounter should use source idle reason: %+v, %v", plans, err)
+	}
+	ending := &Encounter{State: "winding-down"}
+	plans, err = EvaluateEncounter(profile, world, ending)
+	if err != nil || plans[0].Status != "waiting_fight_ending" || plans[0].ComboID != "" {
+		t.Fatalf("ending encounter should precede safety checks: %+v, %v", plans, err)
 	}
 }

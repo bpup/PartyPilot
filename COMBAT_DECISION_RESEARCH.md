@@ -6,6 +6,8 @@
 
 独立版的 `internal/combat` 以自己的数据结构记录了六个默认角色和 18 条连招，并实现**只读的默认配置子集**。回放输入必须明确提供区域、时间、数据年龄、安全区、菜单/聊天/背包/加载状态、角色存活与加载状态，以及怪物的稀有度、生命百分比、相对主号距离和逐角色距离。缺失或无效的数据会拒绝该帧。默认配置保持关闭；只有显式启用规划时，才输出 `planned_only` 连招编号。安全阻断会输出对应原因，没有活怪则等待。
 
+目标版 `CombatDirectorEngine.Evaluate` 在没有遭遇时先返回 `In town` 或 `Waiting: no enemies in range`，在遭遇结束中先返回等待结束，再进入全局安全门禁。独立回放现沿用此顺序：`waiting_no_encounter` 的 `reason` 保留目标版文案；`winding-down` 和 `complete` 不被菜单或旧数据阻断覆盖。存在可规划遭遇时仍按目标版安全门禁阻断。
+
 回放现还要求每名已报告角色显式提供 `activeCombo`。它对应目标版 `CombatDirectorEngine.Evaluate` 传给行为解析器的 `activePlayers` 集合成员资格，由回放提供者负责记录；遭遇处于 `active` 阶段不能代替该证据。角色已有连招运行时，默认 60 米选怪半径按目标版公式扩大到 81 米，普通怪群的最低数量由三只降为一只；此规则仅改变只读计划，不驱动游戏输入。
 
 每名已报告角色还须显式提供 `distanceFromMainM`。目标版 `CombatDirectorThreatClassifier` 在任一角色距离 MAIN 严格大于 15 米时给遭遇增加 `FormationBroken` 标签；独立回放用 `formation-broken` 表示这一只读标签。示例距离是合成输入，不代表传感器已能可靠获取六名角色的相对位置。
