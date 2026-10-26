@@ -1,6 +1,16 @@
 # PartyPilot
 
-独立开发的 PoE2 多角色跟随软件工作区。当前交付包含 **跟随决策内核、实时诊断链路与回放工具**；Windows 和 PoE2 游戏内控制尚未验收。它与 `bpup/poe2-scripts` 没有代码或构建依赖。
+独立开发的 PoE2 多角色跟随软件工作区。当前交付包含 **跟随决策内核、实时诊断链路、回放工具与初步桌面入口**；Windows 和 PoE2 游戏内控制尚未验收。它与 `bpup/poe2-scripts` 没有代码或构建依赖。
+
+`release/desktop/PartyPilot.Desktop.exe` 是 Windows x64 自包含桌面程序，按所提供版本主页的“选择输入 → 配置客户端 → 准备并开始”顺序组织。它目前只把客户端路径、Steam/Epic 启动 URI、窗口布局预检和显式启动接到 `PartyPilot-ClientLaunch.exe`；游戏输入、角色人数/配对、自动跟随、战斗与雷达尚未接入这个界面，不能把“启动游戏窗口”视为“开始完整组队”。客户端数量必须主动选择，启动按钮在选择前保持禁用；macOS 可编译和预览界面，但实际游戏启动只在 Windows 开放。
+
+```sh
+dotnet build ui/PartyPilot.Desktop.csproj -c Release
+dotnet run --project ui-smoke/PartyPilot.Desktop.Smoke.csproj -c Release -- /tmp/PartyPilot-ui-preview.png
+dotnet publish ui/PartyPilot.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o release/desktop
+```
+
+桌面项目使用 [Avalonia 11.3.22](https://www.nuget.org/packages/Avalonia.Desktop/11.3.22)。无界面测试已创建窗口并渲染预览；当前 Mac 锁屏导致本机原生窗口渲染初始化失败，Windows 桌面和 PoE2 运行仍待验证。
 
 ## 当前可运行功能
 
@@ -34,7 +44,7 @@ GOOS=windows GOARCH=amd64 go build -o PartyPilot.exe ./cmd/partypilot
 
 用户指定的 MultiPilot 0.6.17 安装目录位于 `/Users/liuchang/Desktop/project/MultiPilotPoE2/current`。其随附快速指南描述了 1–6 人、最多三个游戏窗口、虚拟手柄、跟随、Smart Focus 等功能；这些是参照清单，不能证明本项目已实现。
 
-回放内核只根据最多六个角色的已知坐标计算方向。示例中的距离数字仅用于回放测试，不代表 0.6.17 的参数。独立窗口布局工具已提供 Windows 目标代码；整体仍没有直接读取 PoE2 内存、自动组队、战斗、拾取、实际药剂按键或图形界面。坐标 `Area` 必须是实例标识；仅有地图名不足以证明两个角色位于同一实例。
+回放内核只根据最多六个角色的已知坐标计算方向。示例中的距离数字仅用于回放测试，不代表 0.6.17 的参数。独立窗口布局工具已提供 Windows 目标代码；整体仍没有直接读取 PoE2 内存、自动组队、战斗、拾取、实际药剂按键或完整图形设置界面。坐标 `Area` 必须是实例标识；仅有地图名不足以证明两个角色位于同一实例。
 
 可选的 `-trail-spacing` 与 `-trail-max-step` 会让跟随者依次走向已观测的队长轨迹点，而非直接指向队长当前位置。两项必须同时显式设置，且最大步长要大于采样间距。若队长单次观测位移超过上限，轨迹跟随会保持等待，直到明确重置；单人回放帧可传 `"reset":true`，组队回放帧可传 `"reset_follow":true`。重置前应确认新的位置与实例数据可靠。轨迹点本身不能证明道路可通；不提供经验证的地形时，轨迹模式无法绕开未知障碍。回放里的这两个数值仅用于检查拐弯与跳变，不是 MultiPilot 0.6.17 参数。
 
