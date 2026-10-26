@@ -173,6 +173,43 @@ func TestTargetTrailHoldsNearWaypoint(t *testing.T) {
 	}
 }
 
+func TestTargetTrailHoldReleasesAfterTargetShift(t *testing.T) {
+	now := time.Unix(55, 0)
+	engine, ok := New(Config{StopDistance: 2, ResumeDistance: 3,
+		CatchUpDistance: 30, MaxAge: 5 * time.Second, TargetTrail: true})
+	if !ok {
+		t.Fatal("target trail configuration rejected")
+	}
+	position := func(x float64, at time.Time) Position {
+		return Position{X: x, Area: "instance", Seen: at, Valid: true}
+	}
+	engine.Step(now, position(10, now), position(8, now))
+	at := now.Add(time.Second)
+	if got := engine.Step(at, position(11, at), position(8, at)); got.State != Holding ||
+		!engine.holdingTarget || math.Abs(engine.heldTarget.x-9) > 0.001 {
+		t.Fatalf("near trail target did not latch its hold: %+v", got)
+	}
+	at = now.Add(2 * time.Second)
+	if got := engine.Step(at, position(11, at), position(20, at)); got.State != Holding {
+		t.Fatalf("unchanged trail target released its hold: %+v", got)
+	}
+	at = now.Add(3 * time.Second)
+	if got := engine.Step(at, position(14, at), position(20, at)); got.State != Following ||
+		engine.holdingTarget || got.X >= 0 {
+		t.Fatalf("shifted trail target did not release its hold: %+v", got)
+	}
+	at = now.Add(4 * time.Second)
+	engine.Step(at, position(14, at), position(10, at))
+	if !engine.holdingTarget {
+		t.Fatal("test did not restore a trail-target hold")
+	}
+	at = now.Add(5 * time.Second)
+	if got := engine.Step(at, position(100, at), position(10, at)); got.State == Holding ||
+		engine.holdingTarget {
+		t.Fatalf("leader jump retained a stale held target: %+v", got)
+	}
+}
+
 func TestTargetTrailAvoidsLeaderOnDirectSegment(t *testing.T) {
 	now := time.Unix(54, 0)
 	engine, ok := New(Config{StopDistance: 8, ResumeDistance: 9,

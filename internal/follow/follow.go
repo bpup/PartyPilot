@@ -70,6 +70,8 @@ func (e *Engine) Reset() {
 	e.initialHeading = point{}
 	e.lastLeaderSampleAt = time.Time{}
 	e.leaderSpeedAverage = 0
+	e.holdingTarget = false
+	e.heldTarget = point{}
 }
 
 type point struct{ x, y float64 }
@@ -87,6 +89,8 @@ type Engine struct {
 	initialHeading     point
 	lastLeaderSampleAt time.Time
 	leaderSpeedAverage float64
+	holdingTarget      bool
+	heldTarget         point
 }
 
 func New(config Config) (*Engine, bool) {
@@ -153,6 +157,8 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 		(!e.moving && distance < e.config.ResumeDistance) {
 		e.moving = false
 		e.catchingUp = false
+		e.holdingTarget = false
+		e.heldTarget = point{}
 		if e.config.TrailSpacing > 0 {
 			e.trail = []point{{leader.X, leader.Y}}
 		}
@@ -163,7 +169,15 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 	if e.config.TargetTrail {
 		target := e.trailingTarget(e.config.StopDistance)
 		targetX, targetY = target.x, target.y
-		if math.Hypot(targetX-follower.X, targetY-follower.Y) <= 2.5 || distance <= 3.75 {
+		if e.holdingTarget && math.Hypot(targetX-e.heldTarget.x, targetY-e.heldTarget.y) >= 1.5 {
+			e.holdingTarget = false
+		}
+		if !e.holdingTarget &&
+			(math.Hypot(targetX-follower.X, targetY-follower.Y) <= 2.5 || distance <= 3.75) {
+			e.holdingTarget = true
+			e.heldTarget = target
+		}
+		if e.holdingTarget {
 			e.moving = false
 			e.catchingUp = false
 			return Command{State: Holding, Distance: distance}
@@ -274,6 +288,8 @@ func (e *Engine) updateTargetTrail(leader, follower Position) {
 		e.trail = []point{current}
 		e.lastLeader = current
 		e.trailArea = leader.Area
+		e.holdingTarget = false
+		e.heldTarget = point{}
 		return
 	}
 	e.lastLeader = current
