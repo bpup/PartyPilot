@@ -14,10 +14,51 @@ AppBuilder.Configure<SmokeApp>()
 var window = new MainWindow();
 window.Show();
 window.UpdateLayout();
+var radarPayload = System.Text.Encoding.UTF8.GetBytes(
+    "{\"ProcessId\":123,\"RadarStatus\":\"ok\",\"RadarSeenUtc\":\"" + DateTime.UtcNow.ToString("O") +
+    "\",\"X\":100,\"Y\":200,\"RadarEntities\":[" +
+    "{\"EntityId\":7,\"Category\":\"monster\",\"Path\":\"Metadata/Monsters/Beast\",\"X\":103,\"Y\":198}," +
+    "{\"EntityId\":8,\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\",\"X\":95,\"Y\":205}]}"
+);
+if (!RadarFrames.TryParse(radarPayload, 123, DateTime.UtcNow, out var radarFrame) || radarFrame?.Markers.Count != 2 ||
+    RadarFrames.TryParse(radarPayload, 124, DateTime.UtcNow, out _) ||
+    RadarFrames.TryParse(radarPayload, 123, DateTime.UtcNow.AddSeconds(3), out _) ||
+    RadarProjection.TryScale("0", out _) || !RadarProjection.TryScale("2", out var radarScale))
+    throw new Exception("Radar frame identity, freshness, or explicit scale validation failed.");
+var radarText = System.Text.Encoding.UTF8.GetString(radarPayload);
+if (RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        radarText.Replace("\"EntityId\":8", "\"EntityId\":7")), 123, DateTime.UtcNow, out _) ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        radarText.Replace("\"RadarStatus\":\"ok\"", "\"RadarStatus\":\"scan_failed\"")),
+        123, DateTime.UtcNow, out _))
+    throw new Exception("Radar accepted duplicate or failed diagnostic markers.");
+var projected = RadarProjection.Project(radarFrame.PlayerX, radarFrame.PlayerY,
+    radarFrame.Markers[0], 400, 300, radarScale);
+if (projected != (406d, 296d)) throw new Exception("Radar marker projection changed unexpectedly.");
+var radarVisibility = new RadarVisibility();
+radarVisibility.Observe(true, true);
+radarVisibility.Observe(true, true);
+if (radarVisibility.Enabled) throw new Exception("A held Tab key toggled radar more than once.");
+radarVisibility.Observe(true, false);
+radarVisibility.Observe(true, true);
+if (!radarVisibility.Enabled) throw new Exception("A second Tab press did not restore radar.");
+radarVisibility.Observe(false, false);
+radarVisibility.Observe(false, true);
+if (!radarVisibility.Enabled) throw new Exception("Tab outside the game changed radar visibility.");
+var radarWindow = new RadarOverlayWindow(new LaunchedClient(123, 1, "C:/Game.exe"), radarScale);
+radarWindow.Show();
+radarWindow.Apply(radarFrame);
+radarWindow.UpdateLayout();
+var radarScreenshot = radarWindow.CaptureRenderedFrame() ?? throw new Exception("Radar overlay did not render.");
+var radarOutput = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(args.FirstOrDefault() ?? "../PartyPilot-ui-preview.png"))!,
+    "PartyPilot-radar-preview.png");
+radarScreenshot.Save(radarOutput);
+radarWindow.Close();
 var labels = window.GetLogicalDescendants().OfType<TextBlock>().Select(item => item.Text).ToArray();
 if (!labels.Contains("PLAY") || !labels.Any(item => item?.Contains("HOW MANY CHARACTERS") == true) ||
     !labels.Any(item => item?.Contains("PREPARE & START") == true) ||
-    !labels.Any(item => item?.Contains("FOLLOW · 跟随") == true))
+    !labels.Any(item => item?.Contains("FOLLOW · 跟随") == true) ||
+    !labels.Any(item => item?.Contains("RADAR · 雷达") == true))
 {
     throw new Exception("The launcher steps were not created in the window tree.");
 }
@@ -92,6 +133,11 @@ if (allOptions.Length != expectedPads.Count || allOptions.Any(option =>
 var screenshot = window.CaptureRenderedFrame() ?? throw new Exception("The desktop window did not render.");
 var output = Path.GetFullPath(args.FirstOrDefault() ?? "../PartyPilot-ui-preview.png");
 screenshot.Save(output);
+var scroll = window.GetLogicalDescendants().OfType<ScrollViewer>().First();
+scroll.Offset = new Vector(0, Math.Max(0, scroll.Extent.Height - scroll.Viewport.Height));
+window.UpdateLayout();
+var radarPanelOutput = Path.Combine(Path.GetDirectoryName(output)!, "PartyPilot-radar-controls.png");
+(window.CaptureRenderedFrame() ?? throw new Exception("Radar controls did not render.")).Save(radarPanelOutput);
 Console.WriteLine($"Headless preview saved to {output}.");
 var clientCount = window.GetLogicalDescendants().OfType<ComboBox>()
     .Single(item => item.PlaceholderText == "选择 1–6 人");

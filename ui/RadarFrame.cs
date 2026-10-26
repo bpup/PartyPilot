@@ -1,0 +1,90 @@
+using System.Globalization;
+using System.Text;
+using System.Text.Json;
+
+namespace PartyPilot.Desktop;
+
+public sealed record RadarMarker(uint Id, string Category, string Path, double X, double Y);
+
+public sealed record RadarFrame(int ProcessId, DateTime SeenUtc, double PlayerX, double PlayerY,
+    IReadOnlyList<RadarMarker> Markers);
+
+public static class RadarFrames
+{
+    public static bool TryParse(ReadOnlySpan<byte> json, int expectedPid, DateTime nowUtc,
+        out RadarFrame? frame)
+    {
+        frame = null;
+        try
+        {
+            using var document = JsonDocument.Parse(json.ToArray());
+            var root = document.RootElement;
+            if (!root.TryGetProperty("ProcessId", out var pidValue) || !pidValue.TryGetInt32(out var pid) ||
+                pid != expectedPid ||
+                !root.TryGetProperty("RadarStatus", out var status) || status.GetString() != "ok" ||
+                !root.TryGetProperty("RadarSeenUtc", out var seenValue) ||
+                !seenValue.TryGetDateTime(out var seenUtc) ||
+                seenUtc.Kind != DateTimeKind.Utc ||
+                nowUtc - seenUtc < TimeSpan.Zero || nowUtc - seenUtc > TimeSpan.FromSeconds(2) ||
+                !TryFinite(root, "X", out var playerX) || !TryFinite(root, "Y", out var playerY) ||
+                !root.TryGetProperty("RadarEntities", out var entities) ||
+                entities.ValueKind != JsonValueKind.Array || entities.GetArrayLength() > 96)
+                return false;
+            var markers = new List<RadarMarker>(entities.GetArrayLength());
+            var ids = new HashSet<uint>();
+            foreach (var item in entities.EnumerateArray())
+            {
+                if (!item.TryGetProperty("EntityId", out var idValue) || !idValue.TryGetUInt32(out var id) ||
+                    id == 0 || !ids.Add(id) ||
+                    !item.TryGetProperty("Category", out var categoryValue) ||
+                    categoryValue.GetString() is not string category || !KnownCategory(category) ||
+                    !item.TryGetProperty("Path", out var pathValue) ||
+                    pathValue.GetString() is not string path ||
+                    Encoding.UTF8.GetByteCount(path) > 256 ||
+                    !path.StartsWith("Metadata/", StringComparison.Ordinal) ||
+                    !TryFinite(item, "X", out var x) || !TryFinite(item, "Y", out var y))
+                    return false;
+                markers.Add(new RadarMarker(id, category, path, x, y));
+            }
+            frame = new RadarFrame(pid, seenUtc, playerX, playerY, markers);
+            return true;
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryFinite(JsonElement element, string name, out double value)
+    {
+        value = 0;
+        return element.TryGetProperty(name, out var field) && field.TryGetDouble(out value) && double.IsFinite(value);
+    }
+
+    private static bool KnownCategory(string value) => value is
+        "monster" or "checkpoint" or "waypoint" or "portal" or "transition" or "npc" or "chest" or "shrine";
+}
+
+public static class RadarProjection
+{
+    public static bool TryScale(string? text, out double scale) =>
+        double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out scale) &&
+        double.IsFinite(scale) && scale > 0;
+
+    public static (double X, double Y) Project(double playerX, double playerY,
+        RadarMarker marker, double centerX, double centerY, double pixelsPerUnit) =>
+        (centerX + (marker.X - playerX) * pixelsPerUnit,
+         centerY + (marker.Y - playerY) * pixelsPerUnit);
+}
+
+public sealed class RadarVisibility
+{
+    private bool _tabWasDown;
+    public bool Enabled { get; private set; } = true;
+
+    public void Observe(bool gameForeground, bool tabDown)
+    {
+        if (gameForeground && tabDown && !_tabWasDown) Enabled = !Enabled;
+        _tabWasDown = gameForeground && tabDown;
+    }
+}

@@ -49,9 +49,14 @@ public sealed class MainWindow : Window
     private readonly Button _startFollow = new();
     private readonly Button _stopFollow = new();
     private readonly TextBlock _followStatus = new();
+    private readonly TextBox _radarScale = new();
+    private readonly Button _startRadar = new();
+    private readonly Button _stopRadar = new();
+    private readonly TextBlock _radarStatus = new();
     private PartyTopology? _selectedTopology;
     private BridgeSession? _bridge;
     private LiveFollowSession? _follow;
+    private RadarSession? _radar;
     private PairingGuide? _pairing;
     private IReadOnlyList<LaunchedClient> _launchedClients = [];
     private bool _pairingHasStarted;
@@ -59,6 +64,7 @@ public sealed class MainWindow : Window
     private bool _pairingSettling;
     private bool _pairingSettled;
     private bool _followStopping;
+    private bool _radarStopping;
     private string _loginStatus = "waiting";
     private bool _busy;
 
@@ -85,6 +91,7 @@ public sealed class MainWindow : Window
         content.Children.Add(BuildClientStep());
         content.Children.Add(BuildLaunchStep());
         content.Children.Add(BuildFollowStep());
+        content.Children.Add(BuildRadarStep());
         content.Children.Add(BuildStatusCard());
 
         shell.Children.Add(new ScrollViewer { Content = content });
@@ -95,7 +102,11 @@ public sealed class MainWindow : Window
         _isolationConfirmed.IsCheckedChanged += (_, _) => UpdateBridgeControls();
         _physicalIndex.SelectionChanged += (_, _) => UpdateBridgeControls();
         _physicalDevice.TextChanged += (_, _) => UpdateBridgeControls();
-        Closed += async (_, _) => await StopBridgeAsync();
+        Closed += async (_, _) =>
+        {
+            await StopRadarAsync();
+            await StopBridgeAsync();
+        };
         UpdateClientRows();
         UpdateLayoutControls();
     }
@@ -304,11 +315,39 @@ public sealed class MainWindow : Window
         return Card(panel);
     }
 
+    private Border BuildRadarStep()
+    {
+        var panel = Step("5", "RADAR · 雷达", "在已绑定游戏窗口上显示只读实体标记；请在对应 ExileCore2 实例中启用传感器的雷达诊断。坐标方向与比例仍需游戏内校准。");
+        panel.Children.Add(Label("每个游戏坐标单位对应的屏幕像素（需明确填写）", 12, MutedBrush));
+        _radarScale.Watermark = "像素/坐标单位";
+        _radarScale.Width = 190;
+        _radarScale.HorizontalAlignment = HorizontalAlignment.Left;
+        _radarScale.TextChanged += (_, _) => UpdateRadarControls();
+        panel.Children.Add(_radarScale);
+        var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
+        _startRadar.Content = "显示雷达";
+        _startRadar.Click += (_, _) => StartRadar();
+        _stopRadar.Content = "关闭雷达";
+        _stopRadar.Click += async (_, _) => await StopRadarAsync();
+        actions.Children.Add(_startRadar);
+        actions.Children.Add(_stopRadar);
+        panel.Children.Add(actions);
+        _radarStatus.Text = "等待已绑定的游戏窗口与明确的比例。";
+        _radarStatus.Foreground = MutedBrush;
+        _radarStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_radarStatus);
+        return Card(panel);
+    }
+
     private void UpdateClientRows()
     {
         var selection = _topologyVariant.SelectedItem as PartyTopology;
         var topologyChanged = !ReferenceEquals(_selectedTopology, selection);
-        if (topologyChanged) _launchedClients = [];
+        if (topologyChanged)
+        {
+            _launchedClients = [];
+            _ = StopRadarAsync();
+        }
         _selectedTopology = selection;
         if (_bridge is null && topologyChanged) _autoFlask.IsChecked = selection?.Id == "2-split";
         var count = _selectedTopology?.ClientCount ?? 0;
@@ -328,13 +367,82 @@ public sealed class MainWindow : Window
         _launch.IsEnabled = !_busy && !_pairingHasStarted && count > 0;
         _attach.IsEnabled = !_busy && !_pairingHasStarted && count > 0;
         UpdateBridgeControls();
+        UpdateRadarControls();
     }
 
     private void ClearLaunchedClients()
     {
         _launchedClients = [];
+        _ = StopRadarAsync();
         if (_pairing is not null) ShowCurrentPairingStep();
         UpdateBridgeControls();
+        UpdateRadarControls();
+    }
+
+    private void UpdateRadarControls()
+    {
+        var ready = _selectedTopology is not null &&
+            _launchedClients.Count == _selectedTopology.ClientCount &&
+            RadarProjection.TryScale(_radarScale.Text, out _);
+        _startRadar.IsEnabled = OperatingSystem.IsWindows() && !_busy && !_radarStopping &&
+            _radar is null && ready;
+        _stopRadar.IsEnabled = _radar is not null;
+    }
+
+    private void StartRadar()
+    {
+        if (_radar is not null || _busy || _radarStopping || !OperatingSystem.IsWindows() ||
+            _selectedTopology is null || _launchedClients.Count != _selectedTopology.ClientCount ||
+            !RadarProjection.TryScale(_radarScale.Text, out var scale)) return;
+        try
+        {
+            var session = RadarSession.Start(_launchedClients, scale);
+            session.Ended += RadarEnded;
+            session.FrameReceived += RadarFrameReceived;
+            _radar = session;
+            _radarStatus.Text = "雷达已打开；等待各游戏进程的只读标记。失焦或样本过期会隐藏标记。";
+        }
+        catch (Exception exception)
+        {
+            _radarStatus.Text = $"雷达未能打开：{exception.Message}";
+        }
+        UpdateRadarControls();
+    }
+
+    private async void RadarEnded(string reason)
+    {
+        await StopRadarAsync();
+        _radarStatus.Text = $"雷达已停止：{reason}";
+    }
+
+    private void RadarFrameReceived(int pid, int count)
+    {
+        _radarStatus.Text = $"已收到游戏进程 {pid} 的 {count} 个可见实体标记；仅当前游戏窗口在前台时显示。";
+    }
+
+    private async Task StopRadarAsync()
+    {
+        if (_radarStopping || _radar is null) return;
+        _radarStopping = true;
+        var session = _radar;
+        _radar = null;
+        UpdateRadarControls();
+        try
+        {
+            session.Ended -= RadarEnded;
+            session.FrameReceived -= RadarFrameReceived;
+            await session.DisposeAsync();
+            _radarStatus.Text = "雷达已关闭。";
+        }
+        catch (Exception exception)
+        {
+            _radarStatus.Text = $"雷达关闭时发生错误：{exception.Message}";
+        }
+        finally
+        {
+            _radarStopping = false;
+            UpdateRadarControls();
+        }
     }
 
     private void UpdateTopologyOptions()
@@ -725,6 +833,7 @@ public sealed class MainWindow : Window
             startInfo.ArgumentList.Add("-attach");
         }
 
+        if (action != ClientAction.Check) await StopRadarAsync();
         _busy = true;
         if (action != ClientAction.Check) _launchedClients = [];
         UpdateClientRows();
