@@ -69,13 +69,17 @@ internal sealed class AutoPartyRecoverySession
         var receiverSlot = _topology.Slots.First(slot => slot.Client == targetClient).RuntimePad;
         var expected = stableClients.Sum(client => _topology.Clients[client - 1].Count) +
             _topology.Clients[targetClient - 1].Count;
-        var initialInviter = AutoPartyInviterSelection.Select(_topology, stableClients, 1, _bridge.LastFocusedSlot);
+        var initialLeader = AutoPartyInviterSelection.DefaultLeaderPlayer(_topology, _bridge.LastManualFocusedSlot);
+        var initialInviter = AutoPartyInviterSelection.Select(_topology, stableClients,
+            initialLeader, _bridge.LastFocusedSlot);
         coordinator.Begin(targetClient, initialInviter, DateTimeOffset.UtcNow);
         while (coordinator.Snapshot.Attempt < AutoPartyCoordinator.MaximumAttempts)
         {
             token.ThrowIfCancellationRequested();
             if (coordinator.Snapshot.Attempt > 0) await _bridge.RenewAutoPartyAsync(token);
-            var inviterClient = AutoPartyInviterSelection.Select(_topology, stableClients, 1, _bridge.LastFocusedSlot);
+            var leader = AutoPartyInviterSelection.DefaultLeaderPlayer(_topology, _bridge.LastManualFocusedSlot);
+            var inviterClient = AutoPartyInviterSelection.Select(_topology, stableClients,
+                leader, _bridge.LastFocusedSlot);
             var inviter = _clients[inviterClient - 1];
             var inviterSlot = _topology.Slots.First(slot => slot.Client == inviterClient).RuntimePad;
             if (!PoeChatInviteService.IsWindowOwned(inviter) || !PoeChatInviteService.IsWindowOwned(receiver))

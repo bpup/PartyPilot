@@ -17,10 +17,12 @@ internal sealed class BridgeSession : IAsyncDisposable
     private readonly SemaphoreSlim _partyGate = new(1, 1);
     private AutoPartyPending? _pendingAutoParty;
     private int _lastFocusedSlot;
+    private int _lastManualFocusedSlot;
     private bool _stopping;
 
     public bool AutoFlaskEnabled { get; }
     internal int LastFocusedSlot => Volatile.Read(ref _lastFocusedSlot);
+    internal int LastManualFocusedSlot => Volatile.Read(ref _lastManualFocusedSlot);
 
     public event Action<int>? AReleased;
     public event Action<int, int, long>? PairingArmed;
@@ -42,6 +44,7 @@ internal sealed class BridgeSession : IAsyncDisposable
         _slots = slots.ToHashSet();
         _allSlots = allSlots.ToHashSet();
         _lastFocusedSlot = slots[0];
+        _lastManualFocusedSlot = slots[0];
     }
 
     public static async Task<BridgeSession> StartAsync(string executable, IReadOnlyList<PartySlot> partySlots, int physicalIndex,
@@ -330,6 +333,10 @@ internal sealed class BridgeSession : IAsyncDisposable
                         root.TryGetProperty("slot", out var focusedSlot) &&
                         focusedSlot.TryGetInt32(out var focusedPad) && _allSlots.Contains(focusedPad))
                         Volatile.Write(ref _lastFocusedSlot, focusedPad);
+                    else if (kind.GetString() == "manual_focus" &&
+                        root.TryGetProperty("slot", out var manualSlot) &&
+                        manualSlot.TryGetInt32(out var manualPad) && _allSlots.Contains(manualPad))
+                        Volatile.Write(ref _lastManualFocusedSlot, manualPad);
                     else if (kind.GetString() == "login_status" &&
                         root.TryGetProperty("source", out var source) && source.ValueKind == JsonValueKind.String &&
                         source.GetString() is { } sourceName &&

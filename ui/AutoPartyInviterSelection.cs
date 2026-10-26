@@ -2,8 +2,12 @@ namespace PartyPilot.Desktop;
 
 internal static class AutoPartyInviterSelection
 {
-    // The desktop currently has a fixed P1 MAIN. The supplied build checks its
-    // runtime leader first, then the focused player, then the lowest stable client.
+    // The supplied 0.6.17 default remembers the last manually focused player as MAIN.
+    internal static int DefaultLeaderPlayer(PartyTopology topology, int lastManualFocusedPad) =>
+        topology.Slots.FirstOrDefault(slot => slot.RuntimePad == lastManualFocusedPad)?.PartyPlayer ?? 1;
+
+    // The supplied build checks its runtime leader first, then the focused
+    // player, then the lowest stable client.
     internal static int Select(PartyTopology topology, IReadOnlySet<int> stableClients,
         int leaderPlayer, int focusedPad)
     {

@@ -20,7 +20,10 @@ internal static class AutoPartyRecoverySmoke
             throw new Exception("The target-version invite acceptance or roster menu sequence changed.");
 
         var topology = PartyTopologies.DefaultFor(5);
-        if (AutoPartyInviterSelection.Select(topology, new HashSet<int> { 1, 2 }, 1, 5) != 1 ||
+        if (AutoPartyInviterSelection.DefaultLeaderPlayer(topology, 5) != 5 ||
+            AutoPartyInviterSelection.DefaultLeaderPlayer(topology, 1) != 1 ||
+            AutoPartyInviterSelection.DefaultLeaderPlayer(topology, 6) != 1 ||
+            AutoPartyInviterSelection.Select(topology, new HashSet<int> { 1, 2 }, 1, 5) != 1 ||
             AutoPartyInviterSelection.Select(topology, new HashSet<int> { 2, 3 }, 1, 5) != 3 ||
             AutoPartyInviterSelection.Select(topology, new HashSet<int> { 2, 3 }, 1, 1) != 2 ||
             AutoPartyInviterSelection.Select(topology, new HashSet<int> { 1, 3 }, 5, 1) != 3)

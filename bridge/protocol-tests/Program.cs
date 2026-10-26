@@ -424,7 +424,8 @@ var hotkeyRouter = new BridgeRouter(new Dictionary<int, IPadOutput> { [1] = pad1
 hotkeyRouter.ConfigurePhysical(1);
 hotkeyRouter.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", now);
 hotkeyRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080 | 0x1000, LeftX = 222 }, now);
-if (pad1.Report != default || pad2ForHotkey.Report.Buttons != 0x1000 || pad2ForHotkey.X != 222)
+if (pad1.Report != default || pad2ForHotkey.Report.Buttons != 0x1000 || pad2ForHotkey.X != 222 ||
+    hotkeyRouter.LastManualFocusSlot != 2)
     throw new Exception("R3 focus switch or key suppression failed.");
 hotkeyRouter.SetPhysical(default, now.AddMilliseconds(10));
 hotkeyRouter.SetPhysical(new XInputGamepad { Buttons = 0x0040 }, now.AddMilliseconds(100));
@@ -445,7 +446,8 @@ hotkeyRouter.SetPhysical(default, now.AddMilliseconds(1210));
 hotkeyRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080 }, now.AddMilliseconds(1600));
 hotkeyRouter.SetPhysical(default, now.AddMilliseconds(1610));
 hotkeyRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080, LeftX = 555 }, now.AddMilliseconds(2000));
-if (hotkeyRouter.FocusedSlot != 1 || pad1.X != 555 || pad2ForHotkey.X != 32767)
+if (hotkeyRouter.FocusedSlot != 1 || hotkeyRouter.LastManualFocusSlot != 2 ||
+    pad1.X != 555 || pad2ForHotkey.X != 32767)
     throw new Exception("Repeating R3 did not return to shared control.");
 hotkeyRouter.ApplyLine("{\"type\":\"focus\",\"slot\":2}", now);
 hotkeyRouter.ApplyLine("{\"type\":\"focus\",\"slot\":1}", now);
@@ -457,10 +459,13 @@ var splitRouter = new BridgeRouter(new Dictionary<int, IPadOutput> { [1] = split
 if (!splitRouter.ConfigurePhysical(1, focusPads: splitFocus))
     throw new Exception("Split player focus mapping was rejected.");
 splitRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080, LeftX = 321 }, now);
-if (splitRouter.FocusedSlot != 3 || splitFollower.X != 321 || splitMain.Report != default)
+if (splitRouter.FocusedSlot != 3 || splitRouter.LastManualFocusSlot != 3 ||
+    splitFollower.X != 321 || splitMain.Report != default)
     throw new Exception("R3 did not route logical P2 to runtime pad P3 in split mode.");
 splitRouter.SetPhysical(default, now.AddMilliseconds(10));
 splitRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080 }, now.AddMilliseconds(400));
+if (splitRouter.FocusedSlot != 1 || splitRouter.LastManualFocusSlot != 3)
+    throw new Exception("Returning to shared focus forgot the split follower as the last manual MAIN.");
 if (splitRouter.FocusedSlot != 1 || splitFollower.Report != default)
     throw new Exception("Split P2 focus did not toggle back to shared control.");
 var thirdMain = new FakePad();

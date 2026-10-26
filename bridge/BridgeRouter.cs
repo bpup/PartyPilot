@@ -34,6 +34,7 @@ internal sealed class BridgeRouter
     private bool _allowDirectRightStick;
     private int _mainSlot;
     private int _focusedSlot;
+    private int _lastManualFocusSlot;
     private int _isolatedSlot;
     private DateTime _lastFocusToggleUtc = DateTime.MinValue;
     private PadReport _physicalReport;
@@ -49,6 +50,7 @@ internal sealed class BridgeRouter
     private DateTime _autoPartyButtonsUntilUtc;
 
     public int FocusedSlot => _physicalMode ? _focusedSlot : 0;
+    public int LastManualFocusSlot => _physicalMode ? _lastManualFocusSlot : 0;
     public bool AutoPartyActive => _autoPartyActive;
 
     public BridgeRouter(IReadOnlyDictionary<int, IPadOutput> outputs, IReportBatch? reportBatch = null)
@@ -76,6 +78,7 @@ internal sealed class BridgeRouter
         _directRightStickSlot = directRightStickSlot;
         _mainSlot = mainSlot;
         _focusedSlot = mainSlot;
+        _lastManualFocusSlot = mainSlot;
         _isolatedSlot = 0;
         _lastFocusToggleUtc = DateTime.MinValue;
         NeutralAll();
@@ -160,6 +163,7 @@ internal sealed class BridgeRouter
         if (pressedRole != 0 && _focusPads.TryGetValue(pressedRole, out var pressedSlot) &&
             (promoteChord || nowUtc - _lastFocusToggleUtc >= TimeSpan.FromMilliseconds(350)))
         {
+            _lastManualFocusSlot = pressedSlot;
             _isolatedSlot = _isolatedSlot == pressedSlot ? 0 : pressedSlot;
             _focusedSlot = _isolatedSlot == 0 ? _mainSlot : _isolatedSlot;
             _lastFocusToggleUtc = nowUtc;
@@ -194,6 +198,7 @@ internal sealed class BridgeRouter
         NeutralAll();
         _isolatedSlot = 0;
         _focusedSlot = _mainSlot;
+        _lastManualFocusSlot = _mainSlot;
         _lastFocusToggleUtc = DateTime.MinValue;
     }
 

@@ -417,6 +417,7 @@ try
                     return 1;
                 }
                 var previousFocusedSlot = router.FocusedSlot;
+                var previousManualFocusSlot = router.LastManualFocusSlot;
                 if (pairingGate is not null)
                 {
                     var observedAt = DateTime.UtcNow;
@@ -487,6 +488,8 @@ try
                 }
                 if (router.FocusedSlot != previousFocusedSlot)
                     Console.WriteLine(JsonSerializer.Serialize(new { @event = "focus_changed", slot = router.FocusedSlot }));
+                if (router.LastManualFocusSlot != previousManualFocusSlot)
+                    Console.WriteLine(JsonSerializer.Serialize(new { @event = "manual_focus", slot = router.LastManualFocusSlot }));
             }
             var autoPartyWasActive = router.AutoPartyActive;
             router.Tick(DateTime.UtcNow);
