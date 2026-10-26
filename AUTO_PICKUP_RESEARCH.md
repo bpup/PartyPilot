@@ -20,6 +20,14 @@
 {"now":"2026-10-26T00:00:00Z","player":1,"frame_sequence":1,"card":{"selected_item":"0xABC","base_id":"CurrencyExalted","player":1,"targetable":true,"received_at":"2026-10-26T00:00:00Z"},"conditions":{"catalog_approved":true,"capacity_allows":true,"inventory_limit_allows":true,"menu_clear":true,"own_inventory_closed":true,"inventory_automation_free":true,"alive":true}}
 ```
 
+新增 `internal/autoloot/catalog.go` 和 `PartyPilot-CatalogReplay.exe -replay <JSONL 文件>`：操作者须逐条提供目录定义、玩家分配、物品卡片及可选掉落实体身份。离线解析按目标版的物品指针与基础 ID 对应、接收时间差不超过 2 秒、稀有度/类别匹配及明确分配筛选；优先选择指定稀有度的条目，再选精确基础 ID 条目。输出固定标记 `explicit_assignment_only`。**目标版的经济规则可覆盖普通分配，这里尚未实现；目录输出不接入实时拾取，也不是完整拾取许可。**
+
+示例目录回放单行：
+
+```json
+{"player":1,"card":{"selected_item":"0xABC","base_id":"CurrencyExalted","player":1,"targetable":true,"received_at":"2026-10-26T00:00:00Z"},"definitions":[{"key":"CurrencyExalted","runtime_base_ids":["CurrencyExalted"],"item_class":"Currency","required_rarity":"","matches_all_of_item_class":false,"assignment":"P1"}]}
+```
+
 ## 待确认与后续实现
 
 1. 在真实 PoE2 中核对 ExileCore2 悬停字段的实体类型、更新频率和与目标版手柄卡片的关系。
