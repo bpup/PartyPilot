@@ -4,9 +4,34 @@ namespace PartyPilot.Bridge;
 
 internal readonly record struct BridgeCommand(int Slot, short X, short Y, bool Active, bool EligibleForManualMovement);
 internal readonly record struct PairingControl(string Type, int Slot, int Pid, long WindowHandle);
+internal readonly record struct FlaskCommand(int Slot, string Resource);
 
 internal static class BridgeProtocol
 {
+    public static bool TryParseFlask(string line, out FlaskCommand command)
+    {
+        command = default;
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String ||
+                type.GetString() != "flask" ||
+                !root.TryGetProperty("slot", out var slot) || !slot.TryGetInt32(out var value) ||
+                value is < 1 or > 4 ||
+                !root.TryGetProperty("resource", out var resource) || resource.ValueKind != JsonValueKind.String ||
+                resource.GetString() is not ("life" or "mana"))
+                return false;
+            command = new FlaskCommand(value, resource.GetString()!);
+            return true;
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
     public static bool TryParsePairingControl(string line, out PairingControl control)
     {
         control = default;

@@ -27,7 +27,12 @@ public sealed record LiveFollowPlan(double Stop, double Resume, double Catchup,
         Regex.IsMatch(value.Trim(), @"^[1-9][0-9]*(ms|s|m|h)$", RegexOptions.CultureInvariant);
 }
 
-public sealed record FollowBridgeFrame(string Command, string Status, string? Reason);
+public sealed record FlaskBridgeRequest(int Player, string Resource);
+
+public sealed record FollowBridgeFrame(string Command, string Status, string? Reason)
+{
+    public IReadOnlyList<FlaskBridgeRequest> Flasks { get; init; } = [];
+}
 
 public static class LiveFollowFrame
 {
@@ -67,6 +72,29 @@ public static class LiveFollowFrame
                 throw new InvalidDataException("Live follow returned an invalid manual override flag.");
             manualEligible = eligibleValue.GetBoolean();
         }
+        var flasks = new List<FlaskBridgeRequest>();
+        if (root.TryGetProperty("flasks", out var flaskValue))
+        {
+            if (flaskValue.ValueKind != JsonValueKind.Array || flaskValue.GetArrayLength() > 2)
+                throw new InvalidDataException("Live follow returned an invalid flask list.");
+            foreach (var item in flaskValue.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object ||
+                    !item.TryGetProperty("player", out var playerValue) || !playerValue.TryGetInt32(out var player) ||
+                    player != 1 && player != followerPartyPlayer ||
+                    !item.TryGetProperty("resource", out var resourceValue) || resourceValue.ValueKind != JsonValueKind.String ||
+                    resourceValue.GetString() is not ("life" or "mana") ||
+                    !item.TryGetProperty("percent", out var percentValue) || !percentValue.TryGetDouble(out var percent) ||
+                    !double.IsFinite(percent) || percent is < 0 or > 100 ||
+                    !item.TryGetProperty("reason", out var flaskReasonValue) || flaskReasonValue.ValueKind != JsonValueKind.String ||
+                    flaskReasonValue.GetString() is not ("threshold" or "emergency" or "sustained" or "ward_break"))
+                    throw new InvalidDataException("Live follow returned an invalid flask request.");
+                var resource = resourceValue.GetString()!;
+                if (flasks.Any(existing => existing.Player == player && existing.Resource == resource))
+                    throw new InvalidDataException("Live follow repeated a flask request.");
+                flasks.Add(new FlaskBridgeRequest(player, resource));
+            }
+        }
         if (state is "waiting" or "holding")
         {
             if (state == "waiting" && manualEligible)
@@ -74,7 +102,7 @@ public static class LiveFollowFrame
             var command = manualEligible
                 ? JsonSerializer.Serialize(new { slot = followerPad, state, manual_override_eligible = true })
                 : JsonSerializer.Serialize(new { slot = followerPad, state });
-            return new FollowBridgeFrame(command, state, reason);
+            return new FollowBridgeFrame(command, state, reason) { Flasks = flasks };
         }
         if (state is not ("following" or "catching_up") ||
             !follower.TryGetProperty("x", out var xValue) || !xValue.TryGetDouble(out var x) ||
@@ -84,6 +112,6 @@ public static class LiveFollowFrame
             throw new InvalidDataException("Live follow returned an invalid movement direction.");
         return new FollowBridgeFrame(manualEligible
             ? JsonSerializer.Serialize(new { slot = followerPad, state, x, y, manual_override_eligible = true })
-            : JsonSerializer.Serialize(new { slot = followerPad, state, x, y }), state, reason);
+            : JsonSerializer.Serialize(new { slot = followerPad, state, x, y }), state, reason) { Flasks = flasks };
     }
 }

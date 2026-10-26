@@ -34,6 +34,7 @@ public sealed class MainWindow : Window
     private readonly TextBox _physicalDevice = new();
     private readonly CheckBox _isolationConfirmed = new();
     private readonly CheckBox _rightStickFollowerOverride = new();
+    private readonly CheckBox _autoFlask = new();
     private readonly Button _prepareBridge = new();
     private readonly Button _armPairing = new();
     private readonly Button _confirmRole = new();
@@ -166,6 +167,8 @@ public sealed class MainWindow : Window
         panel.Children.Add(_isolationConfirmed);
         _rightStickFollowerOverride.Content = "右摇杆暂时控制可活动的跟随角色（主角色不再使用右摇杆瞄准）";
         panel.Children.Add(_rightStickFollowerOverride);
+        _autoFlask.Content = "随实时跟随启用自动药剂（仅双客户端各一名角色；生命/魔力须绑定手柄十字键左/右）";
+        panel.Children.Add(_autoFlask);
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12, LineSpacing = 8 };
         _prepareBridge.Content = "准备虚拟手柄";
         _prepareBridge.Click += async (_, _) => await PrepareBridgeAsync();
@@ -304,8 +307,10 @@ public sealed class MainWindow : Window
     private void UpdateClientRows()
     {
         var selection = _topologyVariant.SelectedItem as PartyTopology;
-        if (!ReferenceEquals(_selectedTopology, selection)) _launchedClients = [];
+        var topologyChanged = !ReferenceEquals(_selectedTopology, selection);
+        if (topologyChanged) _launchedClients = [];
         _selectedTopology = selection;
+        if (_bridge is null && topologyChanged) _autoFlask.IsChecked = selection?.Id == "2-split";
         var count = _selectedTopology?.ClientCount ?? 0;
         _assignment.Text = _selectedTopology is null
             ? "选择人数后显示角色与客户端分布。"
@@ -370,6 +375,7 @@ public sealed class MainWindow : Window
         _physicalDevice.IsEnabled = _bridge is null && !_busy;
         _isolationConfirmed.IsEnabled = _bridge is null && !_busy;
         _rightStickFollowerOverride.IsEnabled = _bridge is null && !_busy;
+        _autoFlask.IsEnabled = _bridge is null && !_busy && _selectedTopology?.Id == "2-split";
         for (var index = 0; index < _paths.Length; index++)
         {
             if (_paths[index] is not null) _paths[index].IsEnabled = _bridge is null && !_pairingHasStarted && !_busy;
@@ -421,7 +427,8 @@ public sealed class MainWindow : Window
             var gameExecutables = Enumerable.Range(0, _selectedTopology.ClientCount)
                 .Select(index => _paths[index].Text?.Trim() ?? "").ToArray();
             var session = await BridgeSession.StartAsync(executable, _selectedTopology.Slots, _physicalIndex.SelectedIndex,
-                _physicalDevice.Text.Trim(), gameExecutables, _rightStickFollowerOverride.IsChecked == true);
+                _physicalDevice.Text.Trim(), gameExecutables, _rightStickFollowerOverride.IsChecked == true,
+                _selectedTopology.Id == "2-split" && _autoFlask.IsChecked == true);
             session.AReleased += BridgeAReleased;
             session.PairingArmed += BridgePairingArmed;
             session.PairingCompleted += BridgePairingCompleted;

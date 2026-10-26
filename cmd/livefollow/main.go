@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -15,6 +17,7 @@ import (
 
 	"partypilot/internal/arealog"
 	"partypilot/internal/clientprocess"
+	"partypilot/internal/flask"
 	"partypilot/internal/follow"
 	"partypilot/internal/live"
 	"partypilot/internal/partylog"
@@ -101,9 +104,56 @@ func verifyProcessBindings(roster map[int]int, paths map[int]string) error {
 type frame struct {
 	Focused  int                    `json:"focused"`
 	Commands map[int]follow.Command `json:"commands"`
+	Flasks   []flask.Activation     `json:"flasks,omitempty"`
 }
 
-func run(address string, roster map[int]int, paths map[int]string, leader int, engine *live.Engine) error {
+type menuInput struct {
+	Type  string `json:"type"`
+	Slot  int    `json:"slot"`
+	State string `json:"state"`
+	Err   error  `json:"-"`
+}
+
+func readMenuInput(reader io.Reader, output chan<- menuInput) {
+	defer close(output)
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		var input menuInput
+		if err := json.Unmarshal(scanner.Bytes(), &input); err != nil || input.Type != "menu_guard" {
+			output <- menuInput{Err: errors.New("invalid menu guard command")}
+			return
+		}
+		output <- input
+	}
+	if err := scanner.Err(); err != nil {
+		output <- menuInput{Err: err}
+	}
+}
+
+func applyMenuInput(session *live.FlaskSession, input <-chan menuInput) error {
+	if session == nil {
+		return nil
+	}
+	for {
+		select {
+		case command, open := <-input:
+			if !open {
+				return errors.New("menu guard input closed")
+			}
+			if command.Err != nil {
+				return command.Err
+			}
+			if err := session.SetMenuGuard(command.Slot, command.State); err != nil {
+				return err
+			}
+		default:
+			return nil
+		}
+	}
+}
+
+func run(address string, roster map[int]int, paths map[int]string, leader int, engine *live.Engine,
+	flasks *live.FlaskSession, menuInput <-chan menuInput) error {
 	endpoint, err := net.ResolveUDPAddr("udp", address)
 	if err != nil || endpoint.IP == nil || !endpoint.IP.IsLoopback() {
 		return errors.New("listen address must be loopback")
@@ -142,11 +192,20 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 		return err
 	}
 	for {
+		if err := applyMenuInput(flasks, menuInput); err != nil {
+			return fail("menu guard input failed", err)
+		}
+		var activations []flask.Activation
 		_ = conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 		count, _, err := conn.ReadFromUDP(data)
 		if err == nil {
 			if sample, decodeErr := telemetry.Decode(data[:count]); decodeErr == nil {
-				engine.ObserveSample(sample)
+				if engine.ObserveSample(sample) && flasks != nil {
+					activations, err = flasks.ObserveSample(sample, time.Now().UTC())
+					if err != nil {
+						return fail("flask decision failed", err)
+					}
+				}
 			}
 		} else if timeout, ok := err.(net.Error); !ok || !timeout.Timeout() {
 			return fail("sensor read failed", err)
@@ -172,7 +231,7 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 				}
 			}
 		}
-		if err := encoder.Encode(frame{Focused: leader, Commands: engine.Step(now)}); err != nil {
+		if err := encoder.Encode(frame{Focused: leader, Commands: engine.Step(now), Flasks: activations}); err != nil {
 			return err
 		}
 	}
@@ -187,6 +246,7 @@ func main() {
 	maxAge := flag.Duration("max-age", 0, "maximum sensor age")
 	logAge := flag.Duration("log-max-age", 0, "maximum area-log signal age")
 	leaderName := flag.String("leader-name", "", "configured character name of the followed leader, for departure detection")
+	autoFlask := flag.Bool("auto-flask", false, "enable life and mana flask decisions for explicitly bound clients")
 	address := flag.String("listen", "127.0.0.1:47617", "loopback sensor address")
 	var logs, exes sources
 	flag.Var(&logs, "log", "SLOT=Client.txt path")
@@ -213,8 +273,20 @@ func main() {
 		os.Exit(2)
 	}
 	engine.SetLeaderName(*leaderName)
+	var flaskSession *live.FlaskSession
+	var menuCommands <-chan menuInput
+	if *autoFlask {
+		flaskSession, err = live.NewFlaskSession(roster, *maxAge)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		commands := make(chan menuInput, 16)
+		menuCommands = commands
+		go readMenuInput(os.Stdin, commands)
+	}
 	fmt.Fprintln(os.Stderr, "Live follow decision stream; Windows controller and PoE2 behavior remain unverified.")
-	if err := run(*address, roster, paths, *leader, engine); err != nil {
+	if err := run(*address, roster, paths, *leader, engine, flaskSession, menuCommands); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

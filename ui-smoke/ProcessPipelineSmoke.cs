@@ -16,16 +16,19 @@ internal static class ProcessPipelineSmoke
         {
             File.WriteAllText(bridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '--focus-pad-map' not in sys.argv or sys.argv[sys.argv.index('--focus-pad-map')+1] != '1:1,2:3': sys.exit(2)\n" +
-                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3\"}', flush=True)\n" +
+                "if '--enable-auto-flask' not in sys.argv: sys.exit(2)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"auto_flask_enabled\":true,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3\"}', flush=True)\n" +
                 $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(log)}, 'a') as out: out.write(line)\n");
-            File.WriteAllText(followExe, "#!/usr/bin/env python3\nimport time\n" +
+            File.WriteAllText(followExe, "#!/usr/bin/env python3\nimport sys,json\n" +
+                "if '-auto-flask' not in sys.argv: sys.exit(2)\n" +
                 "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"reason\":\"missing position\"}}}', flush=True)\n" +
-                "time.sleep(0.05)\n" +
-                "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0,\"manual_override_eligible\":true}}}', flush=True)\n");
+                "states = [json.loads(sys.stdin.readline()) for _ in range(2)]\n" +
+                "if {(s['slot'],s['state']) for s in states} != {(1,'clear'),(2,'clear')}: sys.exit(2)\n" +
+                "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0,\"manual_override_eligible\":true}},\"flasks\":[{\"player\":2,\"resource\":\"life\",\"percent\":30,\"reason\":\"threshold\"}]}', flush=True)\n");
             File.WriteAllText(couchBridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '--focus-pad-map' not in sys.argv or sys.argv[sys.argv.index('--focus-pad-map')+1] != '1:1,2:2': sys.exit(2)\n" +
                 "if '--right-stick-follower-override' not in sys.argv or '--direct-right-stick-slot' not in sys.argv or sys.argv[sys.argv.index('--direct-right-stick-slot')+1] != '2': sys.exit(2)\n" +
-                "print('{\"event\":\"ready\",\"slots\":[1,2],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"right_stick_follower_override\":true,\"direct_right_stick_slot\":2,\"focus_pad_map\":\"1:1,2:2\"}', flush=True)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,2],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"auto_flask_enabled\":false,\"right_stick_follower_override\":true,\"direct_right_stick_slot\":2,\"focus_pad_map\":\"1:1,2:2\"}', flush=True)\n" +
                 "for line in sys.stdin: pass\n");
             File.SetUnixFileMode(bridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(followExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -33,7 +36,7 @@ internal static class ProcessPipelineSmoke
             Console.WriteLine("Pipeline smoke: starting fake bridge.");
             var topology = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-split");
             await using var bridge = await BridgeSession.StartAsync(bridgeExe, topology.Slots, 0,
-                @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"], false);
+                @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"], false, true);
             Console.WriteLine("Pipeline smoke: fake bridge ready.");
             bridge.StartReading();
             var clients = new[]
@@ -49,17 +52,18 @@ internal static class ProcessPipelineSmoke
                 Console.WriteLine("Pipeline smoke: fake follow ready.");
                 follow.StartReading();
                 var deadline = DateTime.UtcNow.AddSeconds(5);
-                while (DateTime.UtcNow < deadline && (!File.Exists(log) || File.ReadAllLines(log).Length < 3))
+                while (DateTime.UtcNow < deadline && (!File.Exists(log) || File.ReadAllLines(log).Length < 4))
                     await Task.Delay(20);
             }
             var lines = File.Exists(log) ? File.ReadAllLines(log) : [];
-            if (lines.Length < 3 ||
+            if (lines.Length < 4 ||
                 !lines[0].Contains("\"slot\":3,\"state\":\"waiting\"") ||
                 !lines[1].Contains("\"slot\":3,\"state\":\"following\"") ||
                 !lines[1].Contains("\"manual_override_eligible\":true") ||
+                !lines[2].Contains("\"type\":\"flask\",\"slot\":3,\"resource\":\"life\"") ||
                 !lines[^1].Contains("\"slot\":3,\"state\":\"waiting\""))
-                throw new Exception("Live follow did not hand off movement and neutralize on exit: " + string.Join(" | ", lines));
-            Console.WriteLine("Desktop decision-to-bridge process handoff and stop checked with local fake executables.");
+                throw new Exception("Live follow did not hand off movement/flasks and neutralize on exit: " + string.Join(" | ", lines));
+            Console.WriteLine("Desktop decision-to-bridge movement, flask, and stop handoff checked with local fake executables.");
             var couch = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-couch");
             await using (var pairedBridge = await BridgeSession.StartAsync(couchBridgeExe, couch.Slots, 0,
                 @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe"], true))

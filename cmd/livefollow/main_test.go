@@ -3,7 +3,11 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
+
+	"partypilot/internal/live"
 )
 
 func TestSourcesAndRoster(t *testing.T) {
@@ -33,5 +37,32 @@ func TestSourcesAndRoster(t *testing.T) {
 	}
 	if _, err := resolveLogs(roster, sources{1: first}, nil); err == nil {
 		t.Fatal("missing log accepted")
+	}
+}
+
+func TestMenuInputRequiresBoundPlayerAndOpenStream(t *testing.T) {
+	session, err := live.NewFlaskSession(map[int]int{1: 101, 2: 202}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := make(chan menuInput, 2)
+	input <- menuInput{Type: "menu_guard", Slot: 1, State: "clear"}
+	if err := applyMenuInput(session, input); err != nil {
+		t.Fatal(err)
+	}
+	input <- menuInput{Type: "menu_guard", Slot: 3, State: "clear"}
+	if err := applyMenuInput(session, input); err == nil {
+		t.Fatal("unbound player menu command accepted")
+	}
+	close(input)
+	if err := applyMenuInput(session, input); err == nil {
+		t.Fatal("closed menu input left automatic flasks armed")
+	}
+	malformed := make(chan menuInput, 2)
+	readMenuInput(strings.NewReader("{\"type\":\"menu_guard\",\"slot\":1,\"state\":\"clear\"}\n{}\n"), malformed)
+	first := <-malformed
+	second := <-malformed
+	if first.Err != nil || first.Slot != 1 || second.Err == nil {
+		t.Fatalf("menu input parsing failed: %+v %+v", first, second)
 	}
 }

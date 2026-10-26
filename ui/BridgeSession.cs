@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Avalonia.Threading;
 
@@ -9,7 +10,11 @@ internal sealed class BridgeSession : IAsyncDisposable
     private readonly Process _process;
     private Task _readEvents = Task.CompletedTask;
     private readonly Task<string> _readError;
+    private readonly ConcurrentDictionary<int, string> _menuStates = new();
+    private readonly HashSet<int> _slots;
     private bool _stopping;
+
+    public bool AutoFlaskEnabled { get; }
 
     public event Action<int>? AReleased;
     public event Action<int, int, long>? PairingArmed;
@@ -18,14 +23,17 @@ internal sealed class BridgeSession : IAsyncDisposable
     public event Action<int, string>? MenuGuardChanged;
     public event Action<string>? Ended;
 
-    private BridgeSession(Process process, Task<string> readError)
+    private BridgeSession(Process process, Task<string> readError, bool autoFlaskEnabled, int[] slots)
     {
         _process = process;
         _readError = readError;
+        AutoFlaskEnabled = autoFlaskEnabled;
+        _slots = slots.ToHashSet();
     }
 
     public static async Task<BridgeSession> StartAsync(string executable, IReadOnlyList<PartySlot> partySlots, int physicalIndex,
-        string deviceInstance, IReadOnlyList<string> gameExecutables, bool rightStickFollowerOverride)
+        string deviceInstance, IReadOnlyList<string> gameExecutables, bool rightStickFollowerOverride,
+        bool autoFlaskEnabled = false)
     {
         var slots = partySlots.Select(item => item.RuntimePad).ToArray();
         if (slots.Length is < 1 or > 3 || slots.Any(slot => slot is < 1 or > 4) ||
@@ -64,6 +72,7 @@ internal sealed class BridgeSession : IAsyncDisposable
             start.ArgumentList.Add(game);
         }
         if (rightStickFollowerOverride) start.ArgumentList.Add("--right-stick-follower-override");
+        if (autoFlaskEnabled) start.ArgumentList.Add("--enable-auto-flask");
         if (directRightStickSlot != 0)
         {
             start.ArgumentList.Add("--direct-right-stick-slot");
@@ -75,11 +84,11 @@ internal sealed class BridgeSession : IAsyncDisposable
         {
             var readyLine = await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15));
             if (readyLine is null || !IsExpectedReady(readyLine, slots, focusPadMap,
-                rightStickFollowerOverride, directRightStickSlot))
+                rightStickFollowerOverride, directRightStickSlot, autoFlaskEnabled))
             {
                 throw new InvalidOperationException("Virtual controller bridge did not confirm the requested pad slots.");
             }
-            return new BridgeSession(process, readError);
+            return new BridgeSession(process, readError, autoFlaskEnabled, slots);
         }
         catch (Exception error)
         {
@@ -99,7 +108,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     }
 
     private static bool IsExpectedReady(string line, int[] slots, string focusPadMap,
-        bool rightStickFollowerOverride, int directRightStickSlot)
+        bool rightStickFollowerOverride, int directRightStickSlot, bool autoFlaskEnabled)
     {
         try
         {
@@ -109,6 +118,8 @@ internal sealed class BridgeSession : IAsyncDisposable
                    root.TryGetProperty("physical_mode", out var mode) && mode.GetBoolean() &&
                    root.TryGetProperty("pairing_protected", out var protectedMode) && protectedMode.GetBoolean() &&
                    root.TryGetProperty("hidhide_preflight", out var preflight) && preflight.GetBoolean() &&
+                   root.TryGetProperty("auto_flask_enabled", out var flaskMode) &&
+                   flaskMode.GetBoolean() == autoFlaskEnabled &&
                    root.TryGetProperty("right_stick_follower_override", out var rightStick) &&
                    rightStick.GetBoolean() == rightStickFollowerOverride &&
                    root.TryGetProperty("direct_right_stick_slot", out var directSlot) &&
@@ -155,6 +166,17 @@ internal sealed class BridgeSession : IAsyncDisposable
         await _process.StandardInput.FlushAsync();
     }
 
+    internal string GetMenuGuardState(int slot) => _menuStates.TryGetValue(slot, out var state) ? state : "clear";
+
+    internal async Task SendFlaskAsync(int slot, string resource)
+    {
+        if (!AutoFlaskEnabled || !_slots.Contains(slot) || resource is not ("life" or "mana") ||
+            _stopping || _process.HasExited)
+            throw new InvalidOperationException("Automatic flask input is unavailable for this pad.");
+        await _process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new { type = "flask", slot, resource }));
+        await _process.StandardInput.FlushAsync();
+    }
+
     private async Task ReadEventsAsync()
     {
         string? failure = null;
@@ -178,17 +200,25 @@ internal sealed class BridgeSession : IAsyncDisposable
                         root.TryGetProperty("slot", out var armedSlot) && armedSlot.TryGetInt32(out var armedSlotValue) &&
                         root.TryGetProperty("pid", out var armedPid) && armedPid.TryGetInt32(out var pid) &&
                         root.TryGetProperty("window_handle", out var armedWindow) && armedWindow.TryGetInt64(out var handle))
+                    {
+                        _menuStates.Clear();
                         Dispatcher.UIThread.Post(() => PairingArmed?.Invoke(armedSlotValue, pid, handle));
+                    }
                     else if (kind.GetString() == "menu_guard" &&
                         root.TryGetProperty("slot", out var menuSlot) && menuSlot.TryGetInt32(out var menuSlotValue) &&
+                        _slots.Contains(menuSlotValue) &&
                         root.TryGetProperty("state", out var menuState) && menuState.ValueKind == JsonValueKind.String &&
                         menuState.GetString() is "clear" or "menu_detected" or "settling")
                     {
                         var state = menuState.GetString()!;
+                        _menuStates[menuSlotValue] = state;
                         Dispatcher.UIThread.Post(() => MenuGuardChanged?.Invoke(menuSlotValue, state));
                     }
                     else if (kind.GetString() == "pairing_complete")
+                    {
+                        _menuStates.Clear();
                         Dispatcher.UIThread.Post(() => PairingCompleted?.Invoke());
+                    }
                     else if (kind.GetString() == "login_status" &&
                         root.TryGetProperty("source", out var source) && source.ValueKind == JsonValueKind.String &&
                         source.GetString() is { } sourceName &&

@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Collections.Concurrent;
+using System.Text.Json;
 using Avalonia.Threading;
 
 namespace PartyPilot.Desktop;
@@ -9,6 +11,9 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     private readonly Process _process;
     private readonly BridgeSession _bridge;
     private readonly int _followerPad;
+    private readonly Dictionary<int, int> _padToPlayer;
+    private readonly Dictionary<int, int> _playerToPad;
+    private readonly ConcurrentQueue<(int Player, string State)> _pendingMenu = new();
     private readonly Task<string> _readError;
     private Task _readFrames = Task.CompletedTask;
     private bool _stopping;
@@ -18,13 +23,28 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     public event Action<string>? Ended;
 
     private LiveFollowSession(Process process, BridgeSession bridge, int followerPad,
+        IReadOnlyList<PartySlot> slots,
         Task<string> readError, FollowBridgeFrame initialFrame)
     {
         _process = process;
         _bridge = bridge;
         _followerPad = followerPad;
+        _padToPlayer = slots.ToDictionary(slot => slot.RuntimePad, slot => slot.PartyPlayer);
+        _playerToPad = slots.ToDictionary(slot => slot.PartyPlayer, slot => slot.RuntimePad);
         _readError = readError;
         Current = initialFrame;
+        if (bridge.AutoFlaskEnabled)
+        {
+            bridge.MenuGuardChanged += OnMenuGuardChanged;
+            foreach (var slot in slots)
+                _pendingMenu.Enqueue((slot.PartyPlayer, bridge.GetMenuGuardState(slot.RuntimePad)));
+        }
+    }
+
+    private void OnMenuGuardChanged(int pad, string state)
+    {
+        if (!_stopping && _padToPlayer.TryGetValue(pad, out var player))
+            _pendingMenu.Enqueue((player, state));
     }
 
     public static async Task<LiveFollowSession> StartAsync(string executable, PartyTopology topology,
@@ -40,6 +60,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            RedirectStandardInput = bridge.AutoFlaskEnabled,
             CreateNoWindow = true
         };
         foreach (var argument in new[]
@@ -56,6 +77,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             start.ArgumentList.Add("-leader-name");
             start.ArgumentList.Add(plan.LeaderName);
         }
+        if (bridge.AutoFlaskEnabled) start.ArgumentList.Add("-auto-flask");
         var process = Process.Start(start) ?? throw new InvalidOperationException("Live follow did not start.");
         var readError = process.StandardError.ReadToEndAsync();
         try
@@ -64,7 +86,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             if (first is null) throw new InvalidDataException("Live follow exited without a decision frame.");
             var frame = LiveFollowFrame.Parse(first, 2, 3);
             await bridge.SendAutomationAsync(frame);
-            return new LiveFollowSession(process, bridge, 3, readError, frame);
+            return new LiveFollowSession(process, bridge, 3, topology.Slots, readError, frame);
         }
         catch (Exception error)
         {
@@ -89,12 +111,19 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         string? failure = null;
         try
         {
-            string? line;
-            while (!_stopping && (line = await _process.StandardOutput.ReadLineAsync()) is not null)
+            while (!_stopping)
             {
+                await FlushMenuAsync();
+                var line = await _process.StandardOutput.ReadLineAsync();
+                if (line is null) break;
                 var frame = LiveFollowFrame.Parse(line, 2, _followerPad);
                 if (_stopping) break;
                 await _bridge.SendAutomationAsync(frame);
+                if (_bridge.AutoFlaskEnabled)
+                {
+                    foreach (var request in frame.Flasks)
+                        await _bridge.SendFlaskAsync(_playerToPad[request.Player], request.Resource);
+                }
                 if (Current.Status == frame.Status && Current.Reason == frame.Reason) continue;
                 Current = frame;
                 Dispatcher.UIThread.Post(() => StatusChanged?.Invoke(frame));
@@ -123,9 +152,23 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         }
     }
 
+    private async Task FlushMenuAsync()
+    {
+        if (!_bridge.AutoFlaskEnabled) return;
+        while (_pendingMenu.TryDequeue(out var item))
+        {
+            await _process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new
+            {
+                type = "menu_guard", slot = item.Player, state = item.State
+            }));
+        }
+        await _process.StandardInput.FlushAsync();
+    }
+
     public async ValueTask DisposeAsync()
     {
         _stopping = true;
+        _bridge.MenuGuardChanged -= OnMenuGuardChanged;
         if (!_process.HasExited) _process.Kill();
         await _process.WaitForExitAsync();
         await _readFrames;

@@ -158,13 +158,41 @@ internal sealed class BridgeRouter
     {
         if (_menuGuardActive == active) return;
         _menuGuardActive = active;
+        if (active)
+        {
+            foreach (var route in _routes.Values)
+                route.LifeUntilUtc = route.ManaUntilUtc = DateTime.MinValue;
+        }
         RenderAll();
+    }
+
+    public bool PulseFlask(int slot, string resource, DateTime nowUtc)
+    {
+        if (!_routes.TryGetValue(slot, out var route) || !_physicalMode || !_physicalConnected ||
+            _menuGuardActive || (_isolatedSlot != 0 && slot != _focusedSlot) ||
+            nowUtc.Kind != DateTimeKind.Utc || resource is not ("life" or "mana"))
+            return false;
+        if (resource == "life") route.LifeUntilUtc = nowUtc.AddMilliseconds(120);
+        else route.ManaUntilUtc = nowUtc.AddMilliseconds(120);
+        Render(slot, route);
+        return true;
     }
 
     public void Tick(DateTime nowUtc)
     {
         foreach (var (slot, route) in _routes)
         {
+            var expired = false;
+            if (route.LifeUntilUtc != DateTime.MinValue && nowUtc >= route.LifeUntilUtc)
+            {
+                route.LifeUntilUtc = DateTime.MinValue;
+                expired = true;
+            }
+            if (route.ManaUntilUtc != DateTime.MinValue && nowUtc >= route.ManaUntilUtc)
+            {
+                route.ManaUntilUtc = DateTime.MinValue;
+                expired = true;
+            }
             if ((route.Active || route.EligibleForManualMovement) &&
                 nowUtc - route.LastUpdateUtc > TimeSpan.FromMilliseconds(500))
             {
@@ -173,6 +201,7 @@ internal sealed class BridgeRouter
                 route.EligibleForManualMovement = false;
                 Render(slot, route);
             }
+            else if (expired) Render(slot, route);
         }
     }
 
@@ -191,6 +220,7 @@ internal sealed class BridgeRouter
             route.Automation = default;
             route.Active = false;
             route.EligibleForManualMovement = false;
+            route.LifeUntilUtc = route.ManaUntilUtc = DateTime.MinValue;
             route.Output.SetReport(default);
         }
     }
@@ -204,7 +234,7 @@ internal sealed class BridgeRouter
     {
         if (_physicalMode && slot == _focusedSlot)
         {
-            route.Output.SetReport(_physicalConnected ? _physicalReport : default);
+            route.Output.SetReport(_physicalConnected ? WithFlasks(_physicalReport, route) : default);
             return;
         }
         if (_menuGuardActive)
@@ -222,10 +252,18 @@ internal sealed class BridgeRouter
              (_allowDirectRightStick && slot == _directRightStickSlot)) &&
             (Math.Abs((int)_manualX) > 8000 || Math.Abs((int)_manualY) > 8000))
         {
-            route.Output.SetReport(PadReport.FromMovement(_manualX, _manualY));
+            route.Output.SetReport(WithFlasks(PadReport.FromMovement(_manualX, _manualY), route));
             return;
         }
-        route.Output.SetReport(route.Automation);
+        route.Output.SetReport(WithFlasks(route.Automation, route));
+    }
+
+    private PadReport WithFlasks(PadReport report, PadRoute route)
+    {
+        if (_menuGuardActive) return report;
+        var buttons = (ushort)((route.LifeUntilUtc != DateTime.MinValue ? 0x0004 : 0) |
+                               (route.ManaUntilUtc != DateTime.MinValue ? 0x0008 : 0));
+        return report with { Buttons = (ushort)(report.Buttons | buttons) };
     }
 
     private sealed class PadRoute(IPadOutput output)
@@ -235,5 +273,7 @@ internal sealed class BridgeRouter
         public DateTime LastUpdateUtc { get; set; }
         public bool Active { get; set; }
         public bool EligibleForManualMovement { get; set; }
+        public DateTime LifeUntilUtc { get; set; }
+        public DateTime ManaUntilUtc { get; set; }
     }
 }

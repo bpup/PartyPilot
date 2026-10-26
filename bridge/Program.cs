@@ -79,6 +79,7 @@ if (!args.Contains("--enable-controller") || !BridgeSlots.TryParse(args, out var
 }
 var physicalMode = args.Contains("--physical-index") || args.Contains("--main-slot") ||
     args.Contains("--physical-hidden-confirmed") || args.Contains("--right-stick-follower-override");
+var autoFlaskEnabled = args.Contains("--enable-auto-flask");
 var rightStickFollowerOverride = args.Contains("--right-stick-follower-override");
 var directSlotPosition = Array.IndexOf(args, "--direct-right-stick-slot");
 var directRightStickSlot = 0;
@@ -91,6 +92,11 @@ if (directSlotPosition >= 0 && (args.Count(arg => arg == "--direct-right-stick-s
     return 2;
 }
 var protectedPairing = args.Contains("--pairing-protected");
+if (autoFlaskEnabled && (!physicalMode || !protectedPairing))
+{
+    Console.Error.WriteLine("Automatic flask input requires physical mode and protected pairing.");
+    return 2;
+}
 var physicalIndexPosition = Array.IndexOf(args, "--physical-index");
 var mainSlotPosition = Array.IndexOf(args, "--main-slot");
 var devicePosition = Array.IndexOf(args, "--device-instance");
@@ -200,6 +206,7 @@ try
         long pairingTargetWindow = 0;
         Console.WriteLine(JsonSerializer.Serialize(new { @event = "ready", slots, physical_mode = physicalMode,
             pairing_protected = protectedPairing, hidhide_preflight = physicalMode,
+            auto_flask_enabled = autoFlaskEnabled,
             right_stick_follower_override = rightStickFollowerOverride,
             direct_right_stick_slot = directRightStickSlot,
             focus_pad_map = focusPads is null ? "" : string.Join(',', focusPads.OrderBy(entry => entry.Key)
@@ -247,6 +254,19 @@ try
                         router.NeutralAll();
                         return 1;
                     }
+                    continue;
+                }
+                if (BridgeProtocol.TryParseFlask(line, out var flaskCommand))
+                {
+                    if (!autoFlaskEnabled || pairingGate?.Phase != ProtectedPairingPhase.Complete ||
+                        !slots.Contains(flaskCommand.Slot))
+                    {
+                        router.NeutralAll();
+                        Console.Error.WriteLine("Automatic flask command is not armed for this virtual pad.");
+                        return 1;
+                    }
+                    // Menu, focus isolation, or a missing physical pad can suppress a valid pulse.
+                    router.PulseFlask(flaskCommand.Slot, flaskCommand.Resource, DateTime.UtcNow);
                     continue;
                 }
                 if ((pairingGate is not null && pairingGate.Phase != ProtectedPairingPhase.Complete) ||

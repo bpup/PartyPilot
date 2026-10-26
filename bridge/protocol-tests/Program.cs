@@ -31,6 +31,11 @@ Expect("{\"slot\":2,\"state\":\"following\",\"x\":2,\"y\":0}", false, 0, false);
 Expect("{\"slot\":2,\"state\":\"following\",\"x\":0,\"y\":0}", false, 0, false);
 Expect("{\"state\":\"following\",\"x\":1,\"y\":0}", false, 0, false);
 Expect("not JSON", false, 0, false);
+if (!BridgeProtocol.TryParseFlask("{\"type\":\"flask\",\"slot\":3,\"resource\":\"life\"}", out var flaskCommand) ||
+    flaskCommand != new FlaskCommand(3, "life") ||
+    BridgeProtocol.TryParseFlask("{\"type\":\"flask\",\"slot\":5,\"resource\":\"life\"}", out _) ||
+    BridgeProtocol.TryParseFlask("{\"type\":\"flask\",\"slot\":3,\"resource\":\"skill\"}", out _))
+    throw new Exception("Automatic flask command validation failed.");
 if (!BridgeSlots.TryParse(["--slots", "3,2"], out var slots) ||
     !slots.SequenceEqual([2, 3]) ||
     BridgeSlots.TryParse(["--slots", "2,2"], out _) ||
@@ -137,8 +142,20 @@ if (!router.ConfigurePhysical(2) ||
 router.SetPhysical(new XInputGamepad { Buttons = 0x1000, LeftTrigger = 42, LeftX = 111 });
 if (pad2.Report.Buttons != 0x1000 || pad2.Report.LeftTrigger != 42 || pad2.X != 111 || pad3.X != 32767)
     throw new Exception("Physical input did not reach focused pad independently.");
+if (!router.PulseFlask(3, "life", now.AddMilliseconds(20)) ||
+    (pad3.Report.Buttons & 0x0004) == 0 || !router.PulseFlask(3, "mana", now.AddMilliseconds(30)) ||
+    (pad3.Report.Buttons & 0x000c) != 0x000c ||
+    router.PulseFlask(4, "life", now.AddMilliseconds(30)))
+    throw new Exception("Independent flask pulses were not routed to the assigned pad.");
+router.Tick(now.AddMilliseconds(151));
+if (pad3.Report.Buttons != 0)
+    throw new Exception("Automatic flask buttons did not release after 120 ms.");
+if (!router.PulseFlask(2, "life", now.AddMilliseconds(160)) ||
+    (pad2.Report.Buttons & 0x1004) != 0x1004)
+    throw new Exception("Focused physical and flask buttons did not combine.");
 router.SetMenuGuardActive(true);
-if (pad2.Report.Buttons != 0x1000 || pad2.X != 111 || pad3.Report != default)
+if (pad2.Report.Buttons != 0x1000 || pad2.X != 111 || pad3.Report != default ||
+    router.PulseFlask(3, "mana", now.AddMilliseconds(170)))
     throw new Exception("Menu guard did not pause automation while leaving the focused physical pad usable.");
 router.Tick(now.AddMilliseconds(501));
 router.SetMenuGuardActive(false);
