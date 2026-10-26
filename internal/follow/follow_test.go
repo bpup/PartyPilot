@@ -64,4 +64,51 @@ func TestInvalidConfiguration(t *testing.T) {
 	if _, ok := New(Config{StopDistance: 3, ResumeDistance: 2, CatchUpDistance: 10, MaxAge: time.Second}); ok {
 		t.Fatal("accepted reversed distances")
 	}
+	if _, ok := New(Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second, TrailSpacing: 1}); ok {
+		t.Fatal("accepted trail without a jump limit")
+	}
+	if _, ok := New(Config{StopDistance: math.NaN(), ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}); ok {
+		t.Fatal("accepted NaN stop distance")
+	}
+}
+
+func TestTrailTurnsBeforeDirectLineAndStopsOnJump(t *testing.T) {
+	now := time.Unix(20, 0)
+	engine, ok := New(Config{StopDistance: 1, ResumeDistance: 2, CatchUpDistance: 30,
+		MaxAge: time.Second, TrailSpacing: 1, TrailMaxStep: 5})
+	if !ok {
+		t.Fatal("invalid trail config")
+	}
+	leader := Position{Area: "instance-1", Seen: now, Valid: true}
+	follower := Position{X: -10, Area: "instance-1", Seen: now, Valid: true}
+	if got := engine.Step(now, leader, follower); got.X != 1 || got.Y != 0 {
+		t.Fatalf("initial route: %+v", got)
+	}
+	leader.Y = 4
+	if got := engine.Step(now, leader, follower); got.X != 1 || got.Y != 0 {
+		t.Fatalf("trail cut the corner: %+v", got)
+	}
+	follower.X = 0
+	if got := engine.Step(now, leader, follower); got.X != 0 || got.Y != 1 {
+		t.Fatalf("trail did not advance after waypoint: %+v", got)
+	}
+	leader.Y = 20
+	if got := engine.Step(now, leader, follower); got.State != Waiting {
+		t.Fatalf("large leader jump did not stop: %+v", got)
+	}
+	if got := engine.Step(now, leader, follower); got.State != Waiting {
+		t.Fatalf("large leader jump resumed without reset: %+v", got)
+	}
+	leader.Seen = now.Add(-2 * time.Second)
+	if got := engine.Step(now, leader, follower); got.State != Waiting {
+		t.Fatalf("stale observation did not wait: %+v", got)
+	}
+	leader.Seen = now
+	if got := engine.Step(now, leader, follower); got.State != Waiting {
+		t.Fatalf("fresh observation cleared jump lock: %+v", got)
+	}
+	engine.Reset()
+	if got := engine.Step(now, leader, follower); got.State != Following {
+		t.Fatalf("explicit reset did not allow a fresh route: %+v", got)
+	}
 }

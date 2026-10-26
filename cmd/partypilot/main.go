@@ -17,6 +17,7 @@ type frame struct {
 	Now      time.Time       `json:"now"`
 	Leader   follow.Position `json:"leader"`
 	Follower follow.Position `json:"follower"`
+	Reset    bool            `json:"reset,omitempty"`
 }
 
 func replay(reader io.Reader, writer io.Writer, config follow.Config) error {
@@ -37,6 +38,9 @@ func replay(reader io.Reader, writer io.Writer, config follow.Config) error {
 		if item.Now.IsZero() {
 			return fmt.Errorf("line %d: missing now", line)
 		}
+		if item.Reset {
+			engine.Reset()
+		}
 		if err := encoder.Encode(engine.Step(item.Now, item.Leader, item.Follower)); err != nil {
 			return err
 		}
@@ -50,8 +54,11 @@ func main() {
 	resume := flag.Float64("resume", -1, "resume distance in telemetry units")
 	catchUp := flag.Float64("catchup", -1, "catch-up distance in telemetry units")
 	maxAge := flag.Duration("max-age", 0, "maximum position age, such as 750ms")
+	trailSpacing := flag.Float64("trail-spacing", 0, "leader trail sample spacing; requires -trail-max-step")
+	trailMaxStep := flag.Float64("trail-max-step", 0, "maximum leader displacement between observations")
 	flag.Parse()
-	config := follow.Config{StopDistance: *stop, ResumeDistance: *resume, CatchUpDistance: *catchUp, MaxAge: *maxAge}
+	config := follow.Config{StopDistance: *stop, ResumeDistance: *resume, CatchUpDistance: *catchUp, MaxAge: *maxAge,
+		TrailSpacing: *trailSpacing, TrailMaxStep: *trailMaxStep}
 	if *input == "" || !config.Valid() {
 		fmt.Fprintln(os.Stderr, "Usage: partypilot -replay observations.jsonl -stop N -resume N -catchup N -max-age 750ms")
 		os.Exit(2)

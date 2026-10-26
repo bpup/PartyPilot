@@ -36,24 +36,42 @@ type Config struct {
 	ResumeDistance  float64
 	CatchUpDistance float64
 	MaxAge          time.Duration
+	TrailSpacing    float64
+	TrailMaxStep    float64
 }
 
 func (c Config) Valid() bool {
 	return !math.IsInf(c.StopDistance, 0) && !math.IsInf(c.ResumeDistance, 0) &&
 		!math.IsInf(c.CatchUpDistance, 0) &&
+		!math.IsNaN(c.StopDistance) && !math.IsNaN(c.ResumeDistance) && !math.IsNaN(c.CatchUpDistance) &&
+		!math.IsNaN(c.TrailSpacing) && !math.IsNaN(c.TrailMaxStep) &&
+		!math.IsInf(c.TrailSpacing, 0) && !math.IsInf(c.TrailMaxStep, 0) &&
 		c.StopDistance >= 0 &&
 		c.ResumeDistance > c.StopDistance &&
 		c.CatchUpDistance > c.ResumeDistance &&
-		c.MaxAge > 0
+		c.MaxAge > 0 &&
+		((c.TrailSpacing == 0 && c.TrailMaxStep == 0) ||
+			(c.TrailSpacing > 0 && c.TrailMaxStep > c.TrailSpacing))
 }
 
 func (e *Engine) Reset() {
 	e.moving = false
+	e.trail = nil
+	e.hasLeader = false
+	e.trailArea = ""
+	e.trailBlocked = false
 }
 
+type point struct{ x, y float64 }
+
 type Engine struct {
-	config Config
-	moving bool
+	config       Config
+	moving       bool
+	trail        []point
+	lastLeader   point
+	hasLeader    bool
+	trailArea    string
+	trailBlocked bool
 }
 
 func New(config Config) (*Engine, bool) {
@@ -65,7 +83,9 @@ func New(config Config) (*Engine, bool) {
 
 func (e *Engine) Step(now time.Time, leader, follower Position) Command {
 	wait := func(reason string) Command {
-		e.moving = false
+		blocked := e.trailBlocked
+		e.Reset()
+		e.trailBlocked = blocked
 		return Command{State: Waiting, Reason: reason}
 	}
 	if !leader.Valid || !follower.Valid {
@@ -85,22 +105,77 @@ func (e *Engine) Step(now time.Time, leader, follower Position) Command {
 			return wait("invalid position")
 		}
 	}
+	if e.trailBlocked {
+		return Command{State: Waiting, Reason: "trail requires reset after leader jump"}
+	}
 	dx, dy := leader.X-follower.X, leader.Y-follower.Y
 	distance := math.Hypot(dx, dy)
+	if e.config.TrailSpacing > 0 {
+		if reason := e.updateTrail(leader); reason != "" {
+			e.moving = false
+			e.trailBlocked = true
+			return Command{State: Waiting, Reason: reason}
+		}
+	}
 	if distance <= e.config.StopDistance ||
 		(!e.moving && distance < e.config.ResumeDistance) {
 		e.moving = false
+		if e.config.TrailSpacing > 0 {
+			e.trail = []point{{leader.X, leader.Y}}
+		}
 		return Command{State: Holding, Distance: distance}
 	}
 	e.moving = true
+	if e.config.TrailSpacing > 0 {
+		waypoint := e.nextWaypoint(follower)
+		dx, dy = waypoint.x-follower.X, waypoint.y-follower.Y
+		if length := math.Hypot(dx, dy); length > 0 {
+			dx, dy = dx/length, dy/length
+		} else {
+			dx, dy = (leader.X-follower.X)/distance, (leader.Y-follower.Y)/distance
+		}
+	} else {
+		dx, dy = dx/distance, dy/distance
+	}
 	state := Following
 	if distance >= e.config.CatchUpDistance {
 		state = CatchingUp
 	}
 	return Command{
 		State:    state,
-		X:        dx / distance,
-		Y:        dy / distance,
+		X:        dx,
+		Y:        dy,
 		Distance: distance,
 	}
+}
+
+func (e *Engine) updateTrail(leader Position) string {
+	current := point{leader.X, leader.Y}
+	if !e.hasLeader || e.trailArea != leader.Area {
+		e.trail = []point{current}
+		e.lastLeader = current
+		e.hasLeader = true
+		e.trailArea = leader.Area
+		return ""
+	}
+	if math.Hypot(current.x-e.lastLeader.x, current.y-e.lastLeader.y) > e.config.TrailMaxStep {
+		return "leader step exceeds trail limit"
+	}
+	e.lastLeader = current
+	last := e.trail[len(e.trail)-1]
+	if math.Hypot(current.x-last.x, current.y-last.y) >= e.config.TrailSpacing {
+		e.trail = append(e.trail, current)
+		if len(e.trail) > 2048 {
+			return "leader trail exceeds capacity"
+		}
+	}
+	return ""
+}
+
+func (e *Engine) nextWaypoint(follower Position) point {
+	radius := e.config.TrailSpacing / 2
+	for len(e.trail) > 1 && math.Hypot(e.trail[0].x-follower.X, e.trail[0].y-follower.Y) <= radius {
+		e.trail = e.trail[1:]
+	}
+	return e.trail[0]
 }

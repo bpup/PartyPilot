@@ -67,6 +67,12 @@ func (c *Coordinator) SetLastFocusedLeads(enabled bool) {
 	c.lastFocusedLeads = enabled
 }
 
+func (c *Coordinator) ResetFollow() {
+	for _, engine := range c.followers {
+		engine.Reset()
+	}
+}
+
 func (c *Coordinator) Focus(slot int) error {
 	if err := c.router.Focus(slot); err != nil {
 		return err

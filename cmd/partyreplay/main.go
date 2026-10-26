@@ -22,6 +22,7 @@ type frame struct {
 	Positions      map[int]follow.Position `json:"positions"`
 	Focus          int                     `json:"focus,omitempty"`
 	ReturnToLeader bool                    `json:"return_to_leader,omitempty"`
+	ResetFollow    bool                    `json:"reset_follow,omitempty"`
 }
 
 type result struct {
@@ -89,6 +90,9 @@ func replay(reader io.Reader, writer io.Writer, coordinator *party.Coordinator, 
 		if item.Now.IsZero() {
 			return fmt.Errorf("line %d: missing now", line)
 		}
+		if item.ResetFollow {
+			coordinator.ResetFollow()
+		}
 		if item.ReturnToLeader {
 			coordinator.ReturnToLeader()
 		}
@@ -113,6 +117,8 @@ func main() {
 	resume := flag.Float64("resume", -1, "resume distance")
 	catchup := flag.Float64("catchup", -1, "catch-up distance")
 	maxAge := flag.Duration("max-age", 0, "maximum position age")
+	trailSpacing := flag.Float64("trail-spacing", 0, "leader trail sample spacing; requires -trail-max-step")
+	trailMaxStep := flag.Float64("trail-max-step", 0, "maximum leader displacement between observations")
 	pace := flag.Duration("pace", 0, "delay between replay frames; zero runs immediately")
 	lastFocusedLeads := flag.Bool("last-focused-leads", false, "make the manually focused player the follow leader")
 	followTargets := flag.String("follow-targets", "", "explicit follower:target pairs, e.g. 2:3")
@@ -122,7 +128,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	config := follow.Config{StopDistance: *stop, ResumeDistance: *resume, CatchUpDistance: *catchup, MaxAge: *maxAge}
+	config := follow.Config{StopDistance: *stop, ResumeDistance: *resume, CatchUpDistance: *catchup, MaxAge: *maxAge,
+		TrailSpacing: *trailSpacing, TrailMaxStep: *trailMaxStep}
 	coordinator, err := party.New(players, *leader, config)
 	if err != nil || *path == "" || *pace < 0 {
 		fmt.Fprintln(os.Stderr, "usage: partyreplay -replay file.jsonl -roster 1:1,2:2 -leader 1 -stop N -resume N -catchup N -max-age 750ms")
