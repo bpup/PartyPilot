@@ -99,6 +99,40 @@ func TestDepartureLatchesStopUntilSessionRestart(t *testing.T) {
 	}
 }
 
+func TestManualFocusChangesLiveMainAndFormerLeaderFollows(t *testing.T) {
+	now := time.Now().UTC()
+	config := follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}
+	engine, err := New(map[int]int{1: 101, 2: 202}, 1, config, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.SetLastFocusedLeads(true)
+	for slot, pid := range map[int]int{1: 101, 2: 202} {
+		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123, ObservedAt: now, Origin: "live"})
+		x := float64(0)
+		if slot == 2 {
+			x = 12
+		}
+		engine.ObserveSample(telemetry.Sample{ProcessID: pid, SeenUTC: now.Add(time.Millisecond), X: x})
+	}
+	if engine.ObserveManualFocus(3) == nil || engine.Leader() != 1 {
+		t.Fatal("unknown manual MAIN accepted")
+	}
+	if err := engine.ObserveManualFocus(2); err != nil {
+		t.Fatal(err)
+	}
+	commands := engine.Step(now.Add(time.Millisecond))
+	if engine.Leader() != 2 || commands[1].State != follow.CatchingUp || commands[1].X <= 0 {
+		t.Fatalf("former MAIN did not follow the manually focused P2: %+v", commands)
+	}
+	if err := engine.ObserveManualFocus(1); err != nil {
+		t.Fatal(err)
+	}
+	if engine.Leader() != 1 || engine.Step(now.Add(time.Millisecond))[2].X >= 0 {
+		t.Fatal("manual P1 focus did not restore P1 MAIN")
+	}
+}
+
 func TestLiveFollowRejectsUnknownAndOldSamples(t *testing.T) {
 	now := time.Now().UTC()
 	config := follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}

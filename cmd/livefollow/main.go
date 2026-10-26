@@ -119,8 +119,9 @@ func readMenuInput(reader io.Reader, output chan<- menuInput) {
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		var input menuInput
-		if err := json.Unmarshal(scanner.Bytes(), &input); err != nil || input.Type != "menu_guard" {
-			output <- menuInput{Err: errors.New("invalid menu guard command")}
+		if err := json.Unmarshal(scanner.Bytes(), &input); err != nil ||
+			(input.Type != "menu_guard" && input.Type != "manual_focus") {
+			output <- menuInput{Err: errors.New("invalid live control command")}
 			return
 		}
 		output <- input
@@ -130,8 +131,8 @@ func readMenuInput(reader io.Reader, output chan<- menuInput) {
 	}
 }
 
-func applyMenuInput(session *live.FlaskSession, input <-chan menuInput) error {
-	if session == nil {
+func applyMenuInput(session *live.FlaskSession, engine *live.Engine, input <-chan menuInput) error {
+	if input == nil {
 		return nil
 	}
 	for {
@@ -143,8 +144,20 @@ func applyMenuInput(session *live.FlaskSession, input <-chan menuInput) error {
 			if command.Err != nil {
 				return command.Err
 			}
-			if err := session.SetMenuGuard(command.Slot, command.State); err != nil {
-				return err
+			switch command.Type {
+			case "menu_guard":
+				if session == nil {
+					return errors.New("menu guard is not enabled")
+				}
+				if err := session.SetMenuGuard(command.Slot, command.State); err != nil {
+					return err
+				}
+			case "manual_focus":
+				if err := engine.ObserveManualFocus(command.Slot); err != nil {
+					return err
+				}
+			default:
+				return errors.New("invalid live control command")
 			}
 		default:
 			return nil
@@ -188,11 +201,11 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 	encoder := json.NewEncoder(os.Stdout)
 	fail := func(reason string, err error) error {
 		engine.Stop(reason)
-		_ = encoder.Encode(frame{Focused: leader, Commands: engine.Step(time.Now().UTC())})
+		_ = encoder.Encode(frame{Focused: engine.Leader(), Commands: engine.Step(time.Now().UTC())})
 		return err
 	}
 	for {
-		if err := applyMenuInput(flasks, menuInput); err != nil {
+		if err := applyMenuInput(flasks, engine, menuInput); err != nil {
 			return fail("menu guard input failed", err)
 		}
 		var activations []flask.Activation
@@ -231,7 +244,7 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 				}
 			}
 		}
-		if err := encoder.Encode(frame{Focused: leader, Commands: engine.Step(now), Flasks: activations}); err != nil {
+		if err := encoder.Encode(frame{Focused: engine.Leader(), Commands: engine.Step(now), Flasks: activations}); err != nil {
 			return err
 		}
 	}
@@ -246,6 +259,7 @@ func main() {
 	maxAge := flag.Duration("max-age", 0, "maximum sensor age")
 	logAge := flag.Duration("log-max-age", 0, "maximum area-log signal age")
 	leaderName := flag.String("leader-name", "", "configured character name of the followed leader, for departure detection")
+	lastFocusedLeads := flag.Bool("last-focused-leads", false, "use manually focused player as the current follow MAIN")
 	autoFlask := flag.Bool("auto-flask", false, "enable life and mana flask decisions for explicitly bound clients")
 	address := flag.String("listen", "127.0.0.1:47617", "loopback sensor address")
 	var logs, exes sources
@@ -273,6 +287,7 @@ func main() {
 		os.Exit(2)
 	}
 	engine.SetLeaderName(*leaderName)
+	engine.SetLastFocusedLeads(*lastFocusedLeads)
 	var flaskSession *live.FlaskSession
 	var menuCommands <-chan menuInput
 	if *autoFlask {
@@ -281,6 +296,8 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+	}
+	if *autoFlask || *lastFocusedLeads {
 		commands := make(chan menuInput, 16)
 		menuCommands = commands
 		go readMenuInput(os.Stdin, commands)

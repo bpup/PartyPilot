@@ -30,9 +30,11 @@ internal sealed class BridgeRouter
     private bool _physicalMode;
     private bool _menuGuardActive;
     private bool _rightStickFollowerOverride;
+    private bool _lastFocusedLeads;
     private int _directRightStickSlot;
     private bool _allowDirectRightStick;
     private int _mainSlot;
+    private int _initialMainSlot;
     private int _focusedSlot;
     private int _lastManualFocusSlot;
     private int _isolatedSlot;
@@ -60,7 +62,8 @@ internal sealed class BridgeRouter
     }
 
     public bool ConfigurePhysical(int mainSlot, bool rightStickFollowerOverride = false,
-        IReadOnlyDictionary<int, int>? focusPads = null, int directRightStickSlot = 0)
+        IReadOnlyDictionary<int, int>? focusPads = null, int directRightStickSlot = 0,
+        bool lastFocusedLeads = false)
     {
         if (!_routes.ContainsKey(mainSlot)) return false;
         if (directRightStickSlot != 0 && (!rightStickFollowerOverride ||
@@ -75,8 +78,10 @@ internal sealed class BridgeRouter
         _focusPads = new Dictionary<int, int>(focusPads);
         _physicalMode = true;
         _rightStickFollowerOverride = rightStickFollowerOverride;
+        _lastFocusedLeads = lastFocusedLeads;
         _directRightStickSlot = directRightStickSlot;
         _mainSlot = mainSlot;
+        _initialMainSlot = mainSlot;
         _focusedSlot = mainSlot;
         _lastManualFocusSlot = mainSlot;
         _isolatedSlot = 0;
@@ -164,6 +169,14 @@ internal sealed class BridgeRouter
             (promoteChord || nowUtc - _lastFocusToggleUtc >= TimeSpan.FromMilliseconds(350)))
         {
             _lastManualFocusSlot = pressedSlot;
+            if (_lastFocusedLeads && _mainSlot != pressedSlot)
+            {
+                _mainSlot = pressedSlot;
+                var newMain = _routes[pressedSlot];
+                newMain.Automation = default;
+                newMain.Active = false;
+                newMain.EligibleForManualMovement = false;
+            }
             _isolatedSlot = _isolatedSlot == pressedSlot ? 0 : pressedSlot;
             _focusedSlot = _isolatedSlot == 0 ? _mainSlot : _isolatedSlot;
             _lastFocusToggleUtc = nowUtc;
@@ -197,6 +210,7 @@ internal sealed class BridgeRouter
         if (!_physicalMode) return;
         NeutralAll();
         _isolatedSlot = 0;
+        _mainSlot = _initialMainSlot;
         _focusedSlot = _mainSlot;
         _lastManualFocusSlot = _mainSlot;
         _lastFocusToggleUtc = DateTime.MinValue;

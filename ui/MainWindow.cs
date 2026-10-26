@@ -1270,7 +1270,7 @@ public sealed class MainWindow : Window
             var session = await BridgeSession.StartAsync(executable, _selectedTopology.Slots, _physicalIndex.SelectedIndex,
                 _physicalDevice.Text.Trim(), gameExecutables, _rightStickFollowerOverride.IsChecked == true,
                 _selectedTopology.Id == "2-split" && _autoFlask.IsChecked == true,
-                useWgi, privatePlan);
+                useWgi, privatePlan, lastFocusedLeads: true);
             session.AReleased += BridgeAReleased;
             session.PairingArmed += BridgePairingArmed;
             session.PairingCompleted += BridgePairingCompleted;

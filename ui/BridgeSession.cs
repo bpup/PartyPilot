@@ -21,6 +21,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     private bool _stopping;
 
     public bool AutoFlaskEnabled { get; }
+    internal bool LastFocusedLeadsEnabled { get; }
     internal int LastFocusedSlot => Volatile.Read(ref _lastFocusedSlot);
     internal int LastManualFocusedSlot => Volatile.Read(ref _lastManualFocusedSlot);
 
@@ -31,16 +32,19 @@ internal sealed class BridgeSession : IAsyncDisposable
     public event Action<int, string>? MenuGuardChanged;
     public event Action<string>? Ended;
     public event Action? AutoPartyExpired;
+    public event Action<int>? ManualFocusChanged;
 
     private sealed record AutoPartyPending(string Type, int Slot, ushort Buttons,
         TaskCompletionSource Completion);
 
     private BridgeSession(Process process, Task<string> readError, bool autoFlaskEnabled,
+        bool lastFocusedLeads,
         int[] slots, int[] allSlots)
     {
         _process = process;
         _readError = readError;
         AutoFlaskEnabled = autoFlaskEnabled;
+        LastFocusedLeadsEnabled = lastFocusedLeads;
         _slots = slots.ToHashSet();
         _allSlots = allSlots.ToHashSet();
         _lastFocusedSlot = slots[0];
@@ -49,7 +53,8 @@ internal sealed class BridgeSession : IAsyncDisposable
 
     public static async Task<BridgeSession> StartAsync(string executable, IReadOnlyList<PartySlot> partySlots, int physicalIndex,
         string deviceInstance, IReadOnlyList<string> gameExecutables, bool rightStickFollowerOverride,
-        bool autoFlaskEnabled = false, bool useWgi = false, PrivateClient3Plan? privatePlan = null)
+        bool autoFlaskEnabled = false, bool useWgi = false, PrivateClient3Plan? privatePlan = null,
+        bool lastFocusedLeads = false)
     {
         var slots = partySlots.Where(item => item.Client != 3).Select(item => item.RuntimePad).ToArray();
         var privateSlots = partySlots.Where(item => item.Client == 3)
@@ -114,6 +119,7 @@ internal sealed class BridgeSession : IAsyncDisposable
         }
         if (rightStickFollowerOverride) start.ArgumentList.Add("--right-stick-follower-override");
         if (autoFlaskEnabled) start.ArgumentList.Add("--enable-auto-flask");
+        if (lastFocusedLeads) start.ArgumentList.Add("--last-focused-leads");
         if (directRightStickSlot != 0)
         {
             start.ArgumentList.Add("--direct-right-stick-slot");
@@ -126,11 +132,12 @@ internal sealed class BridgeSession : IAsyncDisposable
             var readyLine = await process.StandardOutput.ReadLineAsync().WaitAsync(
                 TimeSpan.FromSeconds(privatePlan is null ? 15 : 45));
             if (readyLine is null || !IsExpectedReady(readyLine, slots, focusPadMap,
-                rightStickFollowerOverride, directRightStickSlot, autoFlaskEnabled, useWgi, privatePlan))
+                rightStickFollowerOverride, directRightStickSlot, autoFlaskEnabled, useWgi, privatePlan,
+                lastFocusedLeads))
             {
                 throw new InvalidOperationException("Virtual controller bridge did not confirm the requested pad slots.");
             }
-            return new BridgeSession(process, readError, autoFlaskEnabled, slots,
+            return new BridgeSession(process, readError, autoFlaskEnabled, lastFocusedLeads, slots,
                 partySlots.Select(item => item.RuntimePad).ToArray());
         }
         catch (Exception error)
@@ -152,7 +159,7 @@ internal sealed class BridgeSession : IAsyncDisposable
 
     internal static bool IsExpectedReady(string line, int[] slots, string focusPadMap,
         bool rightStickFollowerOverride, int directRightStickSlot, bool autoFlaskEnabled, bool useWgi,
-        PrivateClient3Plan? privatePlan)
+        PrivateClient3Plan? privatePlan, bool lastFocusedLeads = false)
     {
         try
         {
@@ -165,6 +172,8 @@ internal sealed class BridgeSession : IAsyncDisposable
                    root.TryGetProperty("hidhide_preflight", out var preflight) && preflight.GetBoolean() &&
                    root.TryGetProperty("auto_flask_enabled", out var flaskMode) &&
                    flaskMode.GetBoolean() == autoFlaskEnabled &&
+                   root.TryGetProperty("last_focused_leads", out var dynamicMain) &&
+                   dynamicMain.GetBoolean() == lastFocusedLeads &&
                    root.TryGetProperty("right_stick_follower_override", out var rightStick) &&
                    rightStick.GetBoolean() == rightStickFollowerOverride &&
                    root.TryGetProperty("direct_right_stick_slot", out var directSlot) &&
@@ -336,7 +345,10 @@ internal sealed class BridgeSession : IAsyncDisposable
                     else if (kind.GetString() == "manual_focus" &&
                         root.TryGetProperty("slot", out var manualSlot) &&
                         manualSlot.TryGetInt32(out var manualPad) && _allSlots.Contains(manualPad))
+                    {
                         Volatile.Write(ref _lastManualFocusedSlot, manualPad);
+                        Dispatcher.UIThread.Post(() => ManualFocusChanged?.Invoke(manualPad));
+                    }
                     else if (kind.GetString() == "login_status" &&
                         root.TryGetProperty("source", out var source) && source.ValueKind == JsonValueKind.String &&
                         source.GetString() is { } sourceName &&

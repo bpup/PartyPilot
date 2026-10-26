@@ -37,7 +37,7 @@ internal static class PrivateClient3PlanSmoke
         if (composite is null) throw new Exception("Six-player Client 3 binding was unavailable.");
         const string focusMap = "1:1,2:2,3:3,4:4,5:5,6:6";
         const string bridgeReady = """
-        {"event":"ready","slots":[1,2,3,4],"physical_mode":true,"physical_wgi":true,"pairing_protected":true,"hidhide_preflight":true,"auto_flask_enabled":false,"right_stick_follower_override":false,"direct_right_stick_slot":0,"focus_pad_map":"1:1,2:2,3:3,4:4,5:5,6:6","private_client3_pid":103,"private_client3_window_handle":203,"private_client3_slots":[5,6]}
+        {"event":"ready","slots":[1,2,3,4],"physical_mode":true,"physical_wgi":true,"pairing_protected":true,"hidhide_preflight":true,"last_focused_leads":false,"auto_flask_enabled":false,"right_stick_follower_override":false,"direct_right_stick_slot":0,"focus_pad_map":"1:1,2:2,3:3,4:4,5:5,6:6","private_client3_pid":103,"private_client3_window_handle":203,"private_client3_slots":[5,6]}
         """;
         if (!BridgeSession.IsExpectedReady(bridgeReady, [1, 2, 3, 4], focusMap,
                 false, 0, false, true, composite) ||

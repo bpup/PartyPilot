@@ -147,6 +147,7 @@ if (autoFlaskEnabled && (!physicalMode || !protectedPairing))
     return 2;
 }
 var physicalIndexPosition = Array.IndexOf(args, "--physical-index");
+var lastFocusedLeads = args.Contains("--last-focused-leads");
 var mainSlotPosition = Array.IndexOf(args, "--main-slot");
 var devicePosition = Array.IndexOf(args, "--device-instance");
 var gamePaths = args.Select((value, index) => (value, index))
@@ -170,7 +171,7 @@ if (directRightStickSlot != 0 &&
     Console.Error.WriteLine("Direct right-stick movement is limited to a protected P1/P2 pair in one game client.");
     return 2;
 }
-if ((protectedPairing && !physicalMode) ||
+if ((protectedPairing && !physicalMode) || (lastFocusedLeads && (!physicalMode || !protectedPairing)) ||
     (wgiMode && physicalIndexPosition >= 0) ||
     (physicalMode && ((!wgiMode && (physicalIndexPosition < 0 || physicalIndexPosition + 1 >= args.Length ||
     !uint.TryParse(args[physicalIndexPosition + 1], out physicalIndex) || physicalIndex > 3)) ||
@@ -264,7 +265,7 @@ try
         }
         var router = new BridgeRouter(outputs, privateClient3 is null ? null : privateOutputs);
         if (physicalMode && !router.ConfigurePhysical(mainSlot, rightStickFollowerOverride, focusPads,
-            directRightStickSlot))
+            directRightStickSlot, lastFocusedLeads))
             throw new InvalidOperationException("Focus pad mapping does not match the connected virtual controllers.");
         var pairingSignals = new PairingSignalTracker();
         var pairingGate = protectedPairing ? new ProtectedPairingGate() : null;
@@ -293,6 +294,7 @@ try
             pairing_protected = protectedPairing, hidhide_preflight = physicalMode,
             auto_flask_enabled = autoFlaskEnabled,
             right_stick_follower_override = rightStickFollowerOverride,
+            last_focused_leads = lastFocusedLeads,
             direct_right_stick_slot = directRightStickSlot,
             private_client3_pid = client3Options?.Pid ?? 0,
             private_client3_slots = client3Options?.PrivateSlots ?? [],

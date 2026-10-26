@@ -17,19 +17,44 @@ import (
 // Engine joins one read-only sensor and one independent log per game client.
 // Its output is a movement decision; it does not establish game input mapping.
 type Engine struct {
-	coordinator *party.Coordinator
-	leader      int
-	logAge      time.Duration
-	sampleAge   time.Duration
-	pidToSlot   map[int]int
-	slots       []int
-	samples     map[int]telemetry.Sample
-	areas       map[int]arealog.Signal
-	leaderName  string
-	stopped     string
+	coordinator      *party.Coordinator
+	leader           int
+	baseLeader       int
+	lastFocusedLeads bool
+	logAge           time.Duration
+	sampleAge        time.Duration
+	pidToSlot        map[int]int
+	slots            []int
+	samples          map[int]telemetry.Sample
+	areas            map[int]arealog.Signal
+	leaderName       string
+	memberNames      map[int]string
+	stopped          string
 }
 
-func (e *Engine) SetLeaderName(name string) { e.leaderName = strings.TrimSpace(name) }
+func (e *Engine) SetLeaderName(name string) {
+	e.memberNames[e.baseLeader] = strings.TrimSpace(name)
+	e.leaderName = e.memberNames[e.leader]
+}
+
+func (e *Engine) SetLastFocusedLeads(enabled bool) {
+	e.lastFocusedLeads = enabled
+	e.coordinator.SetLastFocusedLeads(enabled)
+}
+
+func (e *Engine) Leader() int { return e.leader }
+
+func (e *Engine) ObserveManualFocus(slot int) error {
+	if !e.lastFocusedLeads {
+		return fmt.Errorf("last-focused leadership is disabled")
+	}
+	if err := e.coordinator.Focus(slot); err != nil {
+		return err
+	}
+	e.leader = slot
+	e.leaderName = e.memberNames[slot]
+	return nil
+}
 
 func (e *Engine) Stop(reason string) {
 	if e.stopped == "" {
@@ -92,7 +117,8 @@ func New(roster map[int]int, leader int, config follow.Config, logAge time.Durat
 	if err != nil {
 		return nil, err
 	}
-	return &Engine{coordinator: coordinator, leader: leader, logAge: logAge, sampleAge: config.MaxAge,
+	return &Engine{coordinator: coordinator, leader: leader, baseLeader: leader,
+		logAge: logAge, sampleAge: config.MaxAge, memberNames: make(map[int]string),
 		pidToSlot: pidToSlot, slots: slots, samples: make(map[int]telemetry.Sample), areas: make(map[int]arealog.Signal)}, nil
 }
 

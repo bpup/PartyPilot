@@ -299,6 +299,18 @@ if (!movement.Command.Contains("\"slot\":3") || movement.Status != "following" |
     stopped.Command != waiting.Command || !manual.Command.Contains("\"manual_override_eligible\":true") ||
     potion.Flasks.Count != 1 || potion.Flasks[0] != new FlaskBridgeRequest(2, "life"))
     throw new Exception("Live follow did not map P2 to the second client's system pad.");
+var splitTopology = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-split");
+var switchedMain = LiveFollowFrame.ParseDynamic(
+    "{\"focused\":2,\"commands\":{\"1\":{\"state\":\"following\",\"x\":0,\"y\":1}}}", splitTopology);
+if (switchedMain.FocusedPlayer != 2 || switchedMain.FollowerPad != 1 ||
+    !switchedMain.Command.Contains("\"slot\":1"))
+    throw new Exception("Live follow did not route P1 as follower after P2 became MAIN.");
+try
+{
+    LiveFollowFrame.ParseDynamic("{\"focused\":2,\"commands\":{\"2\":{\"state\":\"waiting\"}}}", splitTopology);
+    throw new Exception("Dynamic live follow accepted a command targeting MAIN.");
+}
+catch (InvalidDataException) { }
 foreach (var invalidFrame in new[]
 {
     "{\"focused\":1,\"commands\":{\"3\":{\"state\":\"waiting\"}}}",

@@ -90,9 +90,16 @@ func TestLastFocusedLeadsReassignsFormerLeader(t *testing.T) {
 		t.Fatalf("focus did not make P2 leader: %+v", switched)
 	}
 	coordinator.ReturnToLeader()
+	shared := coordinator.Step(now, positions)
+	if coordinator.Focused().Slot != 2 || shared[1].X <= 0 {
+		t.Fatalf("shared focus forgot the last manual P2 MAIN: %+v", shared)
+	}
+	if err := coordinator.Focus(1); err != nil {
+		t.Fatal(err)
+	}
 	restored := coordinator.Step(now, positions)
 	if _, hasMainCommand := restored[1]; hasMainCommand || restored[2].X >= 0 {
-		t.Fatalf("return to P1 did not restore routing: %+v", restored)
+		t.Fatalf("manual P1 focus did not restore P1 MAIN: %+v", restored)
 	}
 }
 

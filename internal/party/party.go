@@ -17,6 +17,7 @@ type Coordinator struct {
 	leader           int
 	followers        map[int]*follow.Engine
 	lastFocusedLeads bool
+	lastManualFocus  int
 	lastActiveLeader int
 	followTargets    map[int]int
 	lastTargets      map[int]int
@@ -36,7 +37,7 @@ func New(players []focus.Player, leader int, config follow.Config) (*Coordinator
 		followers[player.Slot] = engine
 	}
 	return &Coordinator{
-		router: router, leader: leader, followers: followers,
+		router: router, leader: leader, lastManualFocus: leader, followers: followers,
 		followTargets: make(map[int]int), lastTargets: make(map[int]int),
 	}, nil
 }
@@ -79,6 +80,7 @@ func (c *Coordinator) Focus(slot int) error {
 	if err := c.router.Focus(slot); err != nil {
 		return err
 	}
+	c.lastManualFocus = slot
 	if engine, exists := c.followers[slot]; exists {
 		engine.Reset()
 	}
@@ -86,7 +88,11 @@ func (c *Coordinator) Focus(slot int) error {
 }
 
 func (c *Coordinator) ReturnToLeader() {
-	c.router.ReturnToLeader()
+	if c.lastFocusedLeads {
+		_ = c.router.Focus(c.lastManualFocus)
+	} else {
+		c.router.ReturnToLeader()
+	}
 }
 
 func (c *Coordinator) Focused() focus.Player {
@@ -100,7 +106,7 @@ func (c *Coordinator) Step(now time.Time, positions map[int]follow.Position) map
 func (c *Coordinator) StepWithTerrain(now time.Time, positions map[int]follow.Position, terrain *navigation.Grid) map[int]follow.Command {
 	activeLeader := c.leader
 	if c.lastFocusedLeads {
-		activeLeader = c.router.Focused().Slot
+		activeLeader = c.lastManualFocus
 	}
 	if activeLeader != c.lastActiveLeader {
 		for _, engine := range c.followers {

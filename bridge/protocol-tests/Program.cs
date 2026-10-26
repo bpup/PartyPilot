@@ -466,6 +466,21 @@ splitRouter.SetPhysical(default, now.AddMilliseconds(10));
 splitRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080 }, now.AddMilliseconds(400));
 if (splitRouter.FocusedSlot != 1 || splitRouter.LastManualFocusSlot != 3)
     throw new Exception("Returning to shared focus forgot the split follower as the last manual MAIN.");
+var dynamicMain = new FakePad();
+var dynamicFollower = new FakePad();
+var dynamicRouter = new BridgeRouter(new Dictionary<int, IPadOutput> { [1] = dynamicMain, [3] = dynamicFollower });
+if (!dynamicRouter.ConfigurePhysical(1, focusPads: splitFocus, lastFocusedLeads: true))
+    throw new Exception("Dynamic MAIN focus mapping was rejected.");
+dynamicRouter.ApplyLine("{\"slot\":3,\"state\":\"following\",\"x\":1,\"y\":0}", now);
+dynamicRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080 }, now);
+dynamicRouter.SetPhysical(default, now.AddMilliseconds(10));
+dynamicRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080, LeftX = 600 }, now.AddMilliseconds(400));
+if (dynamicRouter.FocusedSlot != 3 || dynamicRouter.LastManualFocusSlot != 3 ||
+    dynamicFollower.X != 600 || dynamicMain.Report != default)
+    throw new Exception("Shared control did not remain on the last manual MAIN.");
+dynamicRouter.ApplyLine("{\"slot\":1,\"state\":\"following\",\"x\":1,\"y\":0}", now.AddMilliseconds(401));
+if (dynamicMain.X != 32767)
+    throw new Exception("Former MAIN did not become the follower after dynamic leadership changed.");
 if (splitRouter.FocusedSlot != 1 || splitFollower.Report != default)
     throw new Exception("Split P2 focus did not toggle back to shared control.");
 var thirdMain = new FakePad();

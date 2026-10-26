@@ -14,12 +14,15 @@ internal static class ProcessPipelineSmoke
         var wgiBridgeExe = Path.Combine(directory, "fake-wgi-bridge");
         var client3BridgeExe = Path.Combine(directory, "fake-client3-bridge");
         var followExe = Path.Combine(directory, "fake-follow");
+        var dynamicBridgeExe = Path.Combine(directory, "fake-dynamic-bridge");
+        var dynamicFollowExe = Path.Combine(directory, "fake-dynamic-follow");
+        var dynamicLog = Path.Combine(directory, "dynamic-bridge-input.jsonl");
         try
         {
             File.WriteAllText(bridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '--focus-pad-map' not in sys.argv or sys.argv[sys.argv.index('--focus-pad-map')+1] != '1:1,2:3': sys.exit(2)\n" +
                 "if '--enable-auto-flask' not in sys.argv: sys.exit(2)\n" +
-                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"auto_flask_enabled\":true,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"last_focused_leads\":false,\"auto_flask_enabled\":true,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
                 $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(log)}, 'a') as out: out.write(line)\n");
             File.WriteAllText(followExe, "#!/usr/bin/env python3\nimport sys,json\n" +
                 "if '-auto-flask' not in sys.argv: sys.exit(2)\n" +
@@ -27,15 +30,26 @@ internal static class ProcessPipelineSmoke
                 "states = [json.loads(sys.stdin.readline()) for _ in range(2)]\n" +
                 "if {(s['slot'],s['state']) for s in states} != {(1,'clear'),(2,'clear')}: sys.exit(2)\n" +
                 "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0,\"manual_override_eligible\":true}},\"flasks\":[{\"player\":2,\"resource\":\"life\",\"percent\":30,\"reason\":\"threshold\"}]}', flush=True)\n");
+            File.WriteAllText(dynamicBridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
+                "if '--last-focused-leads' not in sys.argv: sys.exit(2)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"last_focused_leads\":true,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
+                "print('{\"event\":\"manual_focus\",\"slot\":3}', flush=True)\n" +
+                $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(dynamicLog)}, 'a') as out: out.write(line)\n");
+            File.WriteAllText(dynamicFollowExe, "#!/usr/bin/env python3\nimport sys,json,time\n" +
+                "if '-last-focused-leads' not in sys.argv: sys.exit(2)\n" +
+                "focus=json.loads(sys.stdin.readline())\n" +
+                "if focus != {'type':'manual_focus','slot':2}: sys.exit(2)\n" +
+                "print('{\"focused\":2,\"commands\":{\"1\":{\"state\":\"following\",\"x\":0,\"y\":1}}}', flush=True)\n" +
+                "time.sleep(0.3)\n");
             File.WriteAllText(couchBridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '--focus-pad-map' not in sys.argv or sys.argv[sys.argv.index('--focus-pad-map')+1] != '1:1,2:2': sys.exit(2)\n" +
                 "if '--right-stick-follower-override' not in sys.argv or '--direct-right-stick-slot' not in sys.argv or sys.argv[sys.argv.index('--direct-right-stick-slot')+1] != '2': sys.exit(2)\n" +
-                "print('{\"event\":\"ready\",\"slots\":[1,2],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"auto_flask_enabled\":false,\"right_stick_follower_override\":true,\"direct_right_stick_slot\":2,\"focus_pad_map\":\"1:1,2:2\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,2],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"last_focused_leads\":false,\"auto_flask_enabled\":false,\"right_stick_follower_override\":true,\"direct_right_stick_slot\":2,\"focus_pad_map\":\"1:1,2:2\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
                 "for line in sys.stdin: pass\n");
             File.WriteAllText(wgiBridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '--physical-wgi' not in sys.argv or '--physical-index' in sys.argv: sys.exit(2)\n" +
                 "if '--focus-pad-map' not in sys.argv or sys.argv[sys.argv.index('--focus-pad-map')+1] != '1:1,2:2,3:3,4:4': sys.exit(2)\n" +
-                "print('{\"event\":\"ready\",\"slots\":[1,2,3,4],\"physical_mode\":true,\"physical_wgi\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:2,3:3,4:4\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,2,3,4],\"physical_mode\":true,\"physical_wgi\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"last_focused_leads\":false,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:2,3:3,4:4\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
                 "for line in sys.stdin: pass\n");
             File.WriteAllText(client3BridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "def value(flag):\n    return sys.argv[sys.argv.index(flag)+1] if flag in sys.argv else None\n" +
@@ -43,10 +57,12 @@ internal static class ProcessPipelineSmoke
                 "if value('--client3-pid') != '103' or value('--client3-window-handle') != '203' or value('--client3-players') != '5,6': sys.exit(2)\n" +
                 "games = [sys.argv[i+1] for i, arg in enumerate(sys.argv[:-1]) if arg == '--game-exe']\n" +
                 "if len(games) != 3 or value('--client3-game-exe') != games[2]: sys.exit(2)\n" +
-                "print('{\"event\":\"ready\",\"slots\":[1,3,4],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3,3:4,4:5,5:6\",\"private_client3_pid\":103,\"private_client3_window_handle\":203,\"private_client3_slots\":[5,6]}', flush=True)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,3,4],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"last_focused_leads\":false,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3,3:4,4:5,5:6\",\"private_client3_pid\":103,\"private_client3_window_handle\":203,\"private_client3_slots\":[5,6]}', flush=True)\n" +
                 "for line in sys.stdin: pass\n");
             File.SetUnixFileMode(bridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(followExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(dynamicBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(dynamicFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(couchBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(wgiBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(client3BridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -81,6 +97,32 @@ internal static class ProcessPipelineSmoke
                 !lines[^1].Contains("\"slot\":3,\"state\":\"waiting\""))
                 throw new Exception("Live follow did not hand off movement/flasks and neutralize on exit: " + string.Join(" | ", lines));
             Console.WriteLine("Desktop decision-to-bridge movement, flask, and stop handoff checked with local fake executables.");
+            await using (var dynamicBridge = await BridgeSession.StartAsync(dynamicBridgeExe, topology.Slots, 0,
+                @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"], false,
+                lastFocusedLeads: true))
+            {
+                dynamicBridge.StartReading();
+                var focusDeadline = DateTime.UtcNow.AddSeconds(5);
+                while (dynamicBridge.LastManualFocusedSlot != 3 && DateTime.UtcNow < focusDeadline)
+                    await Task.Delay(20);
+                if (dynamicBridge.LastManualFocusedSlot != 3)
+                    throw new Exception("The fake bridge did not report P2 manual focus.");
+                await using (var dynamicFollow = await LiveFollowSession.StartAsync(dynamicFollowExe,
+                    topology, clients, dynamicBridge, plan))
+                {
+                    if (dynamicFollow.Current.FocusedPlayer != 2 || dynamicFollow.Current.FollowerPad != 1)
+                        throw new Exception("The desktop did not start live follow with P2 as MAIN.");
+                    dynamicFollow.StartReading();
+                    var commandDeadline = DateTime.UtcNow.AddSeconds(5);
+                    while ((!File.Exists(dynamicLog) || File.ReadAllLines(dynamicLog).Length < 1) &&
+                           DateTime.UtcNow < commandDeadline)
+                        await Task.Delay(20);
+                }
+            }
+            if (!File.Exists(dynamicLog) ||
+                !File.ReadAllLines(dynamicLog).Any(line => line.Contains("\"slot\":1,\"state\":\"following\"")))
+                throw new Exception("Dynamic MAIN did not route P1 movement to pad P1.");
+            Console.WriteLine("P2 MAIN startup and P1 follower routing checked with local fake executables.");
             var couch = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-couch");
             await using (var pairedBridge = await BridgeSession.StartAsync(couchBridgeExe, couch.Slots, 0,
                 @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe"], true))
