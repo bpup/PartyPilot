@@ -14,7 +14,8 @@ internal static class PackedTerrainCapture
     internal static Outcome Save(PackedTerrainProbe.PackedSource source,
         PackedTerrainProbe.Observation observation,
         RawRenderPositionReader.Position position, float observedWorldX, float observedWorldY,
-        Func<long, int, byte[]?> read, string directory, int processId,
+        Func<long, int, byte[]?> read, Func<bool> areaStillCurrent,
+        string directory, int processId,
         string areaHash, string areaAddress, string anchor, DateTime seenUtc)
     {
         var length = (long)source.BytesPerRow * source.Rows;
@@ -24,8 +25,10 @@ internal static class PackedTerrainCapture
             !float.IsFinite(position.GridX) || !float.IsFinite(position.GridY) ||
             !float.IsFinite(observedWorldX) || !float.IsFinite(observedWorldY) ||
             position.GridX < 0 || position.GridY < 0 ||
-            position.GridX >= observation.Width || position.GridY >= observation.Height)
+            position.GridX >= observation.Width || position.GridY >= observation.Height ||
+            areaStillCurrent == null)
             return new Outcome("invalid_source");
+        if (!areaStillCurrent()) return new Outcome("area_changed_before_read");
 
         string? temporary = null;
         string? dataFile = null;
@@ -64,6 +67,8 @@ internal static class PackedTerrainCapture
                 return new Outcome("changed_during_read");
             if (!MatchesPatch(temporary, observation, source.BytesPerRow))
                 return new Outcome("patch_mismatch");
+            if (!areaStillCurrent())
+                return new Outcome("area_changed_during_read");
 
             var digest = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
             File.Move(temporary, dataFile);
@@ -93,6 +98,12 @@ internal static class PackedTerrainCapture
                 Sha256 = digest,
                 DataFile = Path.GetFileName(dataFile)
             }));
+            if (!areaStillCurrent())
+            {
+                TryDelete(metadataFile);
+                TryDelete(dataFile);
+                return new Outcome("area_changed_during_read");
+            }
             return new Outcome("captured_local", dataFile);
         }
         catch

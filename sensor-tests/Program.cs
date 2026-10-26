@@ -240,7 +240,7 @@ void TestPackedTerrainProbe()
     try
     {
         var capture = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate!,
-            capturePosition, 108.69565f, 217.3913f, Read, captureDirectory,
+            capturePosition, 108.69565f, 217.3913f, Read, () => true, captureDirectory,
             123, "test-area", anchored.Candidate!.AreaAddress, anchored.Candidate.Anchor, DateTime.UtcNow);
         Require(capture.Status == "captured_local" && capture.DataFile != null &&
             File.ReadAllBytes(capture.DataFile).SequenceEqual(packed) &&
@@ -256,7 +256,7 @@ void TestPackedTerrainProbe()
         byte[]? ShortRead(long address, int size) =>
             address == packedStart ? new byte[size - 1] : Read(address, size);
         var failed = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate,
-            capturePosition, 108.69565f, 217.3913f, ShortRead, captureDirectory,
+            capturePosition, 108.69565f, 217.3913f, ShortRead, () => true, captureDirectory,
             123, "test-area", anchored.Candidate.AreaAddress, anchored.Candidate.Anchor, DateTime.UtcNow);
         Require(failed.Status == "read_failed" &&
             Directory.GetFiles(captureDirectory, "*.tmp").Length == 0 &&
@@ -270,7 +270,7 @@ void TestPackedTerrainProbe()
             return bytes;
         }
         var changed = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate,
-            capturePosition, 108.69565f, 217.3913f, ChangingRead, captureDirectory,
+            capturePosition, 108.69565f, 217.3913f, ChangingRead, () => true, captureDirectory,
             123, "test-area", anchored.Candidate.AreaAddress, anchored.Candidate.Anchor, DateTime.UtcNow);
         Require(changed.Status == "changed_during_read" &&
             Directory.GetFiles(captureDirectory, "*.tmp").Length == 0 &&
@@ -281,11 +281,37 @@ void TestPackedTerrainProbe()
             PatchRows = anchored.Candidate.PatchRows.Select(row => row.Replace('1', '0')).ToArray()
         };
         var mismatch = PackedTerrainCapture.Save(anchored.Source!, wrongPatch,
-            capturePosition, 108.69565f, 217.3913f, Read, captureDirectory,
+            capturePosition, 108.69565f, 217.3913f, Read, () => true, captureDirectory,
             123, "test-area", anchored.Candidate.AreaAddress, anchored.Candidate.Anchor, DateTime.UtcNow);
         Require(mismatch.Status == "patch_mismatch" &&
             Directory.GetFiles(captureDirectory, "*.packed").Length == 1,
             "A full-map export inconsistent with the observed patch was retained.");
+        var areaChecks = 0;
+        var areaChanged = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate,
+            capturePosition, 108.69565f, 217.3913f, Read,
+            () => ++areaChecks == 1, captureDirectory,
+            123, "test-area", anchored.Candidate.AreaAddress, anchored.Candidate.Anchor, DateTime.UtcNow);
+        Require(areaChanged.Status == "area_changed_during_read" && areaChecks == 2 &&
+            Directory.GetFiles(captureDirectory, "*.tmp").Length == 0 &&
+            Directory.GetFiles(captureDirectory, "*.packed").Length == 1,
+            "An area transition retained a candidate full-map export.");
+        var changedBefore = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate,
+            capturePosition, 108.69565f, 217.3913f, Read,
+            () => false, captureDirectory,
+            123, "test-area", anchored.Candidate.AreaAddress, anchored.Candidate.Anchor, DateTime.UtcNow);
+        Require(changedBefore.Status == "area_changed_before_read" &&
+            Directory.GetFiles(captureDirectory, "*.packed").Length == 1,
+            "An already changed area started a full-map export.");
+        var lateChecks = 0;
+        var lateChange = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate,
+            capturePosition, 108.69565f, 217.3913f, Read,
+            () => ++lateChecks <= 2, captureDirectory,
+            123, "test-area", anchored.Candidate.AreaAddress, anchored.Candidate.Anchor, DateTime.UtcNow);
+        Require(lateChange.Status == "area_changed_during_read" && lateChecks == 3 &&
+            Directory.GetFiles(captureDirectory, "*.tmp").Length == 0 &&
+            Directory.GetFiles(captureDirectory, "*.packed").Length == 1 &&
+            Directory.GetFiles(captureDirectory, "*.json").Length == 1,
+            "An area transition after metadata write retained a candidate export.");
     }
     finally { if (Directory.Exists(captureDirectory)) Directory.Delete(captureDirectory, true); }
     byte[]? ReadTwoAreas(long address, int size) =>

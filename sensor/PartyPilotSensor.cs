@@ -24,6 +24,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     private DateTime _lastCardSentUtc;
     private DateTime _lastTerrainSentUtc;
     private readonly HashSet<string> _capturedTerrainKeys = new();
+    private string? _terrainCaptureEpoch;
     private string? _cardModulePath;
     private Task<long>? _cardVtableTask;
 
@@ -253,6 +254,24 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         PackedTerrainProbe.Observation? packedTerrainProbe = null;
         string? packedTerrainStatus = null;
         string? packedTerrainCaptureStatus = null;
+        if (Settings.DiagnoseTerrain.Value)
+        {
+            try
+            {
+                var epoch = $"{GameController.IngameState.Data.CurrentAreaHash}:" +
+                    $"{GameController.IngameState.Address:X}:{GameController.IngameState.Data.Address:X}";
+                if (_terrainCaptureEpoch != epoch)
+                {
+                    _capturedTerrainKeys.Clear();
+                    _terrainCaptureEpoch = epoch;
+                }
+            }
+            catch
+            {
+                _capturedTerrainKeys.Clear();
+                _terrainCaptureEpoch = null;
+            }
+        }
         if (Settings.DiagnoseTerrain.Value && now - _lastTerrainSentUtc >= TimeSpan.FromSeconds(5))
         {
             _lastTerrainSentUtc = now;
@@ -298,8 +317,25 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                     {
                         var directory = Path.Combine(Environment.GetFolderPath(
                             Environment.SpecialFolder.LocalApplicationData), "PartyPilot", "terrain");
+                        bool AreaStillCurrent()
+                        {
+                            if ($"{GameController.IngameState.Data.CurrentAreaHash}" != areaHash ||
+                                GameController.IngameState.Address != stateAddress)
+                                return false;
+                            long currentAddress;
+                            if (observation.Anchor == "state_pointer_static_656")
+                            {
+                                var pointer = ReadTerrain(stateAddress + 656, 8);
+                                currentAddress = pointer is { Length: 8 } ? BitConverter.ToInt64(pointer) : 0;
+                            }
+                            else currentAddress = GameController.IngameState.Data.Address;
+                            return currentAddress > 0 &&
+                                $"0x{currentAddress:X}".Equals(observation.AreaAddress,
+                                    StringComparison.OrdinalIgnoreCase);
+                        }
                         var capture = PackedTerrainCapture.Save(source, observation,
-                            positionCandidate!, render.Pos.X, render.Pos.Y, ReadTerrain, directory,
+                            positionCandidate!, render.Pos.X, render.Pos.Y, ReadTerrain,
+                            AreaStillCurrent, directory,
                             processId, areaHash, observation.AreaAddress, observation.Anchor, now);
                         packedTerrainCaptureStatus = capture.Status;
                         if (capture.Status == "captured_local") _capturedTerrainKeys.Add(captureKey);
