@@ -227,12 +227,9 @@ func chooseBehavior(role Role, preferred string, monsters []Monster, activeCombo
 	}
 	for _, behavior := range chain {
 		if behavior == "emergency" {
-			for _, monster := range monsters {
-				if distance, ok := monster.DistanceByPlayer[role.Player]; ok && *monster.Alive && distance <= radius {
-					return behavior, role.Behaviors[behavior]
-				}
-			}
-			return "", ""
+			// The supplied resolver bypasses enemy eligibility for an enabled
+			// emergency behaviour once an encounter exists.
+			return behavior, role.Behaviors[behavior]
 		}
 		pack, rare, unique := 0, 0, 0
 		for _, monster := range monsters {

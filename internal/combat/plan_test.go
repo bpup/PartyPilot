@@ -77,6 +77,22 @@ func TestDefaultProfileAndReadOnlyBehavior(t *testing.T) {
 	}
 }
 
+func TestEmergencyDoesNotRequireAnEnemyNearTheRole(t *testing.T) {
+	profile := DefaultProfile()
+	profile.Enabled = true
+	world := testWorld()
+	world.EmergencyActive = ptr(true)
+	for index := range world.Monsters {
+		world.Monsters[index].DistanceByPlayer[2] = 120
+	}
+	encounter := &Encounter{ID: "enc-1", State: "active", Tags: []string{"pack"}}
+	plans, err := EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[1].Status != "planned_only" || plans[1].Behavior != "emergency" ||
+		plans[1].ComboID != "companion-recovery" {
+		t.Fatalf("emergency recovery should survive an out-of-range role: %+v, %v", plans, err)
+	}
+}
+
 func TestPacingUsesCandidateOrderRatherThanPlayerNumber(t *testing.T) {
 	profile := DefaultProfile()
 	profile.Enabled = true
