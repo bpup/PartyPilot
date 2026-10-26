@@ -84,6 +84,22 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                     _slotCandidates = LocalSlotCandidateScanner.Scan(stateAddress, data.Address, localAddress,
                         paths, ReadCandidate,
                         address => RawCharacterPathReader.Read(address, ReadCandidate));
+                    if (_slotCandidates.Status is "single_slot_candidate" or "two_slot_candidate")
+                    {
+                        var positions = _slotCandidates.OrderedAddresses.Select(address =>
+                            long.TryParse(address.AsSpan(2),
+                                System.Globalization.NumberStyles.HexNumber,
+                                System.Globalization.CultureInfo.InvariantCulture, out var entity)
+                                ? RawRenderPositionReader.Read(entity, ReadCandidate) : null).ToArray();
+                        if (LocalSlotCandidateScanner.Revalidate(_slotCandidates, localAddress,
+                                paths, ReadCandidate,
+                                address => RawCharacterPathReader.Read(address, ReadCandidate)))
+                            _slotCandidates = _slotCandidates with
+                            {
+                                RawPositions = positions,
+                                RawPositionsSeenUtc = now
+                            };
+                    }
                     _lastSlotScanStateAddress = stateAddress;
                     _lastSlotScanDataAddress = data.Address;
                     _lastSlotScanLocalAddress = localAddress;

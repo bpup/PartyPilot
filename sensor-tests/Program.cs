@@ -111,6 +111,7 @@ var crossAreaConflict = LocalSlotCandidateScanner.Scan(state, data, local, paths
 Require(crossAreaConflict.Status == "conflicting_candidates" &&
     crossAreaConflict.CandidateAreaAddresses.SequenceEqual(["0x100000", "0x900000"]),
     "Conflicting orders from different area anchors were accepted.");
+TestRawRenderPositionReader();
 Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
     RadarClassifier.Category("Metadata/MiscellaneousObjects/Waypoint") == "waypoint" &&
     RadarClassifier.Category("Metadata/Effects/PortalFlash") == null &&
@@ -127,6 +128,50 @@ Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
     !RadarClassifier.IsWorldItemWrapperPath("Metadata/Items/Weapons/Sword") &&
     RadarClassifier.IsNavigation("waypoint") && !RadarClassifier.IsNavigation("monster"),
     "Path-only radar categories admitted unsupported entities or lost navigation markers.");
+
+void TestRawRenderPositionReader()
+{
+    const long entity = 0x1000000;
+    const long details = 0x1010000;
+    const long lookup = 0x1020000;
+    const long names = 0x1030000;
+    const long name = 0x1040000;
+    const long components = 0x1050000;
+    const long render = 0x1060000;
+    var raw = new Dictionary<long, byte[]>
+    {
+        [entity + 8] = BitConverter.GetBytes(details),
+        [details + 40] = BitConverter.GetBytes(lookup),
+        [lookup + 40] = BitConverter.GetBytes(names)
+            .Concat(BitConverter.GetBytes(names + 16))
+            .Concat(BitConverter.GetBytes(names + 16)).ToArray(),
+        [names] = BitConverter.GetBytes(name).Concat(BitConverter.GetBytes(0))
+            .Concat(new byte[4]).ToArray(),
+        [name] = System.Text.Encoding.ASCII.GetBytes("Render\0").Concat(new byte[57]).ToArray(),
+        [entity + 16] = BitConverter.GetBytes(components)
+            .Concat(BitConverter.GetBytes(components + 8)).ToArray(),
+        [components] = BitConverter.GetBytes(render),
+        [render + 8] = BitConverter.GetBytes(entity),
+        [render + 312] = BitConverter.GetBytes(108.69565f)
+            .Concat(BitConverter.GetBytes(217.3913f))
+            .Concat(BitConverter.GetBytes(5f)).ToArray()
+    };
+    byte[]? ReadRaw(long address, int size) =>
+        raw.TryGetValue(address, out var bytes) && bytes.Length == size ? bytes : null;
+    var position = RawRenderPositionReader.Read(entity, ReadRaw);
+    Require(position != null && Math.Abs(position.GridX - 10) < 0.001 &&
+        Math.Abs(position.GridY - 20) < 0.001 && position.WorldZ == 5 &&
+        position.RenderComponentAddress == "0x1060000",
+        "Default-offset Render position candidate was not read.");
+    raw[render + 8] = BitConverter.GetBytes(entity + 8);
+    Require(RawRenderPositionReader.Read(entity, ReadRaw) == null,
+        "Render component with a different owner was accepted.");
+    raw[render + 8] = BitConverter.GetBytes(entity);
+    raw[render + 312] = BitConverter.GetBytes(float.NaN)
+        .Concat(BitConverter.GetBytes(0f)).Concat(BitConverter.GetBytes(0f)).ToArray();
+    Require(RawRenderPositionReader.Read(entity, ReadRaw) == null,
+        "Nonfinite Render position was accepted.");
+}
 var largeLoot = Enumerable.Range(1, 96).Select(index => (object)new
 {
     EntityId = index,

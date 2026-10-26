@@ -100,3 +100,33 @@ func TestLocalSlotCandidateDiagnosticCannotAssertUnobservedOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestRawLocalSlotPositionsRemainDiagnostic(t *testing.T) {
+	base := `{"ProcessId":123,"SeenUtc":"2026-10-26T00:00:00Z","X":1,"Y":2,"Z":3,` +
+		`"ObservedLocalAddress":"0x200000","LocalSlotCandidateStatus":"ok",` +
+		`"LocalSlotCandidates":{"Status":"two_slot_candidate","Anchor":"static scan",` +
+		`"OffsetProfile":"supplied-build defaults (unverified)",` +
+		`"OrderedAddresses":["0x200000","0x300000"],"MatchingHeaders":1,` +
+		`"CandidateAreaAddresses":["0x100000"],"StatePointerAreaAddress":"0x100000",` +
+		`"VectorHeaderAddress":"0x1005C8","RawPositionsSeenUtc":"2026-10-26T00:00:00Z","RawPositions":[` +
+		`{"WorldX":108.69565,"WorldY":217.3913,"WorldZ":5,` +
+		`"GridX":10,"GridY":20,"RenderComponentAddress":"0x400000"},null]}}`
+	got, err := Decode([]byte(base))
+	if err != nil || got.LocalSlotCandidates == nil ||
+		len(got.LocalSlotCandidates.RawPositions) != 2 ||
+		got.LocalSlotCandidates.RawPositions[0].GridX != 10 {
+		t.Fatalf("raw diagnostic positions lost: %+v, %v", got.LocalSlotCandidates, err)
+	}
+	for _, changed := range []string{
+		strings.Replace(base, `"VectorHeaderAddress":"0x1005C8",`, ``, 1),
+		strings.Replace(base, `"RawPositionsSeenUtc":"2026-10-26T00:00:00Z",`, ``, 1),
+		strings.Replace(base, `"RawPositionsSeenUtc":"2026-10-26T00:00:00Z"`, `"RawPositionsSeenUtc":"2026-10-26T00:00:02Z"`, 1),
+		strings.Replace(base, `"RenderComponentAddress":"0x400000"`, `"RenderComponentAddress":"bad"`, 1),
+		strings.Replace(base, `"GridX":10`, `"GridX":1e999`, 1),
+		strings.Replace(base, `},null]`, `}]`, 1),
+	} {
+		if _, err := Decode([]byte(changed)); err == nil {
+			t.Fatalf("invalid raw diagnostic position accepted: %s", changed)
+		}
+	}
+}

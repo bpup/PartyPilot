@@ -111,14 +111,28 @@ type RadarEntity struct {
 // LocalSlotCandidates are read-only hints from an unverified memory anchor.
 // They must never be used as a controller or party slot assignment.
 type LocalSlotCandidates struct {
-	Status                         string   `json:"Status"`
-	Anchor                         string   `json:"Anchor"`
-	OffsetProfile                  string   `json:"OffsetProfile"`
-	OrderedAddresses               []string `json:"OrderedAddresses"`
-	MatchingHeaders                int      `json:"MatchingHeaders"`
-	StatePointerAreaAddress        string   `json:"StatePointerAreaAddress,omitempty"`
-	StatePointerMatchesDataAddress *bool    `json:"StatePointerMatchesDataAddress,omitempty"`
-	CandidateAreaAddresses         []string `json:"CandidateAreaAddresses"`
+	Status                         string             `json:"Status"`
+	Anchor                         string             `json:"Anchor"`
+	OffsetProfile                  string             `json:"OffsetProfile"`
+	OrderedAddresses               []string           `json:"OrderedAddresses"`
+	MatchingHeaders                int                `json:"MatchingHeaders"`
+	StatePointerAreaAddress        string             `json:"StatePointerAreaAddress,omitempty"`
+	StatePointerMatchesDataAddress *bool              `json:"StatePointerMatchesDataAddress,omitempty"`
+	CandidateAreaAddresses         []string           `json:"CandidateAreaAddresses"`
+	VectorHeaderAddress            string             `json:"VectorHeaderAddress,omitempty"`
+	RawPositions                   []*RawSlotPosition `json:"RawPositions,omitempty"`
+	RawPositionsSeenUTC            *time.Time         `json:"RawPositionsSeenUtc,omitempty"`
+}
+
+// RawSlotPosition is a candidate read using supplied-build default offsets.
+// It does not establish a verified local slot or a usable follow position.
+type RawSlotPosition struct {
+	WorldX                 float64 `json:"WorldX"`
+	WorldY                 float64 `json:"WorldY"`
+	WorldZ                 float64 `json:"WorldZ"`
+	GridX                  float64 `json:"GridX"`
+	GridY                  float64 `json:"GridY"`
+	RenderComponentAddress string  `json:"RenderComponentAddress"`
 }
 
 var ErrInvalidSample = errors.New("invalid telemetry sample")
@@ -134,7 +148,7 @@ func Decode(data []byte) (Sample, error) {
 		!validPool(item.EnergyShield, item.EnergyShieldMax) ||
 		!validAddress(item.IngameDataAddress) || !validAddress(item.ObservedLocalAddress) ||
 		!validLocalSlotCandidates(item.LocalSlotCandidates, item.LocalSlotCandidateStatus,
-			item.ObservedLocalAddress, item.IngameDataAddress) ||
+			item.ObservedLocalAddress, item.IngameDataAddress, item.SeenUTC) ||
 		!validRadar(item.RadarEntities, item.RadarStatus, item.RadarSeenUTC) ||
 		!validGroundHover(item.GroundHover, item.GroundHoverStatus, item.RadarSeenUTC) ||
 		!validRawItemCards(item.ItemCards, item.ItemCardStatus, item.ItemCardSeenUTC,
@@ -306,7 +320,8 @@ func validRadarCategory(category string) bool {
 	}
 }
 
-func validLocalSlotCandidates(candidate *LocalSlotCandidates, scanStatus, observed, dataAddress string) bool {
+func validLocalSlotCandidates(candidate *LocalSlotCandidates, scanStatus, observed, dataAddress string,
+	seenUTC time.Time) bool {
 	if scanStatus != "" && scanStatus != "ok" && scanStatus != "scan_failed" {
 		return false
 	}
@@ -342,6 +357,24 @@ func validLocalSlotCandidates(candidate *LocalSlotCandidates, scanStatus, observ
 	}
 	if len(candidate.OrderedAddresses) != want || (want > 0 && candidate.MatchingHeaders < 1) {
 		return false
+	}
+	if !validAddress(candidate.VectorHeaderAddress) ||
+		(want == 0 && (candidate.VectorHeaderAddress != "" || len(candidate.RawPositions) != 0 ||
+			candidate.RawPositionsSeenUTC != nil)) ||
+		(len(candidate.RawPositions) != 0 && (want == 0 || len(candidate.RawPositions) != want ||
+			candidate.VectorHeaderAddress == "" || candidate.RawPositionsSeenUTC == nil)) ||
+		(len(candidate.RawPositions) == 0 && candidate.RawPositionsSeenUTC != nil) ||
+		(candidate.RawPositionsSeenUTC != nil &&
+			(candidate.RawPositionsSeenUTC.IsZero() || candidate.RawPositionsSeenUTC.After(seenUTC) ||
+				seenUTC.Sub(*candidate.RawPositionsSeenUTC) > time.Second)) {
+		return false
+	}
+	for _, position := range candidate.RawPositions {
+		if position != nil && (!finite(position.WorldX) || !finite(position.WorldY) ||
+			!finite(position.WorldZ) || !finite(position.GridX) || !finite(position.GridY) ||
+			!validAddress(position.RenderComponentAddress) || position.RenderComponentAddress == "") {
+			return false
+		}
 	}
 	if (candidate.MatchingHeaders == 0 && len(candidate.CandidateAreaAddresses) != 0) ||
 		(candidate.MatchingHeaders > 0 && len(candidate.CandidateAreaAddresses) == 0) ||

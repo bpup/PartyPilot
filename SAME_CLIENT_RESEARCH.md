@@ -16,6 +16,8 @@
 
 原始物品卡片诊断在两项开关同时开启时，可把 owner 与上面的**新鲜有序候选**精确比对，并仅输出 `unverified_vector_order_candidate` 的本地 1/2 槽位编号。还要求 owner 同时等于唯一可见玩家实体地址；关闭候选扫描、状态地址变化、候选冲突或地址不符时不输出。所提供版本的 `PlayerSlotVectorResolver` 会从区域实体列表逐一读取角色路径，并记录向量头地址供后续重验；独立版现在也记录所选候选向量头，物品卡片关联前重读向量头、顺序和角色路径，变化时丢弃缓存候选。这里仍使用 ExileCore2 当前可见实体及静态默认的原始路径读取，尚未取得等价的完整区域实体列表，故候选不能升级为可靠槽位或驱动输入。
 
+静态反编译所提供的 `NoddPilot.Offsets.dll` 可见：`MonsterEntityReader.TryReadWorldPosition` 先按名称解析实体的 `Render` 组件，再从该组件读取三个 float；`EntityMapOffsets.Default` 的位置偏移为 312，世界坐标除以 10.869565 得到网格坐标。独立版现仅在已找到 1–2 个有序角色候选时，按这套公开默认偏移尝试只读组件链，并在读完后重验槽位向量；输出 `RawPositions`、`RawPositionsSeenUtc` 与 `RenderComponentAddress` 作为最多缓存一秒的候选诊断。合成内存检查覆盖组件归属与无效坐标。目标版可加载不同的运行时偏移；目前没有实机数据证明这些地址或坐标正确，也没有证据证明它们与 ExileCore2 的当前角色坐标语义一致。`RawPositions` 不参与实时跟随、角色绑定或手柄输入。
+
 ## 待确认
 
 - Windows/PoE2 实机上，同一窗口的两个本地角色是否都出现在 ExileCore2 可见实体集合中，以及名字、实体 ID 和位置是否稳定。

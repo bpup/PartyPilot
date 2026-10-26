@@ -14,6 +14,8 @@ public static class LocalSlotCandidateScanner
         bool? StatePointerMatchesDataAddress, string[] CandidateAreaAddresses)
     {
         public string? VectorHeaderAddress { get; init; }
+        public RawRenderPositionReader.Position?[]? RawPositions { get; init; }
+        public DateTime? RawPositionsSeenUtc { get; init; }
     }
 
     public static Result Scan(long ingameStateAddress, long dataAddress, long observedLocalAddress,
