@@ -13,6 +13,9 @@ type Grid struct {
 	Height           int     `json:"height"`
 	Blocked          []Cell  `json:"blocked"`
 	TargetNavigation bool    `json:"target_navigation,omitempty"`
+	PackedSource     bool    `json:"packed_source,omitempty"`
+	packed           []byte
+	packedStride     int
 }
 
 type Cell struct {
@@ -24,8 +27,20 @@ func finite(value float64) bool { return !math.IsNaN(value) && !math.IsInf(value
 
 func (g *Grid) Valid() bool {
 	if g == nil || g.Area == "" || !finite(g.OriginX) || !finite(g.OriginY) ||
-		!finite(g.CellSize) || g.CellSize <= 0 || g.Width < 1 || g.Height < 1 ||
-		g.Width > 256 || g.Height > 256 || g.Width*g.Height > 65536 {
+		!finite(g.CellSize) || g.CellSize <= 0 || g.Width < 1 || g.Height < 1 {
+		return false
+	}
+	if g.packed != nil {
+		return g.TargetNavigation && g.PackedSource &&
+			g.Width <= 100000 && g.Height <= 100000 &&
+			g.packedStride > 0 && g.Width == g.packedStride*2 &&
+			len(g.packed) <= 64*1024*1024 &&
+			len(g.packed) == g.packedStride*g.Height && len(g.Blocked) == 0
+	}
+	if g.PackedSource {
+		return false
+	}
+	if g.Width > 256 || g.Height > 256 || g.Width*g.Height > 65536 {
 		return false
 	}
 	for _, cell := range g.Blocked {
@@ -68,7 +83,7 @@ func (g *Grid) index(cell Cell) int { return cell.Y*g.Width + cell.X }
 // Path returns the shortest four-neighbor cell path. It never crosses a
 // blocked cell or cuts diagonally across obstacle corners.
 func (g *Grid) Path(fromX, fromY, toX, toY float64) ([]Cell, bool) {
-	if !g.Valid() {
+	if !g.Valid() || g.TargetNavigation {
 		return nil, false
 	}
 	start, startOK := g.cellAt(fromX, fromY)

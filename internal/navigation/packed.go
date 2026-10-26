@@ -4,32 +4,35 @@ import "errors"
 
 var ErrPackedTerrain = errors.New("invalid packed terrain or coordinate mapping")
 
-// GridFromPacked decodes a bounded terrain window after its caller has verified
-// the instance and world-to-grid mapping. The supplied build stores the left
+// GridFromPacked retains the supplied build's compressed terrain after its
+// caller has verified the instance and world-to-grid mapping. It stores the left
 // cell in the low nibble and treats zero as blocked. This function does not
 // establish that the input came from the current game instance.
 func GridFromPacked(area string, originX, originY, cellSize float64,
 	packed []byte, bytesPerRow, rows int) (*Grid, error) {
-	if bytesPerRow < 1 || bytesPerRow > 128 || rows < 1 || rows > 256 ||
+	if bytesPerRow < 1 || bytesPerRow > 50000 || rows < 1 || rows > 100000 ||
+		len(packed) > 64*1024*1024 ||
 		len(packed) != bytesPerRow*rows {
 		return nil, ErrPackedTerrain
 	}
 	g := &Grid{Area: area, OriginX: originX, OriginY: originY,
 		CellSize: cellSize, Width: bytesPerRow * 2, Height: rows,
-		TargetNavigation: true}
+		TargetNavigation: true, PackedSource: true, packed: packed, packedStride: bytesPerRow}
 	if !g.Valid() {
 		return nil, ErrPackedTerrain
 	}
-	for y := 0; y < rows; y++ {
-		for x := 0; x < bytesPerRow; x++ {
-			value := packed[y*bytesPerRow+x]
-			if value&0x0f == 0 {
-				g.Blocked = append(g.Blocked, Cell{X: x * 2, Y: y})
-			}
-			if value>>4 == 0 {
-				g.Blocked = append(g.Blocked, Cell{X: x*2 + 1, Y: y})
-			}
-		}
-	}
 	return g, nil
+}
+
+// PackedValue reads one raw nibble without expanding the full map. The result
+// is diagnostic; walkability uses zero versus nonzero only.
+func (g *Grid) PackedValue(cell Cell) (byte, bool) {
+	if g == nil || g.packed == nil || !g.contains(cell) {
+		return 0, false
+	}
+	value := g.packed[cell.Y*g.packedStride+cell.X/2]
+	if cell.X&1 == 0 {
+		return value & 15, true
+	}
+	return value >> 4, true
 }

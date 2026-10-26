@@ -33,25 +33,19 @@ func (g *Grid) TargetWaypoints(fromX, fromY, toX, toY float64) ([]Waypoint, bool
 		!finite(fromX) || !finite(fromY) || !finite(toX) || !finite(toY) {
 		return nil, false
 	}
-	count := g.Width * g.Height
-	blocked := make([]bool, count)
-	for _, cell := range g.Blocked {
-		blocked[g.index(cell)] = true
-	}
-	allowed := make([]bool, count)
-	for y := 1; y < g.Height-1; y++ {
-		for x := 1; x < g.Width-1; x++ {
-			clear := true
-			for dy := -1; dy <= 1 && clear; dy++ {
-				for dx := -1; dx <= 1; dx++ {
-					if blocked[(y+dy)*g.Width+x+dx] {
-						clear = false
-						break
-					}
-				}
-			}
-			allowed[y*g.Width+x] = clear
+	access := newGridAccess(g)
+	allowedCache := make(map[int]bool)
+	allowed := func(cell Cell) bool {
+		if !g.contains(cell) {
+			return false
 		}
+		index := g.index(cell)
+		if value, known := allowedCache[index]; known {
+			return value
+		}
+		value := access.clear(cell, 1)
+		allowedCache[index] = value
+		return value
 	}
 	nearest := func(px, py float64) (Cell, bool) {
 		scaledX := (px - g.OriginX) / g.CellSize
@@ -70,7 +64,7 @@ func (g *Grid) TargetWaypoints(fromX, fromY, toX, toY float64) ([]Waypoint, bool
 						continue
 					}
 					cell := Cell{X: x, Y: y}
-					if g.contains(cell) && allowed[g.index(cell)] {
+					if allowed(cell) {
 						return cell, true
 					}
 				}
@@ -83,33 +77,28 @@ func (g *Grid) TargetWaypoints(fromX, fromY, toX, toY float64) ([]Waypoint, bool
 	if !startOK || !goalOK {
 		return nil, false
 	}
-	if g.lineOfSight(blocked, fromX, fromY, toX, toY, 1) {
+	if g.lineOfSight(access, fromX, fromY, toX, toY, 1) {
 		return []Waypoint{{toX, toY}}, true
 	}
 	startIndex, goalIndex := g.index(start), g.index(goal)
 	if startIndex == goalIndex {
-		if g.lineOfSight(blocked, fromX, fromY, toX, toY, 0) {
+		if g.lineOfSight(access, fromX, fromY, toX, toY, 0) {
 			return []Waypoint{{toX, toY}}, true
 		}
 		return nil, false
 	}
-	best := make([]float64, count)
-	previous := make([]int, count)
-	closed := make([]bool, count)
-	for i := range best {
-		best[i] = math.Inf(1)
-		previous[i] = -1
-	}
-	best[startIndex] = 0
+	best := map[int]float64{startIndex: 0}
+	previous := make(map[int]int)
+	closed := make(map[int]struct{})
 	queue := &routeQueue{{startIndex, math.Hypot(float64(start.X-goal.X), float64(start.Y-goal.Y))}}
 	heap.Init(queue)
 	steps := [...]Cell{{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}}
 	for examined := 0; queue.Len() > 0 && examined < 60000; examined++ {
 		current := heap.Pop(queue).(routeEntry).index
-		if closed[current] {
+		if _, seen := closed[current]; seen {
 			continue
 		}
-		closed[current] = true
+		closed[current] = struct{}{}
 		if current == goalIndex {
 			break
 		}
@@ -120,9 +109,11 @@ func (g *Grid) TargetWaypoints(fromX, fromY, toX, toY float64) ([]Waypoint, bool
 				continue
 			}
 			next := ny*g.Width + nx
-			if !allowed[next] || closed[next] ||
+			nextCell := Cell{X: nx, Y: ny}
+			_, visited := closed[next]
+			if !allowed(nextCell) || visited ||
 				(delta.X != 0 && delta.Y != 0 &&
-					(!allowed[y*g.Width+nx] || !allowed[ny*g.Width+x])) {
+					(!allowed(Cell{X: nx, Y: y}) || !allowed(Cell{X: x, Y: ny}))) {
 				continue
 			}
 			cost := 1.0
@@ -130,7 +121,7 @@ func (g *Grid) TargetWaypoints(fromX, fromY, toX, toY float64) ([]Waypoint, bool
 				cost = math.Sqrt2
 			}
 			candidate := best[current] + cost
-			if candidate >= best[next] {
+			if prior, known := best[next]; known && candidate >= prior {
 				continue
 			}
 			best[next], previous[next] = candidate, current
@@ -138,12 +129,20 @@ func (g *Grid) TargetWaypoints(fromX, fromY, toX, toY float64) ([]Waypoint, bool
 				candidate + math.Hypot(float64(nx-goal.X), float64(ny-goal.Y))})
 		}
 	}
-	if !closed[goalIndex] {
+	if _, found := closed[goalIndex]; !found {
 		return nil, false
 	}
 	var cells []Cell
-	for index := goalIndex; index != -1; index = previous[index] {
+	for index := goalIndex; ; {
 		cells = append(cells, Cell{index % g.Width, index / g.Width})
+		if index == startIndex {
+			break
+		}
+		prior, known := previous[index]
+		if !known {
+			return nil, false
+		}
+		index = prior
 	}
 	for left, right := 0, len(cells)-1; left < right; left, right = left+1, right-1 {
 		cells[left], cells[right] = cells[right], cells[left]
@@ -159,14 +158,14 @@ func (g *Grid) TargetWaypoints(fromX, fromY, toX, toY float64) ([]Waypoint, bool
 		chosen := -1
 		for next := len(points) - 1; next > index && checks < 8192; next-- {
 			checks++
-			if g.lineOfSight(blocked, current.X, current.Y, points[next].X, points[next].Y, 1) {
+			if g.lineOfSight(access, current.X, current.Y, points[next].X, points[next].Y, 1) {
 				chosen = next
 				break
 			}
 		}
 		if chosen < 0 {
 			chosen = index + 1
-			if !g.lineOfSight(blocked, current.X, current.Y,
+			if !g.lineOfSight(access, current.X, current.Y,
 				points[chosen].X, points[chosen].Y, 0) {
 				return nil, false
 			}

@@ -33,6 +33,7 @@ type packedTerrain struct {
 	BytesPerRow int     `json:"bytes_per_row"`
 	Rows        int     `json:"rows"`
 	Data        []byte  `json:"data"`
+	DataFile    string  `json:"data_file,omitempty"`
 }
 
 func replay(reader io.Reader, writer io.Writer, config follow.Config) error {
@@ -43,6 +44,7 @@ func replay(reader io.Reader, writer io.Writer, config follow.Config) error {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	encoder := json.NewEncoder(writer)
+	packedFiles := make(map[string][]byte)
 	line := 0
 	for scanner.Scan() {
 		line++
@@ -58,6 +60,28 @@ func replay(reader io.Reader, writer io.Writer, config follow.Config) error {
 				return fmt.Errorf("line %d: two terrain sources", line)
 			}
 			p := item.PackedTerrain
+			if p.DataFile != "" {
+				if len(p.Data) != 0 {
+					return fmt.Errorf("line %d: two packed terrain sources", line)
+				}
+				cached, exists := packedFiles[p.DataFile]
+				if !exists {
+					file, openErr := os.Open(p.DataFile)
+					if openErr != nil {
+						return fmt.Errorf("line %d: %w", line, openErr)
+					}
+					cached, openErr = io.ReadAll(io.LimitReader(file, 64*1024*1024+1))
+					closeErr := file.Close()
+					if openErr != nil {
+						return fmt.Errorf("line %d: %w", line, openErr)
+					}
+					if closeErr != nil || len(cached) > 64*1024*1024 {
+						return fmt.Errorf("line %d: invalid packed terrain file", line)
+					}
+					packedFiles[p.DataFile] = cached
+				}
+				p.Data = cached
+			}
 			var err error
 			item.Terrain, err = navigation.GridFromPacked(p.Area, p.OriginX, p.OriginY,
 				p.CellSize, p.Data, p.BytesPerRow, p.Rows)

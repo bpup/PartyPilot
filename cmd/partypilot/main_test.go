@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -54,5 +56,43 @@ func TestPackedTerrainReplayRejectsAmbiguousOrIncompleteInput(t *testing.T) {
 		}); err == nil {
 			t.Fatalf("accepted invalid packed replay: %s", input)
 		}
+	}
+}
+
+func TestPackedTerrainReplayReadsRawFileAndRejectsTwoSources(t *testing.T) {
+	data := bytes.Repeat([]byte{0x11}, 10*15)
+	for y := 4; y <= 10; y++ {
+		data[y*10+5] = 0x10
+	}
+	path := filepath.Join(t.TempDir(), "terrain.bin")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
+	item := frame{Now: at,
+		Leader:        follow.Position{X: 16, Y: 7, Area: "a", Seen: at, Valid: true},
+		Follower:      follow.Position{X: 4, Y: 7, Area: "a", Seen: at, Valid: true},
+		PackedTerrain: &packedTerrain{Area: "a", CellSize: 1, BytesPerRow: 10, Rows: 15, DataFile: path}}
+	encoded, _ := json.Marshal(item)
+	config := follow.Config{StopDistance: 1, ResumeDistance: 2, CatchUpDistance: 30, MaxAge: time.Second}
+	var output bytes.Buffer
+	if err := replay(bytes.NewReader(append(encoded, '\n')), &output, config); err != nil {
+		t.Fatal(err)
+	}
+	var command follow.Command
+	if err := json.Unmarshal(output.Bytes(), &command); err != nil ||
+		command.State != follow.Following || command.Y == 0 {
+		t.Fatalf("raw terrain file was not used for detour: %+v, %v", command, err)
+	}
+	item.PackedTerrain.Data = []byte{0x11}
+	encoded, _ = json.Marshal(item)
+	if err := replay(bytes.NewReader(append(encoded, '\n')), &bytes.Buffer{}, config); err == nil {
+		t.Fatal("accepted both base64 data and raw terrain file")
+	}
+	item.PackedTerrain.Data = nil
+	item.PackedTerrain.Rows++
+	encoded, _ = json.Marshal(item)
+	if err := replay(bytes.NewReader(append(encoded, '\n')), &bytes.Buffer{}, config); err == nil {
+		t.Fatal("accepted terrain file shorter than declared dimensions")
 	}
 }

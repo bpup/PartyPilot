@@ -9,14 +9,10 @@ func (g *Grid) HasLineOfSight(fromX, fromY, toX, toY float64, clearance int) boo
 		!finite(fromX) || !finite(fromY) || !finite(toX) || !finite(toY) {
 		return false
 	}
-	blocked := make([]bool, g.Width*g.Height)
-	for _, cell := range g.Blocked {
-		blocked[g.index(cell)] = true
-	}
-	return g.lineOfSight(blocked, fromX, fromY, toX, toY, clearance)
+	return g.lineOfSight(newGridAccess(g), fromX, fromY, toX, toY, clearance)
 }
 
-func (g *Grid) lineOfSight(blocked []bool, fromX, fromY, toX, toY float64, clearance int) bool {
+func (g *Grid) lineOfSight(access gridAccess, fromX, fromY, toX, toY float64, clearance int) bool {
 	if !finite(fromX) || !finite(fromY) || !finite(toX) || !finite(toY) || clearance < 0 {
 		return false
 	}
@@ -39,13 +35,8 @@ func (g *Grid) lineOfSight(blocked []bool, fromX, fromY, toX, toY float64, clear
 		fraction := float64(step) / float64(steps)
 		x := int(math.Round(fromCellX + (toCellX-fromCellX)*fraction))
 		y := int(math.Round(fromCellY + (toCellY-fromCellY)*fraction))
-		for dy := -clearance; dy <= clearance; dy++ {
-			for dx := -clearance; dx <= clearance; dx++ {
-				cell := Cell{X: x + dx, Y: y + dy}
-				if !g.contains(cell) || blocked[g.index(cell)] {
-					return false
-				}
-			}
+		if !access.clear(Cell{X: x, Y: y}, clearance) {
+			return false
 		}
 	}
 	return true
