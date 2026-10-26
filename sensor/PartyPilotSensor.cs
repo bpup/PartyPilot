@@ -170,9 +170,17 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                         if (itemCardStatus == "ok")
                         {
                             var (players, loot) = ReadItemCardCorrelations();
+                            var slotCandidate = Settings.DiagnoseLocalSlotCandidates.Value &&
+                                _slotCandidateStatus == "ok" && _slotCandidates != null &&
+                                now >= _lastSlotScanUtc &&
+                                now - _lastSlotScanUtc <= TimeSpan.FromSeconds(1) &&
+                                _lastSlotScanStateAddress == GameController.IngameState.Address &&
+                                _lastSlotScanDataAddress == GameController.IngameState.Data.Address &&
+                                _lastSlotScanLocalAddress == (player?.Address ?? 0)
+                                    ? _slotCandidates : null;
                             itemCards = result.Cards.Select(card =>
                             {
-                                var match = UiItemCardCorrelator.Resolve(card, players, loot);
+                                var match = UiItemCardCorrelator.Resolve(card, players, loot, slotCandidate);
                                 return (object)new
                                 {
                                     Object = FormatAddress(card.Object),
@@ -180,7 +188,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                                     Owner = FormatAddress(card.Owner),
                                     Evidence = "unassigned_ui_card",
                                     OwnerMatch = match.Owner,
-                                    LootMatch = match.Loot
+                                    LootMatch = match.Loot,
+                                    SlotCandidate = match.Slot
                                 };
                             }).ToArray();
                         }

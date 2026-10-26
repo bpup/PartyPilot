@@ -50,4 +50,28 @@ func TestRawItemCardsRemainUnassignedDiagnosticEvidence(t *testing.T) {
 			t.Fatalf("unverified card correlation accepted: %s", changed)
 		}
 	}
+	withOrder := strings.Replace(joined, `"ItemCardSeenUtc"`,
+		`"IngameDataAddress":"0x100000","ObservedLocalAddress":"0xA0000",`+
+			`"LocalSlotCandidateStatus":"ok","LocalSlotCandidates":{"Status":"two_slot_candidate",`+
+			`"Anchor":"test anchor","OffsetProfile":"unverified static offsets",`+
+			`"OrderedAddresses":["0xA0000","0x90000"],"MatchingHeaders":1,`+
+			`"StatePointerAreaAddress":"0x100000","StatePointerMatchesDataAddress":true,`+
+			`"CandidateAreaAddresses":["0x100000"]},"ItemCardSeenUtc"`, 1)
+	withOrder = strings.Replace(withOrder, `"Evidence":"unassigned_ui_card"`,
+		`"Evidence":"unassigned_ui_card","SlotCandidate":{"LocalSlot":2,`+
+			`"Evidence":"unverified_vector_order_candidate"}`, 1)
+	if sample, err := Decode([]byte(withOrder)); err != nil || len(sample.ItemCards) != 1 ||
+		sample.ItemCards[0].SlotCandidate == nil || sample.ItemCards[0].SlotCandidate.LocalSlot != 2 {
+		t.Fatalf("unverified slot candidate lost: %+v, %v", sample.ItemCards, err)
+	}
+	for _, changed := range []string{
+		strings.Replace(withOrder, `"LocalSlot":2`, `"LocalSlot":1`, 1),
+		strings.Replace(withOrder, `"unverified_vector_order_candidate"`, `"verified_player_2"`, 1),
+		strings.Replace(withOrder, `"Status":"two_slot_candidate"`, `"Status":"no_candidate"`, 1),
+		strings.Replace(withOrder, `"Owner":"0x90000"`, `"Owner":"0xB0000"`, 1),
+	} {
+		if _, err := Decode([]byte(changed)); err == nil {
+			t.Fatalf("unverified slot assignment accepted: %s", changed)
+		}
+	}
 }

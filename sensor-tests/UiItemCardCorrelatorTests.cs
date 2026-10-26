@@ -27,6 +27,19 @@ internal static class UiItemCardCorrelatorTests
         if (UiItemCardCorrelator.Resolve(card, players,
                 [new UiItemCardCorrelator.Loot(0x80000, 23, "Metadata/Monsters/Beast", "Beast")]).Loot != null)
             throw new Exception("A non-item path was joined to the card.");
+        var ordered = new LocalSlotCandidateScanner.Result("two_slot_candidate", "test anchor",
+            "unverified static offsets", ["0xA0000", "0x90000"], 1, "0x100000", true,
+            ["0x100000"]);
+        if (UiItemCardCorrelator.Resolve(card, players, loot, ordered).Slot is not
+            { LocalSlot: 2, Evidence: "unverified_vector_order_candidate" })
+            throw new Exception("Exact owner did not join the unverified second-slot candidate.");
+        if (UiItemCardCorrelator.Resolve(card, players, loot,
+                ordered with { Status = "conflicting_candidates" }).Slot != null ||
+            UiItemCardCorrelator.Resolve(card,
+                [new UiItemCardCorrelator.Player(0x90001, 11)], loot, ordered).Slot != null ||
+            UiItemCardCorrelator.Resolve(card, players, loot,
+                ordered with { OrderedAddresses = ["0x90000", "0x90000"] }).Slot != null)
+            throw new Exception("Conflicted, unobserved or duplicate candidate order was accepted.");
         Console.WriteLine("UI item-card pointer correlation checks passed.");
     }
 }

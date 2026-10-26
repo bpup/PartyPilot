@@ -42,12 +42,13 @@ type Sample struct {
 // RawItemCard is a currently attached UI node with an item and owner pointer.
 // It has no validated local player, item identity or pickup authorization.
 type RawItemCard struct {
-	Object     string          `json:"Object"`
-	Item       string          `json:"Item"`
-	Owner      string          `json:"Owner"`
-	Evidence   string          `json:"Evidence"`
-	OwnerMatch *CardOwnerMatch `json:"OwnerMatch,omitempty"`
-	LootMatch  *CardLootMatch  `json:"LootMatch,omitempty"`
+	Object        string             `json:"Object"`
+	Item          string             `json:"Item"`
+	Owner         string             `json:"Owner"`
+	Evidence      string             `json:"Evidence"`
+	OwnerMatch    *CardOwnerMatch    `json:"OwnerMatch,omitempty"`
+	LootMatch     *CardLootMatch     `json:"LootMatch,omitempty"`
+	SlotCandidate *CardSlotCandidate `json:"SlotCandidate,omitempty"`
 }
 
 type CardOwnerMatch struct {
@@ -60,6 +61,11 @@ type CardLootMatch struct {
 	ItemPath string `json:"ItemPath"`
 	Name     string `json:"Name"`
 	Evidence string `json:"Evidence"`
+}
+
+type CardSlotCandidate struct {
+	LocalSlot int    `json:"LocalSlot"`
+	Evidence  string `json:"Evidence"`
 }
 
 // GroundHover records only the entity under a UI ground-label hover. It is
@@ -130,14 +136,16 @@ func Decode(data []byte) (Sample, error) {
 			item.ObservedLocalAddress, item.IngameDataAddress) ||
 		!validRadar(item.RadarEntities, item.RadarStatus, item.RadarSeenUTC) ||
 		!validGroundHover(item.GroundHover, item.GroundHoverStatus, item.RadarSeenUTC) ||
-		!validRawItemCards(item.ItemCards, item.ItemCardStatus, item.ItemCardSeenUTC) ||
+		!validRawItemCards(item.ItemCards, item.ItemCardStatus, item.ItemCardSeenUTC,
+			item.LocalSlotCandidates) ||
 		!validVisiblePlayers(item.VisiblePlayers, item.ObservedLocalAddress) {
 		return Sample{}, ErrInvalidSample
 	}
 	return item, nil
 }
 
-func validRawItemCards(cards []RawItemCard, status string, seen *time.Time) bool {
+func validRawItemCards(cards []RawItemCard, status string, seen *time.Time,
+	ordered *LocalSlotCandidates) bool {
 	if status == "" {
 		return cards == nil && seen == nil
 	}
@@ -172,6 +180,16 @@ func validRawItemCards(cards []RawItemCard, status string, seen *time.Time) bool
 			len(card.LootMatch.ItemPath) > 256 || strings.TrimSpace(card.LootMatch.Name) == "" ||
 			len(card.LootMatch.Name) > 96) {
 			return false
+		}
+		if card.SlotCandidate != nil {
+			slot := card.SlotCandidate.LocalSlot
+			if card.OwnerMatch == nil || ordered == nil ||
+				(ordered.Status != "single_slot_candidate" && ordered.Status != "two_slot_candidate") ||
+				slot < 1 || slot > len(ordered.OrderedAddresses) ||
+				!strings.EqualFold(ordered.OrderedAddresses[slot-1], card.Owner) ||
+				card.SlotCandidate.Evidence != "unverified_vector_order_candidate" {
+				return false
+			}
 		}
 		objects[card.Object] = true
 	}
