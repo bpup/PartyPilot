@@ -30,6 +30,10 @@ func TestGenerationAndFreshComparison(t *testing.T) {
 	if Compare(now, time.Second, 1, 2, nil, &follower).Status != "missing" {
 		t.Fatal("missing leader must remain missing")
 	}
+	follower.Origin = "history"
+	if Compare(now, time.Second, 1, 2, &leader, &follower).Status != "historical_candidate" {
+		t.Fatal("primed history must not appear as a live candidate")
+	}
 	for _, invalid := range []string{
 		`[SCENE] Set Source [G2_4]`,
 		`Generating level 68 area "G2_4" with seed 0`,
@@ -38,6 +42,21 @@ func TestGenerationAndFreshComparison(t *testing.T) {
 		if _, ok := ParseGeneration(invalid, 1, now); ok {
 			t.Fatalf("accepted incomplete identity: %q", invalid)
 		}
+	}
+}
+
+func TestPrimeOnlyCompleteHistoryFromBoundedSuffix(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "Client.txt")
+	content := strings.Repeat("x", int(primeBytes)+10) + "\n" +
+		"Generating level 1 area \"OLD\" with seed 1\n" +
+		"Generating level 68 area \"CURRENT\" with seed 2\n" +
+		"Generating level 69 area \"INCOMPLETE\" with seed 3"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	signal, err := Prime(path, 2, time.Now().UTC())
+	if err != nil || signal == nil || signal.AreaID != "CURRENT" || signal.Seed != 2 || signal.Origin != "history" {
+		t.Fatalf("wrong primed signal: %+v, %v", signal, err)
 	}
 }
 
@@ -97,5 +116,27 @@ func TestTailIgnoresHistoryAndWaitsForCompleteLine(t *testing.T) {
 	appendText(" line\r\n")
 	if lines, err := tail.Poll(); err != nil || len(lines) != 1 || lines[0] != "new line" {
 		t.Fatalf("complete line missing: %q, %v", lines, err)
+	}
+}
+
+func TestTailReopensRotatedLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "Client.txt")
+	if err := os.WriteFile(path, []byte("old\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	tail, err := OpenTail(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tail.Close()
+	if err := os.Rename(path, path+".1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("new\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	lines, err := tail.Poll()
+	if err != nil || len(lines) != 1 || lines[0] != "new" {
+		t.Fatalf("rotation did not reopen new log: %q, %v", lines, err)
 	}
 }

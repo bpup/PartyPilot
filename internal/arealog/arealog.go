@@ -17,6 +17,7 @@ type Signal struct {
 	AreaID     string    `json:"area_id"`
 	Seed       int64     `json:"seed"`
 	ObservedAt time.Time `json:"observed_at"`
+	Origin     string    `json:"origin"`
 }
 
 type Comparison struct {
@@ -39,7 +40,7 @@ func ParseGeneration(line string, slot int, observedAt time.Time) (Signal, bool)
 	if err != nil || seed <= 0 || area == "" || slot < 1 || slot > 6 {
 		return Signal{}, false
 	}
-	return Signal{Slot: slot, AreaID: area, Seed: seed, ObservedAt: observedAt}, true
+	return Signal{Slot: slot, AreaID: area, Seed: seed, ObservedAt: observedAt, Origin: "live"}, true
 }
 
 func Compare(now time.Time, maxAge time.Duration, leaderSlot, followerSlot int, leader, follower *Signal) Comparison {
@@ -57,6 +58,9 @@ func Compare(now time.Time, maxAge time.Duration, leaderSlot, followerSlot int, 
 		return result
 	}
 	result.Status = "candidate_same_instance"
+	if leader.Origin == "history" || follower.Origin == "history" {
+		result.Status = "historical_candidate"
+	}
 	result.AreaID = leader.AreaID
 	result.Seed = leader.Seed
 	return result

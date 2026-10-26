@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strconv"
@@ -34,12 +35,26 @@ func (l *logFlags) Set(value string) error {
 	return nil
 }
 
+func resolveExeLogs(logs, exes logFlags) (logFlags, error) {
+	resolved := make(logFlags)
+	for slot, path := range logs {
+		resolved[slot] = path
+	}
+	for slot, exe := range exes {
+		if _, exists := resolved[slot]; exists {
+			return nil, fmt.Errorf("slot %d has both -log and -exe", slot)
+		}
+		resolved[slot] = filepath.Join(filepath.Dir(exe), "logs", "Client.txt")
+	}
+	return resolved, nil
+}
+
 type snapshot struct {
 	ObservedAt time.Time            `json:"observed_at"`
 	Followers  []arealog.Comparison `json:"followers"`
 }
 
-func run(paths map[int]string, leader int, maxAge time.Duration, output *json.Encoder) error {
+func run(paths map[int]string, leader int, maxAge time.Duration, primeHistory bool, output *json.Encoder) error {
 	if err := arealog.ValidatePaths(paths); err != nil {
 		return err
 	}
@@ -68,6 +83,15 @@ func run(paths map[int]string, leader int, maxAge time.Duration, output *json.En
 		}
 	}()
 	latest := make(map[int]*arealog.Signal)
+	if primeHistory {
+		for _, slot := range slots {
+			signal, err := arealog.Prime(paths[slot], slot, time.Now().UTC())
+			if err != nil {
+				return fmt.Errorf("slot %d prime: %w", slot, err)
+			}
+			latest[slot] = signal
+		}
+	}
 	var previous []arealog.Comparison
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
@@ -105,12 +129,20 @@ func run(paths map[int]string, leader int, maxAge time.Duration, output *json.En
 
 func main() {
 	var logs logFlags
+	var exes logFlags
 	flag.Var(&logs, "log", "repeat for each player: SLOT=Client.txt path")
+	flag.Var(&exes, "exe", "repeat for each player: SLOT=game executable path; log is beside it in logs/Client.txt")
 	leader := flag.Int("leader", 0, "leader player slot")
 	maxAge := flag.Duration("max-age", 0, "maximum age of new log evidence")
+	primeHistory := flag.Bool("prime-history", true, "show latest complete identity in the last 512 KiB as historical candidate")
 	flag.Parse()
+	paths, err := resolveExeLogs(logs, exes)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 	fmt.Fprintln(os.Stderr, "Read-only area log monitor; matching IDs and seeds are candidates, not game-verified instance identity.")
-	if err := run(logs, *leader, *maxAge, json.NewEncoder(os.Stdout)); err != nil {
+	if err := run(paths, *leader, *maxAge, *primeHistory, json.NewEncoder(os.Stdout)); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
