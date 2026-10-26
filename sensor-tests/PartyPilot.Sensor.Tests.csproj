@@ -14,6 +14,7 @@
     <Compile Include="../sensor/RadarLootMetadata.cs" Link="RadarLootMetadata.cs" />
     <Compile Include="../sensor/RadarMonsterVitals.cs" Link="RadarMonsterVitals.cs" />
     <Compile Include="../sensor/RadarMonsterMetadata.cs" Link="RadarMonsterMetadata.cs" />
+    <Compile Include="../sensor/RadarMonsterTracker.cs" Link="RadarMonsterTracker.cs" />
     <Compile Include="../sensor/UiItemCardTreeScanner.cs" Link="UiItemCardTreeScanner.cs" />
     <Compile Include="../sensor/UiItemCardVtableLocator.cs" Link="UiItemCardVtableLocator.cs" />
     <Compile Include="../sensor/UiItemCardCorrelator.cs" Link="UiItemCardCorrelator.cs" />

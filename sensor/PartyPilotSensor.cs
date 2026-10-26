@@ -28,6 +28,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     private SkillBindSourceScanner.Result? _skillBindSource;
     private string? _skillBindSourceStatus;
     private DateTime _lastRadarSentUtc;
+    private readonly RadarMonsterTracker _monsterTracker = new();
+    private uint? _monsterTrackerAreaHash;
     private DateTime _lastCardSentUtc;
     private DateTime _lastTerrainSentUtc;
     private readonly HashSet<string> _capturedTerrainKeys = new();
@@ -37,7 +39,12 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
 
     public override void Render()
     {
-        if (!Settings.Enable.Value) return;
+        if (!Settings.Enable.Value)
+        {
+            _monsterTracker.Reset();
+            _monsterTrackerAreaHash = null;
+            return;
+        }
         var now = DateTime.UtcNow;
         if (now - _lastSentUtc < TimeSpan.FromMilliseconds(100)) return;
         _lastSentUtc = now;
@@ -227,17 +234,30 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         DateTime? radarSeenUtc = null;
         object? groundHover = null;
         string? groundHoverStatus = null;
+        if (!Settings.DiagnoseRadarEntities.Value && _monsterTrackerAreaHash.HasValue)
+        {
+            _monsterTracker.Reset();
+            _monsterTrackerAreaHash = null;
+        }
         if (Settings.DiagnoseRadarEntities.Value && now - _lastRadarSentUtc >= TimeSpan.FromMilliseconds(500))
         {
             _lastRadarSentUtc = now;
             radarSeenUtc = now;
             try
             {
+                var areaHash = GameController.IngameState.Data.CurrentAreaHash;
+                if (_monsterTrackerAreaHash != areaHash)
+                {
+                    _monsterTracker.Reset();
+                    _monsterTrackerAreaHash = areaHash;
+                }
                 radarEntities = ReadRadarEntities(player!.Id, render.Pos.X, render.Pos.Y);
                 radarStatus = "ok";
             }
             catch
             {
+                _monsterTracker.Reset();
+                _monsterTrackerAreaHash = null;
                 radarStatus = "scan_failed";
             }
             try
@@ -598,6 +618,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
 
     private object[] ReadRadarEntities(uint observedLocalId, float localX, float localY)
     {
+        _monsterTracker.BeginFrame();
         var seen = new HashSet<uint>();
         var candidates = new List<(object Value, bool Navigation, double Distance)>();
         foreach (var entity in GameController.Entities)
@@ -646,6 +667,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             string? monsterRarity = null;
             bool? entityIsAlive = null;
             bool? entityIsHostile = null;
+            bool? trackedAliveCandidate = null;
             if (category == "monster")
             {
                 try
@@ -663,6 +685,10 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                             monsterLifeCurrent = values.Value.Current;
                             monsterLifeMaximum = values.Value.Maximum;
                         }
+                        if (entity.Address > 0 && entityIsAlive.HasValue)
+                            trackedAliveCandidate = _monsterTracker.Observe(entity.Address, entity.Id, path,
+                                entityIsAlive.Value, entity.IsValid,
+                                monsterLifeCurrent ?? 0, monsterLifeMaximum ?? 0);
                     }
                 }
                 catch
@@ -689,11 +715,13 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 MonsterRarity = monsterRarity,
                 EntityIsAlive = entityIsAlive,
                 EntityIsHostile = entityIsHostile,
+                TrackedAliveCandidate = trackedAliveCandidate,
                 X = pos.X,
                 Y = pos.Y,
                 Z = pos.Z
             }, RadarClassifier.IsNavigation(category), dx * dx + dy * dy));
         }
+        _monsterTracker.EndFrame();
         return RadarPacketBudget.Select(candidates.OrderByDescending(item => item.Navigation)
             .ThenBy(item => item.Distance).Select(item => item.Value));
     }

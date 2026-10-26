@@ -411,6 +411,28 @@ Require(RadarMonsterMetadata.Rarity(0) == "normal" &&
     RadarMonsterMetadata.Rarity(3) == "unique" &&
     RadarMonsterMetadata.Rarity(10_000) == null,
     "Unsupported ExileCore2 monster rarity must remain unknown.");
+var monsterTracker = new RadarMonsterTracker();
+monsterTracker.BeginFrame();
+Require(monsterTracker.Observe(0x1000, 7, "Metadata/Monsters/Beast", true, true, 100, 100),
+    "Readable living monster should enter the candidate tracker.");
+monsterTracker.EndFrame();
+monsterTracker.BeginFrame();
+Require(monsterTracker.Observe(0x1000, 7, "Metadata/Monsters/Beast", true, true, 0, 0),
+    "First missing-life frame should not retire the candidate.");
+monsterTracker.EndFrame();
+monsterTracker.BeginFrame();
+Require(!monsterTracker.Observe(0x1000, 7, "Metadata/Monsters/Beast", true, true, 0, 0),
+    "Second missing-life frame should retire a formerly readable candidate.");
+monsterTracker.EndFrame();
+monsterTracker.BeginFrame();
+Require(monsterTracker.Observe(0x1000, 7, "Metadata/Monsters/Beast", true, true, 50, 100) &&
+    !monsterTracker.Observe(0x1000, 7, "Metadata/Monsters/Beast", false, true, 50, 100) &&
+    monsterTracker.Observe(0x1000, 8, "Metadata/Monsters/Other", true, true, 50, 100),
+    "Readable recovery and address reuse must follow the target tracker rules.");
+monsterTracker.Reset();
+monsterTracker.BeginFrame();
+Require(monsterTracker.Observe(0x1000, 8, "Metadata/Monsters/Other", true, true, 0, 0),
+    "Tracker reset should clear earlier candidate state.");
 Console.WriteLine("Sensor diagnostics passed.");
 UiItemCardTreeScannerTests.Run();
 UiItemCardVtableLocatorTests.Run();

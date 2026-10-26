@@ -82,6 +82,7 @@ func TestRadarMonsterLifeRemainsBoundedEvidence(t *testing.T) {
 		`"RadarEntities":[{"EntityId":7,"Category":"monster","Path":"Metadata/Monsters/Beast",` +
 		`"MonsterComponentPresent":true,"MonsterLifeCurrent":0,"MonsterLifeMaximum":100,` +
 		`"MonsterRarity":"rare","EntityIsAlive":false,"EntityIsHostile":true,` +
+		`"TrackedAliveCandidate":false,` +
 		`"X":4,"Y":5,"Z":6}]}`
 	if sample, err := Decode([]byte(base)); err != nil || sample.RadarEntities[0].MonsterLifeCurrent == nil ||
 		*sample.RadarEntities[0].MonsterLifeCurrent != 0 ||
@@ -96,6 +97,8 @@ func TestRadarMonsterLifeRemainsBoundedEvidence(t *testing.T) {
 		strings.Replace(base, `"MonsterLifeMaximum":100,`, ``, 1),
 		strings.Replace(base, `"Category":"monster"`, `"Category":"chest"`, 1),
 		strings.Replace(base, `"MonsterRarity":"rare"`, `"MonsterRarity":"error"`, 1),
+		strings.Replace(base, `"EntityIsAlive":false,`, ``, 1),
+		strings.Replace(base, `"TrackedAliveCandidate":false`, `"TrackedAliveCandidate":true`, 1),
 	} {
 		if _, err := Decode([]byte(changed)); err == nil {
 			t.Fatalf("invalid monster life evidence accepted: %s", changed)
