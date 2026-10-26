@@ -6,6 +6,13 @@ using Avalonia.Themes.Fluent;
 using Avalonia.Threading;
 using PartyPilot.Desktop;
 
+if (args.Contains("--client3-plan-only"))
+{
+    PrivateClient3PlanSmoke.Run();
+    Console.WriteLine("Client 3 desktop binding and ready contract checked.");
+    return;
+}
+
 AppBuilder.Configure<SmokeApp>()
     .UseSkia()
     .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false })
@@ -424,6 +431,7 @@ const string launchJson = """
 var launched = LaunchedClients.ParseSuccessfulLaunch(launchJson, 2);
 if (launched.Count != 2 || launched[0].Pid != 101 || launched[1].WindowHandle != 202)
     throw new Exception("Launcher output did not bind client order to unique processes and windows.");
+PrivateClient3PlanSmoke.Run();
 try
 {
     LaunchedClients.ParseSuccessfulLaunch(launchJson.Replace("\"pid\":102", "\"pid\":101"), 2);
