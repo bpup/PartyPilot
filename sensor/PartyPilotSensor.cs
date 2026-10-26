@@ -20,6 +20,13 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     private long _lastSlotScanLocalAddress;
     private LocalSlotCandidateScanner.Result? _slotCandidates;
     private string? _slotCandidateStatus;
+    private DateTime _lastSkillBindScanUtc;
+    private long _skillBindStateAddress;
+    private long _skillBindAreaAddress;
+    private long _skillBindLocalAddress;
+    private string? _skillBindOrderKey;
+    private SkillBindSourceScanner.Result? _skillBindSource;
+    private string? _skillBindSourceStatus;
     private DateTime _lastRadarSentUtc;
     private DateTime _lastCardSentUtc;
     private DateTime _lastTerrainSentUtc;
@@ -126,6 +133,93 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         {
             _slotCandidates = null;
             _slotCandidateStatus = null;
+            _skillBindSource = null;
+            _skillBindSourceStatus = null;
+        }
+
+        if (Settings.DiagnoseLocalSlotCandidates.Value)
+        {
+            try
+            {
+                var currentState = GameController.IngameState.Address;
+                var currentArea = GameController.IngameState.Data.Address;
+                var currentLocal = player?.Address ?? 0;
+                var currentOrder = _slotCandidates is { Status: "single_slot_candidate" or "two_slot_candidate" }
+                    ? string.Join(',', _slotCandidates.OrderedAddresses) : null;
+                if (_skillBindStateAddress != currentState || _skillBindAreaAddress != currentArea ||
+                    _skillBindLocalAddress != currentLocal || _skillBindOrderKey != currentOrder)
+                {
+                    _skillBindSource = null;
+                    _skillBindSourceStatus = null;
+                    _lastSkillBindScanUtc = default;
+                    _skillBindStateAddress = currentState;
+                    _skillBindAreaAddress = currentArea;
+                    _skillBindLocalAddress = currentLocal;
+                    _skillBindOrderKey = currentOrder;
+                }
+            }
+            catch
+            {
+                _skillBindSource = null;
+                _skillBindSourceStatus = "scan_failed";
+            }
+        }
+
+        if (Settings.DiagnoseLocalSlotCandidates.Value &&
+            now - _lastSkillBindScanUtc >= TimeSpan.FromSeconds(2))
+        {
+            _lastSkillBindScanUtc = now;
+            _skillBindSource = null;
+            _skillBindSourceStatus = "ordered_players_unverified";
+            try
+            {
+                var data = GameController.IngameState.Data;
+                var localAddress = player?.Address ?? 0;
+                if (_slotCandidates is { Status: "single_slot_candidate" or "two_slot_candidate" } candidate)
+                {
+                    var paths = new Dictionary<long, string>();
+                    foreach (var entity in GameController.Entities)
+                    {
+                        if (entity?.GetComponent<Player>() == null || entity.Address <= 0) continue;
+                        paths.TryAdd(entity.Address, entity.Path ?? "");
+                        if (paths.Count == 256) break;
+                    }
+                    byte[]? ReadCandidate(long address, int size)
+                    {
+                        try { return data.M.ReadMem(address, size); }
+                        catch { return null; }
+                    }
+                    if (LocalSlotCandidateScanner.Revalidate(candidate, localAddress, paths,
+                            ReadCandidate, address => RawCharacterPathReader.Read(address, ReadCandidate)))
+                    {
+                        var players = new List<long>();
+                        foreach (var address in candidate.OrderedAddresses)
+                        {
+                            if (!address.StartsWith("0x", StringComparison.Ordinal) ||
+                                !long.TryParse(address.AsSpan(2),
+                                    System.Globalization.NumberStyles.HexNumber,
+                                    System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+                            {
+                                players.Clear();
+                                break;
+                            }
+                            players.Add(parsed);
+                        }
+                        if (players.Count == candidate.OrderedAddresses.Length)
+                        {
+                            _skillBindSource = SkillBindSourceScanner.Scan(
+                                GameController.IngameState.Address, data.Address, localAddress,
+                                players, ReadCandidate);
+                            _skillBindSourceStatus = _skillBindSource.Status;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                _skillBindSource = null;
+                _skillBindSourceStatus = "scan_failed";
+            }
         }
 
         object[]? radarEntities = null;
@@ -372,6 +466,10 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             ObservedLocalAddress = observedLocalAddress,
             LocalSlotCandidates = Settings.DiagnoseLocalSlotCandidates.Value ? _slotCandidates : null,
             LocalSlotCandidateStatus = Settings.DiagnoseLocalSlotCandidates.Value ? _slotCandidateStatus : null,
+            SkillBindSource = Settings.DiagnoseLocalSlotCandidates.Value ? _skillBindSource : null,
+            SkillBindSourceStatus = Settings.DiagnoseLocalSlotCandidates.Value ? _skillBindSourceStatus : null,
+            SkillBindSourceSeenUtc = Settings.DiagnoseLocalSlotCandidates.Value &&
+                _skillBindSource != null ? _lastSkillBindScanUtc : (DateTime?)null,
             RadarEntities = radarEntities,
             RadarStatus = radarStatus,
             RadarSeenUtc = radarSeenUtc,
