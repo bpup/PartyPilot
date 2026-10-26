@@ -6,6 +6,8 @@ using Avalonia.Themes.Fluent;
 using Avalonia.Threading;
 using PartyPilot.Desktop;
 
+PartyRosterCounterSmoke.Run();
+
 if (args.Contains("--client3-plan-only"))
 {
     PrivateClient3PlanSmoke.Run();

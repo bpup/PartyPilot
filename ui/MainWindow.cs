@@ -30,6 +30,8 @@ public sealed class MainWindow : Window
     private readonly Button _check = new();
     private readonly Button _launch = new();
     private readonly Button _attach = new();
+    private readonly Button _probeRoster = new();
+    private readonly TextBlock _rosterStatus = new();
     private readonly TextBlock _status = new();
     private readonly ComboBox _physicalIndex = new();
     private readonly TextBox _physicalDevice = new();
@@ -92,6 +94,7 @@ public sealed class MainWindow : Window
     private bool _followStopping;
     private bool _radarStopping;
     private bool _fpsBusy;
+    private bool _rosterBusy;
     private bool _closing;
     private string _loginStatus = "waiting";
     private bool _busy;
@@ -311,6 +314,13 @@ public sealed class MainWindow : Window
         actions.Children.Add(_launch);
         actions.Children.Add(_attach);
         panel.Children.Add(actions);
+        _probeRoster.Content = "检查 Current Party 人数";
+        _probeRoster.Click += async (_, _) => await ProbeRosterAsync();
+        panel.Children.Add(_probeRoster);
+        _rosterStatus.Text = "绑定窗口后，可在游戏内打开 Current Party 面板再检查；结果仅是画面候选行数。";
+        _rosterStatus.Foreground = MutedBrush;
+        _rosterStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_rosterStatus);
         return Card(panel);
     }
 
@@ -522,6 +532,7 @@ public sealed class MainWindow : Window
         if (topologyChanged)
         {
             _launchedClients = [];
+            _rosterStatus.Text = "绑定窗口后，可在游戏内打开 Current Party 面板再检查；结果仅是画面候选行数。";
             _ = StopRadarAsync();
             StopPrivacy();
             _ = StopAllResourcesAsync();
@@ -546,6 +557,7 @@ public sealed class MainWindow : Window
         _check.IsEnabled = !_busy && !_pairingHasStarted && count > 0;
         _launch.IsEnabled = !_busy && !_pairingHasStarted && count > 0;
         _attach.IsEnabled = !_busy && !_pairingHasStarted && count > 0;
+        UpdateRosterControls();
         UpdateBridgeControls();
         UpdateRadarControls();
         UpdatePrivacyControls();
@@ -556,6 +568,8 @@ public sealed class MainWindow : Window
     private void ClearLaunchedClients()
     {
         _launchedClients = [];
+        _rosterStatus.Text = "窗口绑定已清除；请重新绑定后检查 Current Party。";
+        UpdateRosterControls();
         _ = StopRadarAsync();
         StopPrivacy();
         _ = StopAllResourcesAsync();
@@ -907,6 +921,7 @@ public sealed class MainWindow : Window
 
     private void UpdateBridgeControls()
     {
+        UpdateRosterControls();
         var slots = _selectedTopology?.Slots.Where(slot => slot.Client != 3)
             .Select(slot => slot.RuntimePad).ToArray() ?? [];
         var useWgi = slots.Length == 4;
@@ -943,6 +958,44 @@ public sealed class MainWindow : Window
             _pairingStatus.Text = "此布局需要先启动或绑定三个游戏窗口，并核对第三客户端进程身份；当前尚未开始配对。";
         }
         UpdateFollowControls();
+    }
+
+    private void UpdateRosterControls()
+    {
+        _probeRoster.IsEnabled = OperatingSystem.IsWindows() && !_busy && !_rosterBusy &&
+            _selectedTopology is not null && _launchedClients.Count == _selectedTopology.ClientCount;
+    }
+
+    private async Task ProbeRosterAsync()
+    {
+        if (!_probeRoster.IsEnabled) return;
+        var clients = _launchedClients.ToArray();
+        _rosterBusy = true;
+        UpdateRosterControls();
+        _rosterStatus.Text = "正在读取已绑定游戏窗口的 Current Party 画面…";
+        try
+        {
+            var results = await Task.Run(() => clients.Select(client =>
+            {
+                var captured = PartyRosterProbe.TryCount(client, out var candidates);
+                return (captured, candidates);
+            }).ToArray());
+            if (!clients.SequenceEqual(_launchedClients)) return;
+            _rosterStatus.Text = string.Join("；", results.Select((result, index) =>
+                result.captured
+                    ? $"客户端 {index + 1}：{result.candidates} 条候选生命条"
+                    : $"客户端 {index + 1}：窗口无效或画面无法读取")) +
+                "。0 条也可能是面板未打开；此检查不证明角色身份或组队成功。";
+        }
+        catch (Exception error)
+        {
+            _rosterStatus.Text = $"Current Party 画面检查失败：{error.Message}";
+        }
+        finally
+        {
+            _rosterBusy = false;
+            UpdateRosterControls();
+        }
     }
 
     private void UpdateFollowControls()
@@ -1302,7 +1355,11 @@ public sealed class MainWindow : Window
             await StopAllResourcesAsync();
         }
         _busy = true;
-        if (action != ClientAction.Check) _launchedClients = [];
+        if (action != ClientAction.Check)
+        {
+            _launchedClients = [];
+            _rosterStatus.Text = "正在重新识别游戏窗口；完成绑定后可检查 Current Party。";
+        }
         UpdateClientRows();
         _status.Text = action switch
         {
