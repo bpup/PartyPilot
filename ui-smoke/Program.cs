@@ -9,6 +9,8 @@ using PartyPilot.Desktop;
 PartyRosterCounterSmoke.Run();
 AccountProfileSmoke.Run();
 LoginCalibrationSmoke.Run();
+await AutoLoginFillSmoke.RunAsync();
+AutoLoginPreferenceSmoke.Run();
 LeadershipPreferenceSmoke.Run();
 AutoPartyCoordinatorSmoke.Run();
 AutoPartyInviteSmoke.Run();
@@ -47,6 +49,9 @@ if (window.GetLogicalDescendants().OfType<CheckBox>().Count(box =>
 if (window.GetLogicalDescendants().OfType<Button>().Count(button =>
         button.Content?.ToString() == "标记登录字段") != 3)
     throw new Exception("The desktop did not expose one login marker per client.");
+if (window.GetLogicalDescendants().OfType<CheckBox>().Count(box =>
+        box.Content?.ToString() == "此独立客户端在配对前自动填入账号和密码") != 3)
+    throw new Exception("The desktop did not expose per-client automatic login choices.");
 if (args.Contains("--ui-controls-only"))
 {
     var sample = new LoginCalibrationDialog(1,

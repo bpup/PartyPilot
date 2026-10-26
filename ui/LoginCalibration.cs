@@ -73,7 +73,7 @@ internal sealed class LoginCalibrationStore
             Directory.CreateDirectory(_directory);
             File.WriteAllBytes(temporary, JsonSerializer.SerializeToUtf8Bytes(calibration));
             File.Move(temporary, path, overwrite: true);
-            return new(true, calibration, "登录字段位置已保存；自动登录尚未接入。");
+            return new(true, calibration, "登录字段位置已保存；仅在显式启用自动填入并复核窗口后使用。");
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
