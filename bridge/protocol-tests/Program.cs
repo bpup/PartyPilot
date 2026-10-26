@@ -23,6 +23,7 @@ PrivateSlotConfigTests.Run();
 PrivateSlotPublisherTests.Run();
 Client3FocusRoutingTests.Run();
 Client3InputPublisherTests.Run();
+PrivateClient3CommandRouterTests.Run();
 if (!Client3RuntimeAttach.IsKnownGameExecutable(@"C:\PoE2\PathOfExile_x64Steam.exe") ||
     Client3RuntimeAttach.IsKnownGameExecutable(@"C:\Other\notepad.exe") ||
     Client3RuntimeAttach.IsKnownGameExecutable(@"C:\PoE2\PathOfExile_x64Steam.dll"))

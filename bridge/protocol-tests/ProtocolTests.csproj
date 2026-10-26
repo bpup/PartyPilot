@@ -14,6 +14,7 @@
     <Compile Include="../Client3InputPublisher.cs" Link="Client3InputPublisher.cs" />
     <Compile Include="../Client3RuntimeAttach.cs" Link="Client3RuntimeAttach.cs" />
     <Compile Include="../Client3AttachRequest.cs" Link="Client3AttachRequest.cs" />
+    <Compile Include="../PrivateClient3CommandRouter.cs" Link="PrivateClient3CommandRouter.cs" />
     <Compile Include="../ForegroundWindowProbe.cs" Link="ForegroundWindowProbe.cs" />
     <Compile Include="../PrivateSlotFrame.cs" Link="PrivateSlotFrame.cs" />
     <Compile Include="../PrivateSlotConfig.cs" Link="PrivateSlotConfig.cs" />

@@ -7,7 +7,7 @@ namespace PartyPilot.Bridge;
 
 // Explicit running-process path. The caller must supply the launcher's Client 3
 // PID, window and executable binding; no process discovery or auth handling.
-internal sealed class Client3RuntimeAttach : IDisposable
+internal sealed class Client3RuntimeAttach : IDisposable, IClient3PadOutput
 {
     private const uint ProcessAccess = 0x43a;
     private const uint MemCommitReserve = 0x3000;
@@ -26,6 +26,9 @@ internal sealed class Client3RuntimeAttach : IDisposable
     }
 
     internal bool IsReady => _publisher.IsReady;
+    bool IClient3PadOutput.IsReady => IsReady;
+    public bool Submit(PadReport p5, PadReport p6) => _publisher.Submit(p5, p6);
+    public void NeutralAll() => _publisher.NeutralAll();
     internal bool Publish(int focusedPlayer, PadReport physical,
         PadReport p5Assist, PadReport p6Assist) =>
         _publisher.Publish(focusedPlayer, physical, p5Assist, p6Assist);

@@ -18,13 +18,28 @@ if (args.Length > 0 && args[0] == "--attach-private-client3")
         Console.WriteLine(JsonSerializer.Serialize(new { @event = "private_client3_ready",
             pid = request.Pid, players = request.IncludeP6 ? new[] { 5, 6 } : new[] { 5 },
             local_indices = request.IncludeP6 ? new[] { 0, 1 } : new[] { 0 } }));
-        while (await Console.In.ReadLineAsync() is { } line)
+        var privateRouter = new PrivateClient3CommandRouter(session, request.IncludeP6);
+        Task<string?> pendingLine = Console.In.ReadLineAsync();
+        while (true)
         {
-            if (line == "stop") return 0;
-            Console.Error.WriteLine("Only the stop control is accepted by the private runtime probe.");
-            return 2;
+            var finished = await Task.WhenAny(pendingLine, Task.Delay(10));
+            if (finished == pendingLine)
+            {
+                var line = await pendingLine;
+                if (line is null or "stop") return 0;
+                pendingLine = Console.In.ReadLineAsync();
+                if (!privateRouter.Apply(line, DateTime.UtcNow))
+                {
+                    Console.Error.WriteLine("Invalid P5/P6 movement command; private slots neutralized.");
+                    return 2;
+                }
+            }
+            if (!privateRouter.Tick(DateTime.UtcNow))
+            {
+                Console.Error.WriteLine("Client 3 private input is no longer ready.");
+                return 1;
+            }
         }
-        return 0;
     }
     catch (Exception error) when (error is InvalidOperationException or IOException or
         System.ComponentModel.Win32Exception or TimeoutException or UnauthorizedAccessException or

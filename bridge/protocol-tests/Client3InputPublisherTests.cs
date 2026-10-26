@@ -56,6 +56,8 @@ internal static class Client3InputPublisherTests
         if (!solo.Publish(5, new PadReport(0x1000, 0, 0, 10, 0, 0, 0),
                 default, default))
             throw new Exception("P5-only Client 3 rejected its local input.");
+        if (solo.Submit(default, new PadReport(1, 0, 0, 0, 0, 0, 0)))
+            throw new Exception("P5-only Client 3 accepted a P6 report.");
         var soloFrame = Read(soloObserver);
         if (!PrivateSlotFrame.TryReadPad(soloFrame, 5, out var soloP5, out _, out _) ||
             soloP5.Buttons != 0x1000 || soloP5.LeftX != 10 ||
