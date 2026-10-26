@@ -16,6 +16,7 @@ import (
 	"partypilot/internal/arealog"
 	"partypilot/internal/follow"
 	"partypilot/internal/live"
+	"partypilot/internal/partylog"
 	"partypilot/internal/telemetry"
 )
 
@@ -141,6 +142,9 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 				if signal, ok := arealog.ParseGeneration(line, slot, now); ok {
 					engine.ObserveArea(signal)
 				}
+				if event, ok := partylog.Parse(line, slot); ok {
+					engine.ObserveParty(event)
+				}
 			}
 		}
 		if err := encoder.Encode(frame{Focused: leader, Commands: engine.Step(now)}); err != nil {
@@ -157,6 +161,7 @@ func main() {
 	catchup := flag.Float64("catchup", -1, "catch-up distance")
 	maxAge := flag.Duration("max-age", 0, "maximum sensor age")
 	logAge := flag.Duration("log-max-age", 0, "maximum area-log signal age")
+	leaderName := flag.String("leader-name", "", "configured character name of the followed leader, for departure detection")
 	address := flag.String("listen", "127.0.0.1:47617", "loopback sensor address")
 	var logs, exes sources
 	flag.Var(&logs, "log", "SLOT=Client.txt path")
@@ -178,6 +183,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
+	engine.SetLeaderName(*leaderName)
 	fmt.Fprintln(os.Stderr, "Live follow decision stream; Windows controller and PoE2 behavior remain unverified.")
 	if err := run(*address, roster, paths, *leader, engine); err != nil {
 		fmt.Fprintln(os.Stderr, err)

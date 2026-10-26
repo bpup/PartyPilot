@@ -6,6 +6,7 @@ import (
 
 	"partypilot/internal/arealog"
 	"partypilot/internal/follow"
+	"partypilot/internal/partylog"
 	"partypilot/internal/telemetry"
 )
 
@@ -54,6 +55,47 @@ func TestLiveFollowRequiresFreshMatchingLogAndNewSamples(t *testing.T) {
 	engine.ObserveSample(telemetry.Sample{ProcessID: 202, SeenUTC: later, X: 0})
 	if state(later) != follow.Waiting {
 		t.Fatal("expired area evidence must stop")
+	}
+}
+
+func TestDepartureLatchesStopUntilSessionRestart(t *testing.T) {
+	now := time.Now().UTC()
+	config := follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}
+	engine, err := New(map[int]int{1: 101, 2: 202}, 1, config, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.SetLeaderName("Leader")
+	for slot, pid := range map[int]int{1: 101, 2: 202} {
+		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123, ObservedAt: now, Origin: "live"})
+		x := float64(0)
+		if slot == 1 {
+			x = 12
+		}
+		engine.ObserveSample(telemetry.Sample{ProcessID: pid, SeenUTC: now.Add(time.Millisecond), X: x})
+	}
+	if engine.Step(now.Add(time.Millisecond))[2].State != follow.CatchingUp {
+		t.Fatal("expected live decision before party departure")
+	}
+	if engine.ObserveParty(partylog.Event{Kind: partylog.MemberLeft, ClientSlot: 2, MemberName: "Other"}) ||
+		engine.Step(now.Add(time.Millisecond))[2].State != follow.CatchingUp {
+		t.Fatal("unrelated member departure stopped following")
+	}
+	if !engine.ObserveParty(partylog.Event{Kind: partylog.MemberLeft, ClientSlot: 2, MemberName: "leader"}) {
+		t.Fatal("configured leader departure did not stop")
+	}
+	engine.ObserveSample(telemetry.Sample{ProcessID: 101, SeenUTC: now.Add(2 * time.Millisecond), X: 12})
+	engine.ObserveSample(telemetry.Sample{ProcessID: 202, SeenUTC: now.Add(2 * time.Millisecond), X: 0})
+	command := engine.Step(now.Add(2 * time.Millisecond))[2]
+	if command.State != follow.Waiting || command.Reason != "followed member left party" {
+		t.Fatalf("departure stop did not latch: %+v", command)
+	}
+	for _, kind := range []partylog.Kind{partylog.Disbanded, partylog.LocalLeft} {
+		other, err := New(map[int]int{1: 101, 2: 202}, 1, config, time.Minute)
+		if err != nil || !other.ObserveParty(partylog.Event{Kind: kind, ClientSlot: 2}) ||
+			other.Step(now)[2].State != follow.Waiting {
+			t.Fatalf("departure %s was not stopped", kind)
+		}
 	}
 }
 

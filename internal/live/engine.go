@@ -10,6 +10,7 @@ import (
 	"partypilot/internal/focus"
 	"partypilot/internal/follow"
 	"partypilot/internal/party"
+	"partypilot/internal/partylog"
 	"partypilot/internal/telemetry"
 )
 
@@ -23,6 +24,39 @@ type Engine struct {
 	slots       []int
 	samples     map[int]telemetry.Sample
 	areas       map[int]arealog.Signal
+	leaderName  string
+	stopped     string
+}
+
+func (e *Engine) SetLeaderName(name string) { e.leaderName = strings.TrimSpace(name) }
+
+// ObserveParty latches a stop. A later position or area update cannot resume
+// following; restarting the session requires an explicit operator action.
+func (e *Engine) ObserveParty(event partylog.Event) bool {
+	configured := false
+	for _, slot := range e.slots {
+		configured = configured || slot == event.ClientSlot
+	}
+	if !configured {
+		return false
+	}
+	reason := ""
+	switch event.Kind {
+	case partylog.Disbanded:
+		reason = "party disbanded"
+	case partylog.LocalLeft:
+		reason = "local client left party"
+	case partylog.MemberLeft:
+		if e.leaderName != "" && strings.EqualFold(strings.TrimSpace(event.MemberName), e.leaderName) {
+			reason = "followed member left party"
+		}
+	}
+	if reason == "" {
+		return false
+	}
+	e.stopped = reason
+	e.coordinator.ResetFollow()
+	return true
 }
 
 func New(roster map[int]int, leader int, config follow.Config, logAge time.Duration) (*Engine, error) {
@@ -87,6 +121,15 @@ func (e *Engine) ObserveArea(signal arealog.Signal) bool {
 }
 
 func (e *Engine) Step(now time.Time) map[int]follow.Command {
+	if e.stopped != "" {
+		commands := make(map[int]follow.Command, len(e.slots)-1)
+		for _, slot := range e.slots {
+			if slot != e.leader {
+				commands[slot] = follow.Command{State: follow.Waiting, Reason: e.stopped}
+			}
+		}
+		return commands
+	}
 	positions := make(map[int]follow.Position, len(e.slots))
 	leaderArea, hasLeaderArea := e.areas[e.leader]
 	for _, slot := range e.slots {
