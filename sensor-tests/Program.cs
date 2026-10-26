@@ -52,7 +52,7 @@ RawRenderPositionReader.Position? ReadSyntheticPosition(long entity, Func<long, 
     entity == other ? new(secondWorldX, 40, 5, secondWorldX / 10.869565f,
         40 / 10.869565f, "0x600000") : null;
 var motion = LocalSlotMotionSampler.Capture(two, local, paths, visiblePositions, Read,
-    _ => null, 10, 20, 5, motionSeen, ReadSyntheticPosition);
+    _ => null, () => true, 10, 20, 5, motionSeen, ReadSyntheticPosition);
 Require(motion?.RawPositions is { Length: 2 } &&
     motion.RawPositions[1]?.WorldX == 30 &&
     motion.RawPositionsSeenUtc == motionSeen &&
@@ -61,17 +61,31 @@ Require(motion?.RawPositions is { Length: 2 } &&
     "A complete revalidated diagnostic position frame was not captured.");
 secondWorldX = 35;
 var nextMotion = LocalSlotMotionSampler.Capture(two, local, paths, visiblePositions, Read,
-    _ => null, 10, 20, 5, motionSeen.AddMilliseconds(100), ReadSyntheticPosition);
+    _ => null, () => true, 10, 20, 5, motionSeen.AddMilliseconds(100), ReadSyntheticPosition);
 Require(nextMotion?.RawPositions?[1]?.WorldX == 35 &&
     nextMotion.RawPositionsSeenUtc == motionSeen.AddMilliseconds(100),
     "A cached vector retained the prior position instead of refreshing it.");
+var areaCurrent = true;
+RawRenderPositionReader.Position? SwitchAreaDuringRead(long entity, Func<long, int, byte[]?> read)
+{
+    areaCurrent = false;
+    return ReadSyntheticPosition(entity, read);
+}
+Require(LocalSlotMotionSampler.Capture(two, local, paths, visiblePositions, Read,
+        _ => null, () => areaCurrent, 10, 20, 5, motionSeen,
+        SwitchAreaDuringRead) == null,
+    "A position frame was published after the area changed during capture.");
+Require(LocalSlotMotionSampler.Capture(two, local, paths, visiblePositions, Read,
+        _ => null, () => false, 10, 20, 5, motionSeen,
+        ReadSyntheticPosition) == null,
+    "A position frame started with an outdated area identity.");
 RawRenderPositionReader.Position? ReorderDuringRead(long entity, Func<long, int, byte[]?> read)
 {
     memory[vectorStart] = new[] { other, local }.SelectMany(BitConverter.GetBytes).ToArray();
     return ReadSyntheticPosition(entity, read);
 }
 Require(LocalSlotMotionSampler.Capture(two, local, paths, visiblePositions, Read,
-        _ => null, 10, 20, 5, motionSeen, ReorderDuringRead) == null,
+        _ => null, () => true, 10, 20, 5, motionSeen, ReorderDuringRead) == null,
     "A vector reordered during position capture remained usable.");
 memory[vectorStart] = new[] { other, local }.SelectMany(BitConverter.GetBytes).ToArray();
 Require(!LocalSlotCandidateScanner.Revalidate(two, local, paths, Read),

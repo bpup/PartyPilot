@@ -52,6 +52,32 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         var player = GameController.Player;
         var render = player?.GetComponent<Render>();
         if (render == null) return;
+        long frameStateAddress;
+        long frameDataAddress;
+        long frameLocalAddress;
+        uint frameAreaHash;
+        int frameProcessId;
+        try
+        {
+            frameStateAddress = GameController.IngameState.Address;
+            frameDataAddress = GameController.IngameState.Data.Address;
+            frameLocalAddress = player?.Address ?? 0;
+            frameAreaHash = GameController.IngameState.Data.CurrentAreaHash;
+            frameProcessId = GameController.Window.Process.Id;
+        }
+        catch { return; }
+        bool SameAreaAndPlayer()
+        {
+            try
+            {
+                return GameController.IngameState.Address == frameStateAddress &&
+                    GameController.IngameState.Data.Address == frameDataAddress &&
+                    GameController.IngameState.Data.CurrentAreaHash == frameAreaHash &&
+                    (GameController.Player?.Address ?? 0) == frameLocalAddress &&
+                    GameController.Window.Process.Id == frameProcessId;
+            }
+            catch { return false; }
+        }
         var vitals = player?.GetComponent<Life>();
         object[]? visiblePlayers = null;
         string? visiblePlayersStatus = null;
@@ -113,7 +139,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 }
                 if (_slotCandidates is { Status: "single_slot_candidate" or "two_slot_candidate" } candidate)
                     _slotCandidates = LocalSlotMotionSampler.Capture(candidate, localAddress,
-                        paths, visiblePositions, ReadCandidate, ReadMissingPath,
+                        paths, visiblePositions, ReadCandidate, ReadMissingPath, SameAreaAndPlayer,
                         render.Pos.X, render.Pos.Y, render.Pos.Z, now);
                 _slotCandidateStatus = _slotCandidates == null ? "scan_failed" : "ok";
             }
@@ -462,6 +488,12 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             }
         }
 
+        if (!SameAreaAndPlayer())
+        {
+            _slotCandidates = null;
+            _slotCandidateStatus = "scan_failed";
+            return;
+        }
         var position = render.Pos;
         var sourceTickMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         // AreaName is diagnostic only. It does not identify a specific instance.
