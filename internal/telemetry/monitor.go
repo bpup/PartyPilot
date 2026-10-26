@@ -51,25 +51,29 @@ func (m *Monitor) Update(item Sample) bool {
 }
 
 func (m *Monitor) Compare(now time.Time) Comparison {
-	result := Comparison{Status: Missing, LeaderPID: m.leaderPID, FollowerPID: m.followerPID}
-	if m.leader == nil || m.follower == nil {
+	return compareSamples(now, m.leaderPID, m.followerPID, m.leader, m.follower, m.maxAge)
+}
+
+func compareSamples(now time.Time, leaderPID, followerPID int, leader, follower *Sample, maxAge time.Duration) Comparison {
+	result := Comparison{Status: Missing, LeaderPID: leaderPID, FollowerPID: followerPID}
+	if leader == nil || follower == nil {
 		return result
 	}
-	if !fresh(now, m.leader.SeenUTC, m.maxAge) || !fresh(now, m.follower.SeenUTC, m.maxAge) {
+	if !fresh(now, leader.SeenUTC, maxAge) || !fresh(now, follower.SeenUTC, maxAge) {
 		result.Status = Stale
 		return result
 	}
-	if m.leader.AreaName == "" || m.follower.AreaName == "" ||
-		m.leader.AreaHash == 0 || m.follower.AreaHash == 0 ||
-		m.leader.AreaName != m.follower.AreaName ||
-		m.leader.AreaHash != m.follower.AreaHash {
+	if leader.AreaName == "" || follower.AreaName == "" ||
+		leader.AreaHash == 0 || follower.AreaHash == 0 ||
+		leader.AreaName != follower.AreaName ||
+		leader.AreaHash != follower.AreaHash {
 		result.Status = DifferentArea
 		return result
 	}
 	result.Status = CandidateSameArea
-	result.AreaName = m.leader.AreaName
-	result.AreaHash = m.leader.AreaHash
-	result.Distance = math.Hypot(m.leader.X-m.follower.X, m.leader.Y-m.follower.Y)
+	result.AreaName = leader.AreaName
+	result.AreaHash = leader.AreaHash
+	result.Distance = math.Hypot(leader.X-follower.X, leader.Y-follower.Y)
 	return result
 }
 

@@ -50,6 +50,8 @@ GOOS=windows GOARCH=amd64 go build -o PartyPilot.exe ./cmd/partypilot
 
 `release/PartyPilot-PartyMonitor.exe` 可用 `-leader-pid`、`-follower-pid` 和 `-max-age` 监视两个进程的只读位置流。它区分数据缺失、过期、区域不一致及“同名同哈希候选”；候选**不等于已证实处于同一实例**，因此监视器不输出任何手柄命令。模拟双进程 UDP 数据已验证这些状态切换。
 
+`release/PartyPilot-RosterWatch.exe` 使用 `-roster 1:进程ID,2:进程ID,... -leader 1 -max-age 750ms` 对 1–6 个明确配置的游戏进程做只读监视。它按角色槽位输出队长是否缺失/过期，以及每个队员的缺失、过期、区域不一致或同区域候选状态；拒绝重复槽位、重复进程 ID 和乱序旧样本。该程序已用本机模拟 UDP 报文验证三角色状态变化，仍未接到真实 PoE2。区域名称与哈希相等仍只是候选，不会进入自动控制。
+
 `PartyReplay` 读取受控数据中的明确实例标识，计算各队员命令。显式启用 `-last-focused-leads` 后，手动聚焦的角色成为跟随目标，原 P1 会转为自动跟随；返回 P1 焦点时恢复原队长。未启用该选项时仍按固定队长计算。`-follow-targets 2:3` 指定 P2 跟随 P3；未指定的队员跟随当前 MAIN。`BridgeFeed -slot 2` 选择一个队员，`BridgeFeed -all` 输出所有队员命令及焦点切换事件。手动接管或等待会松开相应自动化摇杆。上述管道已在 macOS 用模拟数据贯通到 C# 桥接协议解析器。Windows 上可以另传 `-pace 100ms`，再把 `BridgeFeed -all` 的输出接到 `PartyPilot.Bridge.exe --enable-controller --slots 1,2 --physical-index 0 --main-slot 1 --physical-hidden-confirmed` 做受控手柄测试；**这条 Windows/游戏输入管道尚未运行验证**。真实传感器尚不能提供经验证的实例标识，所以当前的只读监视器不会自动连接这条控制管道。
 
 状态：**implementation-aligned / integration-pending**。
