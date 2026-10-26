@@ -18,7 +18,7 @@ func testWorld() World {
 		for number := 1; number <= 6; number++ {
 			distance[number] = 20
 		}
-		return Monster{ID: id, Rarity: rarity, Alive: ptr(true),
+		return Monster{ID: id, Rarity: rarity, Alive: ptr(true), Position: &Point{X: 20, Y: 0},
 			DistanceFromMainM: ptr(20.0), DistanceByPlayer: distance, HealthPercent: ptr(100.0)}
 	}
 	return World{Timestamp: time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC),

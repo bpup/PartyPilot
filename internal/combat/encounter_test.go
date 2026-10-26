@@ -1,6 +1,7 @@
 package combat
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -43,6 +44,19 @@ func TestEncounterEntryAndExitDebounce(t *testing.T) {
 	}
 }
 
+func TestMonsterPositionRequiresBothCoordinates(t *testing.T) {
+	for _, raw := range []string{`{}`, `{"x":1}`, `{"x":null,"y":2}`, `{"x":1,"y":2,"z":3}`} {
+		var point Point
+		if err := json.Unmarshal([]byte(raw), &point); err == nil {
+			t.Fatalf("incomplete position accepted: %s", raw)
+		}
+	}
+	var point Point
+	if err := json.Unmarshal([]byte(`{"x":0,"y":2}`), &point); err != nil || point != (Point{X: 0, Y: 2}) {
+		t.Fatalf("explicit zero coordinate rejected: %+v, %v", point, err)
+	}
+}
+
 func TestEncounterThreatAndTagScope(t *testing.T) {
 	world := testWorld()
 	world.Monsters = world.Monsters[:1]
@@ -67,6 +81,7 @@ func TestEncounterThreatAndTagScope(t *testing.T) {
 	}
 	world = testWorld()
 	world.Monsters = append(world.Monsters, Monster{ID: "far-boss", Rarity: "unique", Alive: ptr(true),
+		Position:          &Point{X: 200, Y: 0},
 		DistanceFromMainM: ptr(200.0), DistanceByPlayer: map[int]float64{1: 200, 2: 200, 3: 200,
 			4: 200, 5: 200, 6: 200}, HealthPercent: ptr(100.0)})
 	tracker = EncounterTracker{}
@@ -132,4 +147,44 @@ func TestEncounterVersionTracksSourceChanges(t *testing.T) {
 	step(150, 6) // Approaching becomes engaged.
 	world.Monsters[0].Rarity = "rare"
 	step(151, 8) // Structural change and tag change each increment once.
+}
+
+func TestEncounterCentroidAndLifecycleTimes(t *testing.T) {
+	world := testWorld()
+	world.Monsters[0].Position = &Point{X: 10, Y: 2}
+	world.Monsters[1].Position = &Point{X: 20, Y: 4}
+	world.Monsters[2].Position = &Point{X: 30, Y: 6}
+	start := world.Timestamp
+	var tracker EncounterTracker
+	encounter, err := tracker.Update(world)
+	if err != nil || encounter == nil || encounter.Centroid != (Point{X: 20, Y: 4}) ||
+		!encounter.StartedAt.Equal(start) || !encounter.UpdatedAt.Equal(start) || encounter.EngagedAt != nil {
+		t.Fatalf("initial encounter geometry or time differs: %+v, %v", encounter, err)
+	}
+	world.Timestamp = start.Add(150 * time.Millisecond)
+	world.Monsters[0].Position = &Point{X: 40, Y: 2}
+	encounter, err = tracker.Update(world)
+	if err != nil || encounter == nil || encounter.Centroid != (Point{X: 30, Y: 4}) ||
+		encounter.EngagedAt == nil || !encounter.EngagedAt.Equal(world.Timestamp) ||
+		!encounter.UpdatedAt.Equal(world.Timestamp) {
+		t.Fatalf("engaged encounter geometry or time differs: %+v, %v", encounter, err)
+	}
+	world.Timestamp = start.Add(200 * time.Millisecond)
+	world.Monsters = []Monster{}
+	encounter, err = tracker.Update(world)
+	if err != nil || encounter == nil || encounter.Centroid != (Point{}) ||
+		encounter.WindingDownAt == nil || !encounter.WindingDownAt.Equal(world.Timestamp) {
+		t.Fatalf("winding encounter geometry or time differs: %+v, %v", encounter, err)
+	}
+	world.Timestamp = start.Add(1000 * time.Millisecond)
+	encounter, err = tracker.Update(world)
+	if err != nil || encounter == nil || encounter.CompletedAt == nil ||
+		!encounter.CompletedAt.Equal(world.Timestamp) || !encounter.StartedAt.Equal(start) {
+		t.Fatalf("completed encounter time differs: %+v, %v", encounter, err)
+	}
+	world = testWorld()
+	world.Monsters[0].Position = nil
+	if _, err := tracker.Update(world); err == nil {
+		t.Fatal("monster with missing position was accepted")
+	}
 }

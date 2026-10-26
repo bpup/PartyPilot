@@ -1,6 +1,7 @@
 package combat
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -43,9 +44,31 @@ type Monster struct {
 	ID                string          `json:"id"`
 	Rarity            string          `json:"rarity"`
 	Alive             *bool           `json:"alive"`
+	Position          *Point          `json:"position"`
 	DistanceFromMainM *float64        `json:"distanceFromMainM"`
 	DistanceByPlayer  map[int]float64 `json:"distanceByPlayerM"`
 	HealthPercent     *float64        `json:"healthPercent,omitempty"`
+}
+
+type Point struct {
+	X float32 `json:"x"`
+	Y float32 `json:"y"`
+}
+
+func (p *Point) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	x, hasX := fields["x"]
+	y, hasY := fields["y"]
+	if len(fields) != 2 || !hasX || !hasY || string(x) == "null" || string(y) == "null" {
+		return errors.New("point requires explicit x and y")
+	}
+	if err := json.Unmarshal(x, &p.X); err != nil {
+		return err
+	}
+	return json.Unmarshal(y, &p.Y)
 }
 
 type Plan struct {
@@ -77,6 +100,8 @@ func (w World) Validate() error {
 	seen := make(map[string]bool, len(w.Monsters))
 	for _, monster := range w.Monsters {
 		if monster.ID == "" || seen[monster.ID] || monster.Alive == nil ||
+			monster.Position == nil || !finite(float64(monster.Position.X)) ||
+			!finite(float64(monster.Position.Y)) ||
 			monster.Rarity != "normal" && monster.Rarity != "magic" &&
 				monster.Rarity != "rare" && monster.Rarity != "unique" ||
 			monster.DistanceFromMainM == nil || !finite(*monster.DistanceFromMainM) ||

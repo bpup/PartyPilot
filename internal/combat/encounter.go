@@ -9,10 +9,16 @@ import (
 
 // Encounter is read-only replay state for the supplied default profile.
 type Encounter struct {
-	ID      string   `json:"id"`
-	Version int      `json:"version"`
-	State   string   `json:"state"`
-	Tags    []string `json:"tags"`
+	ID            string     `json:"id"`
+	Version       int        `json:"version"`
+	State         string     `json:"state"`
+	Tags          []string   `json:"tags"`
+	Centroid      Point      `json:"centroid"`
+	StartedAt     time.Time  `json:"startedAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
+	EngagedAt     *time.Time `json:"engagedAt,omitempty"`
+	WindingDownAt *time.Time `json:"windingDownAt,omitempty"`
+	CompletedAt   *time.Time `json:"completedAt,omitempty"`
 
 	ids           map[string]bool
 	counts        [4]int
@@ -66,7 +72,8 @@ func (t *EncounterTracker) Update(world World) (*Encounter, error) {
 		t.entryAt = world.Timestamp
 		t.current = &Encounter{ID: fmt.Sprintf("enc-%d", t.sequence), Version: 1,
 			State: "approaching", ids: monsterIDs(entry), counts: monsterCounts(entry),
-			primaryThreat: primaryThreat(entry)}
+			primaryThreat: primaryThreat(entry), Centroid: monsterCentroid(entry),
+			StartedAt: world.Timestamp, UpdatedAt: world.Timestamp}
 		t.current.Tags = classifyEncounter(world, entry, time.Time{})
 		if len(t.current.Tags) > 0 {
 			t.current.Version++
@@ -85,18 +92,24 @@ func (t *EncounterTracker) Update(world World) (*Encounter, error) {
 		if t.exitAt.IsZero() {
 			t.exitAt = world.Timestamp
 		}
+		if t.current.State != "winding-down" && t.current.WindingDownAt == nil {
+			t.current.WindingDownAt = timePointer(t.exitAt)
+		}
 		if world.Timestamp.Sub(t.exitAt) >= 800*time.Millisecond {
 			t.current.State = "complete"
+			t.current.CompletedAt = timePointer(world.Timestamp)
 		} else {
 			t.current.State = "winding-down"
 		}
 	} else {
 		t.exitAt = time.Time{}
+		t.current.WindingDownAt = nil
 		switch t.current.State {
 		case "approaching":
 			if world.Timestamp.Sub(t.entryAt) >= 150*time.Millisecond {
 				t.current.State = "engaged"
 				t.current.engagedAt = world.Timestamp
+				t.current.EngagedAt = timePointer(world.Timestamp)
 			}
 		case "engaged", "winding-down":
 			t.current.State = "active"
@@ -117,7 +130,23 @@ func (t *EncounterTracker) Update(world World) (*Encounter, error) {
 		t.current.Version++
 	}
 	t.current.Tags = tags
+	t.current.Centroid = monsterCentroid(selected)
+	t.current.UpdatedAt = world.Timestamp
 	return t.current, nil
+}
+
+func timePointer(value time.Time) *time.Time { return &value }
+
+func monsterCentroid(monsters []Monster) Point {
+	if len(monsters) == 0 {
+		return Point{}
+	}
+	var x, y float64
+	for _, monster := range monsters {
+		x += float64(monster.Position.X)
+		y += float64(monster.Position.Y)
+	}
+	return Point{X: float32(x / float64(len(monsters))), Y: float32(y / float64(len(monsters)))}
 }
 
 func sameMonsterIDs(left, right map[string]bool) bool {
