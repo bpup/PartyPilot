@@ -643,6 +643,9 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             bool? monsterComponentPresent = null;
             int? monsterLifeCurrent = null;
             int? monsterLifeMaximum = null;
+            string? monsterRarity = null;
+            bool? entityIsAlive = null;
+            bool? entityIsHostile = null;
             if (category == "monster")
             {
                 try
@@ -650,6 +653,9 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                     if (entity.GetComponent<Monster>() != null)
                     {
                         monsterComponentPresent = true;
+                        monsterRarity = RadarMonsterMetadata.Rarity((int)entity.Rarity);
+                        entityIsAlive = entity.IsAlive;
+                        entityIsHostile = entity.IsHostile;
                         var life = entity.GetComponent<Life>();
                         var values = RadarMonsterVitals.Read(life?.CurHP, life?.MaxHP);
                         if (values.HasValue)
@@ -680,6 +686,9 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 MonsterComponentPresent = monsterComponentPresent,
                 MonsterLifeCurrent = monsterLifeCurrent,
                 MonsterLifeMaximum = monsterLifeMaximum,
+                MonsterRarity = monsterRarity,
+                EntityIsAlive = entityIsAlive,
+                EntityIsHostile = entityIsHostile,
                 X = pos.X,
                 Y = pos.Y,
                 Z = pos.Z

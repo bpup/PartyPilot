@@ -405,6 +405,12 @@ Require(RadarMonsterVitals.Read(0, 100) == (0, 100) &&
     RadarMonsterVitals.Read(101, 100) == null &&
     RadarMonsterVitals.Read(1, 0) == null,
     "Monster life evidence must be complete and bounded.");
+Require(RadarMonsterMetadata.Rarity(0) == "normal" &&
+    RadarMonsterMetadata.Rarity(1) == "magic" &&
+    RadarMonsterMetadata.Rarity(2) == "rare" &&
+    RadarMonsterMetadata.Rarity(3) == "unique" &&
+    RadarMonsterMetadata.Rarity(10_000) == null,
+    "Unsupported ExileCore2 monster rarity must remain unknown.");
 Console.WriteLine("Sensor diagnostics passed.");
 UiItemCardTreeScannerTests.Run();
 UiItemCardVtableLocatorTests.Run();

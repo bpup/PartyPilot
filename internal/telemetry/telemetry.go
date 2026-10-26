@@ -149,6 +149,9 @@ type RadarEntity struct {
 	MonsterComponentPresent *bool   `json:"MonsterComponentPresent,omitempty"`
 	MonsterLifeCurrent      *int    `json:"MonsterLifeCurrent,omitempty"`
 	MonsterLifeMaximum      *int    `json:"MonsterLifeMaximum,omitempty"`
+	MonsterRarity           *string `json:"MonsterRarity,omitempty"`
+	EntityIsAlive           *bool   `json:"EntityIsAlive,omitempty"`
+	EntityIsHostile         *bool   `json:"EntityIsHostile,omitempty"`
 	X                       float64 `json:"X"`
 	Y                       float64 `json:"Y"`
 	Z                       float64 `json:"Z"`
@@ -427,6 +430,9 @@ func validRadar(entities []RadarEntity, status string, seen *time.Time) bool {
 				entity.MonsterLifeCurrent != nil || entity.MonsterLifeMaximum != nil {
 				return false
 			}
+			if entity.MonsterRarity != nil || entity.EntityIsAlive != nil || entity.EntityIsHostile != nil {
+				return false
+			}
 		} else if entity.Category == "loot" {
 			if !worldItemWrapperPath(entity.Path) || entity.ItemPath == nil ||
 				!strings.HasPrefix(*entity.ItemPath, "Metadata/Items/") || len(*entity.ItemPath) > 256 ||
@@ -439,7 +445,8 @@ func validRadar(entities []RadarEntity, status string, seen *time.Time) bool {
 			if entity.Rarity != nil && !validLootRarity(*entity.Rarity) {
 				return false
 			}
-			if entity.MonsterComponentPresent != nil || entity.MonsterLifeCurrent != nil || entity.MonsterLifeMaximum != nil {
+			if entity.MonsterComponentPresent != nil || entity.MonsterLifeCurrent != nil || entity.MonsterLifeMaximum != nil ||
+				entity.MonsterRarity != nil || entity.EntityIsAlive != nil || entity.EntityIsHostile != nil {
 				return false
 			}
 		} else if entity.Category == "monster" {
@@ -453,8 +460,14 @@ func validRadar(entities []RadarEntity, status string, seen *time.Time) bool {
 				*entity.MonsterLifeCurrent > *entity.MonsterLifeMaximum) {
 				return false
 			}
+			if entity.MonsterRarity != nil && !validLootRarity(*entity.MonsterRarity) ||
+				(entity.MonsterRarity != nil || entity.EntityIsAlive != nil || entity.EntityIsHostile != nil) &&
+					entity.MonsterComponentPresent == nil {
+				return false
+			}
 		} else if entity.Label != nil || entity.ItemPath != nil || entity.Stack != nil || entity.Rarity != nil ||
-			entity.MonsterComponentPresent != nil || entity.MonsterLifeCurrent != nil || entity.MonsterLifeMaximum != nil {
+			entity.MonsterComponentPresent != nil || entity.MonsterLifeCurrent != nil || entity.MonsterLifeMaximum != nil ||
+			entity.MonsterRarity != nil || entity.EntityIsAlive != nil || entity.EntityIsHostile != nil {
 			return false
 		}
 		ids[entity.EntityID] = true

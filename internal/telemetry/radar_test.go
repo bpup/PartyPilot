@@ -81,9 +81,12 @@ func TestRadarMonsterLifeRemainsBoundedEvidence(t *testing.T) {
 		`"RadarSeenUtc":"2026-10-26T00:00:00Z","RadarStatus":"ok",` +
 		`"RadarEntities":[{"EntityId":7,"Category":"monster","Path":"Metadata/Monsters/Beast",` +
 		`"MonsterComponentPresent":true,"MonsterLifeCurrent":0,"MonsterLifeMaximum":100,` +
+		`"MonsterRarity":"rare","EntityIsAlive":false,"EntityIsHostile":true,` +
 		`"X":4,"Y":5,"Z":6}]}`
 	if sample, err := Decode([]byte(base)); err != nil || sample.RadarEntities[0].MonsterLifeCurrent == nil ||
-		*sample.RadarEntities[0].MonsterLifeCurrent != 0 {
+		*sample.RadarEntities[0].MonsterLifeCurrent != 0 ||
+		sample.RadarEntities[0].MonsterRarity == nil || *sample.RadarEntities[0].MonsterRarity != "rare" ||
+		sample.RadarEntities[0].EntityIsAlive == nil || *sample.RadarEntities[0].EntityIsAlive {
 		t.Fatalf("zero monster HP observation must not be discarded or treated as death: %+v, %v", sample, err)
 	}
 	for _, changed := range []string{
@@ -92,6 +95,7 @@ func TestRadarMonsterLifeRemainsBoundedEvidence(t *testing.T) {
 		strings.Replace(base, `"MonsterComponentPresent":true,`, ``, 1),
 		strings.Replace(base, `"MonsterLifeMaximum":100,`, ``, 1),
 		strings.Replace(base, `"Category":"monster"`, `"Category":"chest"`, 1),
+		strings.Replace(base, `"MonsterRarity":"rare"`, `"MonsterRarity":"error"`, 1),
 	} {
 		if _, err := Decode([]byte(changed)); err == nil {
 			t.Fatalf("invalid monster life evidence accepted: %s", changed)
