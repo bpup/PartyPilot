@@ -42,6 +42,7 @@ type Config struct {
 	TrailSpacing    float64
 	TrailMaxStep    float64
 	RequireTerrain  bool
+	TargetTrail     bool
 }
 
 func (c Config) Valid() bool {
@@ -66,20 +67,26 @@ func (e *Engine) Reset() {
 	e.trailArea = ""
 	e.trailBlocked = false
 	e.terrainSeen = false
+	e.initialHeading = point{}
+	e.lastLeaderSampleAt = time.Time{}
+	e.leaderSpeedAverage = 0
 }
 
 type point struct{ x, y float64 }
 
 type Engine struct {
-	config       Config
-	moving       bool
-	catchingUp   bool
-	trail        []point
-	lastLeader   point
-	hasLeader    bool
-	trailArea    string
-	trailBlocked bool
-	terrainSeen  bool
+	config             Config
+	moving             bool
+	catchingUp         bool
+	trail              []point
+	lastLeader         point
+	hasLeader          bool
+	trailArea          string
+	trailBlocked       bool
+	terrainSeen        bool
+	initialHeading     point
+	lastLeaderSampleAt time.Time
+	leaderSpeedAverage float64
 }
 
 func New(config Config) (*Engine, bool) {
@@ -133,7 +140,9 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 	}
 	dx, dy := leader.X-follower.X, leader.Y-follower.Y
 	distance := math.Hypot(dx, dy)
-	if e.config.TrailSpacing > 0 {
+	if e.config.TargetTrail {
+		e.updateTargetTrail(leader, follower)
+	} else if e.config.TrailSpacing > 0 {
 		if reason := e.updateTrail(leader); reason != "" {
 			e.moving = false
 			e.trailBlocked = true
@@ -150,7 +159,15 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 		return Command{State: Holding, Distance: distance}
 	}
 	targetX, targetY := leader.X, leader.Y
-	if e.config.TrailSpacing > 0 {
+	if e.config.TargetTrail {
+		target := e.trailingTarget(e.config.StopDistance)
+		targetX, targetY = target.x, target.y
+		if math.Hypot(targetX-follower.X, targetY-follower.Y) <= 2.5 || distance <= 3.75 {
+			e.moving = false
+			e.catchingUp = false
+			return Command{State: Holding, Distance: distance}
+		}
+	} else if e.config.TrailSpacing > 0 {
 		waypoint := e.nextWaypoint(follower)
 		targetX, targetY = waypoint.x, waypoint.y
 		if targetX == follower.X && targetY == follower.Y {
@@ -163,7 +180,7 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 		if !ok || (dx == 0 && dy == 0) {
 			return wait("terrain route unavailable")
 		}
-	} else if e.config.TrailSpacing > 0 {
+	} else if e.config.TargetTrail || e.config.TrailSpacing > 0 {
 		dx, dy = targetX-follower.X, targetY-follower.Y
 		if length := math.Hypot(dx, dy); length > 0 {
 			dx, dy = dx/length, dy/length
@@ -190,6 +207,68 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 		Y:        dy,
 		Distance: distance,
 	}
+}
+
+func (e *Engine) updateTargetTrail(leader, follower Position) {
+	current := point{leader.X, leader.Y}
+	jump := false
+	if len(e.trail) > 0 && e.trailArea == leader.Area {
+		delta := math.Hypot(current.x-e.lastLeader.x, current.y-e.lastLeader.y)
+		seconds := math.Max(0.001, leader.Seen.Sub(e.lastLeaderSampleAt).Seconds())
+		speed := delta / seconds
+		jump = delta >= 40 || (delta >= 12 &&
+			((e.leaderSpeedAverage > 1 && speed >= e.leaderSpeedAverage*3.5) ||
+				(e.leaderSpeedAverage <= 1 && speed >= 400)))
+		if !jump && speed > 0 {
+			if e.leaderSpeedAverage <= 0 {
+				e.leaderSpeedAverage = speed
+			} else {
+				e.leaderSpeedAverage = e.leaderSpeedAverage*0.9 + speed*0.1
+			}
+		}
+	}
+	e.lastLeaderSampleAt = leader.Seen
+	if len(e.trail) == 0 || e.trailArea != leader.Area || jump {
+		dx, dy := leader.X-follower.X, leader.Y-follower.Y
+		length := math.Hypot(dx, dy)
+		e.initialHeading = point{1, 0}
+		if length > 0.01 {
+			e.initialHeading = point{dx / length, dy / length}
+		}
+		e.trail = []point{current}
+		e.lastLeader = current
+		e.trailArea = leader.Area
+		return
+	}
+	e.lastLeader = current
+	last := e.trail[len(e.trail)-1]
+	if math.Hypot(current.x-last.x, current.y-last.y) >= 1.5 {
+		e.trail = append(e.trail, current)
+	}
+	if len(e.trail) > 1200 {
+		e.trail = e.trail[len(e.trail)-1200:]
+	}
+}
+
+func (e *Engine) trailingTarget(distance float64) point {
+	current := e.lastLeader
+	for index := len(e.trail) - 1; index >= 0; index-- {
+		previous := e.trail[index]
+		segment := math.Hypot(current.x-previous.x, current.y-previous.y)
+		if segment <= 0.001 {
+			current = previous
+			continue
+		}
+		if distance <= segment {
+			fraction := distance / segment
+			return point{current.x + (previous.x-current.x)*fraction,
+				current.y + (previous.y-current.y)*fraction}
+		}
+		distance -= segment
+		current = previous
+	}
+	return point{e.trail[0].x - e.initialHeading.x*distance,
+		e.trail[0].y - e.initialHeading.y*distance}
 }
 
 func (e *Engine) updateTrail(leader Position) string {

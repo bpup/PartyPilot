@@ -2,6 +2,7 @@ package live
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -222,10 +223,21 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 			continue
 		}
 		sample, exists := e.samples[slot]
+		if command.State == follow.Following || command.State == follow.CatchingUp {
+			command.X, command.Y = isometricStick(command.X, command.Y)
+		}
 		if exists && sample.Life != nil && *sample.Life > 0 && command.State != follow.Waiting {
 			command.ManualOverrideEligible = true
-			commands[slot] = command
 		}
+		commands[slot] = command
 	}
 	return commands
+}
+
+func isometricStick(gridX, gridY float64) (float64, float64) {
+	x, y := gridX-gridY, gridX+gridY
+	if length := math.Hypot(x, y); length > 0 {
+		return x / length, y / length
+	}
+	return 0, 0
 }

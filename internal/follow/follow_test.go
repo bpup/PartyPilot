@@ -121,6 +121,58 @@ func TestClassicCatchUpEntryStaysBeyondStopDistance(t *testing.T) {
 	}
 }
 
+func TestTargetTrailUsesTrailingPointAroundTurn(t *testing.T) {
+	now := time.Unix(52, 0)
+	engine, ok := New(Config{StopDistance: 8, ResumeDistance: 9, CatchUpDistance: 30,
+		MaxAge: time.Second, TargetTrail: true})
+	if !ok {
+		t.Fatal("target trail configuration rejected")
+	}
+	position := func(x, y float64, seen time.Time) Position {
+		return Position{X: x, Y: y, Area: "instance", Seen: seen, Valid: true}
+	}
+	engine.Step(now, position(0, 0, now), position(-20, 0, now))
+	engine.Step(now.Add(time.Millisecond), position(10, 0, now.Add(time.Millisecond)),
+		position(-20, 0, now.Add(time.Millisecond)))
+	at := now.Add(2 * time.Millisecond)
+	command := engine.Step(at, position(10, 10, at), position(12, -2, at))
+	if command.State != CatchingUp || command.X > -0.4 || command.Y < 0.8 {
+		t.Fatalf("target trail did not aim at the trailing bend: %+v", command)
+	}
+	if len(engine.trail) != 3 {
+		t.Fatalf("target trail did not retain sampled bend: %+v", engine.trail)
+	}
+	jump := now.Add(3 * time.Millisecond)
+	engine.Step(jump, position(100, 100, jump), position(50, 50, jump))
+	if len(engine.trail) != 1 {
+		t.Fatalf("target trail did not reset after a large leader jump: %+v", engine.trail)
+	}
+	velocityEngine, _ := New(Config{StopDistance: 8, ResumeDistance: 9,
+		CatchUpDistance: 30, MaxAge: time.Second, TargetTrail: true})
+	velocityEngine.Step(now, position(0, 0, now), position(-20, 0, now))
+	slow := now.Add(time.Second)
+	velocityEngine.Step(slow, position(2, 0, slow), position(-20, 0, slow))
+	fast := slow.Add(time.Millisecond)
+	velocityEngine.Step(fast, position(14, 0, fast), position(-20, 0, fast))
+	if len(velocityEngine.trail) != 1 {
+		t.Fatalf("target trail did not reset after a sudden speed jump: %+v", velocityEngine.trail)
+	}
+}
+
+func TestTargetTrailHoldsNearWaypoint(t *testing.T) {
+	now := time.Unix(53, 0)
+	engine, ok := New(Config{StopDistance: 0, ResumeDistance: 1,
+		CatchUpDistance: 20, MaxAge: time.Second, TargetTrail: true})
+	if !ok {
+		t.Fatal("target trail configuration rejected")
+	}
+	leader := Position{X: 10, Area: "instance", Seen: now, Valid: true}
+	follower := Position{X: 8, Area: "instance", Seen: now, Valid: true}
+	if got := engine.Step(now, leader, follower); got.State != Holding || got.X != 0 || got.Y != 0 {
+		t.Fatalf("near trailing waypoint emitted an invalid movement direction: %+v", got)
+	}
+}
+
 func TestTrailAndTerrainAdvanceBeforeNextTrailSample(t *testing.T) {
 	now := time.Unix(51, 0)
 	engine, ok := New(Config{StopDistance: 1, ResumeDistance: 2, CatchUpDistance: 10,

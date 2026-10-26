@@ -1,6 +1,7 @@
 package live
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -9,6 +10,22 @@ import (
 	"partypilot/internal/partylog"
 	"partypilot/internal/telemetry"
 )
+
+func TestIsometricStickMatchesSuppliedFollowDirection(t *testing.T) {
+	for _, test := range []struct {
+		gridX, gridY   float64
+		stickX, stickY float64
+	}{
+		{1, 0, 1 / math.Sqrt2, 1 / math.Sqrt2},
+		{0, 1, -1 / math.Sqrt2, 1 / math.Sqrt2},
+		{-1, 0, -1 / math.Sqrt2, -1 / math.Sqrt2},
+	} {
+		x, y := isometricStick(test.gridX, test.gridY)
+		if math.Abs(x-test.stickX) > 1e-12 || math.Abs(y-test.stickY) > 1e-12 {
+			t.Fatalf("grid (%v,%v) mapped to stick (%v,%v)", test.gridX, test.gridY, x, y)
+		}
+	}
+}
 
 func observeGridSample(engine *Engine, sample telemetry.Sample) bool {
 	sample.CoordinateSpace = "world"
@@ -36,6 +53,43 @@ func TestLiveFollowRequiresKnownWorldCoordinateSpace(t *testing.T) {
 	command := engine.Step(now.Add(time.Millisecond))[2]
 	if command.State != follow.CatchingUp || command.Distance < 11.99 || command.Distance > 12.01 {
 		t.Fatalf("world coordinates were not converted to target grid distance: %+v", command)
+	}
+	if math.Abs(command.X-1/math.Sqrt2) > 1e-12 ||
+		math.Abs(command.Y-1/math.Sqrt2) > 1e-12 {
+		t.Fatalf("live movement did not use the isometric stick direction: %+v", command)
+	}
+}
+
+func TestLiveFollowTurnsAlongRecordedLeaderTrail(t *testing.T) {
+	now := time.Now().UTC()
+	engine, err := New(map[int]int{1: 101, 2: 202}, 1,
+		follow.Config{StopDistance: 8, ResumeDistance: 9, CatchUpDistance: 30,
+			MaxAge: time.Second, TargetTrail: true}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, slot := range []int{1, 2} {
+		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
+			ObservedAt: now, Origin: "live"})
+	}
+	steps := []struct {
+		leaderX, leaderY, followerX, followerY float64
+	}{
+		{0, 0, -20, 0},
+		{10, 0, -20, 0},
+		{10, 10, 12, -2},
+	}
+	for index, step := range steps {
+		at := now.Add(time.Duration(index+1) * time.Millisecond)
+		observeGridSample(engine, telemetry.Sample{ProcessID: 101, SeenUTC: at,
+			X: step.leaderX, Y: step.leaderY})
+		observeGridSample(engine, telemetry.Sample{ProcessID: 202, SeenUTC: at,
+			X: step.followerX, Y: step.followerY})
+		command := engine.Step(at)[2]
+		if index == len(steps)-1 && (command.State != follow.CatchingUp ||
+			command.X > -0.9 || command.Y < 0.2 || command.Y > 0.4) {
+			t.Fatalf("live movement skipped the recorded bend or isometric transform: %+v", command)
+		}
 	}
 }
 

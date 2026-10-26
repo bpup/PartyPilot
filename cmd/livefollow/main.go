@@ -348,7 +348,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	config := follow.Config{StopDistance: *stop, ResumeDistance: *resume, CatchUpDistance: *catchup, MaxAge: *maxAge}
+	config := follow.Config{StopDistance: *stop, ResumeDistance: *resume, CatchUpDistance: *catchup,
+		MaxAge: *maxAge, TargetTrail: true}
 	engine, err := live.New(roster, *leader, config, *logAge)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
