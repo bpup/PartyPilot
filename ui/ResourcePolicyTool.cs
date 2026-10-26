@@ -120,10 +120,10 @@ public sealed class ResourcePolicySession : IAsyncDisposable
         var error = process.StandardError.ReadToEndAsync();
         var output = process.StandardOutput.ReadToEndAsync();
         _ = output;
-        await Task.Delay(200);
+        await Task.Delay(200).ConfigureAwait(false);
         if (process.HasExited)
         {
-            var detail = await error;
+            var detail = await error.ConfigureAwait(false);
             process.Dispose();
             throw new InvalidOperationException(string.IsNullOrWhiteSpace(detail)
                 ? "Resource manager exited during startup." : detail.Trim());
@@ -135,8 +135,8 @@ public sealed class ResourcePolicySession : IAsyncDisposable
     {
         try
         {
-            await _process.WaitForExitAsync();
-            var detail = await _error;
+            await _process.WaitForExitAsync().ConfigureAwait(false);
+            var detail = await _error.ConfigureAwait(false);
             return (_process.ExitCode, string.IsNullOrWhiteSpace(detail) ? null : detail.Trim());
         }
         catch (Exception exception)
@@ -153,17 +153,17 @@ public sealed class ResourcePolicySession : IAsyncDisposable
             {
                 try
                 {
-                    await _process.StandardInput.WriteLineAsync("stop");
-                    await _process.StandardInput.FlushAsync();
+                    await _process.StandardInput.WriteLineAsync("stop").ConfigureAwait(false);
+                    await _process.StandardInput.FlushAsync().ConfigureAwait(false);
                 }
                 catch (IOException) { /* Closing stdin provides the same stop signal. */ }
                 _process.StandardInput.Close();
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                await _process.WaitForExitAsync(timeout.Token);
+                await _process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
             }
             if (_process.ExitCode != 0)
             {
-                var detail = await _error;
+                var detail = await _error.ConfigureAwait(false);
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(detail)
                     ? $"Resource manager exited with code {_process.ExitCode}." : detail.Trim());
             }

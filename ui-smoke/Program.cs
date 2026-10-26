@@ -597,7 +597,8 @@ if (!OperatingSystem.IsWindows())
             "#!/bin/sh\nIFS= read -r command\n[ \"$command\" = stop ] || exit 5\nexit 0\n");
         File.SetUnixFileMode(fakeResource, UnixFileMode.UserRead | UnixFileMode.UserWrite |
             UnixFileMode.UserExecute);
-        await using var session = await ResourcePolicySession.StartAsync(fakeResource, resourcePlan);
+        await using var session = await ResourcePolicySession.StartAsync(fakeResource, resourcePlan)
+            .ConfigureAwait(false);
         if (session.HasExited) throw new Exception("Resource manager control test exited before stop.");
         Console.WriteLine("Desktop resource manager stop channel checked with a local fake process.");
     }
