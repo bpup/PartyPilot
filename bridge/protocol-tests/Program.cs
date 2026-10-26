@@ -304,6 +304,64 @@ if (pad3.Report != default || pad2.Report != default)
     throw new Exception("Disconnect did not neutralize focused pad.");
 if (router.ApplyLine("{\"type\":\"focus\",\"slot\":6}", now) || pad3.Report != default)
     throw new Exception("Unassigned focus was not rejected safely.");
+if (!BridgeProtocol.TryParseCombat("{\"type\":\"combat_pulse\",\"slot\":2,\"input\":\"LT+X\",\"hold_ms\":85}",
+        out var combatCommand) || combatCommand.Pulse.Buttons != 0x4000 ||
+    combatCommand.Pulse.LeftTrigger != 255 ||
+    BridgeProtocol.TryParseCombat("{\"type\":\"combat_pulse\",\"slot\":2,\"input\":\"L3\",\"hold_ms\":85}", out _) ||
+    BridgeProtocol.TryParseCombat("{\"type\":\"combat_pulse\",\"slot\":2,\"input\":\"X\",\"hold_ms\":161}", out _) ||
+    BridgeProtocol.TryParseCombat("{\"type\":\"combat_pulse\",\"slot\":7,\"input\":\"X\",\"hold_ms\":85}", out _))
+    throw new Exception("Combat input protocol accepted an unsafe button, duration, or slot.");
+var combatPad1 = new FakePad();
+var combatPad2 = new FakePad();
+var combatRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
+    { [1] = combatPad1, [2] = combatPad2 });
+if (!combatRouter.ConfigurePhysical(1) || combatRouter.BeginCombat(2, now))
+    throw new Exception("Combat lease escaped before physical input connected.");
+combatRouter.SetPhysical(new XInputGamepad { Buttons = 0x1000 }, now);
+combatRouter.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", now);
+if (!combatRouter.BeginCombat(2, now) || combatRouter.BeginCombat(2, now.AddMilliseconds(1)) ||
+    combatRouter.BeginCombat(1, now) ||
+    combatRouter.PulseCombat(2, new PadReport(0x1040, 0, 0, 0, 0, 0, 0),
+        85, now.AddMilliseconds(1)) ||
+    combatRouter.PulseCombat(2, new PadReport(0x4000, 0, 0, 100, 0, 0, 0),
+        85, now.AddMilliseconds(1)) ||
+    !combatRouter.PulseCombat(2, combatCommand.Pulse, 85, now.AddMilliseconds(1)) ||
+    combatPad2.Report.Buttons != 0x4000 || combatPad2.Report.LeftTrigger != 255 ||
+    combatPad2.X != 0 || combatPad1.Report.Buttons != 0x1000 ||
+    combatRouter.PulseCombat(2, combatCommand.Pulse, 85, now.AddMilliseconds(2)))
+    throw new Exception("Combat lease failed to isolate one follower skill pulse.");
+combatRouter.Tick(now.AddMilliseconds(87));
+if (combatPad2.X != 32767 || combatPad2.Report.Buttons != 0)
+    throw new Exception("Combat pulse did not release back to follower movement.");
+if (!combatRouter.PulseCombat(2, combatCommand.Pulse, 85, now.AddMilliseconds(100)))
+    throw new Exception("A held combat lease did not accept its next pulse.");
+combatRouter.SetMenuGuardActive(true);
+if (combatPad2.Report != default ||
+    combatRouter.PulseCombat(2, combatCommand.Pulse, 85, now.AddMilliseconds(101)))
+    throw new Exception("Menu guard failed to release combat ownership.");
+combatRouter.SetMenuGuardActive(false);
+if (!combatRouter.BeginCombat(2, now.AddMilliseconds(200)) ||
+    !combatRouter.PulseCombat(2, combatCommand.Pulse, 85, now.AddMilliseconds(201)) ||
+    !combatRouter.ApplyLine("{\"type\":\"focus\",\"slot\":2}", now.AddMilliseconds(202)) ||
+    combatPad2.Report.Buttons != 0x1000 ||
+    combatRouter.PulseCombat(2, combatCommand.Pulse, 85, now.AddMilliseconds(203)))
+    throw new Exception("Manual focus failed to revoke a combat pulse.");
+combatRouter.PhysicalDisconnected();
+if (combatPad1.Report != default || combatPad2.Report != default)
+    throw new Exception("Physical disconnect failed to neutralize combat input.");
+combatRouter.SetPhysical(new XInputGamepad { Buttons = 0x1000 }, now.AddSeconds(1));
+if (!combatRouter.BeginCombat(2, now.AddSeconds(1)))
+    throw new Exception("Combat could not restart after physical reconnection.");
+combatRouter.Tick(now.AddSeconds(12));
+if (combatRouter.PulseCombat(2, combatCommand.Pulse, 85, now.AddSeconds(12)) ||
+    combatPad2.Report != default)
+    throw new Exception("Expired combat ownership accepted another pulse.");
+if (!combatRouter.BeginCombat(2, now.AddSeconds(13)) ||
+    !combatRouter.PulseCombat(2, combatCommand.Pulse, 85, now.AddSeconds(13).AddMilliseconds(1)) ||
+    !combatRouter.BeginAutoParty(now.AddSeconds(13).AddMilliseconds(2)) ||
+    combatPad2.Report != default ||
+    combatRouter.PulseCombat(2, combatCommand.Pulse, 85, now.AddSeconds(13).AddMilliseconds(3)))
+    throw new Exception("Auto Party failed to revoke combat ownership.");
 var partyPad1 = new FakePad();
 var partyPad2 = new FakePad();
 var partyRouter = new BridgeRouter(new Dictionary<int, IPadOutput> { [1] = partyPad1, [2] = partyPad2 });

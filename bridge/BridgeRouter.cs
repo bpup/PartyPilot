@@ -51,6 +51,43 @@ internal sealed class BridgeRouter
     private ushort _autoPartyButtons;
     private DateTime _autoPartyButtonsUntilUtc;
 
+    public bool BeginCombat(int slot, DateTime nowUtc)
+    {
+        if (!_physicalMode || !_physicalConnected || _autoPartyActive || _menuGuardActive ||
+            _isolatedSlot != 0 || slot == _focusedSlot || !_routes.TryGetValue(slot, out var route) ||
+            nowUtc.Kind != DateTimeKind.Utc || route.CombatLeaseUntilUtc > nowUtc) return false;
+        route.CombatLeaseUntilUtc = nowUtc.AddSeconds(10);
+        route.CombatPulseUntilUtc = default;
+        route.CombatPulse = default;
+        route.LifeUntilUtc = route.ManaUntilUtc = DateTime.MinValue;
+        Render(slot, route);
+        return true;
+    }
+
+    public bool PulseCombat(int slot, PadReport pulse, int holdMilliseconds, DateTime nowUtc)
+    {
+        if (!_routes.TryGetValue(slot, out var route) || !_physicalMode || !_physicalConnected ||
+            _autoPartyActive || _menuGuardActive || _isolatedSlot != 0 || slot == _focusedSlot ||
+            nowUtc.Kind != DateTimeKind.Utc || nowUtc >= route.CombatLeaseUntilUtc ||
+            holdMilliseconds is < 45 or > 160 ||
+            !BridgeProtocol.ValidCombatPulse(pulse) ||
+            route.CombatPulseUntilUtc > nowUtc) return false;
+        route.CombatPulse = pulse;
+        route.CombatPulseUntilUtc = nowUtc.AddMilliseconds(holdMilliseconds);
+        route.CombatLeaseUntilUtc = nowUtc.AddSeconds(10);
+        Render(slot, route);
+        return true;
+    }
+
+    public void EndCombat(int slot)
+    {
+        if (!_routes.TryGetValue(slot, out var route)) return;
+        route.CombatLeaseUntilUtc = default;
+        route.CombatPulseUntilUtc = default;
+        route.CombatPulse = default;
+        Render(slot, route);
+    }
+
     public int FocusedSlot => _physicalMode ? _focusedSlot : 0;
     public int LastManualFocusSlot => _physicalMode ? _lastManualFocusSlot : 0;
     public bool AutoPartyActive => _autoPartyActive;
@@ -110,6 +147,7 @@ internal sealed class BridgeRouter
             // An external focus command for MAIN resumes the ordinary shared route.
             _isolatedSlot = focused == _mainSlot ? 0 : focused;
             _focusedSlot = focused;
+            ReleaseCombatAll();
             RenderAll();
             return true;
         }
@@ -204,6 +242,8 @@ internal sealed class BridgeRouter
             gamepad.RightY = 0;
         }
         _physicalReport = PadReport.FromPhysical(gamepad);
+        if (previousFocus != _focusedSlot || previousIsolation != _isolatedSlot)
+            ReleaseCombatAll();
         if (previousFocus != _focusedSlot || previousIsolation != _isolatedSlot || _rightStickFollowerOverride) RenderAll();
         else Render(_focusedSlot, _routes[_focusedSlot]);
     }
@@ -225,6 +265,7 @@ internal sealed class BridgeRouter
         _menuGuardActive = active;
         if (active)
         {
+            ReleaseCombatAll();
             foreach (var route in _routes.Values)
                 route.LifeUntilUtc = route.ManaUntilUtc = DateTime.MinValue;
         }
@@ -281,6 +322,7 @@ internal sealed class BridgeRouter
     {
         if (!_routes.TryGetValue(slot, out var route) || !_physicalMode || !_physicalConnected ||
             _menuGuardActive || (_isolatedSlot != 0 && slot != _focusedSlot) ||
+            route.CombatLeaseUntilUtc > nowUtc ||
             nowUtc.Kind != DateTimeKind.Utc || resource is not ("life" or "mana"))
             return false;
         if (resource == "life") route.LifeUntilUtc = nowUtc.AddMilliseconds(120);
@@ -307,6 +349,19 @@ internal sealed class BridgeRouter
         foreach (var (slot, route) in _routes)
         {
             var expired = false;
+            if (route.CombatLeaseUntilUtc != default && nowUtc >= route.CombatLeaseUntilUtc)
+            {
+                route.CombatLeaseUntilUtc = default;
+                route.CombatPulseUntilUtc = default;
+                route.CombatPulse = default;
+                expired = true;
+            }
+            else if (route.CombatPulseUntilUtc != default && nowUtc >= route.CombatPulseUntilUtc)
+            {
+                route.CombatPulseUntilUtc = default;
+                route.CombatPulse = default;
+                expired = true;
+            }
             if (route.LifeUntilUtc != DateTime.MinValue && nowUtc >= route.LifeUntilUtc)
             {
                 route.LifeUntilUtc = DateTime.MinValue;
@@ -353,6 +408,8 @@ internal sealed class BridgeRouter
                 route.Active = false;
                 route.EligibleForManualMovement = false;
                 route.LifeUntilUtc = route.ManaUntilUtc = DateTime.MinValue;
+                route.CombatLeaseUntilUtc = route.CombatPulseUntilUtc = default;
+                route.CombatPulse = default;
                 route.Output.SetReport(default);
             }
             _reportBatch?.EndBatch();
@@ -394,6 +451,11 @@ internal sealed class BridgeRouter
             route.Output.SetReport(default);
             return;
         }
+        if (route.CombatPulseUntilUtc != default)
+        {
+            route.Output.SetReport(route.CombatPulse);
+            return;
+        }
         if (_rightStickFollowerOverride && _physicalConnected && _isolatedSlot == 0 &&
             (route.EligibleForManualMovement ||
              (_allowDirectRightStick && slot == _directRightStickSlot)) &&
@@ -413,6 +475,16 @@ internal sealed class BridgeRouter
         return report with { Buttons = (ushort)(report.Buttons | buttons) };
     }
 
+    private void ReleaseCombatAll()
+    {
+        foreach (var route in _routes.Values)
+        {
+            route.CombatLeaseUntilUtc = default;
+            route.CombatPulseUntilUtc = default;
+            route.CombatPulse = default;
+        }
+    }
+
     private sealed class PadRoute(IPadOutput output)
     {
         public IPadOutput Output { get; } = output;
@@ -422,5 +494,8 @@ internal sealed class BridgeRouter
         public bool EligibleForManualMovement { get; set; }
         public DateTime LifeUntilUtc { get; set; }
         public DateTime ManaUntilUtc { get; set; }
+        public DateTime CombatLeaseUntilUtc { get; set; }
+        public DateTime CombatPulseUntilUtc { get; set; }
+        public PadReport CombatPulse { get; set; }
     }
 }

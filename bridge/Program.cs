@@ -195,13 +195,14 @@ if (!args.Contains("--enable-controller") || !BridgeSlots.TryParse(args, out var
     !FocusPadMap.TryParse(args, slots, client3Options?.PrivateSlots ?? [], out var focusPads) ||
     (client3Options is not null && focusPads is null))
 {
-    Console.Error.WriteLine("Usage: PartyPilot.Bridge --enable-controller --slots 1,2 [--focus-pad-map 1:1,2:2] [--physical-index 0 --main-slot 1 --physical-hidden-confirmed --device-instance HID\\... --game-exe C:\\Game\\PathOfExile.exe [--pairing-protected] [--client3-pid PID --client3-window-handle HANDLE --client3-game-exe PATH --client3-players 5[,6]] [--right-stick-follower-override --direct-right-stick-slot 2]]");
+    Console.Error.WriteLine("Usage: PartyPilot.Bridge --enable-controller --slots 1,2 [--focus-pad-map 1:1,2:2] [--physical-index 0 --main-slot 1 --physical-hidden-confirmed --device-instance HID\\... --game-exe C:\\Game\\PathOfExile.exe [--pairing-protected] [--enable-combat] [--client3-pid PID --client3-window-handle HANDLE --client3-game-exe PATH --client3-players 5[,6]] [--right-stick-follower-override --direct-right-stick-slot 2]]");
     return 2;
 }
 var wgiMode = args.Contains("--physical-wgi");
 var physicalMode = wgiMode || args.Contains("--physical-index") || args.Contains("--main-slot") ||
     args.Contains("--physical-hidden-confirmed") || args.Contains("--right-stick-follower-override");
 var autoFlaskEnabled = args.Contains("--enable-auto-flask");
+var combatEnabled = args.Contains("--enable-combat");
 var rightStickFollowerOverride = args.Contains("--right-stick-follower-override");
 var directSlotPosition = Array.IndexOf(args, "--direct-right-stick-slot");
 var directRightStickSlot = 0;
@@ -217,6 +218,11 @@ var protectedPairing = args.Contains("--pairing-protected");
 if (autoFlaskEnabled && (!physicalMode || !protectedPairing))
 {
     Console.Error.WriteLine("Automatic flask input requires physical mode and protected pairing.");
+    return 2;
+}
+if (combatEnabled && (!physicalMode || !protectedPairing))
+{
+    Console.Error.WriteLine("Combat input requires physical mode and protected pairing.");
     return 2;
 }
 var physicalIndexPosition = Array.IndexOf(args, "--physical-index");
@@ -457,6 +463,25 @@ try
                     }
                     // Menu, focus isolation, or a missing physical pad can suppress a valid pulse.
                     router.PulseFlask(flaskCommand.Slot, flaskCommand.Resource, DateTime.UtcNow);
+                    continue;
+                }
+                if (BridgeProtocol.TryParseCombat(line, out var combatControl))
+                {
+                    if (!combatEnabled || pairingGate?.Phase != ProtectedPairingPhase.Complete ||
+                        !slots.Contains(combatControl.Slot) ||
+                        (combatControl.Type == "combat_begin" &&
+                         !router.BeginCombat(combatControl.Slot, DateTime.UtcNow)) ||
+                        (combatControl.Type == "combat_pulse" &&
+                         !router.PulseCombat(combatControl.Slot, combatControl.Pulse,
+                             combatControl.HoldMilliseconds, DateTime.UtcNow)))
+                    {
+                        router.NeutralAll();
+                        Console.Error.WriteLine("Combat controller command was rejected; all controllers neutral.");
+                        return 1;
+                    }
+                    if (combatControl.Type == "combat_end") router.EndCombat(combatControl.Slot);
+                    Console.WriteLine(JsonSerializer.Serialize(new { @event = "combat_control",
+                        type = combatControl.Type, slot = combatControl.Slot }));
                     continue;
                 }
                 if ((pairingGate is not null && pairingGate.Phase != ProtectedPairingPhase.Complete) ||
