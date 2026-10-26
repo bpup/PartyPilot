@@ -12,6 +12,9 @@
     <Compile Include="../BridgeRouter.cs" Link="BridgeRouter.cs" />
     <Compile Include="../Client3FocusRouting.cs" Link="Client3FocusRouting.cs" />
     <Compile Include="../Client3InputPublisher.cs" Link="Client3InputPublisher.cs" />
+    <Compile Include="../Client3RuntimeAttach.cs" Link="Client3RuntimeAttach.cs" />
+    <Compile Include="../Client3AttachRequest.cs" Link="Client3AttachRequest.cs" />
+    <Compile Include="../ForegroundWindowProbe.cs" Link="ForegroundWindowProbe.cs" />
     <Compile Include="../PrivateSlotFrame.cs" Link="PrivateSlotFrame.cs" />
     <Compile Include="../PrivateSlotConfig.cs" Link="PrivateSlotConfig.cs" />
     <Compile Include="../PrivateSlotPublisher.cs" Link="PrivateSlotPublisher.cs" />

@@ -23,6 +23,7 @@ internal sealed class Client3InputPublisher : IDisposable
         bool includeP6) => new(publisher, includeP6);
 
     internal bool IsReady => _publisher.IsReady;
+    internal int Status => _publisher.Status;
 
     internal bool Publish(int focusedPlayer, PadReport physical,
         PadReport p5Assist, PadReport p6Assist)

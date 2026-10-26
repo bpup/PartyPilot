@@ -80,6 +80,15 @@ internal sealed class PrivateSlotPublisher : IDisposable
         }
     }
 
+    internal int Status
+    {
+        get
+        {
+            lock (_sync) return !_disposed && _processAlive() && HasValidFrame()
+                ? _view.ReadInt32(12) : 0;
+        }
+    }
+
     internal bool WritePad(int player, PadReport report)
     {
         lock (_sync)

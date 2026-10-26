@@ -23,6 +23,22 @@ PrivateSlotConfigTests.Run();
 PrivateSlotPublisherTests.Run();
 Client3FocusRoutingTests.Run();
 Client3InputPublisherTests.Run();
+if (!Client3RuntimeAttach.IsKnownGameExecutable(@"C:\PoE2\PathOfExile_x64Steam.exe") ||
+    Client3RuntimeAttach.IsKnownGameExecutable(@"C:\Other\notepad.exe") ||
+    Client3RuntimeAttach.IsKnownGameExecutable(@"C:\PoE2\PathOfExile_x64Steam.dll"))
+    throw new Exception("Client 3 native attach accepted an unrelated process name.");
+if (!Client3AttachRequest.TryParse(["--attach-private-client3", "--pid", "123",
+        "--window-handle", "456", "--game-exe", @"C:\PoE2\PathOfExile_x64.exe",
+        "--players", "5,6"], out var attachRequest) ||
+    attachRequest != new Client3AttachRequest(123, 456,
+        @"C:\PoE2\PathOfExile_x64.exe", true) ||
+    Client3AttachRequest.TryParse(["--attach-private-client3", "--pid", "123",
+        "--window-handle", "456", "--game-exe", @"C:\PoE2\PathOfExile_x64.exe",
+        "--players", "6"], out _) ||
+    Client3AttachRequest.TryParse(["--attach-private-client3", "--pid", "123",
+        "--pid", "456", "--game-exe", @"C:\PoE2\PathOfExile_x64.exe",
+        "--players", "5"], out _))
+    throw new Exception("Client 3 attach binding arguments were accepted ambiguously.");
 
 Expect("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", true, 2, true);
 Expect("{\"slot\":3,\"state\":\"holding\"}", true, 3, false);
