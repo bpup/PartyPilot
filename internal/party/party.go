@@ -24,6 +24,7 @@ type Coordinator struct {
 	lastActiveLeader int
 	followTargets    map[int]int
 	lastTargets      map[int]int
+	planner          *navigation.PathPlanner
 }
 
 func New(players []focus.Player, leader int, config follow.Config) (*Coordinator, error) {
@@ -35,13 +36,17 @@ func New(players []focus.Player, leader int, config follow.Config) (*Coordinator
 		return nil, ErrInvalidFollowConfig
 	}
 	followers := make(map[int]*follow.Engine)
+	var planner *navigation.PathPlanner
+	if config.AsyncTargetPath {
+		planner = navigation.NewPathPlanner()
+	}
 	for _, player := range players {
-		engine, _ := follow.New(config)
+		engine, _ := follow.NewWithPathPlanner(config, planner)
 		followers[player.Slot] = engine
 	}
 	return &Coordinator{
 		router: router, leader: leader, lastManualFocus: leader, followers: followers, baseConfig: config,
-		followTargets: make(map[int]int), lastTargets: make(map[int]int),
+		followTargets: make(map[int]int), lastTargets: make(map[int]int), planner: planner,
 	}, nil
 }
 
@@ -58,10 +63,11 @@ func (c *Coordinator) SetStopDistance(slot int, distance float64) error {
 	config := c.baseConfig
 	config.StopDistance = distance
 	config.ResumeDistance = distance + 3
-	engine, ok := follow.New(config)
+	engine, ok := follow.NewWithPathPlanner(config, c.planner)
 	if !ok {
 		return fmt.Errorf("invalid follow configuration for player %d", slot)
 	}
+	c.followers[slot].Close()
 	c.followers[slot] = engine
 	delete(c.lastTargets, slot)
 	return nil
@@ -91,6 +97,15 @@ func (c *Coordinator) SetLastFocusedLeads(enabled bool) {
 func (c *Coordinator) ResetFollow() {
 	for _, engine := range c.followers {
 		engine.Reset()
+	}
+}
+
+func (c *Coordinator) Close() {
+	for _, engine := range c.followers {
+		engine.Close()
+	}
+	if c.planner != nil {
+		c.planner.Close()
 	}
 }
 

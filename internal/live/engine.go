@@ -74,6 +74,8 @@ func (e *Engine) SetStopDistance(slot int, distance float64) error {
 
 func (e *Engine) Leader() int { return e.leader }
 
+func (e *Engine) Close() { e.coordinator.Close() }
+
 func (e *Engine) ObserveManualFocus(slot int) error {
 	if !e.lastFocusedLeads {
 		return fmt.Errorf("last-focused leadership is disabled")

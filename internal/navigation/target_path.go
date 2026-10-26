@@ -2,6 +2,7 @@ package navigation
 
 import (
 	"container/heap"
+	"context"
 	"math"
 )
 
@@ -29,7 +30,7 @@ func (q *routeQueue) Pop() any {
 // clearance, diagonal corner guard and line-of-sight simplification. The grid
 // still needs a verified area identity and coordinate mapping before live use.
 func (g *Grid) TargetWaypoints(fromX, fromY, toX, toY float64) ([]Waypoint, bool) {
-	return g.targetWaypoints(fromX, fromY, toX, toY, nil)
+	return g.targetWaypoints(context.Background(), fromX, fromY, toX, toY, nil)
 }
 
 // TargetWaypointsAvoid treats cells within radius of the observed leader as
@@ -39,14 +40,25 @@ func (g *Grid) TargetWaypointsAvoid(fromX, fromY, toX, toY,
 	if !finite(avoidX) || !finite(avoidY) || !finite(radius) || radius <= 0 {
 		return nil, false
 	}
-	return g.targetWaypoints(fromX, fromY, toX, toY,
+	return g.targetWaypoints(context.Background(), fromX, fromY, toX, toY,
 		&avoidRegion{x: avoidX, y: avoidY, radius: radius})
 }
 
-func (g *Grid) targetWaypoints(fromX, fromY, toX, toY float64,
+// TargetWaypointsAvoidContext permits a queued search to stop after its
+// request is superseded. Terrain must remain immutable during the search.
+func (g *Grid) TargetWaypointsAvoidContext(ctx context.Context,
+	fromX, fromY, toX, toY, avoidX, avoidY, radius float64) ([]Waypoint, bool) {
+	if ctx == nil || !finite(avoidX) || !finite(avoidY) || !finite(radius) || radius <= 0 {
+		return nil, false
+	}
+	return g.targetWaypoints(ctx, fromX, fromY, toX, toY,
+		&avoidRegion{x: avoidX, y: avoidY, radius: radius})
+}
+
+func (g *Grid) targetWaypoints(ctx context.Context, fromX, fromY, toX, toY float64,
 	avoid *avoidRegion) ([]Waypoint, bool) {
 	if !g.Valid() || !g.TargetNavigation ||
-		!finite(fromX) || !finite(fromY) || !finite(toX) || !finite(toY) {
+		!finite(fromX) || !finite(fromY) || !finite(toX) || !finite(toY) || ctx.Err() != nil {
 		return nil, false
 	}
 	access := newGridAccess(g)
@@ -116,6 +128,9 @@ func (g *Grid) targetWaypoints(fromX, fromY, toX, toY float64,
 	heap.Init(queue)
 	steps := [...]Cell{{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}}
 	for examined := 0; queue.Len() > 0 && examined < 60000; examined++ {
+		if examined&255 == 0 && ctx.Err() != nil {
+			return nil, false
+		}
 		current := heap.Pop(queue).(routeEntry).index
 		if _, seen := closed[current]; seen {
 			continue
@@ -176,6 +191,9 @@ func (g *Grid) targetWaypoints(fromX, fromY, toX, toY float64,
 	points[len(points)-1] = Waypoint{toX, toY}
 	var simplified []Waypoint
 	for index, checks := 0, 0; index < len(points)-1; {
+		if ctx.Err() != nil {
+			return nil, false
+		}
 		chosen := index + 1
 		for next := len(points) - 1; next > chosen && checks < 8192; next-- {
 			checks++

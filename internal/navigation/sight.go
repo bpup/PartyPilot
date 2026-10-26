@@ -12,6 +12,16 @@ func (g *Grid) HasLineOfSight(fromX, fromY, toX, toY float64, clearance int) boo
 	return g.lineOfSight(newGridAccess(g), fromX, fromY, toX, toY, clearance, nil)
 }
 
+func (g *Grid) HasLineOfSightAvoid(fromX, fromY, toX, toY,
+	avoidX, avoidY, radius float64, clearance int) bool {
+	if !g.Valid() || !g.TargetNavigation || clearance < 0 || clearance > 8 ||
+		!finite(avoidX) || !finite(avoidY) || !finite(radius) || radius <= 0 {
+		return false
+	}
+	return g.lineOfSight(newGridAccess(g), fromX, fromY, toX, toY,
+		clearance, &avoidRegion{x: avoidX, y: avoidY, radius: radius})
+}
+
 // HasClearFollowSegmentAvoid mirrors the supplied build's short escape from
 // an obstructed starting cell. The leader exclusion applies to both checks.
 func (g *Grid) HasClearFollowSegmentAvoid(fromX, fromY, toX, toY,

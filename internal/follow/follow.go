@@ -44,6 +44,7 @@ type Config struct {
 	TrailMaxStep          float64
 	RequireTerrain        bool
 	TargetTrail           bool
+	AsyncTargetPath       bool
 	ClassicCollisionDodge bool
 }
 
@@ -56,7 +57,7 @@ func (c Config) Valid() bool {
 		c.StopDistance >= 0 &&
 		c.ResumeDistance > c.StopDistance &&
 		c.CatchUpDistance > 0 &&
-		c.MaxAge > 0 &&
+		c.MaxAge > 0 && (!c.AsyncTargetPath || c.TargetTrail) &&
 		((c.TrailSpacing == 0 && c.TrailMaxStep == 0) ||
 			(c.TrailSpacing > 0 && c.TrailMaxStep > c.TrailSpacing))
 }
@@ -80,6 +81,11 @@ func (e *Engine) Reset() {
 	e.sprintDown = false
 	e.route = nil
 	e.routeTerrain = nil
+	e.planningTerrain = nil
+	e.planPending = false
+	if e.planner != nil && e.plannerOwned {
+		e.planner.Clear()
+	}
 }
 
 type point struct{ x, y float64 }
@@ -108,13 +114,42 @@ type Engine struct {
 	planOrigin            point
 	planTarget            point
 	planAvoid             point
+	planPending           bool
+	planRequestedAt       time.Time
+	planningTerrain       *navigation.Grid
+	planner               *navigation.PathPlanner
+	plannerOwned          bool
 }
 
 func New(config Config) (*Engine, bool) {
 	if !config.Valid() {
 		return nil, false
 	}
-	return &Engine{config: config}, true
+	engine := &Engine{config: config}
+	if config.AsyncTargetPath {
+		engine.planner = navigation.NewPathPlanner()
+		engine.plannerOwned = true
+	}
+	return engine, true
+}
+
+func NewWithPathPlanner(config Config, planner *navigation.PathPlanner) (*Engine, bool) {
+	if !config.Valid() || config.AsyncTargetPath != (planner != nil) {
+		return nil, false
+	}
+	return &Engine{config: config, planner: planner}, true
+}
+
+func (e *Engine) clearPlanner() {
+	if e.planner != nil && e.plannerOwned {
+		e.planner.Clear()
+	}
+}
+
+func (e *Engine) Close() {
+	if e.planner != nil && e.plannerOwned {
+		e.planner.Close()
+	}
 }
 
 func (e *Engine) Step(now time.Time, leader, follower Position) Command {
@@ -236,8 +271,18 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 	if terrain != nil {
 		var ok bool
 		if e.config.TargetTrail && terrain.TargetNavigation {
-			dx, dy, ok = e.targetRouteDirection(terrain,
-				follower.X, follower.Y, targetX, targetY, leader.X, leader.Y)
+			if e.planner != nil {
+				var state navigation.PathState
+				dx, dy, state = e.asyncTargetRouteDirection(terrain,
+					follower.X, follower.Y, targetX, targetY, leader.X, leader.Y)
+				if state == navigation.PathPending {
+					return Command{State: Following, Distance: distance, Reason: "Planning route"}
+				}
+				ok = state == navigation.PathReady
+			} else {
+				dx, dy, ok = e.targetRouteDirection(terrain,
+					follower.X, follower.Y, targetX, targetY, leader.X, leader.Y)
+			}
 			if !ok {
 				recoveryX, recoveryY := playerDetour(leader.X, leader.Y,
 					follower.X, follower.Y, targetX, targetY)

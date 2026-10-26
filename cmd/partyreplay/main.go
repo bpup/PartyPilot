@@ -80,6 +80,7 @@ func replay(reader io.Reader, writer io.Writer, coordinator *party.Coordinator, 
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	encoder := json.NewEncoder(writer)
+	var activeTerrain *navigation.Grid
 	line := 0
 	for scanner.Scan() {
 		line++
@@ -92,6 +93,13 @@ func replay(reader io.Reader, writer io.Writer, coordinator *party.Coordinator, 
 		}
 		if item.Now.IsZero() {
 			return fmt.Errorf("line %d: missing now", line)
+		}
+		if item.Terrain == nil {
+			activeTerrain = nil
+		} else if activeTerrain != nil && activeTerrain.Equivalent(item.Terrain) {
+			item.Terrain = activeTerrain
+		} else {
+			activeTerrain = item.Terrain
 		}
 		if item.ResetFollow {
 			coordinator.ResetFollow()
@@ -124,6 +132,7 @@ func main() {
 	trailMaxStep := flag.Float64("trail-max-step", 0, "maximum leader displacement between observations")
 	requireTerrain := flag.Bool("require-terrain", false, "stop when an instance-matched terrain grid is unavailable")
 	targetTrail := flag.Bool("target-trail", false, "use the target build's observed trail spacing rule")
+	asyncTargetPath := flag.Bool("async-target-path", false, "queue target-format terrain routes and hold movement while planning")
 	classicCollisionDodge := flag.Bool("classic-collision-dodge", false, "use controlled terrain to rearm classic sprint near obstacles")
 	pace := flag.Duration("pace", 0, "delay between replay frames; zero runs immediately")
 	lastFocusedLeads := flag.Bool("last-focused-leads", false, "make the manually focused player the follow leader")
@@ -136,12 +145,14 @@ func main() {
 	}
 	config := follow.Config{StopDistance: *stop, ResumeDistance: *resume, CatchUpDistance: *catchup, MaxAge: *maxAge,
 		TrailSpacing: *trailSpacing, TrailMaxStep: *trailMaxStep, RequireTerrain: *requireTerrain,
-		TargetTrail: *targetTrail, ClassicCollisionDodge: *classicCollisionDodge}
+		TargetTrail: *targetTrail, AsyncTargetPath: *asyncTargetPath,
+		ClassicCollisionDodge: *classicCollisionDodge}
 	coordinator, err := party.New(players, *leader, config)
 	if err != nil || *path == "" || *pace < 0 {
 		fmt.Fprintln(os.Stderr, "usage: partyreplay -replay file.jsonl -roster 1:1,2:2 -leader 1 -stop N -resume N -catchup N -max-age 750ms")
 		os.Exit(2)
 	}
+	defer coordinator.Close()
 	coordinator.SetLastFocusedLeads(*lastFocusedLeads)
 	targets, err := parseFollowTargets(*followTargets)
 	if err != nil {

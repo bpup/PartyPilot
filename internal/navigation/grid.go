@@ -1,6 +1,10 @@
 package navigation
 
-import "math"
+import (
+	"bytes"
+	"math"
+	"slices"
+)
 
 // Grid is a controlled, instance-specific navigation input. Its cells must
 // come from a verified source before it can be used with live game data.
@@ -21,6 +25,21 @@ type Grid struct {
 type Cell struct {
 	X int `json:"x"`
 	Y int `json:"y"`
+}
+
+// Equivalent lets a replay retain one immutable map identity across JSON
+// frames, which is required for target-style route caching and queued search.
+func (g *Grid) Equivalent(other *Grid) bool {
+	if g == nil || other == nil {
+		return g == other
+	}
+	return g.Area == other.Area && g.OriginX == other.OriginX &&
+		g.OriginY == other.OriginY && g.CellSize == other.CellSize &&
+		g.Width == other.Width && g.Height == other.Height &&
+		g.TargetNavigation == other.TargetNavigation &&
+		g.PackedSource == other.PackedSource &&
+		g.packedStride == other.packedStride &&
+		bytes.Equal(g.packed, other.packed) && slices.Equal(g.Blocked, other.Blocked)
 }
 
 func finite(value float64) bool { return !math.IsNaN(value) && !math.IsInf(value, 0) }

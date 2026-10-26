@@ -9,6 +9,7 @@ import (
 
 	"partypilot/internal/focus"
 	"partypilot/internal/follow"
+	"partypilot/internal/navigation"
 	"partypilot/internal/party"
 )
 
@@ -25,6 +26,47 @@ func TestParseFollowTargetsRejectsAmbiguousRoutes(t *testing.T) {
 		if _, err := parseFollowTargets(value); err == nil {
 			t.Fatalf("accepted ambiguous or invalid route %q", value)
 		}
+	}
+}
+
+func TestAsyncPartyReplayAdvancesOnSameTerrain(t *testing.T) {
+	at := time.Now().UTC()
+	coordinator, err := party.New([]focus.Player{{Slot: 1, Client: 1}, {Slot: 2, Client: 2}}, 1,
+		follow.Config{StopDistance: 9, ResumeDistance: 10, CatchUpDistance: 30,
+			MaxAge: time.Second, TargetTrail: true, AsyncTargetPath: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer coordinator.Close()
+	grid := &navigation.Grid{Area: "instance", CellSize: 1, Width: 45,
+		Height: 31, TargetNavigation: true}
+	for y := 5; y <= 15; y++ {
+		grid.Blocked = append(grid.Blocked, navigation.Cell{X: 10, Y: y})
+	}
+	var input, output bytes.Buffer
+	for index := 0; index < 2; index++ {
+		now := at.Add(time.Duration(index) * 100 * time.Millisecond)
+		item := frame{Now: now, Terrain: grid, Positions: map[int]follow.Position{
+			1: {X: 25, Y: 15, Area: "instance", Seen: now, Valid: true},
+			2: {X: 5, Y: 15, Area: "instance", Seen: now, Valid: true},
+		}}
+		if err := json.NewEncoder(&input).Encode(item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := replay(&input, &output, coordinator, 50*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("missing replay frames: %s", output.String())
+	}
+	var first, second result
+	if json.Unmarshal([]byte(lines[0]), &first) != nil ||
+		json.Unmarshal([]byte(lines[1]), &second) != nil ||
+		first.Commands[2].Reason != "Planning route" ||
+		second.Commands[2].Reason == "Planning route" || second.Commands[2].Y == 0 {
+		t.Fatalf("async party route did not complete: %+v, %+v", first, second)
 	}
 }
 

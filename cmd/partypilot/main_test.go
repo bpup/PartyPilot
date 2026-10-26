@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"partypilot/internal/follow"
+	"partypilot/internal/navigation"
 )
 
 func TestPackedTerrainReplayProducesDetour(t *testing.T) {
@@ -144,5 +146,51 @@ func TestPackedTerrainReplayLoadsValidatedDiagnosticCapture(t *testing.T) {
 	encodedFrame, _ = json.Marshal(item)
 	if err := replay(bytes.NewReader(append(encodedFrame, '\n')), &bytes.Buffer{}, config); err == nil {
 		t.Fatal("capture and manual dimensions were both accepted")
+	}
+}
+
+func TestAsyncTargetReplayReusesSameTerrainAcrossFrames(t *testing.T) {
+	grid := &navigation.Grid{Area: "a", CellSize: 1, Width: 45, Height: 31,
+		TargetNavigation: true}
+	for y := 5; y <= 15; y++ {
+		grid.Blocked = append(grid.Blocked, navigation.Cell{X: 10, Y: y})
+	}
+	at := time.Now().UTC()
+	item := frame{Now: at,
+		Leader:   follow.Position{X: 25, Y: 15, Area: "a", Seen: at, Valid: true},
+		Follower: follow.Position{X: 5, Y: 15, Area: "a", Seen: at, Valid: true},
+		Terrain:  grid}
+	first, _ := json.Marshal(item)
+	item.Now = at.Add(100 * time.Millisecond)
+	item.Leader.Seen, item.Follower.Seen = item.Now, item.Now
+	second, _ := json.Marshal(item)
+	reader, writer := io.Pipe()
+	go func() {
+		_, _ = writer.Write(append(first, '\n'))
+		time.Sleep(50 * time.Millisecond)
+		_, _ = writer.Write(append(second, '\n'))
+		_ = writer.Close()
+	}()
+	var output bytes.Buffer
+	config := follow.Config{StopDistance: 9, ResumeDistance: 10,
+		CatchUpDistance: 30, MaxAge: time.Second,
+		TargetTrail: true, AsyncTargetPath: true}
+	if err := replay(reader, &output, config); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("missing async frames: %s", output.String())
+	}
+	var pending, ready follow.Command
+	if err := json.Unmarshal([]byte(lines[0]), &pending); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &ready); err != nil {
+		t.Fatal(err)
+	}
+	if pending.Reason != "Planning route" || pending.X != 0 || pending.Y != 0 ||
+		ready.Reason == "Planning route" || ready.Y == 0 {
+		t.Fatalf("replay did not advance from pending to detour: %+v, %+v", pending, ready)
 	}
 }

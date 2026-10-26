@@ -6,6 +6,7 @@ import (
 
 	"partypilot/internal/focus"
 	"partypilot/internal/follow"
+	"partypilot/internal/navigation"
 )
 
 func TestManualFocusStopsOnlySelectedFollower(t *testing.T) {
@@ -39,6 +40,41 @@ func TestManualFocusStopsOnlySelectedFollower(t *testing.T) {
 	commands = coordinator.Step(now, positions)
 	if commands[2].State != follow.CatchingUp {
 		t.Fatalf("resume: %+v", commands)
+	}
+}
+
+func TestAsyncPartySharesPlannerAcrossFollowerReset(t *testing.T) {
+	coordinator, err := New([]focus.Player{{Slot: 1, Client: 1},
+		{Slot: 2, Client: 2}, {Slot: 3, Client: 3}}, 1,
+		follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 30,
+			MaxAge: time.Second, TargetTrail: true, AsyncTargetPath: true})
+	if err != nil || coordinator.planner == nil {
+		t.Fatalf("shared planner missing: %v", err)
+	}
+	defer coordinator.Close()
+	grid := &navigation.Grid{Area: "instance", CellSize: 1, Width: 40,
+		Height: 30, TargetNavigation: true}
+	from, goal, avoid := navigation.Waypoint{X: 5, Y: 10},
+		navigation.Waypoint{X: 25, Y: 10}, navigation.Waypoint{X: 35, Y: 20}
+	if plan := coordinator.planner.Request(grid, from, goal, avoid, 0); plan.State != navigation.PathPending {
+		t.Fatalf("new shared request did not queue: %+v", plan)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if coordinator.planner.Request(grid, from, goal, avoid, 0).State == navigation.PathReady {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if coordinator.planner.SearchCount() != 1 {
+		t.Fatal("shared request did not complete once")
+	}
+	coordinator.followers[2].Reset()
+	if err := coordinator.SetStopDistance(2, 4); err != nil {
+		t.Fatal(err)
+	}
+	if plan := coordinator.planner.Request(grid, from, goal, avoid, 0); plan.State != navigation.PathReady || coordinator.planner.SearchCount() != 1 {
+		t.Fatalf("one follower reset another follower's shared route: %+v", plan)
 	}
 }
 

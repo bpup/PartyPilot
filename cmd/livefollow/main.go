@@ -348,12 +348,13 @@ func main() {
 		os.Exit(2)
 	}
 	config := follow.Config{StopDistance: *stop, ResumeDistance: *stop + 3, CatchUpDistance: *catchup,
-		MaxAge: *maxAge, TargetTrail: true}
+		MaxAge: *maxAge, TargetTrail: true, AsyncTargetPath: true}
 	engine, err := live.New(roster, *leader, config, *logAge)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
+	defer engine.Close()
 	engine.SetLeaderName(*leaderName)
 	for slot, name := range names {
 		if err := engine.SetMemberName(slot, name); err != nil {
