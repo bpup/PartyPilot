@@ -31,6 +31,9 @@ public sealed class MainWindow : Window
     private readonly AccountProfileStore _accountProfiles = new();
     private readonly StackPanel[] _accountRows = new StackPanel[3];
     private readonly TextBlock[] _accountResults = new TextBlock[3];
+    private readonly LoginCalibrationStore _loginCalibrations = new();
+    private readonly Button[] _calibrateLogin = new Button[3];
+    private readonly TextBlock[] _calibrationResults = new TextBlock[3];
     private readonly Button _check = new();
     private readonly Button _launch = new();
     private readonly Button _attach = new();
@@ -342,7 +345,7 @@ public sealed class MainWindow : Window
     private Border BuildAccountStep()
     {
         var panel = Step("2A", "ACCOUNTS · 账号资料",
-            "按客户端保存独立 PoE 账号；密码只写入当前 Windows 用户保护的本地资料。登录画面校准与自动填入尚未接入。");
+            "按客户端保存独立 PoE 账号；密码只写入当前 Windows 用户保护的本地资料。绑定游戏窗口后可标记邮箱和密码字段；自动填入尚未接入。");
         for (var index = 0; index < 3; index++)
         {
             var client = index + 1;
@@ -354,6 +357,7 @@ public sealed class MainWindow : Window
                 HorizontalAlignment = HorizontalAlignment.Left };
             row.Children.Add(email);
             row.Children.Add(password);
+            row.Children.Add(Label("修改账号时密码可留空，沿用本客户端已保存的密码。", 12, MutedBrush));
             var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 10 };
             var save = new Button { Content = "保存账号资料", IsEnabled = OperatingSystem.IsWindows() };
             var remove = new Button { Content = "删除账号资料", IsEnabled = OperatingSystem.IsWindows() };
@@ -380,6 +384,22 @@ public sealed class MainWindow : Window
             var status = Label(_accountProfiles.Describe(client), 12, MutedBrush);
             row.Children.Add(status);
             _accountResults[index] = status;
+            var calibrationActions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 10 };
+            var calibrate = new Button { Content = "标记登录字段", IsEnabled = false };
+            calibrate.Click += async (_, _) => await CalibrateLoginAsync(client);
+            var clearMark = new Button { Content = "清除字段标记", IsEnabled = OperatingSystem.IsWindows() };
+            clearMark.Click += (_, _) =>
+            {
+                _calibrationResults[client - 1].Text = _loginCalibrations.Delete(client)
+                    ? "登录字段标记已清除。" : "登录字段标记无法清除。";
+            };
+            calibrationActions.Children.Add(calibrate);
+            calibrationActions.Children.Add(clearMark);
+            row.Children.Add(calibrationActions);
+            var calibrationStatus = Label(_loginCalibrations.Load(client).Message, 12, MutedBrush);
+            row.Children.Add(calibrationStatus);
+            _calibrateLogin[index] = calibrate;
+            _calibrationResults[index] = calibrationStatus;
             _accountRows[index] = row;
             panel.Children.Add(row);
         }
@@ -697,6 +717,7 @@ public sealed class MainWindow : Window
                 _clientLabels[index].Text = $"客户端 {index + 1} · {string.Join('/', players.Select(player => $"P{player}"))} · 游戏程序";
             }
         }
+        UpdateLoginCalibrationControls();
         for (var player = 0; player < _inviteRows.Length; player++)
             _inviteRows[player].IsVisible = player < (_selectedTopology?.PlayerCount ?? 0);
         if (topologyChanged)
@@ -723,6 +744,7 @@ public sealed class MainWindow : Window
         _inviteCancellation?.Cancel();
         _autoPartyCancellation?.Cancel();
         _launchedClients = [];
+        UpdateLoginCalibrationControls();
         _rosterStatus.Text = "窗口绑定已清除；请重新绑定后检查 Current Party。";
         UpdateRosterControls();
         UpdateAutoPartyControls();
@@ -734,6 +756,59 @@ public sealed class MainWindow : Window
         UpdateRadarControls();
         UpdatePrivacyControls();
         UpdateResourceControls();
+    }
+
+    private void UpdateLoginCalibrationControls()
+    {
+        for (var index = 0; index < _calibrateLogin.Length; index++)
+            if (_calibrateLogin[index] is not null)
+                _calibrateLogin[index].IsEnabled = OperatingSystem.IsWindows() && !_busy &&
+                    index < _launchedClients.Count && index < (_selectedTopology?.ClientCount ?? 0);
+    }
+
+    private async Task CalibrateLoginAsync(int clientNumber)
+    {
+        if (!OperatingSystem.IsWindows() || _selectedTopology is null ||
+            clientNumber > _launchedClients.Count ||
+            !_calibrateLogin[clientNumber - 1].IsEnabled) return;
+        var bound = _launchedClients[clientNumber - 1];
+        var topology = _selectedTopology;
+        _calibrateLogin[clientNumber - 1].IsEnabled = false;
+        _calibrationResults[clientNumber - 1].Text = "正在读取已绑定客户端的登录画面…";
+        try
+        {
+            var frame = await Task.Run(() => LoginCalibrationCapture.TryCapture(bound));
+            if (frame is null || !ReferenceEquals(_selectedTopology, topology) ||
+                clientNumber > _launchedClients.Count || _launchedClients[clientNumber - 1] != bound)
+            {
+                _calibrationResults[clientNumber - 1].Text = "窗口身份或画面无法核对；没有保存标记。";
+                return;
+            }
+            var dialog = new LoginCalibrationDialog(clientNumber, frame, topology.Id);
+            var calibration = await dialog.ShowDialog<LoginCalibration?>(this);
+            if (calibration is null)
+            {
+                _calibrationResults[clientNumber - 1].Text = "没有保存字段标记；可手动登录。";
+                return;
+            }
+            if (!ReferenceEquals(_selectedTopology, topology) ||
+                clientNumber > _launchedClients.Count || _launchedClients[clientNumber - 1] != bound ||
+                !LoginCalibrationCapture.MatchesCurrentViewport(bound, calibration, topology.Id))
+            {
+                _calibrationResults[clientNumber - 1].Text = "窗口身份或布局已改变；没有保存字段标记。";
+                return;
+            }
+            _calibrationResults[clientNumber - 1].Text =
+                _loginCalibrations.Save(clientNumber, calibration).Message;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            _calibrationResults[clientNumber - 1].Text = "登录画面标记未完成；没有保存字段标记。";
+        }
+        finally
+        {
+            UpdateLoginCalibrationControls();
+        }
     }
 
     private void UpdateRadarControls()

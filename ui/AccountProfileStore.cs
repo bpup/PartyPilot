@@ -49,9 +49,18 @@ internal sealed class AccountProfileStore
         if (_protector is WindowsAccountDataProtector && !OperatingSystem.IsWindows())
             return new(false, "账号资料仅能在 Windows 上保存。");
         email = email?.Trim();
+        if (string.IsNullOrEmpty(password)) password = Load(client)?.Password;
         if (!IsValidEmail(email) || string.IsNullOrEmpty(password) ||
             password.Length > 1024 || password.Any(char.IsControl))
             return new(false, "请输入有效的邮箱和密码。密码最长 1024 字符。");
+        for (var other = 1; other <= 3; other++)
+        {
+            if (other == client) continue;
+            var existing = Load(other);
+            if (existing is not null && string.Equals(email, existing.Email,
+                    StringComparison.OrdinalIgnoreCase))
+                return new(false, $"客户端 {other} 已使用此邮箱；独立客户端需要不同账号。");
+        }
         byte[]? plain = null;
         byte[]? encrypted = null;
         string? temporary = null;

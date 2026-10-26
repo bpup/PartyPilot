@@ -8,6 +8,7 @@ using PartyPilot.Desktop;
 
 PartyRosterCounterSmoke.Run();
 AccountProfileSmoke.Run();
+LoginCalibrationSmoke.Run();
 LeadershipPreferenceSmoke.Run();
 AutoPartyCoordinatorSmoke.Run();
 AutoPartyInviteSmoke.Run();
@@ -43,9 +44,16 @@ if (window.GetLogicalDescendants().OfType<TextBox>().Count(field =>
 if (window.GetLogicalDescendants().OfType<CheckBox>().Count(box =>
         box.Content?.ToString() == "最近手动聚焦的角色成为 MAIN") != 1)
     throw new Exception("The desktop did not expose the observed MAIN preference.");
+if (window.GetLogicalDescendants().OfType<Button>().Count(button =>
+        button.Content?.ToString() == "标记登录字段") != 3)
+    throw new Exception("The desktop did not expose one login marker per client.");
 if (args.Contains("--ui-controls-only"))
 {
-    Console.WriteLine("Account and MAIN preference controls created in the headless desktop.");
+    var sample = new LoginCalibrationDialog(1,
+        new LoginCalibrationFrame(new byte[320 * 240 * 4], 320, 240), "sample-layout");
+    sample.Show(window);
+    sample.Close();
+    Console.WriteLine("Account, login marking, and MAIN preference controls created in the headless desktop.");
     window.Close();
     return;
 }

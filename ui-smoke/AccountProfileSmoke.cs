@@ -25,6 +25,12 @@ internal static class AccountProfileSmoke
                 store.Load(2) != new AccountCredential("account@example.invalid", "synthetic-password") ||
                 store.Describe(2) != "已保存 · ac***@example.invalid")
                 throw new Exception("Account profile storage, load, or masking failed with a synthetic protector.");
+            if (store.Save(1, "ACCOUNT@example.invalid", "other-synthetic-password").Success)
+                throw new Exception("The same account email was accepted for a second client.");
+            if (!store.Save(2, "updated@example.invalid", "").Success ||
+                store.Load(2) != new AccountCredential("updated@example.invalid", "synthetic-password") ||
+                store.Save(1, "new@example.invalid", "").Success)
+                throw new Exception("Blank password did not preserve only the current client's saved password.");
             if (!store.Delete(2).Success || File.Exists(path) || store.Load(2) is not null)
                 throw new Exception("Account profile deletion failed.");
             if (!OperatingSystem.IsWindows() &&
