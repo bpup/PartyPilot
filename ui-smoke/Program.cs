@@ -71,6 +71,33 @@ var radarWindow = new RadarOverlayWindow(new LaunchedClient(123, 1, "C:/Game.exe
 radarWindow.Show();
 radarWindow.Apply(radarFrame);
 radarWindow.UpdateLayout();
+var playerMarker = radarFrame.Markers.Single(marker => marker.Category == "player");
+var lootMarker = radarFrame.Markers.Single(marker => marker.Category == "loot");
+var leaderField = window.GetLogicalDescendants().OfType<TextBox>()
+    .Single(field => field.Watermark?.ToString() == "角色名");
+var hideNamesButton = window.GetLogicalDescendants().OfType<Button>()
+    .Single(button => button.Content?.ToString() == "Hide names");
+leaderField.Text = "Leader";
+NamePrivacy.Enabled = true;
+Dispatcher.UIThread.RunJobs();
+if (NamePrivacy.Mask("Teammate") != "hidden" || NamePrivacy.Mask("  ") != "" ||
+    NamePrivacy.MaskIdentity(2, "Player 2") != "Player 2" ||
+    NamePrivacy.MaskIdentity(2, "Teammate") != "hidden" ||
+    RadarOverlayWindow.DisplayLabel(playerMarker) != "hidden" ||
+    RadarOverlayWindow.DisplayLabel(lootMarker) != "Scroll of Wisdom" ||
+    leaderField.PasswordChar != '•' || leaderField.Text != "Leader" ||
+    hideNamesButton.Content?.ToString() != "Names hidden" ||
+    !radarWindow.GetLogicalDescendants().OfType<TextBlock>().Any(label => label.Text == "hidden"))
+    throw new Exception("Name privacy changed identity data or failed to mask a displayed character name.");
+var hiddenRadarOutput = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(args.FirstOrDefault() ?? "../PartyPilot-ui-preview.png"))!,
+    "PartyPilot-radar-hidden-preview.png");
+(radarWindow.CaptureRenderedFrame() ?? throw new Exception("Hidden-name radar did not render.")).Save(hiddenRadarOutput);
+NamePrivacy.Enabled = false;
+Dispatcher.UIThread.RunJobs();
+if (RadarOverlayWindow.DisplayLabel(playerMarker) != "Teammate" ||
+    leaderField.PasswordChar != '\0' || leaderField.Text != "Leader" ||
+    hideNamesButton.Content?.ToString() != "Hide names")
+    throw new Exception("Showing names did not restore the visible label without changing the real input.");
 var radarScreenshot = radarWindow.CaptureRenderedFrame() ?? throw new Exception("Radar overlay did not render.");
 var radarOutput = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(args.FirstOrDefault() ?? "../PartyPilot-ui-preview.png"))!,
     "PartyPilot-radar-preview.png");

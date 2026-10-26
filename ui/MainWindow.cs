@@ -17,6 +17,7 @@ public sealed class MainWindow : Window
     private static readonly IBrush AccentBrush = Brush("#D7A65B");
 
     private readonly ComboBox _playerCount = new();
+    private readonly Button _hideNames = new();
     private readonly ComboBox _topologyVariant = new();
     private readonly TextBlock _assignment = new();
     private readonly ComboBox _layoutMode = new();
@@ -106,7 +107,12 @@ public sealed class MainWindow : Window
 
         var content = new StackPanel { Spacing = 18, Margin = new Thickness(34, 28, 34, 36) };
         content.Children.Add(Label("PLAY", 12, AccentBrush, FontWeight.Bold));
-        content.Children.Add(Label("Connect. Choose. Start playing.", 29, Brushes.White, FontWeight.Bold));
+        var heading = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 16 };
+        heading.Children.Add(Label("Connect. Choose. Start playing.", 29, Brushes.White, FontWeight.Bold));
+        _hideNames.Content = "Hide names";
+        _hideNames.Click += (_, _) => NamePrivacy.Enabled = !NamePrivacy.Enabled;
+        heading.Children.Add(_hideNames);
+        content.Children.Add(heading);
         content.Children.Add(Label("独立版工作区 · 游戏窗口启动与有限布局的手柄配对引导", 13, MutedBrush));
         content.Children.Add(BuildInputStep());
         content.Children.Add(BuildClientStep());
@@ -127,16 +133,25 @@ public sealed class MainWindow : Window
         _physicalDevice.TextChanged += (_, _) => UpdateBridgeControls();
         Closed += async (_, _) =>
         {
+            NamePrivacy.Changed -= UpdateNamePrivacy;
             _closing = true;
             await StopAllResourcesAsync();
             await StopRadarAsync();
             await StopBridgeAsync();
         };
+        NamePrivacy.Changed += UpdateNamePrivacy;
+        UpdateNamePrivacy();
         UpdateClientRows();
         UpdateLayoutControls();
     }
 
     private static IBrush Brush(string hex) => new SolidColorBrush(Color.Parse(hex));
+
+    private void UpdateNamePrivacy()
+    {
+        _hideNames.Content = NamePrivacy.Enabled ? "Names hidden" : "Hide names";
+        _followLeaderName.PasswordChar = NamePrivacy.Enabled ? '•' : '\0';
+    }
 
     private static TextBlock Label(string text, double size, IBrush brush, FontWeight weight = default) => new()
     {

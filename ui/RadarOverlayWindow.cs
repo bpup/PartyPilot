@@ -49,9 +49,24 @@ public sealed class RadarOverlayWindow : Window
             }
         };
         Closed += (_, _) => _positionTimer.Stop();
+        NamePrivacy.Changed += OnNamePrivacyChanged;
+        Closed += (_, _) => NamePrivacy.Changed -= OnNamePrivacyChanged;
         SizeChanged += (_, _) => Draw();
         _positionTimer.Tick += (_, _) => SyncTarget();
     }
+
+    private void OnNamePrivacyChanged()
+    {
+        if (Dispatcher.UIThread.CheckAccess()) Draw();
+        else Dispatcher.UIThread.Post(Draw);
+    }
+
+    public static string DisplayLabel(RadarMarker marker) => marker.Category switch
+    {
+        "player" => NamePrivacy.Mask(marker.Label),
+        "loot" => marker.Label ?? string.Empty,
+        _ => marker.Path.Split('/').Last()
+    };
 
     public void Apply(RadarFrame frame)
     {
@@ -78,7 +93,7 @@ public sealed class RadarOverlayWindow : Window
             {
                 var label = new TextBlock
                 {
-                    Text = marker.Category is "player" or "loot" ? marker.Label : marker.Path.Split('/').Last(),
+                    Text = DisplayLabel(marker),
                     Foreground = Brushes.White,
                     Background = new SolidColorBrush(Color.FromArgb(190, 8, 12, 20)),
                     FontSize = 12
