@@ -49,6 +49,29 @@ func parseRoster(value string) ([]focus.Player, error) {
 	return players, nil
 }
 
+func parseFollowTargets(value string) (map[int]int, error) {
+	targets := make(map[int]int)
+	if value == "" {
+		return targets, nil
+	}
+	for _, entry := range strings.Split(value, ",") {
+		parts := strings.Split(entry, ":")
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid follow target %q", entry)
+		}
+		slot, slotErr := strconv.Atoi(parts[0])
+		target, targetErr := strconv.Atoi(parts[1])
+		if slotErr != nil || targetErr != nil || slot < 1 || slot > 6 || target < 1 || target > 6 {
+			return nil, fmt.Errorf("invalid follow target %q", entry)
+		}
+		if _, exists := targets[slot]; exists {
+			return nil, fmt.Errorf("duplicate follow target for player %d", slot)
+		}
+		targets[slot] = target
+	}
+	return targets, nil
+}
+
 func replay(reader io.Reader, writer io.Writer, coordinator *party.Coordinator, pace time.Duration) error {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -91,6 +114,8 @@ func main() {
 	catchup := flag.Float64("catchup", -1, "catch-up distance")
 	maxAge := flag.Duration("max-age", 0, "maximum position age")
 	pace := flag.Duration("pace", 0, "delay between replay frames; zero runs immediately")
+	lastFocusedLeads := flag.Bool("last-focused-leads", false, "make the manually focused player the follow leader")
+	followTargets := flag.String("follow-targets", "", "explicit follower:target pairs, e.g. 2:3")
 	flag.Parse()
 	players, err := parseRoster(*roster)
 	if err != nil {
@@ -102,6 +127,18 @@ func main() {
 	if err != nil || *path == "" || *pace < 0 {
 		fmt.Fprintln(os.Stderr, "usage: partyreplay -replay file.jsonl -roster 1:1,2:2 -leader 1 -stop N -resume N -catchup N -max-age 750ms")
 		os.Exit(2)
+	}
+	coordinator.SetLastFocusedLeads(*lastFocusedLeads)
+	targets, err := parseFollowTargets(*followTargets)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	for slot, target := range targets {
+		if err := coordinator.SetFollowTarget(slot, target); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 	}
 	file, err := os.Open(*path)
 	if err != nil {
