@@ -15,16 +15,20 @@ public sealed class MainWindow : Window
     private static readonly IBrush MutedBrush = Brush("#9FAFC2");
     private static readonly IBrush AccentBrush = Brush("#D7A65B");
 
-    private readonly ComboBox _clientCount = new();
+    private readonly ComboBox _playerCount = new();
+    private readonly ComboBox _topologyVariant = new();
+    private readonly TextBlock _assignment = new();
     private readonly ComboBox _layoutMode = new();
     private readonly CheckBox _applyLayout = new();
     private readonly TextBox _monitors = new();
     private readonly TextBox[] _paths = new TextBox[3];
     private readonly TextBox[] _uris = new TextBox[3];
+    private readonly TextBlock[] _clientLabels = new TextBlock[3];
     private readonly StackPanel[] _clientRows = new StackPanel[3];
     private readonly Button _check = new();
     private readonly Button _launch = new();
     private readonly TextBlock _status = new();
+    private PartyTopology? _selectedTopology;
     private bool _busy;
 
     public MainWindow()
@@ -53,7 +57,8 @@ public sealed class MainWindow : Window
 
         shell.Children.Add(new ScrollViewer { Content = content });
         Content = shell;
-        _clientCount.SelectionChanged += (_, _) => UpdateClientRows();
+        _playerCount.SelectionChanged += (_, _) => UpdateTopologyOptions();
+        _topologyVariant.SelectionChanged += (_, _) => UpdateClientRows();
         _applyLayout.IsCheckedChanged += (_, _) => UpdateLayoutControls();
         UpdateClientRows();
         UpdateLayoutControls();
@@ -120,17 +125,26 @@ public sealed class MainWindow : Window
 
     private Border BuildClientStep()
     {
-        var panel = Step("2", "CHOOSE CLIENTS · 选择游戏客户端", "当前启动器按游戏窗口配置，最多三个客户端；每个窗口的第二角色尚未接入。");
-        _clientCount.PlaceholderText = "选择游戏窗口数量";
-        _clientCount.ItemsSource = new[] { "1 个客户端", "2 个客户端", "3 个客户端" };
-        _clientCount.Width = 190;
-        _clientCount.HorizontalAlignment = HorizontalAlignment.Left;
-        panel.Children.Add(_clientCount);
+        var panel = Step("2", "HOW MANY CHARACTERS? · 选择人数", "按目标版本的布局列出 1–6 人及其所需客户端。角色配对与每窗口第二角色尚未接入。");
+        _playerCount.PlaceholderText = "选择 1–6 人";
+        _playerCount.ItemsSource = Enumerable.Range(1, 6).Select(count => $"{count} 人").ToArray();
+        _playerCount.Width = 190;
+        _playerCount.HorizontalAlignment = HorizontalAlignment.Left;
+        panel.Children.Add(_playerCount);
+        _topologyVariant.PlaceholderText = "选择角色分布";
+        _topologyVariant.MinWidth = 380;
+        _topologyVariant.HorizontalAlignment = HorizontalAlignment.Left;
+        panel.Children.Add(_topologyVariant);
+        _assignment.Text = "选择人数后显示角色与客户端分布。";
+        _assignment.Foreground = MutedBrush;
+        _assignment.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_assignment);
 
         for (var index = 0; index < 3; index++)
         {
             var row = new StackPanel { Spacing = 7, Margin = new Thickness(0, 8, 0, 0) };
-            row.Children.Add(Label($"客户端 {index + 1} · 游戏程序", 13, Brushes.White, FontWeight.SemiBold));
+            var clientLabel = Label($"客户端 {index + 1} · 游戏程序", 13, Brushes.White, FontWeight.SemiBold);
+            row.Children.Add(clientLabel);
             var path = new TextBox { Watermark = "PathOfExile_x64.exe 完整路径" };
             row.Children.Add(path);
             row.Children.Add(Label("Steam/Epic 启动 URI（可选；须与上方程序对应）", 12, MutedBrush));
@@ -138,6 +152,7 @@ public sealed class MainWindow : Window
             row.Children.Add(uri);
             _paths[index] = path;
             _uris[index] = uri;
+            _clientLabels[index] = clientLabel;
             _clientRows[index] = row;
             panel.Children.Add(row);
         }
@@ -181,13 +196,32 @@ public sealed class MainWindow : Window
 
     private void UpdateClientRows()
     {
-        var count = _clientCount.SelectedIndex + 1;
+        _selectedTopology = _topologyVariant.SelectedItem as PartyTopology;
+        var count = _selectedTopology?.ClientCount ?? 0;
+        _assignment.Text = _selectedTopology is null
+            ? "选择人数后显示角色与客户端分布。"
+            : $"{_selectedTopology.PlayerCount} 人 · {count} 个客户端 · {_selectedTopology.Summary}";
         for (var index = 0; index < _clientRows.Length; index++)
         {
             _clientRows[index].IsVisible = index < count;
+            if (index < count)
+            {
+                var players = _selectedTopology!.Clients[index];
+                _clientLabels[index].Text = $"客户端 {index + 1} · {string.Join('/', players.Select(player => $"P{player}"))} · 游戏程序";
+            }
         }
         _check.IsEnabled = !_busy && count > 0;
         _launch.IsEnabled = !_busy && count > 0;
+    }
+
+    private void UpdateTopologyOptions()
+    {
+        var playerCount = _playerCount.SelectedIndex + 1;
+        var options = PartyTopologies.ForPlayerCount(playerCount);
+        _topologyVariant.ItemsSource = options;
+        _topologyVariant.IsVisible = options.Count > 1;
+        _topologyVariant.SelectedIndex = options.Count > 0 ? 0 : -1;
+        UpdateClientRows();
     }
 
     private void UpdateLayoutControls()
@@ -222,7 +256,12 @@ public sealed class MainWindow : Window
             RedirectStandardError = true,
             CreateNoWindow = true
         };
-        for (var index = 0; index <= _clientCount.SelectedIndex; index++)
+        if (_selectedTopology is null)
+        {
+            _status.Text = "请先选择人数与角色分布。";
+            return;
+        }
+        for (var index = 0; index < _selectedTopology.ClientCount; index++)
         {
             startInfo.ArgumentList.Add("-exe");
             startInfo.ArgumentList.Add(_paths[index].Text?.Trim() ?? string.Empty);

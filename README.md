@@ -2,7 +2,7 @@
 
 独立开发的 PoE2 多角色跟随软件工作区。当前交付包含 **跟随决策内核、实时诊断链路、回放工具与初步桌面入口**；Windows 和 PoE2 游戏内控制尚未验收。它与 `bpup/poe2-scripts` 没有代码或构建依赖。
 
-`release/desktop/PartyPilot.Desktop.exe` 是 Windows x64 自包含桌面程序，按所提供版本主页的“选择输入 → 配置客户端 → 准备并开始”顺序组织。它目前只把客户端路径、Steam/Epic 启动 URI、窗口布局预检和显式启动接到 `PartyPilot-ClientLaunch.exe`；游戏输入、角色人数/配对、自动跟随、战斗与雷达尚未接入这个界面，不能把“启动游戏窗口”视为“开始完整组队”。客户端数量必须主动选择，启动按钮在选择前保持禁用；macOS 可编译和预览界面，但实际游戏启动只在 Windows 开放。
+`release/desktop/PartyPilot.Desktop.exe` 是 Windows x64 自包含桌面程序，按所提供版本主页的“选择输入 → 选择人数 → 准备并开始”顺序组织。它提供 1–6 人的 [角色与客户端布局选项](TOPOLOGY_RESEARCH.md)，依所选布局显示 1–3 个客户端程序路径；2P、3P、5P 的初始布局与所提供版本的设置相符。客户端路径、Steam/Epic 启动 URI、窗口布局预检和显式启动接到 `PartyPilot-ClientLaunch.exe`；游戏输入、角色配对、自动跟随、战斗与雷达尚未接入这个界面，不能把“启动游戏窗口”视为“开始完整组队”。人数必须主动选择，启动按钮在选择前保持禁用；macOS 可编译和预览界面，但实际游戏启动只在 Windows 开放。
 
 ```sh
 dotnet build ui/PartyPilot.Desktop.csproj -c Release

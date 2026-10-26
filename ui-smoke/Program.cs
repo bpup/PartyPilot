@@ -15,18 +15,50 @@ var window = new MainWindow();
 window.Show();
 window.UpdateLayout();
 var labels = window.GetLogicalDescendants().OfType<TextBlock>().Select(item => item.Text).ToArray();
-if (!labels.Contains("PLAY") || !labels.Any(item => item?.Contains("CHOOSE CLIENTS") == true) ||
+if (!labels.Contains("PLAY") || !labels.Any(item => item?.Contains("HOW MANY CHARACTERS") == true) ||
     !labels.Any(item => item?.Contains("PREPARE & START") == true))
 {
     throw new Exception("The launcher steps were not created in the window tree.");
 }
 Console.WriteLine($"Desktop window created with {labels.Length} labels and three launch steps.");
+var optionCounts = new[] { 1, 2, 3, 1, 2, 1 };
+for (var count = 1; count <= 6; count++)
+{
+    var options = PartyTopologies.ForPlayerCount(count);
+    if (options.Count != optionCounts[count - 1] || options.Any(option => option.PlayerCount != count))
+    {
+        throw new Exception($"Unexpected {count}P topology options.");
+    }
+}
+var expectedPads = new Dictionary<string, int[]>
+{
+    ["1-single"] = [1],
+    ["2-couch"] = [1, 2],
+    ["2-split"] = [1, 3],
+    ["3-main-solo"] = [1, 3, 4],
+    ["3-second-solo"] = [1, 2, 3],
+    ["3-three-singles"] = [1, 3, 5],
+    ["4-balanced"] = [1, 2, 3, 4],
+    ["5-third-solo"] = [1, 2, 3, 4, 5],
+    ["5-main-solo"] = [1, 3, 4, 5, 6],
+    ["6-balanced"] = [1, 2, 3, 4, 5, 6]
+};
+var allOptions = Enumerable.Range(1, 6).SelectMany(PartyTopologies.ForPlayerCount).ToArray();
+if (allOptions.Length != expectedPads.Count || allOptions.Any(option =>
+        !expectedPads.TryGetValue(option.Id, out var pads) ||
+        !option.Slots.Select(slot => slot.RuntimePad).SequenceEqual(pads)) ||
+    PartyTopologies.DefaultFor(2).Id != "2-couch" ||
+    PartyTopologies.DefaultFor(3).Id != "3-main-solo" ||
+    PartyTopologies.DefaultFor(5).Id != "5-third-solo")
+{
+    throw new Exception("A target party layout mapped to the wrong client or virtual pad.");
+}
 var screenshot = window.CaptureRenderedFrame() ?? throw new Exception("The desktop window did not render.");
 var output = Path.GetFullPath(args.FirstOrDefault() ?? "../PartyPilot-ui-preview.png");
 screenshot.Save(output);
 Console.WriteLine($"Headless preview saved to {output}.");
 var clientCount = window.GetLogicalDescendants().OfType<ComboBox>().First();
-clientCount.SelectedIndex = 1;
+clientCount.SelectedIndex = 3;
 Dispatcher.UIThread.RunJobs();
 var pathFields = window.GetLogicalDescendants().OfType<TextBox>()
     .Where(item => item.Watermark?.ToString()?.Contains("PathOfExile_x64.exe") == true)
@@ -37,7 +69,24 @@ if (pathFields.Length != 3 || !pathFields[0].IsEffectivelyVisible || !pathFields
 }
 var configured = Path.Combine(Path.GetDirectoryName(output)!, Path.GetFileNameWithoutExtension(output) + "-configured.png");
 (window.CaptureRenderedFrame() ?? throw new Exception("The configured window did not render.")).Save(configured);
-Console.WriteLine($"Two-client preview saved to {configured}.");
+Console.WriteLine($"Four-player, two-client preview saved to {configured}.");
+clientCount.SelectedIndex = 2;
+Dispatcher.UIThread.RunJobs();
+var variant = window.GetLogicalDescendants().OfType<ComboBox>().Skip(1).First();
+variant.SelectedIndex = 2;
+Dispatcher.UIThread.RunJobs();
+if (pathFields.Any(field => !field.IsEffectivelyVisible))
+{
+    throw new Exception("The three-single-client 3P option did not request three game windows.");
+}
+clientCount.SelectedIndex = 1;
+Dispatcher.UIThread.RunJobs();
+variant.SelectedIndex = 0;
+Dispatcher.UIThread.RunJobs();
+if (!pathFields[0].IsEffectivelyVisible || pathFields[1].IsEffectivelyVisible)
+{
+    throw new Exception("The default couch 2P option did not request one game window.");
+}
 window.Close();
 
 sealed class SmokeApp : Application
