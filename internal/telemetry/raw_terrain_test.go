@@ -24,3 +24,32 @@ func TestRawTerrainSummaryRemainsDiagnostic(t *testing.T) {
 		}
 	}
 }
+
+func TestPackedTerrainPatchIsDiagnosticAndBounded(t *testing.T) {
+	base := `{"ProcessId":123,"SeenUtc":"2026-10-26T00:00:00Z","X":1,"Y":2,"Z":3,` +
+		`"TerrainStatus":"unavailable","TerrainSeenUtc":"2026-10-26T00:00:00Z",`
+	valid := base + `"PackedTerrainStatus":"candidate_patch_observed",` +
+		`"PackedTerrainProbe":{"AreaAddress":"0x100000","Anchor":"state_pointer_static_656",` +
+		`"Width":92,"Height":92,"BytesPerRow":46,"PatchX":6,"PatchY":16,` +
+		`"PatchRows":["111","101","111"],"SampledNibbles":8192,"InRangeNibbles":8192}}`
+	sample, err := Decode([]byte(valid))
+	if err != nil || sample.PackedTerrainProbe == nil || sample.PackedTerrainProbe.PatchRows[1] != "101" {
+		t.Fatalf("valid read-only patch lost: %+v, %v", sample.PackedTerrainProbe, err)
+	}
+	for _, suffix := range []string{
+		`"PackedTerrainStatus":"candidate_patch_observed"}`,
+		`"PackedTerrainStatus":"no_candidate","PackedTerrainProbe":{"Width":92}}`,
+		`"PackedTerrainStatus":"candidate_patch_observed","PackedTerrainProbe":` +
+			`{"AreaAddress":"0x100000","Anchor":"ingame_data_address",` +
+			`"Width":92,"Height":92,"BytesPerRow":46,"PatchX":90,"PatchY":16,` +
+			`"PatchRows":["111"],"SampledNibbles":8192,"InRangeNibbles":8192}}`,
+		`"PackedTerrainStatus":"candidate_patch_observed","PackedTerrainProbe":` +
+			`{"AreaAddress":"0x100000","Anchor":"ingame_data_address",` +
+			`"Width":92,"Height":92,"BytesPerRow":46,"PatchX":6,"PatchY":16,` +
+			`"PatchRows":["1?1"],"SampledNibbles":8192,"InRangeNibbles":8192}}`,
+	} {
+		if _, err := Decode([]byte(base + suffix)); err == nil {
+			t.Fatalf("invalid terrain patch accepted: %s", suffix)
+		}
+	}
+}

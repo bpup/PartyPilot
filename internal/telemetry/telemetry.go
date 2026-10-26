@@ -39,6 +39,8 @@ type Sample struct {
 	TerrainSummary           *RawTerrainSummary   `json:"TerrainSummary,omitempty"`
 	TerrainStatus            string               `json:"TerrainStatus,omitempty"`
 	TerrainSeenUTC           *time.Time           `json:"TerrainSeenUtc,omitempty"`
+	PackedTerrainProbe       *PackedTerrainProbe  `json:"PackedTerrainProbe,omitempty"`
+	PackedTerrainStatus      string               `json:"PackedTerrainStatus,omitempty"`
 	VisiblePlayers           []VisiblePlayer      `json:"VisiblePlayers,omitempty"`
 	VisiblePlayersStatus     string               `json:"VisiblePlayersStatus,omitempty"`
 }
@@ -57,6 +59,21 @@ type RawTerrainSummary struct {
 type RawTerrainValue struct {
 	Value int `json:"Value"`
 	Count int `json:"Count"`
+}
+
+// PackedTerrainProbe is a bounded read-only patch around a candidate player
+// grid position. It is not accepted as live navigation input.
+type PackedTerrainProbe struct {
+	AreaAddress    string   `json:"AreaAddress"`
+	Anchor         string   `json:"Anchor"`
+	Width          int      `json:"Width"`
+	Height         int      `json:"Height"`
+	BytesPerRow    int      `json:"BytesPerRow"`
+	PatchX         int      `json:"PatchX"`
+	PatchY         int      `json:"PatchY"`
+	PatchRows      []string `json:"PatchRows"`
+	SampledNibbles int      `json:"SampledNibbles"`
+	InRangeNibbles int      `json:"InRangeNibbles"`
 }
 
 // RawItemCard is a currently attached UI node with an item and owner pointer.
@@ -186,6 +203,7 @@ func Decode(data []byte) (Sample, error) {
 		!validRawItemCards(item.ItemCards, item.ItemCardStatus, item.ItemCardSeenUTC,
 			item.LocalSlotCandidates) ||
 		!validRawTerrain(item.TerrainSummary, item.TerrainStatus, item.TerrainSeenUTC) ||
+		!validPackedTerrainProbe(item.PackedTerrainProbe, item.PackedTerrainStatus, item.TerrainSeenUTC) ||
 		!validVisiblePlayers(item.VisiblePlayers, item.ObservedLocalAddress) {
 		return Sample{}, ErrInvalidSample
 	}
@@ -227,6 +245,43 @@ func validRawTerrain(summary *RawTerrainSummary, status string, seen *time.Time)
 	}
 	return counted <= summary.SampledCells &&
 		(summary.ValuesTruncated || counted == summary.SampledCells)
+}
+
+func validPackedTerrainProbe(probe *PackedTerrainProbe, status string, seen *time.Time) bool {
+	if status == "" {
+		return probe == nil
+	}
+	if seen == nil || seen.IsZero() {
+		return false
+	}
+	if status != "candidate_patch_observed" {
+		return probe == nil && (status == "missing_anchor_or_grid" ||
+			status == "header_unreadable" || status == "ambiguous_candidates" ||
+			status == "ambiguous_area_candidates" ||
+			status == "no_candidate" || status == "patch_unreadable" ||
+			status == "scan_failed")
+	}
+	if probe == nil || probe.AreaAddress == "" || !validAddress(probe.AreaAddress) ||
+		(probe.Anchor != "state_pointer_static_656" && probe.Anchor != "ingame_data_address") ||
+		probe.BytesPerRow < 1 || probe.Width != probe.BytesPerRow*2 ||
+		probe.Width > 100000 || probe.Height < 1 || probe.Height > 100000 ||
+		probe.PatchX < 0 || probe.PatchY < 0 || len(probe.PatchRows) < 1 ||
+		len(probe.PatchRows) > 9 || probe.PatchY+len(probe.PatchRows) > probe.Height ||
+		probe.SampledNibbles < 2 || probe.SampledNibbles > 8192 ||
+		probe.InRangeNibbles < 0 || probe.InRangeNibbles > probe.SampledNibbles ||
+		probe.InRangeNibbles*5 < probe.SampledNibbles*4 {
+		return false
+	}
+	width := len(probe.PatchRows[0])
+	if width < 1 || width > 9 || probe.PatchX+width > probe.Width {
+		return false
+	}
+	for _, row := range probe.PatchRows {
+		if len(row) != width || strings.Trim(row, "01") != "" {
+			return false
+		}
+	}
+	return true
 }
 
 func validRawItemCards(cards []RawItemCard, status string, seen *time.Time,

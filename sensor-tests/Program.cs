@@ -113,6 +113,7 @@ Require(crossAreaConflict.Status == "conflicting_candidates" &&
     "Conflicting orders from different area anchors were accepted.");
 TestRawRenderPositionReader();
 TestTerrainDiagnostic();
+TestPackedTerrainProbe();
 Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
     RadarClassifier.Category("Metadata/MiscellaneousObjects/Waypoint") == "waypoint" &&
     RadarClassifier.Category("Metadata/Effects/PortalFlash") == null &&
@@ -192,6 +193,64 @@ void TestTerrainDiagnostic()
     Require(large.SampledCells == 65_536 && large.SampleTruncated &&
         large.Values.Length == 32 && large.ValuesTruncated,
         "Raw terrain diagnostic exceeded its sample or value budget.");
+}
+void TestPackedTerrainProbe()
+{
+    const long area = 0x100000;
+    const long packedStart = 0x200000;
+    const int bytesPerRow = 46;
+    const int rows = 92;
+    var header = new byte[16 * 1024];
+    const int tuple = 256;
+    BitConverter.GetBytes(4L).CopyTo(header, tuple);
+    BitConverter.GetBytes(4L).CopyTo(header, tuple + 8);
+    BitConverter.GetBytes(packedStart).CopyTo(header, tuple + 184);
+    BitConverter.GetBytes(packedStart + bytesPerRow * rows).CopyTo(header, tuple + 192);
+    BitConverter.GetBytes(bytesPerRow).CopyTo(header, tuple + 184 + 24);
+    var packed = Enumerable.Repeat((byte)0x11, bytesPerRow * rows).ToArray();
+    packed[20 * bytesPerRow + 5] = 0x10; // cell x=10 is blocked; x=11 is open.
+    byte[]? Read(long address, int size)
+    {
+        if (address == area && size == header.Length) return header;
+        if (address >= packedStart && address + size <= packedStart + packed.Length)
+            return packed.AsSpan((int)(address - packedStart), size).ToArray();
+        return null;
+    }
+    var result = PackedTerrainProbe.Scan(area, 10, 20, Read);
+    Require(result.Status == "candidate_patch_observed" && result.Candidate is { } candidate &&
+        candidate.Width == 92 && candidate.Height == 92 && candidate.BytesPerRow == 46 &&
+        candidate.PatchX == 6 && candidate.PatchY == 16 &&
+        candidate.PatchRows[4] == "111101111" && candidate.SampledNibbles == 8192,
+        "Packed terrain candidate dimensions, nibble order or local patch changed.");
+    Require(PackedTerrainProbe.Scan(area, 100, 20, Read).Status == "no_candidate" &&
+        PackedTerrainProbe.Scan(0, 10, 20, Read).Status == "missing_anchor_or_grid" &&
+        PackedTerrainProbe.Scan(area, float.NaN, 20, Read).Status == "missing_anchor_or_grid",
+        "Invalid packed terrain candidate was accepted.");
+    var anchored = PackedTerrainProbe.ScanAnchors([
+        new("state_pointer_static_656", 0),
+        new("ingame_data_address", area)
+    ], 10, 20, Read);
+    Require(anchored.Candidate is { AreaAddress: "0x100000", Anchor: "ingame_data_address" },
+        "A unique area anchor was not identified.");
+    byte[]? ReadTwoAreas(long address, int size) =>
+        address == area + 0x10000 && size == header.Length ? header : Read(address, size);
+    Require(PackedTerrainProbe.ScanAnchors([
+        new("state_pointer_static_656", area),
+        new("ingame_data_address", area + 0x10000)
+    ], 10, 20, ReadTwoAreas).Status == "ambiguous_area_candidates",
+        "Two distinct area anchors were silently selected.");
+    const int secondTuple = 512;
+    BitConverter.GetBytes(4L).CopyTo(header, secondTuple);
+    BitConverter.GetBytes(4L).CopyTo(header, secondTuple + 8);
+    BitConverter.GetBytes(packedStart + 0x10000).CopyTo(header, secondTuple + 184);
+    BitConverter.GetBytes(packedStart + 0x10000 + bytesPerRow * rows).CopyTo(header, secondTuple + 192);
+    BitConverter.GetBytes(bytesPerRow).CopyTo(header, secondTuple + 184 + 24);
+    byte[]? ReadAmbiguous(long address, int size) =>
+        address >= packedStart + 0x10000 && address + size <= packedStart + 0x10000 + packed.Length
+            ? packed.AsSpan((int)(address - packedStart - 0x10000), size).ToArray()
+            : Read(address, size);
+    Require(PackedTerrainProbe.Scan(area, 10, 20, ReadAmbiguous).Status == "ambiguous_candidates",
+        "Two plausible memory layouts were silently selected.");
 }
 var largeLoot = Enumerable.Range(1, 96).Select(index => (object)new
 {

@@ -249,6 +249,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         TerrainDiagnostic.Summary? terrainSummary = null;
         string? terrainStatus = null;
         DateTime? terrainSeenUtc = null;
+        PackedTerrainProbe.Observation? packedTerrainProbe = null;
+        string? packedTerrainStatus = null;
         if (Settings.DiagnoseTerrain.Value && now - _lastTerrainSentUtc >= TimeSpan.FromSeconds(5))
         {
             _lastTerrainSentUtc = now;
@@ -262,6 +264,31 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             catch
             {
                 terrainStatus = "scan_failed";
+            }
+            try
+            {
+                byte[]? ReadTerrain(long address, int size)
+                {
+                    try { return GameController.IngameState.Data.M.ReadMem(address, size); }
+                    catch { return null; }
+                }
+                var stateAddress = GameController.IngameState.Address;
+                var areaPointer = ReadTerrain(stateAddress + 656, 8);
+                var area = areaPointer is { Length: 8 } ? BitConverter.ToInt64(areaPointer) : 0;
+                var positionCandidate = RawRenderPositionReader.Read(player!.Address, ReadTerrain);
+                var result = PackedTerrainProbe.ScanAnchors([
+                    new PackedTerrainProbe.AreaCandidate("state_pointer_static_656", area),
+                    new PackedTerrainProbe.AreaCandidate("ingame_data_address",
+                        GameController.IngameState.Data.Address)
+                ],
+                    positionCandidate?.GridX ?? float.NaN,
+                    positionCandidate?.GridY ?? float.NaN, ReadTerrain);
+                packedTerrainProbe = result.Candidate;
+                packedTerrainStatus = result.Status;
+            }
+            catch
+            {
+                packedTerrainStatus = "scan_failed";
             }
         }
 
@@ -298,6 +325,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             TerrainSummary = terrainSummary,
             TerrainStatus = terrainStatus,
             TerrainSeenUtc = terrainSeenUtc,
+            PackedTerrainProbe = packedTerrainProbe,
+            PackedTerrainStatus = packedTerrainStatus,
             VisiblePlayers = visiblePlayers,
             VisiblePlayersStatus = visiblePlayersStatus
         });

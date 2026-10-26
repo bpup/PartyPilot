@@ -10,12 +10,14 @@
 
 ## 本次只读诊断
 
-在每个 ExileCore2 实例中启用传感器后，可单独开启默认关闭的 `DiagnoseTerrain`。传感器最多每五秒读取一次 `RawPathfindingData`，只报告行数、最短和最长行、最多 65,536 个单元的原始整数频数；频数表至多保留 32 种值，并标明是否截断。`PartyPilot-SensorLog.exe` 的本机诊断流可查看 `TerrainSummary`、`TerrainStatus` 和 `TerrainSeenUtc`。这一诊断不生成可通行网格，也不进入跟随输入。
+在每个 ExileCore2 实例中启用传感器后，可单独开启默认关闭的 `DiagnoseTerrain`。传感器最多每五秒读取一次 `RawPathfindingData`，只报告行数、最短和最长行、最多 65,536 个单元的原始整数频数；频数表至多保留 32 种值，并标明是否截断。
+
+同一开关现在还从当前 `IngameState` 的静态区域指针候选、`IngameData.Address` 和本地角色原始 Render 格坐标做只读扫描。候选需通过 tile 尺寸、缓存长度、坐标范围及压缩四位值分布检查；若仅有一个候选，最多回报玩家周围 9×9 格的 `1`/`0` 小块及其左上角、地图宽高、区域地址来源、采样数。多个布局或两个区域地址均成立时报告歧义，任何地址或小块读取失败都不输出地图。`PartyPilot-SensorLog.exe` 的本机诊断流可查看 `TerrainSummary`、`TerrainStatus`、`PackedTerrainProbe`、`PackedTerrainStatus` 和 `TerrainSeenUtc`。目标版静态偏移不等于当前游戏内验证；小块也不进入跟随输入。
 
 ## 待游戏实测
 
 1. 分别在开阔地、明确障碍两侧、换图后采样，确认原始整数与实际通行性及区域变化的关系。
-2. 用玩家已观察到的世界坐标与网格坐标核对行列方向、原点、步长、层级和地图实例身份。
+2. 对照 `PackedTerrainProbe` 的玩家附近小块和游戏可见障碍，核对候选区域、行列方向及 `0`/非零的含义；再用世界坐标与格坐标核对原点、步长、层级和地图实例身份。
 3. 只有映射成立后，才把地形转为导航网格并验证路径、视线和失败时回中；不能把频数分布直接当作目标版 `1`/`0` 地形。
 
 受控回放可提供 `packed_terrain`：`area`、`origin_x`、`origin_y`、`cell_size`、`bytes_per_row`、`rows` 和 base64 编码的 `data`。解码后的宽度为 `bytes_per_row * 2`，当前路由器最多接受 256×256 格。调用者必须先确认实例、原点和格子尺寸；示例或合成数据不能据此证明游戏内坐标映射。
