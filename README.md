@@ -80,6 +80,8 @@ GOOS=windows GOARCH=amd64 go build -o PartyPilot.exe ./cmd/partypilot
 
 `sensor/` 是基于公开 ExileCore2 接口的只读诊断插件。它默认关闭，启用后以 10Hz 向本机 `127.0.0.1:47617` 发送进程 ID、时间、区域名称、区域哈希和玩家三维坐标。`release/PartyPilot-SensorLog.exe` 可接收并显示这些数据。另有默认关闭的 `DiagnoseVisiblePlayers` 选项，打开后在同一诊断流中列出最多 16 个可见玩家实体的名字、实体 ID、位置、地址和路径，并标明与当前本地角色 ID 相同的实体；还会报告 ExileCore2 的游戏数据对象和当前角色地址。这些地址是诊断证据，不会自动绑定 P2 或驱动同窗口自动跟随，原因见[同窗口角色身份核对](SAME_CLIENT_RESEARCH.md)。区域名称不是实例 ID；区域哈希能否唯一标识两客户端的同一实例也**待游戏实测**。预览包包含本项目的 `PartyPilot.Sensor.dll` 与同次构建的 `PartyPilot.Sensor.deps.json`；本地 ExileCore2 参考目录中的已编译插件使用 `Plugins/Compiled/<插件名>/` 结构，用户实际安装目录及加载结果仍需在 Windows 上核对。插件默认关闭，必须在对应 ExileCore2 实例中确认加载并启用；双客户端跟随要求两个游戏 PID 都收到传感器样本。插件已针对当前参考程序集编译，接收程序已用模拟数据验证；真实游戏数据仍待测试。重新编译需设置 `EXILECORE2_DIR` 为 ExileCore2 安装目录，本项目不分发 ExileCore2 本身的二进制文件。`scripts/package_preview.py` 会核验并打包上述传感器文件和 Windows 预览程序。
 
+该可见实体诊断现在还带各角色的生命、魔力和能量护盾读数；有角色路径和地址但暂时无名字的实体也会保留。实时内核另有可测试的同进程双角色有序帧入口，但现有候选扫描不会生成可靠帧，桌面仍只开放每客户端一名角色的实时跟随。四人以上布局的真实自动跟随仍待游戏数据源和 Windows/PoE2 验证。
+
 开启 `DiagnoseLocalSlotCandidates` 时，诊断现会按所提供版本的公开默认偏移尝试读取候选角色的原始三维坐标，放在 `LocalSlotCandidates.RawPositions` 中；读不到的位置为 `null`。同一诊断还给出当前角色的 ExileCore2 坐标到原始世界/网格 XY 的两种数值距离，不自动判断哪种坐标系正确。这不是经游戏验证的第二角色位置，也不会进入自动跟随或输入，具体边界见[同窗口角色身份核对](SAME_CLIENT_RESEARCH.md)。
 同一帧还按地址逐槽对照当前可见的 ExileCore2 玩家实体，`VisiblePositionComparisons` 中不可见的槽位为 `null`。这帮助检查第二角色的坐标关系；未在游戏中采样验证，也不改变跟随准入。
 

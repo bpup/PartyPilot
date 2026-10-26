@@ -1,0 +1,200 @@
+package live
+
+import (
+	"testing"
+	"time"
+
+	"partypilot/internal/arealog"
+	"partypilot/internal/follow"
+	"partypilot/internal/telemetry"
+)
+
+func TestTwoLocalPlayersNeedOneCompleteOrderedFrame(t *testing.T) {
+	now := time.Now().UTC()
+	bindings := []RoleBinding{
+		{Slot: 1, Client: 1, LocalPlayer: 1, ProcessID: 101},
+		{Slot: 2, Client: 1, LocalPlayer: 2, ProcessID: 101},
+	}
+	engine, err := NewWithBindings(bindings, 1, follow.Config{
+		StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10,
+		MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	for _, slot := range []int{1, 2} {
+		if !engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
+			ObservedAt: now, Origin: "live"}) {
+			t.Fatal("role area was not accepted")
+		}
+	}
+	if engine.ObserveSample(telemetry.Sample{ProcessID: 101, SeenUTC: now.Add(time.Millisecond),
+		ReceivedAt: now.Add(time.Millisecond), TickMS: now.UnixMilli() + 1,
+		CoordinateSpace: "world", X: 12 * worldPerGridUnit}) {
+		t.Fatal("single-player sensor sample assigned a dual-local client")
+	}
+	full := OrderedClientFrame{ProcessID: 101, SeenUTC: now.Add(time.Millisecond),
+		ReceivedAt: now.Add(time.Millisecond), TickMS: now.UnixMilli() + 1,
+		CoordinateSpace: "world", PlayerOrderReliable: true,
+		PlayerOrderSource: "validated local-player vector", Players: []OrderedLocalPlayer{
+			{LocalPlayer: 1, X: 12 * worldPerGridUnit, Life: floatPtr(100), LifeMax: floatPtr(100)},
+			{LocalPlayer: 2, X: 0, Life: floatPtr(90), LifeMax: floatPtr(100)},
+		}}
+	if !engine.ObserveOrderedClient(full) {
+		t.Fatal("complete two-local frame was rejected")
+	}
+	if got := engine.Step(now.Add(time.Millisecond))[2]; got.State != follow.CatchingUp {
+		t.Fatalf("second local role did not receive a follow decision: %+v", got)
+	}
+	bad := full
+	bad.SeenUTC = now.Add(2 * time.Millisecond)
+	bad.ReceivedAt = bad.SeenUTC
+	bad.TickMS++
+	bad.Players = bad.Players[:1]
+	if engine.ObserveOrderedClient(bad) || len(engine.samples) != 0 {
+		t.Fatalf("incomplete current frame left an old local role active: %+v", engine.samples)
+	}
+	if got := engine.Step(now.Add(2 * time.Millisecond))[2]; got.State != follow.Waiting {
+		t.Fatalf("role moved after order became incomplete: %+v", got)
+	}
+	full.SeenUTC = now.Add(3 * time.Millisecond)
+	full.ReceivedAt = full.SeenUTC
+	full.TickMS += 2
+	if !engine.ObserveOrderedClient(full) || engine.Step(full.SeenUTC)[2].State != follow.CatchingUp {
+		t.Fatal("complete order did not restore follow after a dropped frame")
+	}
+	old := bad
+	old.PlayerOrderReliable = false
+	if engine.ObserveOrderedClient(old) || len(engine.samples) != 2 {
+		t.Fatal("an old unreliable frame erased newer ordered positions")
+	}
+	current := full
+	current.SeenUTC = now.Add(4 * time.Millisecond)
+	current.ReceivedAt = current.SeenUTC
+	current.TickMS++
+	current.PlayerOrderReliable = false
+	if engine.ObserveOrderedClient(current) || len(engine.samples) != 0 ||
+		engine.Step(current.SeenUTC)[2].State != follow.Waiting {
+		t.Fatal("current loss of player order did not release both local roles")
+	}
+}
+
+func TestFourRolesAcrossTwoDualLocalClients(t *testing.T) {
+	now := time.Now().UTC()
+	bindings := []RoleBinding{
+		{1, 1, 1, 101}, {2, 1, 2, 101},
+		{3, 2, 1, 202}, {4, 2, 2, 202},
+	}
+	engine, err := NewWithBindings(bindings, 1, follow.Config{
+		StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10,
+		MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	for slot := 1; slot <= 4; slot++ {
+		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
+			ObservedAt: now, Origin: "live"})
+	}
+	frame := func(pid int, x1, x2 float64) OrderedClientFrame {
+		return OrderedClientFrame{ProcessID: pid, SeenUTC: now.Add(time.Millisecond),
+			ReceivedAt: now.Add(time.Millisecond), TickMS: now.UnixMilli() + 1,
+			CoordinateSpace: "world", PlayerOrderReliable: true,
+			PlayerOrderSource: "validated local-player vector", Players: []OrderedLocalPlayer{
+				{LocalPlayer: 1, X: x1 * worldPerGridUnit, Life: floatPtr(100), LifeMax: floatPtr(100)},
+				{LocalPlayer: 2, X: x2 * worldPerGridUnit, Life: floatPtr(100), LifeMax: floatPtr(100)},
+			}}
+	}
+	if !engine.ObserveOrderedClient(frame(101, 30, 20)) ||
+		!engine.ObserveOrderedClient(frame(202, 10, 0)) {
+		t.Fatal("two complete client frames were not accepted")
+	}
+	commands := engine.Step(now.Add(time.Millisecond))
+	for _, slot := range []int{2, 3, 4} {
+		if commands[slot].State != follow.CatchingUp {
+			t.Fatalf("P%d did not follow across the two-client layout: %+v", slot, commands[slot])
+		}
+	}
+}
+
+func TestSixRolesAcrossThreeDualLocalClients(t *testing.T) {
+	now := time.Now().UTC()
+	bindings := []RoleBinding{
+		{1, 1, 1, 101}, {2, 1, 2, 101},
+		{3, 2, 1, 202}, {4, 2, 2, 202},
+		{5, 3, 1, 303}, {6, 3, 2, 303},
+	}
+	engine, err := NewWithBindings(bindings, 1, follow.Config{
+		StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10,
+		MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	for slot := 1; slot <= 6; slot++ {
+		if !engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
+			ObservedAt: now, Origin: "live"}) {
+			t.Fatal("area rejected")
+		}
+	}
+	for client := 1; client <= 3; client++ {
+		pid := client * 101
+		x := float64(70 - client*20)
+		if !engine.ObserveOrderedClient(OrderedClientFrame{
+			ProcessID: pid, SeenUTC: now.Add(time.Millisecond),
+			ReceivedAt: now.Add(time.Millisecond), TickMS: now.UnixMilli() + 1,
+			CoordinateSpace: "world", PlayerOrderReliable: true,
+			PlayerOrderSource: "validated local-player vector",
+			Players: []OrderedLocalPlayer{
+				{LocalPlayer: 1, X: x * worldPerGridUnit, Life: floatPtr(100), LifeMax: floatPtr(100)},
+				{LocalPlayer: 2, X: (x - 10) * worldPerGridUnit, Life: floatPtr(100), LifeMax: floatPtr(100)},
+			},
+		}) {
+			t.Fatalf("client %d frame rejected", client)
+		}
+	}
+	commands := engine.Step(now.Add(time.Millisecond))
+	for slot := 2; slot <= 6; slot++ {
+		if commands[slot].State != follow.CatchingUp {
+			t.Fatalf("P%d was not represented in six-role follow: %+v", slot, commands[slot])
+		}
+	}
+}
+
+func TestOrderedClientRejectsUnverifiedAndAmbiguousBindings(t *testing.T) {
+	config := follow.Config{StopDistance: 2, ResumeDistance: 3,
+		CatchUpDistance: 10, MaxAge: time.Second}
+	for _, bindings := range [][]RoleBinding{
+		{{1, 1, 1, 101}, {2, 1, 1, 101}},
+		{{1, 1, 1, 101}, {2, 2, 1, 101}},
+		{{1, 1, 1, 101}, {2, 3, 1, 202}},
+	} {
+		if engine, err := NewWithBindings(bindings, 1, config, time.Minute); err == nil {
+			engine.Close()
+			t.Fatalf("ambiguous role binding accepted: %+v", bindings)
+		}
+	}
+	engine, err := NewWithBindings([]RoleBinding{{1, 1, 1, 101}, {2, 1, 2, 101}},
+		1, config, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	now := time.Now().UTC()
+	frame := OrderedClientFrame{ProcessID: 101, SeenUTC: now,
+		ReceivedAt: now, TickMS: now.UnixMilli(), CoordinateSpace: "world",
+		PlayerOrderSource: "candidate scan", Players: []OrderedLocalPlayer{
+			{LocalPlayer: 1, Life: floatPtr(100), LifeMax: floatPtr(100)},
+			{LocalPlayer: 2, Life: floatPtr(100), LifeMax: floatPtr(100)},
+		}}
+	if engine.ObserveOrderedClient(frame) {
+		t.Fatal("unreliable order drove positions")
+	}
+	frame.PlayerOrderReliable = true
+	frame.Players[1].Life = nil
+	if engine.ObserveOrderedClient(frame) {
+		t.Fatal("missing second-role life was accepted")
+	}
+}
+
+func floatPtr(value float64) *float64 { return &value }

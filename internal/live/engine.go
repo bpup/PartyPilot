@@ -26,6 +26,8 @@ type Engine struct {
 	logAge           time.Duration
 	sampleAge        time.Duration
 	pidToSlot        map[int]int
+	pidToRoles       map[int][]RoleBinding
+	slotToPID        map[int]int
 	slots            []int
 	samples          map[int]telemetry.Sample
 	areas            map[int]arealog.Signal
@@ -140,45 +142,101 @@ func New(roster map[int]int, leader int, config follow.Config, logAge time.Durat
 		slots = append(slots, slot)
 	}
 	sort.Ints(slots)
-	players := make([]focus.Player, 0, len(slots))
-	pidToSlot := make(map[int]int, len(slots))
+	bindings := make([]RoleBinding, 0, len(roster))
 	for index, slot := range slots {
-		pid := roster[slot]
-		if slot < 1 || slot > 6 || pid <= 0 {
-			return nil, fmt.Errorf("invalid slot or process ID")
-		}
-		if _, exists := pidToSlot[pid]; exists {
-			return nil, fmt.Errorf("duplicate process ID")
-		}
-		pidToSlot[pid] = slot
-		players = append(players, focus.Player{Slot: slot, Client: index + 1})
+		bindings = append(bindings, RoleBinding{Slot: slot, Client: index + 1,
+			LocalPlayer: 1, ProcessID: roster[slot]})
 	}
+	return NewWithBindings(bindings, leader, config, logAge)
+}
+
+// NewWithBindings retains the target layout's distinction between a client
+// process and its one or two local players. It does not infer local order from
+// visible entities; only ObserveOrderedClient can supply a two-player frame.
+func NewWithBindings(bindings []RoleBinding, leader int, config follow.Config,
+	logAge time.Duration) (*Engine, error) {
+	if len(bindings) < 2 || len(bindings) > 6 || logAge <= 0 {
+		return nil, fmt.Errorf("live roster needs 2–6 roles and positive log age")
+	}
+	slots := make([]int, 0, len(bindings))
+	players := make([]focus.Player, 0, len(bindings))
+	pidToSlot := make(map[int]int)
+	pidToRoles := make(map[int][]RoleBinding)
+	slotToPID := make(map[int]int)
+	clientPIDs := make(map[int]int)
+	pidClients := make(map[int]int)
+	localSlots := make(map[int]map[int]bool)
+	for _, binding := range bindings {
+		if binding.Slot < 1 || binding.Slot > 6 || binding.Client < 1 || binding.Client > 3 ||
+			binding.LocalPlayer < 1 || binding.LocalPlayer > 2 || binding.ProcessID <= 0 ||
+			slotToPID[binding.Slot] != 0 ||
+			(clientPIDs[binding.Client] != 0 && clientPIDs[binding.Client] != binding.ProcessID) ||
+			(pidClients[binding.ProcessID] != 0 && pidClients[binding.ProcessID] != binding.Client) {
+			return nil, fmt.Errorf("invalid role/client/process binding")
+		}
+		if localSlots[binding.Client] == nil {
+			localSlots[binding.Client] = make(map[int]bool)
+		}
+		if localSlots[binding.Client][binding.LocalPlayer] {
+			return nil, fmt.Errorf("duplicate local player in client %d", binding.Client)
+		}
+		localSlots[binding.Client][binding.LocalPlayer] = true
+		clientPIDs[binding.Client] = binding.ProcessID
+		pidClients[binding.ProcessID] = binding.Client
+		slotToPID[binding.Slot] = binding.ProcessID
+		pidToRoles[binding.ProcessID] = append(pidToRoles[binding.ProcessID], binding)
+		slots = append(slots, binding.Slot)
+		players = append(players, focus.Player{Slot: binding.Slot, Client: binding.Client})
+	}
+	for client := 1; client <= len(clientPIDs); client++ {
+		if clientPIDs[client] == 0 || !localSlots[client][1] ||
+			(len(localSlots[client]) == 2 && !localSlots[client][2]) {
+			return nil, fmt.Errorf("incomplete local-player order for client %d", client)
+		}
+	}
+	for _, roles := range pidToRoles {
+		if len(roles) == 1 {
+			pidToSlot[roles[0].ProcessID] = roles[0].Slot
+		}
+	}
+	sort.Ints(slots)
 	coordinator, err := party.New(players, leader, config)
 	if err != nil {
 		return nil, err
 	}
 	return &Engine{coordinator: coordinator, leader: leader, baseLeader: leader,
 		logAge: logAge, sampleAge: config.MaxAge, memberNames: make(map[int]string),
-		pidToSlot: pidToSlot, slots: slots, samples: make(map[int]telemetry.Sample), areas: make(map[int]arealog.Signal)}, nil
+		pidToSlot: pidToSlot, pidToRoles: pidToRoles, slotToPID: slotToPID,
+		slots: slots, samples: make(map[int]telemetry.Sample), areas: make(map[int]arealog.Signal)}, nil
 }
 
 func (e *Engine) ObserveSample(sample telemetry.Sample) bool {
 	slot, exists := e.pidToSlot[sample.ProcessID]
-	if !exists || sample.SeenUTC.IsZero() || sample.TickMS <= 0 ||
-		sample.ReceivedAt.IsZero() || sample.CoordinateSpace != "world" {
+	if !exists || !validMovementSample(sample) || !e.sampleIsNew(slot, sample) {
 		return false
 	}
-	if previous, exists := e.samples[slot]; exists &&
-		(sample.SeenUTC.Before(previous.SeenUTC) || sample.TickMS < previous.TickMS ||
-			sample.ReceivedAt.Before(previous.ReceivedAt)) {
-		return false
-	}
+	e.storeSample(slot, sample)
+	return true
+}
+
+func validMovementSample(sample telemetry.Sample) bool {
+	return sample.SeenUTC.IsZero() == false && sample.TickMS > 0 &&
+		!sample.ReceivedAt.IsZero() && sample.CoordinateSpace == "world" &&
+		finitePosition(sample.X) && finitePosition(sample.Y) && finitePosition(sample.Z)
+}
+
+func (e *Engine) sampleIsNew(slot int, sample telemetry.Sample) bool {
+	previous, exists := e.samples[slot]
+	return !exists || !sample.SeenUTC.Before(previous.SeenUTC) &&
+		sample.TickMS >= previous.TickMS && !sample.ReceivedAt.Before(previous.ReceivedAt)
+}
+
+func (e *Engine) storeSample(slot int, sample telemetry.Sample) {
 	if bound, exists := e.terrains[slot]; exists &&
 		(sample.AreaHash != bound.binding.AreaHash || sample.SeenUTC.Before(bound.seen)) {
 		delete(e.terrainStable, slot)
 	}
 	e.samples[slot] = sample
-	return true
 }
 
 func (e *Engine) ObserveArea(signal arealog.Signal) bool {

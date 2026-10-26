@@ -142,14 +142,20 @@ type GroundHover struct {
 // VisiblePlayer is diagnostic evidence only. It does not establish a local
 // co-op slot or authorize controller movement.
 type VisiblePlayer struct {
-	EntityID        uint64  `json:"EntityId"`
-	Address         string  `json:"Address,omitempty"`
-	Path            string  `json:"Path,omitempty"`
-	Name            string  `json:"Name"`
-	X               float64 `json:"X"`
-	Y               float64 `json:"Y"`
-	Z               float64 `json:"Z"`
-	IsObservedLocal bool    `json:"IsObservedLocal"`
+	EntityID        uint64   `json:"EntityId"`
+	Address         string   `json:"Address,omitempty"`
+	Path            string   `json:"Path,omitempty"`
+	Name            string   `json:"Name"`
+	X               float64  `json:"X"`
+	Y               float64  `json:"Y"`
+	Z               float64  `json:"Z"`
+	IsObservedLocal bool     `json:"IsObservedLocal"`
+	Life            *float64 `json:"Life,omitempty"`
+	LifeMax         *float64 `json:"LifeMax,omitempty"`
+	Mana            *float64 `json:"Mana,omitempty"`
+	ManaMax         *float64 `json:"ManaMax,omitempty"`
+	EnergyShield    *float64 `json:"EnergyShield,omitempty"`
+	EnergyShieldMax *float64 `json:"EnergyShieldMax,omitempty"`
 }
 
 // RadarEntity is a path-and-position observation; category does not assert
@@ -687,9 +693,14 @@ func validVisiblePlayers(players []VisiblePlayer, observedLocalAddress string) b
 	ids := make(map[uint64]bool, len(players))
 	localCount := 0
 	for _, player := range players {
-		if player.EntityID == 0 || player.Name == "" || ids[player.EntityID] ||
+		if player.EntityID == 0 || ids[player.EntityID] ||
 			!validAddress(player.Address) ||
-			!finite(player.X) || !finite(player.Y) || !finite(player.Z) {
+			(player.Name == "" && (player.Address == "" ||
+				!strings.HasPrefix(strings.ToLower(player.Path), "metadata/characters/"))) ||
+			!finite(player.X) || !finite(player.Y) || !finite(player.Z) ||
+			!validPool(player.Life, player.LifeMax) ||
+			!validPool(player.Mana, player.ManaMax) ||
+			!validPool(player.EnergyShield, player.EnergyShieldMax) {
 			return false
 		}
 		ids[player.EntityID] = true

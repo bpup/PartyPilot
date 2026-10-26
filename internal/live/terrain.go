@@ -82,7 +82,7 @@ func LoadTerrainBinding(path string) (TerrainBinding, error) {
 }
 
 func (e *Engine) SetTerrainBinding(slot int, binding TerrainBinding) error {
-	if binding.ProcessID <= 0 || e.pidToSlot[binding.ProcessID] != slot ||
+	if binding.ProcessID <= 0 || e.slotToPID[slot] != binding.ProcessID ||
 		strings.TrimSpace(binding.CaptureMetadataFile) == "" || strings.TrimSpace(binding.AreaID) == "" ||
 		binding.Seed <= 0 || binding.AreaHash == 0 || math.IsNaN(binding.OriginX) ||
 		math.IsInf(binding.OriginX, 0) || math.IsNaN(binding.OriginY) ||

@@ -562,23 +562,31 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         foreach (var entity in GameController.Entities)
         {
             var component = entity?.GetComponent<Player>();
-            if (component == null || string.IsNullOrWhiteSpace(component.PlayerName)) continue;
-            if (Encoding.UTF8.GetByteCount(component.PlayerName) > 64 ||
+            if (component == null || entity == null ||
+                !RadarClassifier.IsPlayerPath(entity.Path ?? "")) continue;
+            if (Encoding.UTF8.GetByteCount(component.PlayerName ?? "") > 64 ||
                 Encoding.UTF8.GetByteCount(entity!.Path ?? "") > 256) continue;
             var position = entity!.Pos;
             if (entity.Id == 0 || !seen.Add(entity.Id) || !float.IsFinite(position.X) ||
                 !float.IsFinite(position.Y) || !float.IsFinite(position.Z))
                 continue;
+            var life = entity.GetComponent<Life>();
             players.Add(new
             {
                 EntityId = entity.Id,
                 Address = FormatAddress(entity.Address),
                 Path = entity.Path,
-                Name = component.PlayerName.Trim(),
+                Name = component.PlayerName?.Trim() ?? "",
                 X = position.X,
                 Y = position.Y,
                 Z = position.Z,
-                IsObservedLocal = observedLocalId.HasValue && entity.Id == observedLocalId.Value
+                IsObservedLocal = observedLocalId.HasValue && entity.Id == observedLocalId.Value,
+                Life = life?.CurHP,
+                LifeMax = life?.MaxHP,
+                Mana = life?.CurMana,
+                ManaMax = life?.MaxMana,
+                EnergyShield = life?.CurES,
+                EnergyShieldMax = life?.MaxES
             });
             if (players.Count == 16) break;
         }

@@ -49,6 +49,33 @@ func TestVisiblePlayerDiagnosticsCannotDeclareTwoLocalEntities(t *testing.T) {
 	}
 }
 
+func TestVisiblePlayerVitalsRemainUnassignedDiagnostics(t *testing.T) {
+	base := `{"ProcessId":123,"SeenUtc":"2026-10-26T00:00:00Z","X":1,"Y":2,"Z":3,` +
+		`"VisiblePlayersStatus":"ok","VisiblePlayers":[` +
+		`{"EntityId":11,"Address":"0x200000","Name":"One","X":1,"Y":2,"Z":3,` +
+		`"IsObservedLocal":true,"Life":80,"LifeMax":100,"Mana":20,"ManaMax":50},` +
+		`{"EntityId":12,"Address":"0x300000","Path":"Metadata/Characters/Player",` +
+		`"Name":"","X":4,"Y":5,"Z":6,` +
+		`"IsObservedLocal":false,"Life":70,"LifeMax":100,"EnergyShield":5,"EnergyShieldMax":20}]}`
+	sample, err := Decode([]byte(base))
+	if err != nil || len(sample.VisiblePlayers) != 2 || sample.VisiblePlayers[1].Life == nil ||
+		*sample.VisiblePlayers[1].Life != 70 || sample.LocalSlotCandidates != nil || sample.Life != nil {
+		t.Fatalf("visible vitals were promoted to a local player: %+v, %v", sample, err)
+	}
+	for _, changed := range []string{
+		strings.Replace(base, `"Path":"Metadata/Characters/Player"`,
+			`"Path":"Metadata/Monsters/Player"`, 1),
+		strings.Replace(base, `"Life":70,"LifeMax":100`, `"Life":70`, 1),
+		strings.Replace(base, `"EnergyShield":5,"EnergyShieldMax":20`,
+			`"EnergyShield":-1,"EnergyShieldMax":20`, 1),
+		strings.Replace(base, `"Mana":20,"ManaMax":50`, `"Mana":20,"ManaMax":-1`, 1),
+	} {
+		if _, err := Decode([]byte(changed)); err == nil {
+			t.Fatalf("invalid visible vitals accepted: %s", changed)
+		}
+	}
+}
+
 func TestVisiblePlayerAddressEvidenceIsDiagnosticOnly(t *testing.T) {
 	base := `{"ProcessId":123,"SeenUtc":"2026-10-26T00:00:00Z","X":1,"Y":2,"Z":3,` +
 		`"IngameDataAddress":"0x100000","ObservedLocalAddress":"0x200000",` +
