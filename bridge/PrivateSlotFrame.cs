@@ -84,7 +84,7 @@ internal static class PrivateSlotFrame
         return false;
     }
 
-    private static bool HasHeader(ReadOnlySpan<byte> frame) =>
+    internal static bool HasHeader(ReadOnlySpan<byte> frame) =>
         frame.Length == Size && Get32(frame, 0) == Magic && Get32(frame, 4) == Version &&
         Get32(frame, 8) == Size && Get32(frame, 16) is P5 or (P5 | P6);
 

@@ -19,6 +19,7 @@ if (args.Contains("--stdin"))
 }
 
 PrivateSlotFrameTests.Run();
+PrivateSlotPublisherTests.Run();
 
 Expect("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", true, 2, true);
 Expect("{\"slot\":3,\"state\":\"holding\"}", true, 3, false);

@@ -11,6 +11,7 @@
     <Compile Include="../FocusPadMap.cs" Link="FocusPadMap.cs" />
     <Compile Include="../BridgeRouter.cs" Link="BridgeRouter.cs" />
     <Compile Include="../PrivateSlotFrame.cs" Link="PrivateSlotFrame.cs" />
+    <Compile Include="../PrivateSlotPublisher.cs" Link="PrivateSlotPublisher.cs" />
     <Compile Include="../XInputNative.cs" Link="XInputNative.cs" />
     <Compile Include="../PhysicalSlotGuard.cs" Link="PhysicalSlotGuard.cs" />
     <Compile Include="../HidHidePreflight.cs" Link="HidHidePreflight.cs" />
