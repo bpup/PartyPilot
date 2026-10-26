@@ -66,6 +66,52 @@ func ValidateAttach(paths []string, timeout time.Duration) ([]string, error) {
 	return validate(paths, timeout, true)
 }
 
+func ValidateStart(paths []string, timeout time.Duration, runtime string) ([]string, error) {
+	validated, err := validate(paths, timeout, true)
+	if err != nil {
+		return nil, err
+	}
+	for index, path := range validated {
+		for prior := 0; prior < index; prior++ {
+			left, leftErr := os.Stat(filepath.Dir(path))
+			right, rightErr := os.Stat(filepath.Dir(validated[prior]))
+			if leftErr != nil || rightErr != nil {
+				return nil, fmt.Errorf("cannot verify game installation directory")
+			}
+			if !os.SameFile(left, right) {
+				continue
+			}
+			if !clientprocess.IsStandaloneGameExecutable(path) ||
+				!clientprocess.IsStandaloneGameExecutable(validated[prior]) {
+				return nil, fmt.Errorf("shared-installation launch requires standalone PathOfExile.exe or PathOfExile_x64.exe")
+			}
+			info, statErr := os.Stat(runtime)
+			if statErr != nil || !info.Mode().IsRegular() {
+				return nil, fmt.Errorf("independent multi-instance runtime is missing: %s", runtime)
+			}
+			break
+		}
+	}
+	return validated, nil
+}
+
+func NeedsIsolation(paths []string, index int) bool {
+	if index < 1 || index >= len(paths) {
+		return false
+	}
+	root, err := os.Stat(filepath.Dir(paths[index]))
+	if err != nil {
+		return false
+	}
+	for prior := 0; prior < index; prior++ {
+		other, err := os.Stat(filepath.Dir(paths[prior]))
+		if err == nil && os.SameFile(root, other) {
+			return true
+		}
+	}
+	return false
+}
+
 func validate(paths []string, timeout time.Duration, allowShared bool) ([]string, error) {
 	if len(paths) < 1 || len(paths) > 3 || timeout <= 0 {
 		return nil, fmt.Errorf("configure 1–3 executables and a positive timeout")

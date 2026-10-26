@@ -39,6 +39,29 @@ func TestLaunchValidationRequiresDistinctInstallations(t *testing.T) {
 	}
 }
 
+func TestStandaloneSharedInstallationRequiresOwnRuntime(t *testing.T) {
+	root := t.TempDir()
+	standalone := filepath.Join(root, "PathOfExile_x64.exe")
+	steam := filepath.Join(root, "PathOfExile_x64Steam.exe")
+	runtime := filepath.Join(root, "PartyPilot.MultiInstance.dll")
+	for _, path := range []string{standalone, steam, runtime} {
+		if err := os.WriteFile(path, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	paths := []string{standalone, standalone}
+	if _, err := ValidateStart(paths, time.Second, filepath.Join(root, "missing.dll")); err == nil {
+		t.Fatal("shared standalone installation accepted a missing runtime")
+	}
+	checked, err := ValidateStart(paths, time.Second, runtime)
+	if err != nil || len(checked) != 2 || !NeedsIsolation(checked, 1) || NeedsIsolation(checked, 0) {
+		t.Fatalf("shared standalone launch was not planned for the additional client: %v %v", checked, err)
+	}
+	if _, err := ValidateStart([]string{steam, steam}, time.Second, runtime); err == nil {
+		t.Fatal("shared Steam installation was accepted for mutex isolation")
+	}
+}
+
 func TestStoreURIsRequireMatchingExecutable(t *testing.T) {
 	paths := []string{"/Steam/PathOfExile_x64Steam.exe", "/Epic/PathOfExile_x64EGS.exe"}
 	valid := map[int]string{

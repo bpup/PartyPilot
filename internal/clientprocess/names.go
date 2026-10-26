@@ -18,3 +18,11 @@ func IsKnownGameExecutable(path string) bool {
 	name := strings.ToLower(strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)))
 	return knownGameNames[name]
 }
+
+func IsStandaloneGameExecutable(path string) bool {
+	if !strings.EqualFold(filepath.Ext(path), ".exe") {
+		return false
+	}
+	name := strings.ToLower(strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)))
+	return name == "pathofexile" || name == "pathofexile_x64"
+}

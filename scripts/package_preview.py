@@ -14,10 +14,13 @@ REQUIRED = {
     "release/bridge/PartyPilot.Bridge.exe",
     "release/PartyPilot-LiveFollow.exe",
     "release/PartyPilot-FpsConfig.exe",
+    "release/PartyPilot-ClientLaunch.exe",
     "release/PartyPilot.Sensor.dll",
     "release/PartyPilot.Sensor.deps.json",
     "release/native/PartyPilot.PrivateSlots.dll",
     "release/native/PartyPilot.PrivateSlots.Smoke.exe",
+    "release/native/PartyPilot.MultiInstance.dll",
+    "release/native/PartyPilot.MultiInstance.Smoke.exe",
 }
 
 

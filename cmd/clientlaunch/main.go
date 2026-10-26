@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -90,12 +91,15 @@ type output struct {
 }
 
 func main() {
+	self, _ := os.Executable()
+	defaultRuntime := filepath.Join(filepath.Dir(self), "native", "PartyPilot.MultiInstance.dll")
 	var paths executables
 	var uris launchURIs
 	var pids attachPIDs
 	flag.Var(&paths, "exe", "repeat for each game client in launch order")
 	flag.Var(&uris, "uri", "optional SLOT=Steam-or-Epic-launch-URI, bound to the matching -exe")
 	flag.Var(&pids, "pid", "optional SLOT=PID for -attach; required when clients share one installation")
+	runtime := flag.String("multi-instance-runtime", defaultRuntime, "independent mutex runtime for extra standalone clients from one installation")
 	check := flag.Bool("check", false, "validate paths and layout without launching")
 	attach := flag.Bool("attach", false, "bind one existing game window to each configured executable")
 	timeout := flag.Duration("timeout", 60*time.Second, "time to wait for each game window")
@@ -106,6 +110,10 @@ func main() {
 	size := flag.String("size", "small", "stacked size")
 	align := flag.String("align", "center", "stacked alignment")
 	flag.Parse()
+	runtimePath, pathErr := filepath.Abs(*runtime)
+	if pathErr != nil {
+		fail(pathErr)
+	}
 	if *attach && (*check || len(uris) != 0) {
 		fail(errors.New("-attach cannot be combined with -check or -uri"))
 	}
@@ -117,7 +125,7 @@ func main() {
 	if *attach {
 		validated, err = clientlaunch.ValidateAttach(paths, *timeout)
 	} else {
-		validated, err = clientlaunch.Validate(paths, *timeout)
+		validated, err = clientlaunch.ValidateStart(paths, *timeout, runtimePath)
 	}
 	if err != nil {
 		fail(err)
@@ -174,7 +182,7 @@ func main() {
 	if *attach {
 		bound, err = clientlaunch.Attach(validated, pids)
 	} else {
-		bound, err = clientlaunch.Start(validated, uris, *timeout)
+		bound, err = clientlaunch.Start(validated, uris, *timeout, runtimePath)
 	}
 	response.Clients = bound.Clients
 	if err != nil {

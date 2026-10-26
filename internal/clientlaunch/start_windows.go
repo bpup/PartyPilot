@@ -68,12 +68,28 @@ func Attach(paths []string, selected map[int]int) (Result, error) {
 	return result, nil
 }
 
-func Start(paths []string, uris map[int]string, timeout time.Duration) (Result, error) {
+func Start(paths []string, uris map[int]string, timeout time.Duration, runtime string) (Result, error) {
+	if _, err := ValidateStart(paths, timeout, runtime); err != nil {
+		return Result{}, err
+	}
 	if err := ValidateURIs(paths, uris); err != nil {
 		return Result{}, err
 	}
 	result := Result{Clients: make([]Client, 0, len(paths))}
 	for index, path := range paths {
+		if NeedsIsolation(paths, index) {
+			if uris[index+1] != "" {
+				return result, fmt.Errorf("client %d shared standalone installation cannot use a store URI", index+1)
+			}
+			client, err := startIsolatedStandalone(path, runtime, timeout)
+			if client.PID != 0 {
+				result.Clients = append(result.Clients, client)
+			}
+			if err != nil {
+				return result, fmt.Errorf("client %d multi-instance launch: %w", index+1, err)
+			}
+			continue
+		}
 		if uri := uris[index+1]; uri != "" {
 			client, err := startStoreClient(path, uri, timeout)
 			if client.PID != 0 {

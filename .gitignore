@@ -12,4 +12,5 @@ ui-smoke/bin/
 ui-smoke/obj/
 release/
 native/private-slot-runtime/.build/
+native/multi-instance-runtime/.build/
 PartyPilot.exe
