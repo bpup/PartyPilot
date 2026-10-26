@@ -16,5 +16,6 @@
     <Compile Include="../sensor/UiItemCardVtableLocator.cs" Link="UiItemCardVtableLocator.cs" />
     <Compile Include="../sensor/UiItemCardCorrelator.cs" Link="UiItemCardCorrelator.cs" />
     <Compile Include="../sensor/LootBaseIdentity.cs" Link="LootBaseIdentity.cs" />
+    <Compile Include="../sensor/TerrainDiagnostic.cs" Link="TerrainDiagnostic.cs" />
   </ItemGroup>
 </Project>

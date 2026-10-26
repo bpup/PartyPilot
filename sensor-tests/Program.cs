@@ -112,6 +112,7 @@ Require(crossAreaConflict.Status == "conflicting_candidates" &&
     crossAreaConflict.CandidateAreaAddresses.SequenceEqual(["0x100000", "0x900000"]),
     "Conflicting orders from different area anchors were accepted.");
 TestRawRenderPositionReader();
+TestTerrainDiagnostic();
 Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
     RadarClassifier.Category("Metadata/MiscellaneousObjects/Waypoint") == "waypoint" &&
     RadarClassifier.Category("Metadata/Effects/PortalFlash") == null &&
@@ -176,6 +177,21 @@ void TestRawRenderPositionReader()
         .Concat(BitConverter.GetBytes(0f)).Concat(BitConverter.GetBytes(0f)).ToArray();
     Require(RawRenderPositionReader.Read(entity, ReadRaw) == null,
         "Nonfinite Render position was accepted.");
+}
+void TestTerrainDiagnostic()
+{
+    Require(TerrainDiagnostic.Summarize(null) == null &&
+        TerrainDiagnostic.Summarize([]) == null, "Missing terrain was reported as available.");
+    var small = TerrainDiagnostic.Summarize([[0, 1, 1], [2]])!;
+    Require(small.Rows == 2 && small.MinColumns == 1 && small.MaxColumns == 3 &&
+        small.SampledCells == 4 && !small.SampleTruncated && !small.ValuesTruncated &&
+        small.Values.Select(entry => (entry.Value, entry.Count))
+            .SequenceEqual([(0, 1), (1, 2), (2, 1)]),
+        "Raw terrain dimensions or value counts changed.");
+    var large = TerrainDiagnostic.Summarize([Enumerable.Range(0, 70_000).ToArray()])!;
+    Require(large.SampledCells == 65_536 && large.SampleTruncated &&
+        large.Values.Length == 32 && large.ValuesTruncated,
+        "Raw terrain diagnostic exceeded its sample or value budget.");
 }
 var largeLoot = Enumerable.Range(1, 96).Select(index => (object)new
 {

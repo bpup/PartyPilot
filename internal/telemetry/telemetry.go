@@ -36,8 +36,27 @@ type Sample struct {
 	ItemCards                []RawItemCard        `json:"ItemCards,omitempty"`
 	ItemCardStatus           string               `json:"ItemCardStatus,omitempty"`
 	ItemCardSeenUTC          *time.Time           `json:"ItemCardSeenUtc,omitempty"`
+	TerrainSummary           *RawTerrainSummary   `json:"TerrainSummary,omitempty"`
+	TerrainStatus            string               `json:"TerrainStatus,omitempty"`
+	TerrainSeenUTC           *time.Time           `json:"TerrainSeenUtc,omitempty"`
 	VisiblePlayers           []VisiblePlayer      `json:"VisiblePlayers,omitempty"`
 	VisiblePlayersStatus     string               `json:"VisiblePlayersStatus,omitempty"`
+}
+
+// RawTerrainSummary is diagnostic evidence only. Values are not walkability flags.
+type RawTerrainSummary struct {
+	Rows            int               `json:"Rows"`
+	MinColumns      int               `json:"MinColumns"`
+	MaxColumns      int               `json:"MaxColumns"`
+	SampledCells    int               `json:"SampledCells"`
+	SampleTruncated bool              `json:"SampleTruncated"`
+	ValuesTruncated bool              `json:"ValuesTruncated"`
+	Values          []RawTerrainValue `json:"Values"`
+}
+
+type RawTerrainValue struct {
+	Value int `json:"Value"`
+	Count int `json:"Count"`
 }
 
 // RawItemCard is a currently attached UI node with an item and owner pointer.
@@ -166,10 +185,48 @@ func Decode(data []byte) (Sample, error) {
 		!validGroundHover(item.GroundHover, item.GroundHoverStatus, item.RadarSeenUTC) ||
 		!validRawItemCards(item.ItemCards, item.ItemCardStatus, item.ItemCardSeenUTC,
 			item.LocalSlotCandidates) ||
+		!validRawTerrain(item.TerrainSummary, item.TerrainStatus, item.TerrainSeenUTC) ||
 		!validVisiblePlayers(item.VisiblePlayers, item.ObservedLocalAddress) {
 		return Sample{}, ErrInvalidSample
 	}
 	return item, nil
+}
+
+func validRawTerrain(summary *RawTerrainSummary, status string, seen *time.Time) bool {
+	if status == "" {
+		return summary == nil && seen == nil
+	}
+	if seen == nil || seen.IsZero() {
+		return false
+	}
+	if status == "unavailable" || status == "scan_failed" {
+		return summary == nil
+	}
+	if status != "raw_values_observed" && status != "empty" {
+		return false
+	}
+	if summary == nil || summary.Rows <= 0 || summary.MinColumns < 0 ||
+		summary.MaxColumns < summary.MinColumns || summary.SampledCells < 0 ||
+		summary.SampledCells > 65_536 || len(summary.Values) > 32 {
+		return false
+	}
+	if status == "empty" {
+		return summary.SampledCells == 0 && len(summary.Values) == 0
+	}
+	if summary.SampledCells == 0 || len(summary.Values) == 0 {
+		return false
+	}
+	counted := 0
+	previous := 0
+	for i, value := range summary.Values {
+		if value.Count <= 0 || (i > 0 && value.Value <= previous) {
+			return false
+		}
+		previous = value.Value
+		counted += value.Count
+	}
+	return counted <= summary.SampledCells &&
+		(summary.ValuesTruncated || counted == summary.SampledCells)
 }
 
 func validRawItemCards(cards []RawItemCard, status string, seen *time.Time,

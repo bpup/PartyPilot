@@ -157,3 +157,5 @@ PartyPilot-LiveFollow.exe -roster 1:1234,2:5678 -leader 1 -leader-name Leader -m
 多角色回放现按所提供 0.6.17 版本的 `ResolveFollowTargets` 静态规则，在每帧决策前解析跟随图：未设置或无效的运行时目标回到当前 MAIN，循环路径上的角色也回到当前 MAIN；其他可到达 MAIN 的链保持原目标。六角色合成帧覆盖循环消解和聚焦后更换 MAIN。命令行现接受 `角色:0` 表示“当前 MAIN”；当目标指向自己、当前布局未激活的角色或无效编号时，也会按目标版设置入口收敛到“当前 MAIN”。目标列表之外的跟随者仍会被拒绝。
 
 状态：**implementation-aligned / integration-pending**。
+
+地形绕行仍缺游戏数据映射。传感器新增默认关闭的 `DiagnoseTerrain`，仅输出原始 `RawPathfindingData` 的有界统计供实测核对，不用于移动决策；证据与待验证步骤见[地形与绕行取证](TERRAIN_RESEARCH.md)。

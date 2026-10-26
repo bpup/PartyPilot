@@ -22,6 +22,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     private string? _slotCandidateStatus;
     private DateTime _lastRadarSentUtc;
     private DateTime _lastCardSentUtc;
+    private DateTime _lastTerrainSentUtc;
     private string? _cardModulePath;
     private Task<long>? _cardVtableTask;
 
@@ -245,6 +246,25 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             }
         }
 
+        TerrainDiagnostic.Summary? terrainSummary = null;
+        string? terrainStatus = null;
+        DateTime? terrainSeenUtc = null;
+        if (Settings.DiagnoseTerrain.Value && now - _lastTerrainSentUtc >= TimeSpan.FromSeconds(5))
+        {
+            _lastTerrainSentUtc = now;
+            terrainSeenUtc = now;
+            try
+            {
+                terrainSummary = TerrainDiagnostic.Summarize(GameController.IngameState.Data.RawPathfindingData);
+                terrainStatus = terrainSummary == null ? "unavailable" :
+                    terrainSummary.SampledCells == 0 ? "empty" : "raw_values_observed";
+            }
+            catch
+            {
+                terrainStatus = "scan_failed";
+            }
+        }
+
         var position = render.Pos;
         // AreaName is diagnostic only. It does not identify a specific instance.
         var message = JsonSerializer.Serialize(new
@@ -275,6 +295,9 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             ItemCards = itemCards,
             ItemCardStatus = itemCardStatus,
             ItemCardSeenUtc = itemCardSeenUtc,
+            TerrainSummary = terrainSummary,
+            TerrainStatus = terrainStatus,
+            TerrainSeenUtc = terrainSeenUtc,
             VisiblePlayers = visiblePlayers,
             VisiblePlayersStatus = visiblePlayersStatus
         });
