@@ -272,14 +272,15 @@ if (!labels.Contains("PLAY") || !labels.Any(item => item?.Contains("HOW MANY CHA
     !labels.Any(item => item?.Contains("FOLLOW · 跟随") == true) ||
     !labels.Any(item => item?.Contains("RADAR · 雷达") == true) ||
     !labels.Any(item => item?.Contains("PERFORMANCE · FPS") == true) ||
-    !labels.Any(item => item?.Contains("PRIVACY · 游戏画面遮挡") == true))
+    !labels.Any(item => item?.Contains("PRIVACY · 游戏画面遮挡") == true) ||
+    labels.Contains("恢复距离"))
 {
     throw new Exception("The launcher steps were not created in the window tree.");
 }
-if (!LiveFollowPlan.TryCreate("2", "3", "10", "750ms", "30m", "Leader", out var followPlan) ||
+if (!LiveFollowPlan.TryCreate("2", "10", "750ms", "30m", "Leader", out var followPlan) ||
     followPlan?.LeaderName != "Leader" ||
-    LiveFollowPlan.TryCreate("3", "2", "10", "750ms", "30m", null, out _) ||
-    LiveFollowPlan.TryCreate("2", "3", "10", "0ms", "30m", null, out _))
+    LiveFollowPlan.TryCreate("3", "2", "750ms", "30m", null, out _) ||
+    LiveFollowPlan.TryCreate("2", "10", "0ms", "30m", null, out _))
     throw new Exception("Follow distance or freshness parameters were accepted without a valid explicit plan.");
 var fpsPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "poe2_production_Config.ini"));
 if (!FpsConfigPlan.TryCreate(fpsPath, "keep", "30", out var fpsPlan) || fpsPlan is null ||

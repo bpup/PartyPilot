@@ -72,6 +72,7 @@ func (e *Engine) Reset() {
 	e.leaderSpeedAverage = 0
 	e.holdingTarget = false
 	e.heldTarget = point{}
+	e.stopBubbleHolding = false
 }
 
 type point struct{ x, y float64 }
@@ -91,6 +92,7 @@ type Engine struct {
 	leaderSpeedAverage float64
 	holdingTarget      bool
 	heldTarget         point
+	stopBubbleHolding  bool
 }
 
 func New(config Config) (*Engine, bool) {
@@ -153,8 +155,18 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 			return Command{State: Waiting, Reason: reason}
 		}
 	}
-	if distance <= e.config.StopDistance ||
-		(!e.moving && distance < e.config.ResumeDistance) {
+	if e.config.TargetTrail {
+		if e.config.StopDistance <= 0 {
+			e.stopBubbleHolding = false
+		} else if distance <= e.config.StopDistance {
+			e.stopBubbleHolding = true
+		} else if e.stopBubbleHolding && distance >= e.config.StopDistance+3 {
+			e.stopBubbleHolding = false
+		}
+	}
+	if e.config.TargetTrail && e.stopBubbleHolding ||
+		!e.config.TargetTrail && (distance <= e.config.StopDistance ||
+			(!e.moving && distance < e.config.ResumeDistance)) {
 		e.moving = false
 		e.catchingUp = false
 		e.holdingTarget = false

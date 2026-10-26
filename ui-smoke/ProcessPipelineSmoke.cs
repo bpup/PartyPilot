@@ -143,7 +143,7 @@ internal static class ProcessPipelineSmoke
                 new LaunchedClient(101, 201, "C:/GameA.exe"),
                 new LaunchedClient(102, 202, "D:/GameB.exe")
             };
-            if (!LiveFollowPlan.TryCreate("2", "3", "10", "750ms", "30m", null, out var plan) || plan is null)
+            if (!LiveFollowPlan.TryCreate("2", "10", "750ms", "30m", null, out var plan) || plan is null)
                 throw new Exception("The pipeline test plan is invalid.");
             Console.WriteLine("Pipeline smoke: starting fake follow.");
             await using (var follow = await LiveFollowSession.StartAsync(followExe, topology, clients, bridge, plan))

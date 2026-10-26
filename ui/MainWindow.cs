@@ -76,7 +76,6 @@ public sealed class MainWindow : Window
     private readonly Button _stopBridge = new();
     private readonly TextBlock _pairingStatus = new();
     private readonly TextBox _followStop = new();
-    private readonly TextBox _followResume = new();
     private readonly TextBox _followCatchup = new();
     private readonly TextBox _followMaxAge = new();
     private readonly TextBox _followLogAge = new();
@@ -598,7 +597,7 @@ public sealed class MainWindow : Window
         var panel = Step("4", "FOLLOW · 跟随", "实时输入支持双客户端 2P 或三个客户端 3P，均须每端一名角色；请先完成配对，并在每个客户端启用只读位置传感器。距离与时效需要按实际游戏校准。");
         var fields = new (TextBox Box, string Label)[]
         {
-            (_followStop, "停止距离"), (_followResume, "恢复距离"), (_followCatchup, "追赶距离"),
+            (_followStop, "停止距离"), (_followCatchup, "追赶距离"),
             (_followMaxAge, "位置有效期（ms/s/m/h）"), (_followLogAge, "区域日志有效期（ms/s/m/h）")
         };
         foreach (var (box, label) in fields)
@@ -1655,7 +1654,7 @@ public sealed class MainWindow : Window
             if (choice is not null) choice.IsEnabled = _follow is null && !_busy;
         foreach (var stop in _followPlayerStops)
             if (stop is not null) stop.IsEnabled = _follow is null && !_busy;
-        var valid = LiveFollowPlan.TryCreate(_followStop.Text, _followResume.Text, _followCatchup.Text,
+        var valid = LiveFollowPlan.TryCreate(_followStop.Text, _followCatchup.Text,
             _followMaxAge.Text, _followLogAge.Text, _followLeaderName.Text, out _);
         if (_selectedTopology?.Id is "2-split" or "3-three-singles")
             valid &= _selectedTopology.Slots.All(slot =>
@@ -1944,7 +1943,7 @@ public sealed class MainWindow : Window
     {
         if (_bridge is null || !_pairingSettled || _selectedTopology is null || _follow is not null || _followStopping ||
             !_followTargetPreferenceReady || !_followStopPreferenceReady ||
-            !LiveFollowPlan.TryCreate(_followStop.Text, _followResume.Text, _followCatchup.Text,
+            !LiveFollowPlan.TryCreate(_followStop.Text, _followCatchup.Text,
                 _followMaxAge.Text, _followLogAge.Text, _followLeaderName.Text, out var plan) || plan is null) return;
         var executable = LiveFollowSession.FindExecutable();
         if (executable is null)

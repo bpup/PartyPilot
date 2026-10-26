@@ -316,7 +316,6 @@ func main() {
 	rosterText := flag.String("roster", "", "explicit slot:process pairs, one player per client")
 	leader := flag.Int("leader", 0, "leader slot")
 	stop := flag.Float64("stop", -1, "stop distance")
-	resume := flag.Float64("resume", -1, "resume distance")
 	catchup := flag.Float64("catchup", -1, "catch-up distance")
 	maxAge := flag.Duration("max-age", 0, "maximum sensor age")
 	logAge := flag.Duration("log-max-age", 0, "maximum area-log signal age")
@@ -348,7 +347,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	config := follow.Config{StopDistance: *stop, ResumeDistance: *resume, CatchUpDistance: *catchup,
+	config := follow.Config{StopDistance: *stop, ResumeDistance: *stop + 3, CatchUpDistance: *catchup,
 		MaxAge: *maxAge, TargetTrail: true}
 	engine, err := live.New(roster, *leader, config, *logAge)
 	if err != nil {

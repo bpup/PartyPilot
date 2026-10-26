@@ -4,21 +4,20 @@ using System.Text.RegularExpressions;
 
 namespace PartyPilot.Desktop;
 
-public sealed record LiveFollowPlan(double Stop, double Resume, double Catchup,
+public sealed record LiveFollowPlan(double Stop, double Catchup,
     string MaxAge, string LogMaxAge, string LeaderName)
 {
-    public static bool TryCreate(string? stopText, string? resumeText, string? catchupText,
+    public static bool TryCreate(string? stopText, string? catchupText,
         string? maxAgeText, string? logMaxAgeText, string? leaderNameText, out LiveFollowPlan? plan)
     {
         plan = null;
         if (!double.TryParse(stopText, NumberStyles.Float, CultureInfo.InvariantCulture, out var stop) ||
-            !double.TryParse(resumeText, NumberStyles.Float, CultureInfo.InvariantCulture, out var resume) ||
             !double.TryParse(catchupText, NumberStyles.Float, CultureInfo.InvariantCulture, out var catchup) ||
-            !double.IsFinite(stop) || !double.IsFinite(resume) || !double.IsFinite(catchup) ||
-            stop < 0 || resume <= stop || catchup <= resume ||
+            !double.IsFinite(stop) || !double.IsFinite(catchup) ||
+            stop < 0 || catchup <= stop ||
             !DurationIsPositive(maxAgeText) || !DurationIsPositive(logMaxAgeText) ||
             (leaderNameText?.Length ?? 0) > 128) return false;
-        plan = new LiveFollowPlan(stop, resume, catchup, maxAgeText!.Trim(), logMaxAgeText!.Trim(),
+        plan = new LiveFollowPlan(stop, catchup, maxAgeText!.Trim(), logMaxAgeText!.Trim(),
             leaderNameText?.Trim() ?? string.Empty);
         return true;
     }

@@ -102,7 +102,6 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             "-roster", string.Join(',', topology.Slots.Select(slot =>
                 $"{slot.PartyPlayer}:{clients[slot.Client - 1].Pid}")), "-leader", "1",
             "-stop", plan.Stop.ToString("R", CultureInfo.InvariantCulture),
-            "-resume", plan.Resume.ToString("R", CultureInfo.InvariantCulture),
             "-catchup", plan.Catchup.ToString("R", CultureInfo.InvariantCulture),
             "-max-age", plan.MaxAge, "-log-max-age", plan.LogMaxAge
         }) start.ArgumentList.Add(argument);

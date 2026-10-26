@@ -183,7 +183,7 @@ func TestTargetTrailHoldReleasesAfterTargetShift(t *testing.T) {
 	position := func(x float64, at time.Time) Position {
 		return Position{X: x, Area: "instance", Seen: at, Valid: true}
 	}
-	engine.Step(now, position(10, now), position(8, now))
+	engine.Step(now, position(10, now), position(0, now))
 	at := now.Add(time.Second)
 	if got := engine.Step(at, position(11, at), position(8, at)); got.State != Holding ||
 		!engine.holdingTarget || math.Abs(engine.heldTarget.x-9) > 0.001 {
@@ -207,6 +207,41 @@ func TestTargetTrailHoldReleasesAfterTargetShift(t *testing.T) {
 	if got := engine.Step(at, position(100, at), position(10, at)); got.State == Holding ||
 		engine.holdingTarget {
 		t.Fatalf("leader jump retained a stale held target: %+v", got)
+	}
+}
+
+func TestTargetTrailStopBubbleUsesFixedThreeUnitRelease(t *testing.T) {
+	now := time.Unix(56, 0)
+	engine, ok := New(Config{StopDistance: 10, ResumeDistance: 11,
+		CatchUpDistance: 30, MaxAge: 10 * time.Second, TargetTrail: true})
+	if !ok {
+		t.Fatal("target trail configuration rejected")
+	}
+	position := func(x, y float64, at time.Time) Position {
+		return Position{X: x, Y: y, Area: "instance", Seen: at, Valid: true}
+	}
+	engine.Step(now, position(0, 0, now), position(-20, 0, now))
+	at := now.Add(time.Second)
+	engine.Step(at, position(10, 0, at), position(0, 11, at))
+	at = now.Add(2 * time.Second)
+	if got := engine.Step(at, position(10, 0, at), position(10, 11, at)); got.State == Holding ||
+		engine.stopBubbleHolding {
+		t.Fatalf("first approach above stop distance entered stop bubble: %+v", got)
+	}
+	at = now.Add(3 * time.Second)
+	if got := engine.Step(at, position(10, 0, at), position(10, 0, at)); got.State != Holding ||
+		!engine.stopBubbleHolding {
+		t.Fatalf("inside stop distance did not latch stop bubble: %+v", got)
+	}
+	at = now.Add(4 * time.Second)
+	if got := engine.Step(at, position(10, 0, at), position(21, 0, at)); got.State != Holding ||
+		!engine.stopBubbleHolding {
+		t.Fatalf("stop bubble released before the fixed margin: %+v", got)
+	}
+	at = now.Add(5 * time.Second)
+	if got := engine.Step(at, position(10, 0, at), position(24, 0, at)); got.State == Holding ||
+		engine.stopBubbleHolding {
+		t.Fatalf("stop bubble did not release at three units: %+v", got)
 	}
 }
 
