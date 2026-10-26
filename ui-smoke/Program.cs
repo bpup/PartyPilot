@@ -8,6 +8,7 @@ using PartyPilot.Desktop;
 
 PartyRosterCounterSmoke.Run();
 AutoPartyCoordinatorSmoke.Run();
+AutoPartyInviteSmoke.Run();
 
 if (args.Contains("--client3-plan-only"))
 {

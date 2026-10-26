@@ -14,7 +14,8 @@ dotnet publish ui/PartyPilot.Desktop.csproj -c Release -r win-x64 --self-contain
 
 绑定 Windows 游戏窗口后，桌面入口提供手动的 `Current Party` 画面检查。它核对窗口进程身份，从客户端截图中按所提供 0.6.17 版本的生命条行规则计算每个窗口的候选数量。计数器已通过目标版本四种合成窗口布局的离线检查；截图和真实游戏面板仍待 Windows/PoE2 验证。零条可能表示面板未打开，任何计数都不能证明成员身份或自动组队成功。
 
-自动组队恢复状态机已按所提供版本的 `Missing → SendingInvite → AcceptingInvite → Verifying → RetryWait/Stable/Failed` 和最多 10 次全新邀请、250/400/650/900 毫秒重试间隔实现离线检查。它尚未连接角色名、聊天命令、手柄菜单脉冲或运行时画面验证，所以当前桌面程序没有自动组队入口。
+自动组队恢复状态机已按所提供版本的 `Missing → SendingInvite → AcceptingInvite → Verifying → RetryWait/Stable/Failed` 和最多 10 次全新邀请、250/400/650/900 毫秒重试间隔实现离线检查。它尚未与角色名、聊天命令、手柄菜单脉冲和运行时画面验证串接，所以当前桌面程序没有自动恢复入口。
+桌面入口现可为 P1–P6 填写准确角色名，并在窗口绑定及配对引导完成后，由客户端 1 向指定的其他客户端发送一次 `/invite`。发送前检查每个客户端至少一个角色名、名称中的控制字符与命令分隔符、邀请方进程所属窗口和前台状态。受邀方仍需手动接受；该操作尚未在 Windows/PoE2 实测，也不运行自动组队恢复状态机。
 
 ## 当前可运行功能
 

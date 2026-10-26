@@ -32,6 +32,11 @@ public sealed class MainWindow : Window
     private readonly Button _attach = new();
     private readonly Button _probeRoster = new();
     private readonly TextBlock _rosterStatus = new();
+    private readonly StackPanel[] _inviteRows = new StackPanel[6];
+    private readonly TextBox[] _inviteNames = new TextBox[6];
+    private readonly ComboBox _inviteTarget = new();
+    private readonly Button _sendInvite = new();
+    private readonly TextBlock _inviteStatus = new();
     private readonly TextBlock _status = new();
     private readonly ComboBox _physicalIndex = new();
     private readonly TextBox _physicalDevice = new();
@@ -95,6 +100,8 @@ public sealed class MainWindow : Window
     private bool _radarStopping;
     private bool _fpsBusy;
     private bool _rosterBusy;
+    private bool _inviteBusy;
+    private CancellationTokenSource? _inviteCancellation;
     private bool _closing;
     private string _loginStatus = "waiting";
     private bool _busy;
@@ -126,6 +133,7 @@ public sealed class MainWindow : Window
         content.Children.Add(BuildInputStep());
         content.Children.Add(BuildClientStep());
         content.Children.Add(BuildLaunchStep());
+        content.Children.Add(BuildAutoPartyStep());
         content.Children.Add(BuildFollowStep());
         content.Children.Add(BuildRadarStep());
         content.Children.Add(BuildPrivacyStep());
@@ -335,6 +343,34 @@ public sealed class MainWindow : Window
         return Card(panel);
     }
 
+    private Border BuildAutoPartyStep()
+    {
+        var panel = Step("3A", "AUTO PARTY · 组队邀请", "按角色填写游戏中的准确名称。当前仅能从客户端 1 向所选客户端发送一次邀请；受邀方仍需手动接受。");
+        for (var player = 1; player <= 6; player++)
+        {
+            var row = new StackPanel { Spacing = 4 };
+            row.Children.Add(Label($"P{player} 角色名", 12, MutedBrush));
+            var name = new TextBox { Watermark = "游戏内准确角色名" };
+            name.TextChanged += (_, _) => UpdateAutoPartyControls();
+            row.Children.Add(name);
+            _inviteRows[player - 1] = row;
+            _inviteNames[player - 1] = name;
+            panel.Children.Add(row);
+        }
+        _inviteTarget.Width = 190;
+        _inviteTarget.HorizontalAlignment = HorizontalAlignment.Left;
+        _inviteTarget.SelectionChanged += (_, _) => UpdateAutoPartyControls();
+        panel.Children.Add(_inviteTarget);
+        _sendInvite.Content = "发送一次邀请";
+        _sendInvite.Click += async (_, _) => await SendOneInviteAsync();
+        panel.Children.Add(_sendInvite);
+        _inviteStatus.Text = "需要已绑定窗口、完成配对和每个客户端至少一个准确角色名。";
+        _inviteStatus.Foreground = MutedBrush;
+        _inviteStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_inviteStatus);
+        return Card(panel);
+    }
+
     private Border BuildFollowStep()
     {
         var panel = Step("4", "FOLLOW · 跟随", "当前实时输入仅支持双客户端各一名角色；请先完成配对，并在两个客户端启用只读位置传感器。距离与时效需要按实际游戏校准。");
@@ -531,6 +567,7 @@ public sealed class MainWindow : Window
         var topologyChanged = !ReferenceEquals(_selectedTopology, selection);
         if (topologyChanged)
         {
+            _inviteCancellation?.Cancel();
             _launchedClients = [];
             _rosterStatus.Text = "绑定窗口后，可在游戏内打开 Current Party 面板再检查；结果仅是画面候选行数。";
             _ = StopRadarAsync();
@@ -554,10 +591,19 @@ public sealed class MainWindow : Window
                 _clientLabels[index].Text = $"客户端 {index + 1} · {string.Join('/', players.Select(player => $"P{player}"))} · 游戏程序";
             }
         }
+        for (var player = 0; player < _inviteRows.Length; player++)
+            _inviteRows[player].IsVisible = player < (_selectedTopology?.PlayerCount ?? 0);
+        if (topologyChanged)
+        {
+            _inviteTarget.ItemsSource = Enumerable.Range(2, Math.Max(0, count - 1))
+                .Select(client => $"客户端 {client}").ToArray();
+            _inviteTarget.SelectedIndex = count > 1 ? 0 : -1;
+        }
         _check.IsEnabled = !_busy && !_pairingHasStarted && count > 0;
         _launch.IsEnabled = !_busy && !_pairingHasStarted && count > 0;
         _attach.IsEnabled = !_busy && !_pairingHasStarted && count > 0;
         UpdateRosterControls();
+        UpdateAutoPartyControls();
         UpdateBridgeControls();
         UpdateRadarControls();
         UpdatePrivacyControls();
@@ -567,9 +613,11 @@ public sealed class MainWindow : Window
 
     private void ClearLaunchedClients()
     {
+        _inviteCancellation?.Cancel();
         _launchedClients = [];
         _rosterStatus.Text = "窗口绑定已清除；请重新绑定后检查 Current Party。";
         UpdateRosterControls();
+        UpdateAutoPartyControls();
         _ = StopRadarAsync();
         StopPrivacy();
         _ = StopAllResourcesAsync();
@@ -922,6 +970,7 @@ public sealed class MainWindow : Window
     private void UpdateBridgeControls()
     {
         UpdateRosterControls();
+        UpdateAutoPartyControls();
         var slots = _selectedTopology?.Slots.Where(slot => slot.Client != 3)
             .Select(slot => slot.RuntimePad).ToArray() ?? [];
         var useWgi = slots.Length == 4;
@@ -964,6 +1013,50 @@ public sealed class MainWindow : Window
     {
         _probeRoster.IsEnabled = OperatingSystem.IsWindows() && !_busy && !_rosterBusy &&
             _selectedTopology is not null && _launchedClients.Count == _selectedTopology.ClientCount;
+    }
+
+    private void UpdateAutoPartyControls()
+    {
+        var namesReady = _selectedTopology is not null && AutoPartyInviteNames.TryCreate(
+            _selectedTopology, _inviteNames.Take(_selectedTopology.PlayerCount)
+                .Select(box => box?.Text).ToArray(), out _);
+        _sendInvite.IsEnabled = OperatingSystem.IsWindows() && !_busy && !_inviteBusy &&
+            _bridge is not null && _pairingSettled && _selectedTopology is { ClientCount: > 1 } &&
+            _launchedClients.Count == _selectedTopology.ClientCount &&
+            _inviteTarget.SelectedIndex is >= 0 && namesReady;
+    }
+
+    private async Task SendOneInviteAsync()
+    {
+        if (!_sendInvite.IsEnabled || _selectedTopology is null ||
+            !AutoPartyInviteNames.TryCreate(_selectedTopology,
+                _inviteNames.Take(_selectedTopology.PlayerCount).Select(box => box.Text).ToArray(), out var names) ||
+            names is null) return;
+        var targetClient = _inviteTarget.SelectedIndex + 2;
+        var inviter = _launchedClients[0];
+        using var cancellation = new CancellationTokenSource();
+        _inviteCancellation = cancellation;
+        _inviteBusy = true;
+        UpdateAutoPartyControls();
+        _inviteStatus.Text = $"正在从客户端 1 向客户端 {targetClient} 发送一次邀请…";
+        try
+        {
+            var result = await PoeChatInviteService.SendInviteAsync(
+                inviter, names.ForClient(targetClient), cancellation.Token);
+            _inviteStatus.Text = result.Ok
+                ? $"客户端 1 已尝试发送邀请。请在客户端 {targetClient} 手动接受；尚未核验游戏内组队结果。"
+                : $"未完成邀请：{result.Detail}";
+        }
+        catch (OperationCanceledException)
+        {
+            _inviteStatus.Text = "邀请操作已取消。";
+        }
+        finally
+        {
+            if (ReferenceEquals(_inviteCancellation, cancellation)) _inviteCancellation = null;
+            _inviteBusy = false;
+            UpdateAutoPartyControls();
+        }
     }
 
     private async Task ProbeRosterAsync()
@@ -1132,6 +1225,7 @@ public sealed class MainWindow : Window
         _pairingSettled = true;
         ShowCurrentPairingStep();
         UpdateFollowControls();
+        UpdateAutoPartyControls();
     }
 
     private async void BridgeEnded(string reason)
@@ -1185,6 +1279,7 @@ public sealed class MainWindow : Window
 
     private async Task StopBridgeAsync()
     {
+        _inviteCancellation?.Cancel();
         await StopFollowAsync();
         var session = _bridge;
         _bridge = null;
