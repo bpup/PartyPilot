@@ -4,9 +4,7 @@ package windowlayout
 
 import (
 	"fmt"
-	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -101,12 +99,6 @@ func DiscoverDisplays() ([]Display, error) {
 	return found, nil
 }
 
-var knownGameImages = map[string]bool{
-	"pathofexile": true, "pathofexile_x64": true,
-	"pathofexilesteam": true, "pathofexile_x64steam": true,
-	"pathofexileegs": true, "pathofexile_x64egs": true,
-}
-
 func DiscoverWindows(pids []int) ([]Window, error) {
 	if err := ensureDPI(); err != nil {
 		return nil, err
@@ -123,8 +115,7 @@ func DiscoverWindows(pids []int) ([]Window, error) {
 		if err != nil {
 			return nil, fmt.Errorf("process %d: %w", pid, err)
 		}
-		name := strings.ToLower(strings.TrimSuffix(filepath.Base(image), filepath.Ext(image)))
-		if !knownGameImages[name] {
+		if !clientprocess.IsKnownGameExecutable(image) {
 			return nil, fmt.Errorf("process %d is not a known game executable", pid)
 		}
 		requested[pid] = true
@@ -158,7 +149,7 @@ func DiscoverWindows(pids []int) ([]Window, error) {
 	for _, pid := range pids {
 		window, exists := best[pid]
 		if !exists {
-			return nil, fmt.Errorf("process %d has no visible game window", pid)
+			return nil, fmt.Errorf("%w for process %d", ErrNoWindow, pid)
 		}
 		windows = append(windows, window)
 	}

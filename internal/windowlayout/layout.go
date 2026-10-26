@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+var ErrNoWindow = errors.New("game window has not appeared")
+
 type Rect struct {
 	Left   int `json:"left"`
 	Top    int `json:"top"`
