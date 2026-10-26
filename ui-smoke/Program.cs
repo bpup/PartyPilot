@@ -56,6 +56,9 @@ if (window.GetLogicalDescendants().OfType<CheckBox>().Count(box =>
 if (window.GetLogicalDescendants().OfType<Button>().Count(button =>
         button.Content?.ToString() == "取消账号准备") != 1)
     throw new Exception("The desktop did not expose automatic login cancellation.");
+if (window.GetLogicalDescendants().OfType<TextBox>().Count(field =>
+        field.Watermark?.ToString() == "进程号，仅用于绑定已运行窗口") != 3)
+    throw new Exception("The desktop did not expose per-client process selection for attachment.");
 if (args.Contains("--ui-controls-only"))
 {
     var sample = new LoginCalibrationDialog(1,

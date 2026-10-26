@@ -26,6 +26,7 @@ public sealed class MainWindow : Window
     private readonly TextBox _monitors = new();
     private readonly TextBox[] _paths = new TextBox[3];
     private readonly TextBox[] _uris = new TextBox[3];
+    private readonly TextBox[] _attachPids = new TextBox[3];
     private readonly TextBlock[] _clientLabels = new TextBlock[3];
     private readonly StackPanel[] _clientRows = new StackPanel[3];
     private readonly AccountProfileStore _accountProfiles = new();
@@ -344,8 +345,13 @@ public sealed class MainWindow : Window
             var uri = new TextBox { Watermark = "steam://rungameid/2694490 或 Epic 清单 URI" };
             uri.TextChanged += (_, _) => ClearLaunchedClients();
             row.Children.Add(uri);
+            row.Children.Add(Label("绑定已运行窗口的进程号（同目录多客户端时必填）", 12, MutedBrush));
+            var attachPid = new TextBox { Watermark = "进程号，仅用于绑定已运行窗口" };
+            attachPid.TextChanged += (_, _) => ClearLaunchedClients();
+            row.Children.Add(attachPid);
             _paths[index] = path;
             _uris[index] = uri;
+            _attachPids[index] = attachPid;
             _clientLabels[index] = clientLabel;
             _clientRows[index] = row;
             panel.Children.Add(row);
@@ -1309,6 +1315,7 @@ public sealed class MainWindow : Window
         {
             if (_paths[index] is not null) _paths[index].IsEnabled = _bridge is null && !_pairingHasStarted && !_busy;
             if (_uris[index] is not null) _uris[index].IsEnabled = _bridge is null && !_pairingHasStarted && !_busy;
+            if (_attachPids[index] is not null) _attachPids[index].IsEnabled = _bridge is null && !_pairingHasStarted && !_busy;
         }
         if (_bridge is null && _selectedTopology is not null && !supported)
         {
@@ -1930,6 +1937,17 @@ public sealed class MainWindow : Window
             {
                 startInfo.ArgumentList.Add("-uri");
                 startInfo.ArgumentList.Add($"{index + 1}={uri}");
+            }
+            if (action == ClientAction.Attach && !string.IsNullOrWhiteSpace(_attachPids[index].Text))
+            {
+                var rawPid = _attachPids[index].Text!.Trim();
+                if (!int.TryParse(rawPid, out var pid) || pid <= 0)
+                {
+                    _status.Text = $"客户端 {index + 1} 的进程号必须是正整数。";
+                    return;
+                }
+                startInfo.ArgumentList.Add("-pid");
+                startInfo.ArgumentList.Add($"{index + 1}={pid}");
             }
         }
         if (_applyLayout.IsChecked == true)
