@@ -117,6 +117,14 @@ internal sealed class BridgeSession : IAsyncDisposable
         await _process.StandardInput.FlushAsync();
     }
 
+    internal async Task SendAutomationAsync(FollowBridgeFrame frame)
+    {
+        if (_stopping || _process.HasExited)
+            throw new InvalidOperationException("Virtual controller bridge is no longer running.");
+        await _process.StandardInput.WriteLineAsync(frame.Command);
+        await _process.StandardInput.FlushAsync();
+    }
+
     private async Task ReadEventsAsync()
     {
         string? failure = null;

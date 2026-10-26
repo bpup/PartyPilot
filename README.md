@@ -110,6 +110,8 @@ PartyPilot-FlaskReplay.exe -replay testdata/flask-combined-example.jsonl -combin
 PartyPilot-LiveFollow.exe -roster 1:1234,2:5678 -leader 1 -leader-name Leader -exe "1=C:\\PoE2-A\\PathOfExile.exe" -exe "2=C:\\PoE2-B\\PathOfExile.exe" -stop 2 -resume 3 -catchup 10 -max-age 750ms -log-max-age 30m
 ```
 
+桌面入口现可在“双客户端、每端一名角色”完成手柄配对后启动此实时决策程序，并把 P2 的方向送到系统虚拟手柄槽位 P3；可随时停止，或在桥接退出时撤销自动方向。停止、恢复、追赶距离与位置/日志有效期必须由操作者明确填写；界面不借用测试示例作为默认配置。这个接线只通过无界面检查与 Windows 目标编译，尚未在 Windows/PoE2 验证真实传感器、区域身份、角色绑定或移动方向。
+
 该链路已用合成 UDP 与日志验证“等待 → 追赶 → 样本过期等待”、“追赶 → 被跟随成员离队后持续等待”和“追赶 → 日志消失后等待并退出”，并交叉编译 Windows 程序。进程路径读取采用 Microsoft 文档中的 [OpenProcess](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openprocess) 与 [QueryFullProcessImageNameW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-queryfullprocessimagenamew)。离队文案及角色名仍缺真实 `Client.txt` 样本验证；没有真实 Windows/PoE2 运行证据，也没有验证 ExileCore2 的坐标系与虚拟摇杆方向映射，因此输出仍属于 **implementation-aligned / integration-pending**。
 
 `PartyReplay` 读取受控数据中的明确实例标识，计算各队员命令。显式启用 `-last-focused-leads` 后，手动聚焦的角色成为跟随目标，原 P1 会转为自动跟随；返回 P1 焦点时恢复原队长。未启用该选项时仍按固定队长计算。`-follow-targets 2:3` 指定 P2 跟随 P3；未指定的队员跟随当前 MAIN。`BridgeFeed -slot 2` 选择一个队员，`BridgeFeed -all` 输出所有队员命令及焦点切换事件。手动接管或等待会松开相应自动化摇杆。队伍角色编号与系统手柄槽位不同时，须逐一传入 `-pad-map 角色:槽位`；例如双客户端 2P 使用 `BridgeFeed -all -pad-map 1:1 -pad-map 2:3`，缺失或重复映射会拒绝输出。此映射目前只支持 P1–P4 系统手柄，P5/P6 的进程内路径仍未实现。上述双客户端命令已在 macOS 用模拟数据贯通到 C# 桥接协议解析器。Windows 上可以另传 `-pace 100ms`，再把命令输出接到明确槽位的 `PartyPilot.Bridge.exe` 做受控手柄测试；**这条 Windows/游戏输入管道尚未运行验证**。真实传感器尚不能提供经验证的实例标识，所以当前的只读监视器不会自动连接这条控制管道。

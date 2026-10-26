@@ -37,14 +37,24 @@ public sealed class MainWindow : Window
     private readonly Button _confirmRole = new();
     private readonly Button _stopBridge = new();
     private readonly TextBlock _pairingStatus = new();
+    private readonly TextBox _followStop = new();
+    private readonly TextBox _followResume = new();
+    private readonly TextBox _followCatchup = new();
+    private readonly TextBox _followMaxAge = new();
+    private readonly TextBox _followLogAge = new();
+    private readonly Button _startFollow = new();
+    private readonly Button _stopFollow = new();
+    private readonly TextBlock _followStatus = new();
     private PartyTopology? _selectedTopology;
     private BridgeSession? _bridge;
+    private LiveFollowSession? _follow;
     private PairingGuide? _pairing;
     private IReadOnlyList<LaunchedClient> _launchedClients = [];
     private bool _pairingHasStarted;
     private bool _armRequested;
     private bool _pairingSettling;
     private bool _pairingSettled;
+    private bool _followStopping;
     private string _loginStatus = "waiting";
     private bool _busy;
 
@@ -70,6 +80,7 @@ public sealed class MainWindow : Window
         content.Children.Add(BuildInputStep());
         content.Children.Add(BuildClientStep());
         content.Children.Add(BuildLaunchStep());
+        content.Children.Add(BuildFollowStep());
         content.Children.Add(BuildStatusCard());
 
         shell.Children.Add(new ScrollViewer { Content = content });
@@ -243,6 +254,38 @@ public sealed class MainWindow : Window
         return Card(panel);
     }
 
+    private Border BuildFollowStep()
+    {
+        var panel = Step("4", "FOLLOW · 跟随", "当前实时输入仅支持双客户端各一名角色；请先完成配对，并在两个客户端启用只读位置传感器。距离与时效需要按实际游戏校准。");
+        var fields = new (TextBox Box, string Label)[]
+        {
+            (_followStop, "停止距离"), (_followResume, "恢复距离"), (_followCatchup, "追赶距离"),
+            (_followMaxAge, "位置有效期（ms/s/m/h）"), (_followLogAge, "区域日志有效期（ms/s/m/h）")
+        };
+        foreach (var (box, label) in fields)
+        {
+            panel.Children.Add(Label(label, 12, MutedBrush));
+            box.Watermark = "明确填写";
+            box.Width = 190;
+            box.HorizontalAlignment = HorizontalAlignment.Left;
+            box.TextChanged += (_, _) => UpdateFollowControls();
+            panel.Children.Add(box);
+        }
+        var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
+        _startFollow.Content = "开始跟随";
+        _startFollow.Click += async (_, _) => await StartFollowAsync();
+        _stopFollow.Content = "停止跟随";
+        _stopFollow.Click += async (_, _) => await StopFollowAsync();
+        actions.Children.Add(_startFollow);
+        actions.Children.Add(_stopFollow);
+        panel.Children.Add(actions);
+        _followStatus.Text = "等待配对完成；真实游戏中的方向与角色绑定尚未验证。";
+        _followStatus.Foreground = MutedBrush;
+        _followStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_followStatus);
+        return Card(panel);
+    }
+
     private void UpdateClientRows()
     {
         var selection = _topologyVariant.SelectedItem as PartyTopology;
@@ -313,6 +356,17 @@ public sealed class MainWindow : Window
         {
             _pairingStatus.Text = "此布局需要四个以上系统手柄或第三客户端进程内 P5/P6 输入；当前桥接不支持，未开始配对。";
         }
+        UpdateFollowControls();
+    }
+
+    private void UpdateFollowControls()
+    {
+        var valid = LiveFollowPlan.TryCreate(_followStop.Text, _followResume.Text, _followCatchup.Text,
+            _followMaxAge.Text, _followLogAge.Text, out _);
+        _startFollow.IsEnabled = OperatingSystem.IsWindows() && !_busy && !_followStopping && _follow is null &&
+            _bridge is not null && _pairingSettled && _selectedTopology?.Id == "2-split" &&
+            _launchedClients.Count == 2 && valid;
+        _stopFollow.IsEnabled = _follow is not null;
     }
 
     private async Task PrepareBridgeAsync()
@@ -421,6 +475,7 @@ public sealed class MainWindow : Window
         _pairingSettling = false;
         _pairingSettled = true;
         ShowCurrentPairingStep();
+        UpdateFollowControls();
     }
 
     private async void BridgeEnded(string reason)
@@ -474,6 +529,7 @@ public sealed class MainWindow : Window
 
     private async Task StopBridgeAsync()
     {
+        await StopFollowAsync();
         var session = _bridge;
         _bridge = null;
         _pairing = null;
@@ -482,6 +538,7 @@ public sealed class MainWindow : Window
         _pairingSettling = false;
         _pairingSettled = false;
         _loginStatus = "waiting";
+        UpdateFollowControls();
         UpdateClientRows();
         if (session is null) return;
         session.AReleased -= BridgeAReleased;
@@ -491,6 +548,82 @@ public sealed class MainWindow : Window
         session.Ended -= BridgeEnded;
         await session.DisposeAsync();
         _pairingStatus.Text = "手柄桥接已停止，虚拟手柄已释放。";
+    }
+
+    private async Task StartFollowAsync()
+    {
+        if (_bridge is null || !_pairingSettled || _selectedTopology is null || _follow is not null || _followStopping ||
+            !LiveFollowPlan.TryCreate(_followStop.Text, _followResume.Text, _followCatchup.Text,
+                _followMaxAge.Text, _followLogAge.Text, out var plan) || plan is null) return;
+        var executable = LiveFollowSession.FindExecutable();
+        if (executable is null)
+        {
+            _followStatus.Text = "找不到 PartyPilot-LiveFollow.exe；请使用完整发布目录。";
+            return;
+        }
+        _busy = true;
+        UpdateFollowControls();
+        _followStatus.Text = "正在核对进程、日志与传感器输入…";
+        try
+        {
+            var session = await LiveFollowSession.StartAsync(executable, _selectedTopology,
+                _launchedClients, _bridge, plan);
+            session.StatusChanged += FollowStatusChanged;
+            session.Ended += FollowEnded;
+            _follow = session;
+            session.StartReading();
+            FollowStatusChanged(session.Status);
+        }
+        catch (Exception error)
+        {
+            _followStatus.Text = $"跟随未启动：{error.Message}";
+        }
+        finally
+        {
+            _busy = false;
+            UpdateFollowControls();
+        }
+    }
+
+    private void FollowStatusChanged(string status)
+    {
+        _followStatus.Text = status switch
+        {
+            "following" => "已输出跟随方向；游戏内移动效果待验证。",
+            "catching_up" => "已输出追赶方向；游戏内移动效果待验证。",
+            "holding" => "跟随者已停靠，自动方向已停止。",
+            _ => "等待新鲜位置、区域日志与队伍状态；自动方向已停止。"
+        };
+    }
+
+    private async void FollowEnded(string reason)
+    {
+        await StopFollowAsync();
+        _followStatus.Text = string.IsNullOrWhiteSpace(reason)
+            ? "跟随进程已结束，自动方向已停止。"
+            : $"跟随进程已结束，自动方向已停止：{reason}";
+    }
+
+    private async Task StopFollowAsync()
+    {
+        if (_followStopping) return;
+        var session = _follow;
+        if (session is null) return;
+        _followStopping = true;
+        _follow = null;
+        UpdateFollowControls();
+        try
+        {
+            session.StatusChanged -= FollowStatusChanged;
+            session.Ended -= FollowEnded;
+            await session.DisposeAsync();
+            _followStatus.Text = "跟随已停止，自动输入已撤销。";
+        }
+        finally
+        {
+            _followStopping = false;
+            UpdateFollowControls();
+        }
     }
 
     private async Task RunLauncherAsync(ClientAction action)

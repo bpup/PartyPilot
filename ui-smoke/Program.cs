@@ -16,9 +16,33 @@ window.Show();
 window.UpdateLayout();
 var labels = window.GetLogicalDescendants().OfType<TextBlock>().Select(item => item.Text).ToArray();
 if (!labels.Contains("PLAY") || !labels.Any(item => item?.Contains("HOW MANY CHARACTERS") == true) ||
-    !labels.Any(item => item?.Contains("PREPARE & START") == true))
+    !labels.Any(item => item?.Contains("PREPARE & START") == true) ||
+    !labels.Any(item => item?.Contains("FOLLOW · 跟随") == true))
 {
     throw new Exception("The launcher steps were not created in the window tree.");
+}
+if (!LiveFollowPlan.TryCreate("2", "3", "10", "750ms", "30m", out var followPlan) ||
+    followPlan is null || LiveFollowPlan.TryCreate("3", "2", "10", "750ms", "30m", out _) ||
+    LiveFollowPlan.TryCreate("2", "3", "10", "0ms", "30m", out _))
+    throw new Exception("Follow distance or freshness parameters were accepted without a valid explicit plan.");
+var movement = LiveFollowFrame.Parse(
+    "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0}}}", 2, 3);
+var waiting = LiveFollowFrame.Parse(
+    "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}}}", 2, 3);
+var stopped = LiveFollowFrame.Waiting(3);
+if (!movement.Command.Contains("\"slot\":3") || movement.Status != "following" ||
+    !waiting.Command.Contains("\"slot\":3") || waiting.Status != "waiting" ||
+    stopped.Command != waiting.Command)
+    throw new Exception("Live follow did not map P2 to the second client's system pad.");
+foreach (var invalidFrame in new[]
+{
+    "{\"focused\":1,\"commands\":{\"3\":{\"state\":\"waiting\"}}}",
+    "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":2,\"y\":0}}}",
+    "{\"focused\":2,\"commands\":{\"2\":{\"state\":\"waiting\"}}}"
+})
+{
+    try { LiveFollowFrame.Parse(invalidFrame, 2, 3); throw new Exception("Invalid live follow frame was accepted."); }
+    catch (InvalidDataException) { }
 }
 Console.WriteLine($"Desktop window created with {labels.Length} labels and three launch steps.");
 var optionCounts = new[] { 1, 2, 3, 1, 2, 1 };
