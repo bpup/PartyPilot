@@ -23,6 +23,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         var player = GameController.Player;
         var render = player?.GetComponent<Render>();
         if (render == null) return;
+        var vitals = player?.GetComponent<Life>();
 
         var position = render.Pos;
         // AreaName is diagnostic only. It does not identify a specific instance.
@@ -34,7 +35,13 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             AreaHash = GameController.IngameState.Data.CurrentAreaHash,
             X = position.X,
             Y = position.Y,
-            Z = position.Z
+            Z = position.Z,
+            Life = vitals?.CurHP,
+            LifeMax = vitals?.MaxHP,
+            Mana = vitals?.CurMana,
+            ManaMax = vitals?.MaxMana,
+            EnergyShield = vitals?.CurES,
+            EnergyShieldMax = vitals?.MaxES
         });
         var bytes = Encoding.UTF8.GetBytes(message);
         _udp.Send(bytes, bytes.Length, Receiver);

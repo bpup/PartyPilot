@@ -1,0 +1,3 @@
+{"now":"2026-10-26T00:00:00Z","player":1,"menu_open":true,"recovering":false,"vitals":{"life":{"current":60,"maximum":100},"mana":{"current":100,"maximum":100}}}
+{"now":"2026-10-26T00:00:00.1Z","player":1,"menu_open":false,"recovering":false,"vitals":{"life":{"current":60,"maximum":100},"mana":{"current":100,"maximum":100}}}
+{"now":"2026-10-26T00:00:00.2Z","player":1,"menu_open":false,"recovering":false,"vitals":{"life":{"current":20,"maximum":100},"mana":{"current":100,"maximum":100}}}
