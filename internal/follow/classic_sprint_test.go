@@ -3,6 +3,8 @@ package follow
 import (
 	"testing"
 	"time"
+
+	"partypilot/internal/navigation"
 )
 
 func TestClassicSprintRetriesAndFallsBackAfterThreeAttempts(t *testing.T) {
@@ -64,5 +66,32 @@ func TestTargetTrailSprintButtonFollowsCatchUpAndHold(t *testing.T) {
 	later = at.Add(3 * time.Second)
 	if got := engine.Step(later, position(40, later), position(40, later)); got.State != Holding || got.SprintDown {
 		t.Fatalf("holding retained the sprint button: %+v", got)
+	}
+}
+
+func TestTargetTrailCollisionRequiresOptInAndMatchingTerrain(t *testing.T) {
+	at := time.Unix(103, 0)
+	grid := &navigation.Grid{Area: "instance", CellSize: 1, Width: 50, Height: 30,
+		Blocked: []navigation.Cell{{X: 10, Y: 12}, {X: 10, Y: 15}, {X: 10, Y: 18}}}
+	leader := Position{X: 40.5, Y: 15.5, Area: "instance", Seen: at, Valid: true}
+	follower := Position{X: 2.5, Y: 15.5, Area: "instance", Seen: at, Valid: true}
+	config := Config{StopDistance: 2, ResumeDistance: 5, CatchUpDistance: 10,
+		MaxAge: 5 * time.Second, TargetTrail: true, ClassicCollisionDodge: true}
+	engine, _ := New(config)
+	if command := engine.StepWithTerrain(at, leader, follower, grid); command.State != CatchingUp {
+		t.Fatalf("terrain route did not enter catch-up: %+v", command)
+	}
+	leader.Seen, follower.Seen = at.Add(100*time.Millisecond), at.Add(100*time.Millisecond)
+	if command := engine.StepWithTerrain(leader.Seen, leader, follower, grid); command.State != CatchingUp ||
+		engine.sprint.collisionSince.IsZero() {
+		t.Fatalf("opted-in terrain collision was not observed: %+v", command)
+	}
+	config.ClassicCollisionDodge = false
+	without, _ := New(config)
+	without.StepWithTerrain(at, Position{X: 40.5, Y: 15.5, Area: "instance", Seen: at, Valid: true},
+		Position{X: 2.5, Y: 15.5, Area: "instance", Seen: at, Valid: true}, grid)
+	without.StepWithTerrain(leader.Seen, leader, follower, grid)
+	if !without.sprint.collisionSince.IsZero() {
+		t.Fatal("disabled collision option altered sprint state")
 	}
 }

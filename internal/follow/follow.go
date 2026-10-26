@@ -36,14 +36,15 @@ type Command struct {
 }
 
 type Config struct {
-	StopDistance    float64
-	ResumeDistance  float64
-	CatchUpDistance float64
-	MaxAge          time.Duration
-	TrailSpacing    float64
-	TrailMaxStep    float64
-	RequireTerrain  bool
-	TargetTrail     bool
+	StopDistance          float64
+	ResumeDistance        float64
+	CatchUpDistance       float64
+	MaxAge                time.Duration
+	TrailSpacing          float64
+	TrailMaxStep          float64
+	RequireTerrain        bool
+	TargetTrail           bool
+	ClassicCollisionDodge bool
 }
 
 func (c Config) Valid() bool {
@@ -259,8 +260,10 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 			observedAt = follower.Seen
 		}
 		if observedAt.After(e.lastSprintObservation) {
+			collisionImminent := e.config.ClassicCollisionDodge && terrain != nil &&
+				terrain.SprintCollisionImminent(follower.X, follower.Y, targetX, targetY)
 			e.sprintDown = e.sprint.Update(e.catchingUp,
-				distance >= e.config.StopDistance+5, false,
+				distance >= e.config.StopDistance+5, collisionImminent,
 				point{follower.X, follower.Y}, observedAt)
 			e.lastSprintObservation = observedAt
 		}

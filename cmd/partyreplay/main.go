@@ -123,6 +123,8 @@ func main() {
 	trailSpacing := flag.Float64("trail-spacing", 0, "leader trail sample spacing; requires -trail-max-step")
 	trailMaxStep := flag.Float64("trail-max-step", 0, "maximum leader displacement between observations")
 	requireTerrain := flag.Bool("require-terrain", false, "stop when an instance-matched terrain grid is unavailable")
+	targetTrail := flag.Bool("target-trail", false, "use the target build's observed trail spacing rule")
+	classicCollisionDodge := flag.Bool("classic-collision-dodge", false, "use controlled terrain to rearm classic sprint near obstacles")
 	pace := flag.Duration("pace", 0, "delay between replay frames; zero runs immediately")
 	lastFocusedLeads := flag.Bool("last-focused-leads", false, "make the manually focused player the follow leader")
 	followTargets := flag.String("follow-targets", "", "explicit follower:target pairs, e.g. 2:3")
@@ -133,7 +135,8 @@ func main() {
 		os.Exit(2)
 	}
 	config := follow.Config{StopDistance: *stop, ResumeDistance: *resume, CatchUpDistance: *catchup, MaxAge: *maxAge,
-		TrailSpacing: *trailSpacing, TrailMaxStep: *trailMaxStep, RequireTerrain: *requireTerrain}
+		TrailSpacing: *trailSpacing, TrailMaxStep: *trailMaxStep, RequireTerrain: *requireTerrain,
+		TargetTrail: *targetTrail, ClassicCollisionDodge: *classicCollisionDodge}
 	coordinator, err := party.New(players, *leader, config)
 	if err != nil || *path == "" || *pace < 0 {
 		fmt.Fprintln(os.Stderr, "usage: partyreplay -replay file.jsonl -roster 1:1,2:2 -leader 1 -stop N -resume N -catchup N -max-age 750ms")

@@ -6,7 +6,8 @@ import (
 )
 
 // classicSprint mirrors the supplied build's sprint engagement controller.
-// Collision input stays false until a verified live terrain source exists.
+// Collision input is available in controlled terrain replay. Live following
+// still has no verified terrain source.
 type classicSprint struct {
 	phase                 sprintPhase
 	phaseSince            time.Time
