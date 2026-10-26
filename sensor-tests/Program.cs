@@ -109,3 +109,4 @@ Require(RadarLootMetadata.Stack(1) == 1 && RadarLootMetadata.Stack(999_999) == 9
 Console.WriteLine("Sensor diagnostics passed.");
 UiItemCardTreeScannerTests.Run();
 UiItemCardVtableLocatorTests.Run();
+UiItemCardCorrelatorTests.Run();

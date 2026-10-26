@@ -42,9 +42,23 @@ type Sample struct {
 // RawItemCard is a currently attached UI node with an item and owner pointer.
 // It has no validated local player, item identity or pickup authorization.
 type RawItemCard struct {
-	Object   string `json:"Object"`
-	Item     string `json:"Item"`
-	Owner    string `json:"Owner"`
+	Object     string          `json:"Object"`
+	Item       string          `json:"Item"`
+	Owner      string          `json:"Owner"`
+	Evidence   string          `json:"Evidence"`
+	OwnerMatch *CardOwnerMatch `json:"OwnerMatch,omitempty"`
+	LootMatch  *CardLootMatch  `json:"LootMatch,omitempty"`
+}
+
+type CardOwnerMatch struct {
+	EntityID uint64 `json:"EntityId"`
+	Evidence string `json:"Evidence"`
+}
+
+type CardLootMatch struct {
+	EntityID uint64 `json:"EntityId"`
+	ItemPath string `json:"ItemPath"`
+	Name     string `json:"Name"`
 	Evidence string `json:"Evidence"`
 }
 
@@ -146,6 +160,17 @@ func validRawItemCards(cards []RawItemCard, status string, seen *time.Time) bool
 		if card.Object == "" || card.Item == "" || card.Owner == "" ||
 			!validAddress(card.Object) || !validAddress(card.Item) || !validAddress(card.Owner) ||
 			objects[card.Object] || card.Evidence != "unassigned_ui_card" {
+			return false
+		}
+		if card.OwnerMatch != nil && (card.OwnerMatch.EntityID == 0 ||
+			card.OwnerMatch.Evidence != "pointer_equal_visible_player") {
+			return false
+		}
+		if card.LootMatch != nil && (card.LootMatch.EntityID == 0 ||
+			card.LootMatch.Evidence != "pointer_equal_visible_world_item" ||
+			!strings.HasPrefix(card.LootMatch.ItemPath, "Metadata/Items/") ||
+			len(card.LootMatch.ItemPath) > 256 || strings.TrimSpace(card.LootMatch.Name) == "" ||
+			len(card.LootMatch.Name) > 96) {
 			return false
 		}
 		objects[card.Object] = true

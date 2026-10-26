@@ -168,13 +168,22 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                             GameController.IngameState.Address, _cardVtableTask.Result);
                         itemCardStatus = result.Cards.Length > 32 ? "too_many_cards" : result.Status;
                         if (itemCardStatus == "ok")
-                            itemCards = result.Cards.Select(card => (object)new
+                        {
+                            var (players, loot) = ReadItemCardCorrelations();
+                            itemCards = result.Cards.Select(card =>
                             {
-                                Object = FormatAddress(card.Object),
-                                Item = FormatAddress(card.Item),
-                                Owner = FormatAddress(card.Owner),
-                                Evidence = "unassigned_ui_card"
+                                var match = UiItemCardCorrelator.Resolve(card, players, loot);
+                                return (object)new
+                                {
+                                    Object = FormatAddress(card.Object),
+                                    Item = FormatAddress(card.Item),
+                                    Owner = FormatAddress(card.Owner),
+                                    Evidence = "unassigned_ui_card",
+                                    OwnerMatch = match.Owner,
+                                    LootMatch = match.Loot
+                                };
                             }).ToArray();
+                        }
                     }
                 }
             }
@@ -259,6 +268,30 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     }
 
     private static string? FormatAddress(long address) => address > 0 ? $"0x{address:X}" : null;
+
+    private (UiItemCardCorrelator.Player[] Players, UiItemCardCorrelator.Loot[] Loot)
+        ReadItemCardCorrelations()
+    {
+        var players = new List<UiItemCardCorrelator.Player>();
+        var loot = new List<UiItemCardCorrelator.Loot>();
+        foreach (var entity in GameController.Entities)
+        {
+            if (entity == null || entity.Id == 0) continue;
+            var path = entity.Path;
+            if (entity.Address > 0 && path != null && RadarClassifier.IsPlayerPath(path) &&
+                entity.GetComponent<Player>() != null)
+                players.Add(new(entity.Address, entity.Id));
+            if (path == null || !RadarClassifier.IsWorldItemWrapperPath(path)) continue;
+            var inner = entity.GetComponent<WorldItem>()?.ItemEntity;
+            var itemPath = inner?.Path;
+            var name = inner?.GetComponent<Base>()?.Name?.Trim();
+            if (inner?.Address > 0 && itemPath?.StartsWith("Metadata/Items/", StringComparison.Ordinal) == true &&
+                Encoding.UTF8.GetByteCount(itemPath) <= 256 &&
+                !string.IsNullOrWhiteSpace(name) && Encoding.UTF8.GetByteCount(name) <= 96)
+                loot.Add(new(inner.Address, entity.Id, itemPath, name));
+        }
+        return (players.ToArray(), loot.ToArray());
+    }
 
     private object? ReadGroundHover()
     {

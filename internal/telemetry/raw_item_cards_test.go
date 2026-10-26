@@ -31,4 +31,23 @@ func TestRawItemCardsRemainUnassignedDiagnosticEvidence(t *testing.T) {
 			t.Fatalf("read status %s rejected: %v", status, err)
 		}
 	}
+	joined := strings.Replace(base, `"Evidence":"unassigned_ui_card"`,
+		`"Evidence":"unassigned_ui_card","OwnerMatch":{"EntityId":11,"Evidence":"pointer_equal_visible_player"},`+
+			`"LootMatch":{"EntityId":23,"ItemPath":"Metadata/Items/Currency/CurrencyExalted",`+
+			`"Name":"Exalted Orb","Evidence":"pointer_equal_visible_world_item"}`, 1)
+	if sample, err := Decode([]byte(joined)); err != nil || len(sample.ItemCards) != 1 ||
+		sample.ItemCards[0].OwnerMatch == nil || sample.ItemCards[0].OwnerMatch.EntityID != 11 ||
+		sample.ItemCards[0].LootMatch == nil || sample.ItemCards[0].LootMatch.EntityID != 23 {
+		t.Fatalf("exact pointer candidates lost: %+v, %v", sample.ItemCards, err)
+	}
+	for _, changed := range []string{
+		strings.Replace(joined, `"pointer_equal_visible_player"`, `"player_1_confirmed"`, 1),
+		strings.Replace(joined, `"pointer_equal_visible_world_item"`, `"pickup_ready"`, 1),
+		strings.Replace(joined, `"EntityId":23`, `"EntityId":0`, 1),
+		strings.Replace(joined, `"Metadata/Items/Currency/CurrencyExalted"`, `"Metadata/Monsters/Beast"`, 1),
+	} {
+		if _, err := Decode([]byte(changed)); err == nil {
+			t.Fatalf("unverified card correlation accepted: %s", changed)
+		}
+	}
 }
