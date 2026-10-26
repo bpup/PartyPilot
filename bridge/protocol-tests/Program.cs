@@ -77,6 +77,16 @@ if (!BridgeProtocol.TryParseFlask("{\"type\":\"flask\",\"slot\":3,\"resource\":\
     BridgeProtocol.TryParseFlask("{\"type\":\"flask\",\"slot\":5,\"resource\":\"life\"}", out _) ||
     BridgeProtocol.TryParseFlask("{\"type\":\"flask\",\"slot\":3,\"resource\":\"skill\"}", out _))
     throw new Exception("Automatic flask command validation failed.");
+if (!BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_begin\"}", out var beginParty) ||
+    beginParty.Type != "auto_party_begin" ||
+    !BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":5,\"buttons\":4096,\"hold_ms\":80}", out var pulseParty) ||
+    pulseParty != new AutoPartyControl("auto_party_pulse", 5, 4096, 80) ||
+    !BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_end\"}", out _) ||
+    BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":7,\"buttons\":4096,\"hold_ms\":80}", out _) ||
+    BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":2,\"buttons\":4096,\"hold_ms\":1000}", out _) ||
+    BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":2,\"buttons\":4096,\"hold_ms\":60}", out _) ||
+    BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":2,\"buttons\":16384,\"hold_ms\":80}", out _))
+    throw new Exception("Auto Party menu command validation failed.");
 if (!BridgeSlots.TryParse(["--slots", "3,2"], out var slots) ||
     !slots.SequenceEqual([2, 3]) ||
     BridgeSlots.TryParse(["--slots", "2,2"], out _) ||
@@ -242,6 +252,43 @@ if (pad3.Report != default || pad2.Report != default)
     throw new Exception("Disconnect did not neutralize focused pad.");
 if (router.ApplyLine("{\"type\":\"focus\",\"slot\":6}", now) || pad3.Report != default)
     throw new Exception("Unassigned focus was not rejected safely.");
+var partyPad1 = new FakePad();
+var partyPad2 = new FakePad();
+var partyRouter = new BridgeRouter(new Dictionary<int, IPadOutput> { [1] = partyPad1, [2] = partyPad2 });
+if (!partyRouter.ConfigurePhysical(1) || partyRouter.PulseAutoParty(2, 0x0010, 100, now))
+    throw new Exception("Auto Party pulse escaped before exclusive ownership.");
+partyRouter.SetPhysical(new XInputGamepad { Buttons = 0x1000, LeftX = 20000 }, now);
+partyRouter.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", now);
+if (!partyRouter.BeginAutoParty(now) || !partyRouter.AutoPartyActive ||
+    partyPad1.Report != default || partyPad2.Report != default ||
+    partyRouter.BeginAutoParty(now.AddMilliseconds(1)))
+    throw new Exception("Auto Party did not exclusively neutralize existing input.");
+partyRouter.SetPhysical(new XInputGamepad { Buttons = 0x1000, LeftX = 20000 }, now.AddMilliseconds(2));
+if (!partyRouter.PulseAutoParty(2, 0x0010, 100, now.AddMilliseconds(3)) ||
+    partyPad1.Report != default || partyPad2.Report.Buttons != 0x0010 ||
+    partyRouter.PulseAutoParty(1, 0x1000, 80, now.AddMilliseconds(4)))
+    throw new Exception("Auto Party failed to isolate one held menu button.");
+if (!partyRouter.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", now.AddMilliseconds(5)) ||
+    partyPad2.Report.Buttons != 0x0010 || partyPad2.X != 0)
+    throw new Exception("Follow input interrupted Auto Party ownership.");
+partyRouter.Tick(now.AddMilliseconds(104));
+if (partyPad2.Report != default ||
+    !partyRouter.PulseAutoParty(2, 0x1000, 80, now.AddMilliseconds(105)) ||
+    partyPad2.Report.Buttons != 0x1000)
+    throw new Exception("Auto Party did not release before the next menu pulse.");
+partyRouter.EndAutoParty();
+if (partyRouter.AutoPartyActive || partyPad1.Report != default || partyPad2.Report != default)
+    throw new Exception("Auto Party stop left controller input active.");
+if (!partyRouter.BeginAutoParty(now.AddSeconds(1)) ||
+    !partyRouter.PulseAutoParty(2, 0x2000, 60, now.AddSeconds(1).AddMilliseconds(1)))
+    throw new Exception("Auto Party could not restart after stopping.");
+partyRouter.Tick(now.AddSeconds(12));
+if (partyRouter.AutoPartyActive || partyPad2.Report != default)
+    throw new Exception("Auto Party timeout failed to neutralize a stale session.");
+if (!partyRouter.BeginAutoParty(now.AddSeconds(13)) ||
+    partyRouter.ApplyLine("{\"type\":\"auto_party_pulse\",\"slot\":2,\"buttons\":16384,\"hold_ms\":80}", now.AddSeconds(13)) ||
+    partyRouter.AutoPartyActive || partyPad2.Report != default)
+    throw new Exception("Malformed input survived Auto Party exclusive ownership.");
 var pairingSignals = new PairingSignalTracker();
 if (pairingSignals.Observe(false, 2) != 0 ||
     pairingSignals.Observe(true, 2) != 0 ||

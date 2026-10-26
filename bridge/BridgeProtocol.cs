@@ -5,9 +5,49 @@ namespace PartyPilot.Bridge;
 internal readonly record struct BridgeCommand(int Slot, short X, short Y, bool Active, bool EligibleForManualMovement);
 internal readonly record struct PairingControl(string Type, int Slot, int Pid, long WindowHandle);
 internal readonly record struct FlaskCommand(int Slot, string Resource);
+internal readonly record struct AutoPartyControl(string Type, int Slot, ushort Buttons, int HoldMilliseconds);
 
 internal static class BridgeProtocol
 {
+    public static bool TryParseAutoParty(string line, out AutoPartyControl command)
+    {
+        command = default;
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String ||
+                type.GetString() is not ("auto_party_begin" or "auto_party_pulse" or "auto_party_end"))
+                return false;
+            var name = type.GetString()!;
+            if (name is "auto_party_begin" or "auto_party_end")
+            {
+                command = new AutoPartyControl(name, 0, 0, 0);
+                return true;
+            }
+            if (!root.TryGetProperty("slot", out var slot) || !slot.TryGetInt32(out var value) ||
+                value is < 1 or > 6 ||
+                !root.TryGetProperty("buttons", out var buttons) || !buttons.TryGetUInt16(out var pressed) ||
+                !root.TryGetProperty("hold_ms", out var hold) || !hold.TryGetInt32(out var duration) ||
+                !ValidAutoPartyPulse(pressed, duration)) return false;
+            command = new AutoPartyControl(name, value, pressed, duration);
+            return true;
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException)
+        {
+            return false;
+        }
+    }
+
+    internal static bool ValidAutoPartyPulse(ushort buttons, int duration) => buttons switch
+    {
+        0x0010 => duration is 80 or 100,
+        0x0004 or 0x1000 => duration == 80,
+        0x2000 => duration == 60,
+        _ => false
+    };
+
     public static bool TryParseFlask(string line, out FlaskCommand command)
     {
         command = default;

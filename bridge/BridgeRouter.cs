@@ -42,8 +42,14 @@ internal sealed class BridgeRouter
     private short _manualY;
     private ushort _previousButtons;
     private byte _previousLeftTrigger;
+    private bool _autoPartyActive;
+    private DateTime _autoPartyExpiresUtc;
+    private int _autoPartySlot;
+    private ushort _autoPartyButtons;
+    private DateTime _autoPartyButtonsUntilUtc;
 
     public int FocusedSlot => _physicalMode ? _focusedSlot : 0;
+    public bool AutoPartyActive => _autoPartyActive;
 
     public BridgeRouter(IReadOnlyDictionary<int, IPadOutput> outputs, IReportBatch? reportBatch = null)
     {
@@ -78,6 +84,14 @@ internal sealed class BridgeRouter
 
     public bool ApplyLine(string line, DateTime nowUtc)
     {
+        if (_autoPartyActive)
+        {
+            // Drop valid follow/focus input while Auto Party owns every pad; malformed input still fails closed.
+            if ((BridgeProtocol.TryParseFocus(line, out var focusSlot) && _routes.ContainsKey(focusSlot)) ||
+                (BridgeProtocol.TryParse(line, out var movement) && _routes.ContainsKey(movement.Slot))) return true;
+            NeutralAll();
+            return false;
+        }
         if (BridgeProtocol.TryParseFocus(line, out var focused))
         {
             if (!_physicalMode || !_routes.ContainsKey(focused))
@@ -109,6 +123,7 @@ internal sealed class BridgeRouter
         bool allowDirectRightStick = true)
     {
         if (!_physicalMode) return;
+        if (_autoPartyActive) return;
         const ushort leftThumb = 0x0040;
         const ushort rightThumb = 0x0080;
         const ushort dpadUp = 0x0001;
@@ -194,6 +209,35 @@ internal sealed class BridgeRouter
         RenderAll();
     }
 
+    public bool BeginAutoParty(DateTime nowUtc)
+    {
+        if (!_physicalMode || _autoPartyActive || nowUtc.Kind != DateTimeKind.Utc) return false;
+        NeutralAll();
+        _autoPartyActive = true;
+        _autoPartyExpiresUtc = nowUtc.AddSeconds(10);
+        return true;
+    }
+
+    public bool PulseAutoParty(int slot, ushort buttons, int holdMilliseconds, DateTime nowUtc)
+    {
+        if (!_autoPartyActive || !_routes.ContainsKey(slot) ||
+            nowUtc.Kind != DateTimeKind.Utc || nowUtc >= _autoPartyExpiresUtc ||
+            !BridgeProtocol.ValidAutoPartyPulse(buttons, holdMilliseconds) ||
+            _autoPartyButtons != 0) return false;
+        _autoPartySlot = slot;
+        _autoPartyButtons = buttons;
+        _autoPartyButtonsUntilUtc = nowUtc.AddMilliseconds(holdMilliseconds);
+        _autoPartyExpiresUtc = nowUtc.AddSeconds(10);
+        Render(slot, _routes[slot]);
+        return true;
+    }
+
+    public void EndAutoParty()
+    {
+        if (!_autoPartyActive) return;
+        NeutralAll();
+    }
+
     public bool PulseFlask(int slot, string resource, DateTime nowUtc)
     {
         if (!_routes.TryGetValue(slot, out var route) || !_physicalMode || !_physicalConnected ||
@@ -208,6 +252,19 @@ internal sealed class BridgeRouter
 
     public void Tick(DateTime nowUtc)
     {
+        if (_autoPartyActive)
+        {
+            if (nowUtc >= _autoPartyExpiresUtc) { EndAutoParty(); return; }
+            if (_autoPartyButtons != 0 && nowUtc >= _autoPartyButtonsUntilUtc)
+            {
+                var slot = _autoPartySlot;
+                _autoPartySlot = 0;
+                _autoPartyButtons = 0;
+                _autoPartyButtonsUntilUtc = default;
+                Render(slot, _routes[slot]);
+            }
+            return;
+        }
         foreach (var (slot, route) in _routes)
         {
             var expired = false;
@@ -235,6 +292,11 @@ internal sealed class BridgeRouter
 
     public void NeutralAll()
     {
+        _autoPartyActive = false;
+        _autoPartyExpiresUtc = default;
+        _autoPartySlot = 0;
+        _autoPartyButtons = 0;
+        _autoPartyButtonsUntilUtc = default;
         _menuGuardActive = false;
         _physicalConnected = false;
         _physicalReport = default;
@@ -272,6 +334,12 @@ internal sealed class BridgeRouter
 
     private void Render(int slot, PadRoute route)
     {
+        if (_autoPartyActive)
+        {
+            route.Output.SetReport(slot == _autoPartySlot && _autoPartyButtons != 0
+                ? new PadReport(_autoPartyButtons, 0, 0, 0, 0, 0, 0) : default);
+            return;
+        }
         if (_physicalMode && slot == _focusedSlot)
         {
             route.Output.SetReport(_physicalConnected ? WithFlasks(_physicalReport, route) : default);

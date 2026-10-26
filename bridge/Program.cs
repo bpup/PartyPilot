@@ -352,6 +352,24 @@ try
                     }
                     continue;
                 }
+                if (BridgeProtocol.TryParseAutoParty(line, out var partyControl))
+                {
+                    if (!physicalMode || pairingGate?.Phase != ProtectedPairingPhase.Complete ||
+                        (partyControl.Type == "auto_party_begin" && !router.BeginAutoParty(DateTime.UtcNow)) ||
+                        (partyControl.Type == "auto_party_pulse" &&
+                         !router.PulseAutoParty(partyControl.Slot, partyControl.Buttons,
+                             partyControl.HoldMilliseconds, DateTime.UtcNow)))
+                    {
+                        router.NeutralAll();
+                        Console.Error.WriteLine("Auto Party controller command was rejected; all controllers neutral.");
+                        return 1;
+                    }
+                    if (partyControl.Type == "auto_party_end") router.EndAutoParty();
+                    Console.WriteLine(JsonSerializer.Serialize(new { @event = "auto_party_control",
+                        type = partyControl.Type, slot = partyControl.Slot,
+                        buttons = partyControl.Buttons }));
+                    continue;
+                }
                 if (BridgeProtocol.TryParseFlask(line, out var flaskCommand))
                 {
                     if (!autoFlaskEnabled || pairingGate?.Phase != ProtectedPairingPhase.Complete ||
@@ -434,7 +452,12 @@ try
                         stable && foreground, loginReadiness.Ready);
                     router.SetPhysical(observation.Forwarded, observedAt,
                         allowDirectRightStick: pairingGate.Phase == ProtectedPairingPhase.Complete);
-                    if (pairingGate.Phase == ProtectedPairingPhase.Complete)
+                    if (router.AutoPartyActive)
+                    {
+                        menuGuard.Reset();
+                        router.SetMenuGuardActive(false);
+                    }
+                    else if (pairingGate.Phase == ProtectedPairingPhase.Complete)
                     {
                         var changes = menuGuard.Observe(router.FocusedSlot, observation.Forwarded.Buttons, observedAt);
                         router.SetMenuGuardActive(menuGuard.AnyActive);
@@ -461,7 +484,10 @@ try
                         Console.WriteLine(JsonSerializer.Serialize(new { @event = "a_release", slot = pairedSlot }));
                 }
             }
+            var autoPartyWasActive = router.AutoPartyActive;
             router.Tick(DateTime.UtcNow);
+            if (autoPartyWasActive && !router.AutoPartyActive)
+                Console.WriteLine(JsonSerializer.Serialize(new { @event = "auto_party_expired" }));
         }
         return 0;
     }
