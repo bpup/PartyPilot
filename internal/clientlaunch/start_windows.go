@@ -69,24 +69,40 @@ func Attach(paths []string, selected map[int]int) (Result, error) {
 }
 
 func Start(paths []string, uris map[int]string, timeout time.Duration, runtime string) (Result, error) {
+	return StartWithPreResume(paths, uris, timeout, runtime, nil)
+}
+
+// StartWithPreResume holds Client 3's standalone primary thread while a caller
+// prepares process-local input. Returning an error closes that suspended process.
+func StartWithPreResume(paths []string, uris map[int]string, timeout time.Duration,
+	runtime string, beforeClient3Resume func(int) error) (Result, error) {
 	if _, err := ValidateStart(paths, timeout, runtime); err != nil {
 		return Result{}, err
 	}
 	if err := ValidateURIs(paths, uris); err != nil {
 		return Result{}, err
 	}
+	if beforeClient3Resume != nil && (len(paths) != 3 ||
+		!clientprocess.IsStandaloneGameExecutable(paths[2]) || uris[3] != "") {
+		return Result{}, fmt.Errorf("pre-resume input requires three clients and a standalone Client 3 executable")
+	}
 	result := Result{Clients: make([]Client, 0, len(paths))}
 	for index, path := range paths {
-		if NeedsIsolation(paths, index) {
+		isolate := NeedsIsolation(paths, index)
+		var beforeResume func(int) error
+		if index == 2 {
+			beforeResume = beforeClient3Resume
+		}
+		if isolate || beforeResume != nil {
 			if uris[index+1] != "" {
 				return result, fmt.Errorf("client %d shared standalone installation cannot use a store URI", index+1)
 			}
-			client, err := startIsolatedStandalone(path, runtime, timeout)
+			client, err := startSuspendedStandalone(path, runtime, timeout, isolate, beforeResume)
 			if client.PID != 0 {
 				result.Clients = append(result.Clients, client)
 			}
 			if err != nil {
-				return result, fmt.Errorf("client %d multi-instance launch: %w", index+1, err)
+				return result, fmt.Errorf("client %d suspended launch: %w", index+1, err)
 			}
 			continue
 		}

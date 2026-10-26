@@ -32,7 +32,8 @@ var (
 	resumeThread       = kernel32.NewProc("ResumeThread")
 )
 
-func startIsolatedStandalone(path, runtime string, timeout time.Duration) (Client, error) {
+func startSuspendedStandalone(path, runtime string, timeout time.Duration,
+	isolateMutexes bool, beforeResume func(int) error) (Client, error) {
 	application, err := syscall.UTF16PtrFromString(path)
 	if err != nil {
 		return Client{}, err
@@ -61,39 +62,15 @@ func startIsolatedStandalone(path, runtime string, timeout time.Duration) (Clien
 	}()
 
 	pid := int(process.ProcessId)
-	ready, err := newNamedEvent(fmt.Sprintf(`Local\PartyPilot.MultiInstance.Ready.%d`, pid))
-	if err != nil {
-		return Client{}, fmt.Errorf("create runtime ready event: %w", err)
+	if isolateMutexes {
+		if err := prepareMutexIsolation(process.Process, pid, runtime); err != nil {
+			return Client{}, err
+		}
 	}
-	defer syscall.CloseHandle(ready)
-	failed, err := newNamedEvent(fmt.Sprintf(`Local\PartyPilot.MultiInstance.Failed.%d`, pid))
-	if err != nil {
-		return Client{}, fmt.Errorf("create runtime failure event: %w", err)
-	}
-	defer syscall.CloseHandle(failed)
-	if err := injectMutexRuntime(process.Process, runtime); err != nil {
-		return Client{}, err
-	}
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		result, waitErr := syscall.WaitForSingleObject(ready, 0)
-		if waitErr != nil {
-			return Client{}, fmt.Errorf("wait for mutex runtime: %w", waitErr)
+	if beforeResume != nil {
+		if err := beforeResume(pid); err != nil {
+			return Client{}, fmt.Errorf("pre-resume preparation: %w", err)
 		}
-		if result == waitObject0 {
-			break
-		}
-		result, waitErr = syscall.WaitForSingleObject(failed, 0)
-		if waitErr != nil {
-			return Client{}, fmt.Errorf("wait for mutex runtime failure: %w", waitErr)
-		}
-		if result == waitObject0 {
-			return Client{}, errors.New("independent mutex runtime rejected its hooks")
-		}
-		if time.Now().After(deadline) {
-			return Client{}, errors.New("independent mutex runtime did not become ready in 15 seconds")
-		}
-		time.Sleep(50 * time.Millisecond)
 	}
 	previous, _, callErr := resumeThread.Call(uintptr(process.Thread))
 	if previous != 1 {
@@ -101,7 +78,7 @@ func startIsolatedStandalone(path, runtime string, timeout time.Duration) (Clien
 	}
 	resumed = true
 	client := Client{Executable: path, PID: pid}
-	deadline = time.Now().Add(timeout)
+	deadline := time.Now().Add(timeout)
 	for {
 		windows, discoverErr := windowlayout.DiscoverWindows([]int{pid})
 		if discoverErr == nil && len(windows) == 1 {
@@ -119,6 +96,43 @@ func startIsolatedStandalone(path, runtime string, timeout time.Duration) (Clien
 			return client, fmt.Errorf("isolated client did not present a game window within %s", timeout)
 		}
 		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+func prepareMutexIsolation(process syscall.Handle, pid int, runtime string) error {
+	ready, err := newNamedEvent(fmt.Sprintf(`Local\PartyPilot.MultiInstance.Ready.%d`, pid))
+	if err != nil {
+		return fmt.Errorf("create runtime ready event: %w", err)
+	}
+	defer syscall.CloseHandle(ready)
+	failed, err := newNamedEvent(fmt.Sprintf(`Local\PartyPilot.MultiInstance.Failed.%d`, pid))
+	if err != nil {
+		return fmt.Errorf("create runtime failure event: %w", err)
+	}
+	defer syscall.CloseHandle(failed)
+	if err := injectMutexRuntime(process, runtime); err != nil {
+		return err
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		result, waitErr := syscall.WaitForSingleObject(ready, 0)
+		if waitErr != nil {
+			return fmt.Errorf("wait for mutex runtime: %w", waitErr)
+		}
+		if result == waitObject0 {
+			return nil
+		}
+		result, waitErr = syscall.WaitForSingleObject(failed, 0)
+		if waitErr != nil {
+			return fmt.Errorf("wait for mutex runtime failure: %w", waitErr)
+		}
+		if result == waitObject0 {
+			return errors.New("independent mutex runtime rejected its hooks")
+		}
+		if time.Now().After(deadline) {
+			return errors.New("independent mutex runtime did not become ready in 15 seconds")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
