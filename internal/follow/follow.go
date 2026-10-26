@@ -39,10 +39,16 @@ type Config struct {
 }
 
 func (c Config) Valid() bool {
-	return c.StopDistance >= 0 &&
+	return !math.IsInf(c.StopDistance, 0) && !math.IsInf(c.ResumeDistance, 0) &&
+		!math.IsInf(c.CatchUpDistance, 0) &&
+		c.StopDistance >= 0 &&
 		c.ResumeDistance > c.StopDistance &&
 		c.CatchUpDistance > c.ResumeDistance &&
 		c.MaxAge > 0
+}
+
+func (e *Engine) Reset() {
+	e.moving = false
 }
 
 type Engine struct {

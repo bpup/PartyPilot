@@ -7,12 +7,15 @@
 - 读取逐帧 JSONL 位置数据，输出等待、停靠、跟随和追赶命令。
 - 丢失坐标、区域实例不一致、数据过期或坐标无效时停止输出移动方向。
 - 停靠与恢复使用不同距离，减少边界附近的反复启停。
+- 多角色状态机支持明确的角色/客户端名单：手动接管队员时暂停该队员的自动跟随，切回主角色后恢复。
 
 运行：
 
 ```sh
 go test ./...
 go run ./cmd/partypilot -replay testdata/example.jsonl -stop 2 -resume 3 -catchup 10 -max-age 750ms
+go run ./cmd/partyreplay -replay testdata/party-example.jsonl -roster 1:1,2:2 -leader 1 -stop 2 -resume 3 -catchup 10 -max-age 750ms
+go run ./cmd/partyreplay -replay testdata/party-example.jsonl -roster 1:1,2:2 -leader 1 -stop 2 -resume 3 -catchup 10 -max-age 750ms | go run ./cmd/bridgefeed -slot 2
 ```
 
 在 macOS 上交叉编译 Windows 程序：
@@ -32,5 +35,9 @@ GOOS=windows GOARCH=amd64 go build -o PartyPilot.exe ./cmd/partypilot
 已生成的 Windows 文件位于 `release/PartyPilot-Replay.exe` 和 `release/bridge/PartyPilot.Bridge.exe`。后者需要明确传入 `--enable-controller`，并从标准输入持续接收 JSON 命令。两个程序已经交叉编译，**尚未在 Windows 或 PoE2 中运行验证**；用户当前没有可用的虚拟机。
 
 `sensor/` 是基于公开 ExileCore2 接口的只读诊断插件。它默认关闭，启用后以 10Hz 向本机 `127.0.0.1:47617` 发送进程 ID、时间、区域名称、区域哈希和玩家三维坐标。`release/PartyPilot-SensorLog.exe` 可接收并显示这些数据。区域名称不是实例 ID；区域哈希能否唯一标识两客户端的同一实例也**待游戏实测**，因此采集数据目前不会进入自动跟随控制。插件已经针对当前 ExileCore2 程序集编译，接收程序已用模拟数据验证；真实游戏数据仍待测试。编译插件需设置 `EXILECORE2_DIR` 为 ExileCore2 安装目录，本项目不分发它的二进制文件。
+
+`release/PartyPilot-PartyMonitor.exe` 可用 `-leader-pid`、`-follower-pid` 和 `-max-age` 监视两个进程的只读位置流。它区分数据缺失、过期、区域不一致及“同名同哈希候选”；候选**不等于已证实处于同一实例**，因此监视器不输出任何手柄命令。模拟双进程 UDP 数据已验证这些状态切换。
+
+`PartyReplay` 读取受控数据中的明确实例标识，计算各队员命令；`BridgeFeed` 选择其中一个队员，并把手动接管或等待状态转换为松开摇杆的命令。上述管道已在 macOS 用模拟数据跑通。Windows 上可以另传 `-pace 100ms`，再把 `BridgeFeed` 的输出接到 `PartyPilot.Bridge.exe --enable-controller` 做手柄测试；**这条 Windows/游戏输入管道尚未运行验证**。真实传感器尚不能提供经验证的实例标识，所以当前的只读监视器不会自动连接这条控制管道。
 
 状态：**implementation-aligned / integration-pending**。

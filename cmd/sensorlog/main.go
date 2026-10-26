@@ -4,30 +4,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"math"
 	"net"
 	"os"
-	"time"
+
+	"partypilot/internal/telemetry"
 )
-
-type sample struct {
-	ProcessID int       `json:"ProcessId"`
-	SeenUTC   time.Time `json:"SeenUtc"`
-	AreaName  string    `json:"AreaName"`
-	AreaHash  uint32    `json:"AreaHash"`
-	X         float64   `json:"X"`
-	Y         float64   `json:"Y"`
-	Z         float64   `json:"Z"`
-}
-
-func valid(item sample) bool {
-	return item.ProcessID > 0 && !item.SeenUTC.IsZero() &&
-		finite(item.X) && finite(item.Y) && finite(item.Z)
-}
-
-func finite(value float64) bool {
-	return !math.IsNaN(value) && !math.IsInf(value, 0)
-}
 
 func main() {
 	address := flag.String("listen", "127.0.0.1:47617", "local telemetry address")
@@ -51,8 +32,8 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		var item sample
-		if err := json.Unmarshal(data[:count], &item); err != nil || !valid(item) {
+		item, err := telemetry.Decode(data[:count])
+		if err != nil {
 			fmt.Fprintln(os.Stderr, "discarded invalid sample")
 			continue
 		}
