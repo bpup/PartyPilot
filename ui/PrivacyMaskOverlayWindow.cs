@@ -14,9 +14,9 @@ public sealed class PrivacyMaskOverlayWindow : Window
     private readonly IReadOnlyList<PrivacyMaskBox> _boxes;
     private readonly bool _autoNameplates;
     private readonly int _clientNumber;
+    private readonly PrivacyNameplateTracker _tracker = new();
     private IReadOnlyList<PrivacyMaskBox> _activeBoxes;
     private IReadOnlyList<PrivacyMaskBox> _autoBoxes = [];
-    private DateTime _lastAutoDetectedUtc;
     private DateTime _lastGameplayUtc;
     private readonly Canvas _canvas = new();
     private readonly List<Image> _images = [];
@@ -62,6 +62,7 @@ public sealed class PrivacyMaskOverlayWindow : Window
         Closed += (_, _) =>
         {
             _generation++;
+            _tracker.Reset();
             _timer.Stop();
             ClearFrames();
         };
@@ -129,21 +130,39 @@ public sealed class PrivacyMaskOverlayWindow : Window
             if (_wasForeground)
             {
                 _generation++;
+                _tracker.Reset();
+                _autoBoxes = [];
+                SetActiveBoxes(_boxes);
                 HideFrames();
             }
             _wasForeground = false;
             return;
         }
         _wasForeground = true;
-        if (_autoBoxes.Count > 0 && (DateTime.UtcNow - _lastAutoDetectedUtc >
-            TimeSpan.FromMilliseconds(140) || DateTime.UtcNow - _lastGameplayUtc > TimeSpan.FromSeconds(2)))
+        var physicalWidth = rect.Right - rect.Left;
+        var physicalHeight = rect.Bottom - rect.Top;
+        var gameplayFresh = _autoNameplates && _lastGameplayUtc != default &&
+            DateTime.UtcNow - _lastGameplayUtc <= TimeSpan.FromSeconds(2);
+        if (!gameplayFresh)
         {
+            _tracker.Reset();
             _autoBoxes = [];
             SetActiveBoxes(_boxes);
         }
+        else if (Volatile.Read(ref _captureInFlight) == 0)
+        {
+            var coverage = _tracker.Coverage(physicalWidth, physicalHeight, DateTime.UtcNow);
+            var moving = coverage.Select(bounds => PrivacyNameplateDetector.Expand(_clientNumber,
+                bounds, physicalWidth, physicalHeight)).ToArray();
+            if (!_autoBoxes.SequenceEqual(moving))
+            {
+                _autoBoxes = moving;
+                SetActiveBoxes(_boxes.Concat(moving).ToArray());
+            }
+        }
         if (_lastFrameUtc != default && DateTime.UtcNow - _lastFrameUtc > TimeSpan.FromMilliseconds(250))
             foreach (var image in _images) image.IsVisible = false;
-        RequestCapture(handle, rect.Right - rect.Left, rect.Bottom - rect.Top);
+        RequestCapture(handle, physicalWidth, physicalHeight);
     }
 
     public void ObserveGameplay(DateTime seenUtc)
@@ -170,30 +189,28 @@ public sealed class PrivacyMaskOverlayWindow : Window
             Interlocked.CompareExchange(ref _captureInFlight, 1, 0) != 0) return;
         var generation = _generation;
         var sequence = Interlocked.Increment(ref _captureSequence);
+        var trackerRevision = _tracker.Revision;
         var currentActive = _activeBoxes;
-        var heldAuto = _autoBoxes;
-        var lastAutoAt = _lastAutoDetectedUtc;
         _ = Task.Run(() =>
         {
             PrivacyBlurFrame?[]? frames = null;
             IReadOnlyList<PrivacyMaskBox> active = currentActive;
             IReadOnlyList<PrivacyMaskBox> detectedAuto = [];
-            var detectedAt = DateTime.UtcNow;
             try
             {
                 var pixels = PrivacyWindowCapture.TryCapture(handle, width, height);
                 if (pixels is not null)
                 {
-                    if (gameplayFresh)
-                        detectedAuto = PrivacyNameplateDetector.SelectTwo(
-                                PrivacyNameplateDetector.Locate(pixels, width, height), height)
-                            .Select(bounds => PrivacyNameplateDetector.Expand(_clientNumber, bounds,
-                                width, height)).ToArray();
-                    detectedAt = DateTime.UtcNow;
-                    var auto = detectedAuto.Count > 0 ? detectedAuto :
-                        gameplayFresh && detectedAt - lastAutoAt <= TimeSpan.FromMilliseconds(140)
-                            ? heldAuto : [];
-                    active = _boxes.Concat(auto).ToArray();
+                    if (gameplayFresh && generation == Volatile.Read(ref _generation))
+                    {
+                        var detected = PrivacyNameplateDetector.Locate(pixels, width, height);
+                        var observedAt = DateTime.UtcNow;
+                        _tracker.Observe(detected, width, height, observedAt, trackerRevision);
+                        detectedAuto = _tracker.Coverage(width, height, observedAt)
+                            .Select(bounds => PrivacyNameplateDetector.Expand(_clientNumber,
+                                bounds, width, height)).ToArray();
+                    }
+                    active = _boxes.Concat(detectedAuto).ToArray();
                     frames = active.Select(box => PrivacyBlur.Build(pixels, width, height, box)).ToArray();
                 }
             }
@@ -209,13 +226,7 @@ public sealed class PrivacyMaskOverlayWindow : Window
                     HideFrames();
                     return;
                 }
-                if (detectedAuto.Count > 0)
-                {
-                    _autoBoxes = detectedAuto;
-                    _lastAutoDetectedUtc = detectedAt;
-                }
-                else if (!gameplayFresh || detectedAt - _lastAutoDetectedUtc > TimeSpan.FromMilliseconds(140))
-                    _autoBoxes = [];
+                _autoBoxes = detectedAuto;
                 SetActiveBoxes(active);
                 if (frames.Length != _images.Count) { HideFrames(); return; }
                 try { ShowFrames(frames!); }

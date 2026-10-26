@@ -1,6 +1,10 @@
 namespace PartyPilot.Desktop;
 
-public readonly record struct PrivacyPixelRect(int X, int Y, int Width, int Height);
+public readonly record struct PrivacyPixelRect(int X, int Y, int Width, int Height)
+{
+    public int Right => X + Width;
+    public int Bottom => Y + Height;
+}
 
 public static class PrivacyNameplateDetector
 {

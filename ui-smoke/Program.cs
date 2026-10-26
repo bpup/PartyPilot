@@ -151,6 +151,34 @@ if (detectedNames.Count != 2 || detectedNames[0].X > 115 || detectedNames[0].Y >
     PrivacyNameplateDetector.Expand(1, detectedNames[0], 480, 240).Width <= 0 ||
     PrivacyNameplateDetector.Locate([], 480, 240).Count != 0)
     throw new Exception("Privacy nameplate pixel detection failed on the target synthetic pattern.");
+var tracker = new PrivacyNameplateTracker();
+var trackedAt = DateTime.UtcNow;
+tracker.Observe([new PrivacyPixelRect(400, 300, 100, 20),
+    new PrivacyPixelRect(900, 620, 120, 20)], 1920, 1080, trackedAt);
+tracker.Observe([new PrivacyPixelRect(430, 320, 90, 18)],
+    1920, 1080, trackedAt.AddMilliseconds(20));
+var heldNames = tracker.Coverage(1920, 1080, trackedAt.AddMilliseconds(40));
+if (heldNames.Count != 2 || !heldNames.Any(bounds => bounds.Y >= 600))
+    throw new Exception("A one-label frame dropped the other tracked privacy region.");
+var movingTracker = new PrivacyNameplateTracker();
+movingTracker.Observe([new PrivacyPixelRect(400, 300, 100, 20)], 1920, 1080, trackedAt);
+movingTracker.Observe([new PrivacyPixelRect(420, 310, 100, 20)],
+    1920, 1080, trackedAt.AddMilliseconds(20));
+var swept = movingTracker.Coverage(1920, 1080, trackedAt.AddMilliseconds(40)).Single();
+if (swept.X != 420 || swept.Y != 310 || swept.Right <= 520 || swept.Bottom <= 330 ||
+    movingTracker.Coverage(1920, 1080, trackedAt.AddMilliseconds(200)).Count != 0)
+    throw new Exception("Moving nameplate coverage did not predict and expire as expected.");
+movingTracker.Observe([new PrivacyPixelRect(420, 310, 100, 20)],
+    1920, 1080, trackedAt.AddMilliseconds(40));
+if (movingTracker.Coverage(1920, 1080, trackedAt.AddMilliseconds(40)).Single() !=
+    new PrivacyPixelRect(420, 310, 100, 20))
+    throw new Exception("A stationary nameplate kept an obsolete movement halo.");
+var obsoleteRevision = movingTracker.Revision;
+movingTracker.Reset();
+movingTracker.Observe([new PrivacyPixelRect(500, 500, 100, 20)],
+    1920, 1080, trackedAt.AddMilliseconds(60), obsoleteRevision);
+if (movingTracker.Coverage(1920, 1080, trackedAt.AddMilliseconds(60)).Count != 0)
+    throw new Exception("A late capture revived tracking after privacy reset.");
 var privacyPulse = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
 {
     ProcessId = 123,
