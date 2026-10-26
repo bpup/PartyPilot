@@ -2,6 +2,7 @@ package party
 
 import (
 	"errors"
+	"sort"
 	"time"
 
 	"partypilot/internal/focus"
@@ -107,6 +108,7 @@ func (c *Coordinator) StepWithTerrain(now time.Time, positions map[int]follow.Po
 		}
 		c.lastActiveLeader = activeLeader
 	}
+	resolvedTargets := c.resolveTargets(activeLeader)
 	commands := make(map[int]follow.Command, len(c.followers)-1)
 	for slot, engine := range c.followers {
 		if slot == activeLeader {
@@ -117,10 +119,7 @@ func (c *Coordinator) StepWithTerrain(now time.Time, positions map[int]follow.Po
 			commands[slot] = follow.Command{State: follow.Holding, Reason: "manual control"}
 			continue
 		}
-		target := activeLeader
-		if specific := c.followTargets[slot]; specific != 0 {
-			target = specific
-		}
+		target := resolvedTargets[slot]
 		if c.lastTargets[slot] != target {
 			engine.Reset()
 			c.lastTargets[slot] = target
@@ -128,4 +127,42 @@ func (c *Coordinator) StepWithTerrain(now time.Time, positions map[int]follow.Po
 		commands[slot] = engine.StepWithTerrain(now, positions[target], positions[slot], terrain)
 	}
 	return commands
+}
+
+// resolveTargets follows the supplied six-player navigation graph: missing,
+// self and cyclic target paths return to the current MAIN before movement.
+func (c *Coordinator) resolveTargets(activeLeader int) map[int]int {
+	players := make([]int, 0, len(c.followers))
+	for slot := range c.followers {
+		players = append(players, slot)
+	}
+	sort.Ints(players)
+	targets := make(map[int]int, len(players))
+	for _, slot := range players {
+		requested := c.followTargets[slot]
+		if _, active := c.followers[requested]; slot == activeLeader ||
+			requested == slot || !active {
+			targets[slot] = activeLeader
+		} else {
+			targets[slot] = requested
+		}
+	}
+	for _, slot := range players {
+		if slot == activeLeader {
+			continue
+		}
+		seen := map[int]bool{slot: true}
+		for next := targets[slot]; next != activeLeader; next = targets[next] {
+			if _, active := c.followers[next]; !active || seen[next] {
+				for visited := range seen {
+					if visited != activeLeader {
+						targets[visited] = activeLeader
+					}
+				}
+				break
+			}
+			seen[next] = true
+		}
+	}
+	return targets
 }

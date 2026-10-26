@@ -130,3 +130,41 @@ func TestSpecificFollowTargetAndReturnToCurrentMain(t *testing.T) {
 		t.Fatal("invalid follow target accepted")
 	}
 }
+
+func TestSixPlayerFollowGraphResolvesCyclesToCurrentMain(t *testing.T) {
+	now := time.Unix(31, 0)
+	players := []focus.Player{
+		{Slot: 1, Client: 1}, {Slot: 2, Client: 1},
+		{Slot: 3, Client: 2}, {Slot: 4, Client: 2},
+		{Slot: 5, Client: 3}, {Slot: 6, Client: 3},
+	}
+	coordinator, err := New(players, 1,
+		follow.Config{StopDistance: 2, ResumeDistance: 3,
+			CatchUpDistance: 10, MaxAge: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for slot, target := range map[int]int{2: 3, 3: 2, 4: 2, 5: 6} {
+		if err := coordinator.SetFollowTarget(slot, target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	positions := map[int]follow.Position{}
+	for slot, x := range map[int]float64{1: 0, 2: 10, 3: 20, 4: 5, 5: 50, 6: 60} {
+		positions[slot] = follow.Position{X: x, Area: "verified-instance", Seen: now, Valid: true}
+	}
+	commands := coordinator.Step(now, positions)
+	if commands[2].X >= 0 || commands[3].X >= 0 ||
+		commands[4].X <= 0 || commands[5].X <= 0 || commands[6].X >= 0 {
+		t.Fatalf("cycle or independent chains were routed incorrectly: %+v", commands)
+	}
+	coordinator.SetLastFocusedLeads(true)
+	if err := coordinator.Focus(3); err != nil {
+		t.Fatal(err)
+	}
+	commands = coordinator.Step(now, positions)
+	if _, hasMainCommand := commands[3]; hasMainCommand ||
+		commands[1].X <= 0 || commands[2].X <= 0 || commands[4].X <= 0 {
+		t.Fatalf("new MAIN did not resolve the follow graph: %+v", commands)
+	}
+}

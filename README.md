@@ -143,4 +143,6 @@ PartyPilot-LiveFollow.exe -roster 1:1234,2:5678 -leader 1 -leader-name Leader -e
 
 `PartyReplay` 读取受控数据中的明确实例标识，计算各队员命令。显式启用 `-last-focused-leads` 后，手动聚焦的角色成为跟随目标，原 P1 会转为自动跟随；返回 P1 焦点时恢复原队长。未启用该选项时仍按固定队长计算。`-follow-targets 2:3` 指定 P2 跟随 P3；未指定的队员跟随当前 MAIN。`BridgeFeed -slot 2` 选择一个队员，`BridgeFeed -all` 输出所有队员命令及焦点切换事件。手动接管或等待会松开相应自动化摇杆。队伍角色编号与系统手柄槽位不同时，须逐一传入 `-pad-map 角色:槽位`；例如双客户端 2P 使用 `BridgeFeed -all -pad-map 1:1 -pad-map 2:3`，缺失或重复映射会拒绝输出。此映射现可在明确提供全部角色到运行槽位的对应关系后，把受控决策帧转发到 P5/P6；公共系统手柄仍限 P1–P4，P5/P6 走第三客户端独立共享内存和 Windows 原生 DLL。桌面组合路径已连入桥接主循环与受保护配对引导；实时传感器尚不能为同一游戏进程中的两个角色分别提供经验证的位置，因此未产生 P5/P6 的实时自动跟随决策，也未在 Windows/PoE2 实测，详见[第三客户端输入状态](NATIVE_PRIVATE_SLOTS.md)。上述双客户端命令已在 macOS 用模拟数据贯通到 C# 桥接协议解析器。Windows 上可以另传 `-pace 100ms`，再把命令输出接到明确槽位的 `PartyPilot.Bridge.exe` 做受控手柄测试；**这条 Windows/游戏输入管道尚未运行验证**。真实传感器尚不能提供经验证的实例标识，所以当前的只读监视器不会自动连接这条控制管道。
 
+多角色回放现按所提供 0.6.17 版本的 `ResolveFollowTargets` 静态规则，在每帧决策前解析跟随图：未设置或无效的运行时目标回到当前 MAIN，循环路径上的角色也回到当前 MAIN；其他可到达 MAIN 的链保持原目标。六角色合成帧覆盖循环消解和聚焦后更换 MAIN。命令行仍拒绝不在当前名单内或指向自己的显式目标；这与目标版设置界面的“当前 MAIN”选择收敛方式尚未完全一致。
+
 状态：**implementation-aligned / integration-pending**。
