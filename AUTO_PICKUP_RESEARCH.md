@@ -28,6 +28,14 @@
 {"player":1,"card":{"selected_item":"0xABC","base_id":"CurrencyExalted","player":1,"targetable":true,"received_at":"2026-10-26T00:00:00Z"},"definitions":[{"key":"CurrencyExalted","runtime_base_ids":["CurrencyExalted"],"item_class":"Currency","required_rarity":"","matches_all_of_item_class":false,"assignment":"P1"}]}
 ```
 
+新增 `internal/economy` 与 `PartyPilot-EconomyReplay.exe -replay <JSONL 文件>`，依据目标版 `EconomyInventoryPolicy.Evaluate` 计算已明确提供的报价与规则：价格类别、排除项、Chaos/Divine 换算、单件或已知堆叠价值、自动寻路门槛及退出滞后。输入金额用十进制字符串，避免浮点比较误差；输出 `scope=numerical_policy_only`。**它不构造或校验目标版冻结经济清单、清单哈希、价格来源、报价别名匹配及角色收集授权；数值通过不能自动覆盖目录分配，更不能触发拾取。**
+
+经济回放示例单行：
+
+```json
+{"rule":{"enabled":true,"selected_price_categories":["Currency"],"minimum_unit_value":{"amount":"10","unit":"Chaos"},"minimum_total_stack_value":{"amount":"20","unit":"Chaos"},"auto_run_minimum_value":{"amount":"30","unit":"Chaos"},"exit_hysteresis_percent":"20"},"quote":{"lookup_key":"example","item_name":"Example","category_key":"Currency","divine_per_unit":"0.9"},"known_stack_quantity":3,"chaos_divine_per_unit":"0.1"}
+```
+
 ## 待确认与后续实现
 
 1. 在真实 PoE2 中核对 ExileCore2 悬停字段的实体类型、更新频率和与目标版手柄卡片的关系。
