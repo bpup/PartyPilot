@@ -20,6 +20,7 @@ internal sealed class BridgeRouter
     private readonly Dictionary<int, PadRoute> _routes;
     private IReadOnlyDictionary<int, int> _focusPads = new Dictionary<int, int>();
     private bool _physicalMode;
+    private bool _menuGuardActive;
     private bool _rightStickFollowerOverride;
     private int _directRightStickSlot;
     private bool _allowDirectRightStick;
@@ -153,6 +154,13 @@ internal sealed class BridgeRouter
         _lastFocusToggleUtc = DateTime.MinValue;
     }
 
+    public void SetMenuGuardActive(bool active)
+    {
+        if (_menuGuardActive == active) return;
+        _menuGuardActive = active;
+        RenderAll();
+    }
+
     public void Tick(DateTime nowUtc)
     {
         foreach (var (slot, route) in _routes)
@@ -170,6 +178,7 @@ internal sealed class BridgeRouter
 
     public void NeutralAll()
     {
+        _menuGuardActive = false;
         _physicalConnected = false;
         _physicalReport = default;
         _manualX = 0;
@@ -196,6 +205,11 @@ internal sealed class BridgeRouter
         if (_physicalMode && slot == _focusedSlot)
         {
             route.Output.SetReport(_physicalConnected ? _physicalReport : default);
+            return;
+        }
+        if (_menuGuardActive)
+        {
+            route.Output.SetReport(default);
             return;
         }
         if (_physicalMode && _isolatedSlot != 0)

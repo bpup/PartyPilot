@@ -15,6 +15,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     public event Action<int, int, long>? PairingArmed;
     public event Action? PairingCompleted;
     public event Action<string>? LoginStatusChanged;
+    public event Action<int, string>? MenuGuardChanged;
     public event Action<string>? Ended;
 
     private BridgeSession(Process process, Task<string> readError)
@@ -178,6 +179,14 @@ internal sealed class BridgeSession : IAsyncDisposable
                         root.TryGetProperty("pid", out var armedPid) && armedPid.TryGetInt32(out var pid) &&
                         root.TryGetProperty("window_handle", out var armedWindow) && armedWindow.TryGetInt64(out var handle))
                         Dispatcher.UIThread.Post(() => PairingArmed?.Invoke(armedSlotValue, pid, handle));
+                    else if (kind.GetString() == "menu_guard" &&
+                        root.TryGetProperty("slot", out var menuSlot) && menuSlot.TryGetInt32(out var menuSlotValue) &&
+                        root.TryGetProperty("state", out var menuState) && menuState.ValueKind == JsonValueKind.String &&
+                        menuState.GetString() is "clear" or "menu_detected" or "settling")
+                    {
+                        var state = menuState.GetString()!;
+                        Dispatcher.UIThread.Post(() => MenuGuardChanged?.Invoke(menuSlotValue, state));
+                    }
                     else if (kind.GetString() == "pairing_complete")
                         Dispatcher.UIThread.Post(() => PairingCompleted?.Invoke());
                     else if (kind.GetString() == "login_status" &&

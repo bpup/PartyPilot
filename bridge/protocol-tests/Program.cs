@@ -55,6 +55,29 @@ if (!FocusPadMap.TryParse(["--focus-pad-map", "1:1,2:3"], [1, 3], out var splitF
     FocusPadMap.TryParse(["--focus-pad-map", "1:1,2:2"], [1, 3], out _))
     throw new Exception("Logical player to virtual pad focus mapping was accepted ambiguously.");
 var now = new DateTime(2026, 10, 26, 10, 0, 0, DateTimeKind.Utc);
+var menuGuard = new MenuGuardTracker();
+menuGuard.Observe(1, 0, now);
+if (menuGuard.Observe(1, 0x0010, now.AddMilliseconds(10)).Single() !=
+        new MenuGuardChange(1, MenuGuardPhase.MenuDetected) ||
+    menuGuard.Observe(1, 0x0010, now.AddMilliseconds(20)).Count != 0 ||
+    menuGuard.Observe(1, 0x2000, now.AddMilliseconds(30)).Single() !=
+        new MenuGuardChange(1, MenuGuardPhase.Settling) ||
+    menuGuard.Advance(now.AddMilliseconds(679)).Count != 0 ||
+    menuGuard.Advance(now.AddMilliseconds(680)).Single() !=
+        new MenuGuardChange(1, MenuGuardPhase.Clear))
+    throw new Exception("Menu guard opening, B close, or settling delay changed.");
+if (menuGuard.Observe(2, 0x0010, now.AddMilliseconds(700)).Count != 0 ||
+    menuGuard.Observe(2, 0, now.AddMilliseconds(710)).Count != 0 ||
+    menuGuard.Observe(2, 0x0010, now.AddMilliseconds(720)).Single() !=
+        new MenuGuardChange(2, MenuGuardPhase.MenuDetected) ||
+    menuGuard.Observe(1, 0x2000, now.AddMilliseconds(730)).Count != 0 ||
+    menuGuard.Observe(2, 0, now.AddMilliseconds(740)).Count != 0 ||
+    menuGuard.Observe(2, 0x0010, now.AddMilliseconds(750)).Single() !=
+        new MenuGuardChange(2, MenuGuardPhase.Settling))
+    throw new Exception("Menu guard leaked held controls across focused pads.");
+menuGuard.Reset();
+if (menuGuard.Advance(now.AddSeconds(2)).Count != 0)
+    throw new Exception("Menu guard survived a pairing reset.");
 var pad2 = new FakePad();
 var pad3 = new FakePad();
 var router = new BridgeRouter(new Dictionary<int, IPadOutput> { [2] = pad2, [3] = pad3 });
@@ -114,6 +137,13 @@ if (!router.ConfigurePhysical(2) ||
 router.SetPhysical(new XInputGamepad { Buttons = 0x1000, LeftTrigger = 42, LeftX = 111 });
 if (pad2.Report.Buttons != 0x1000 || pad2.Report.LeftTrigger != 42 || pad2.X != 111 || pad3.X != 32767)
     throw new Exception("Physical input did not reach focused pad independently.");
+router.SetMenuGuardActive(true);
+if (pad2.Report.Buttons != 0x1000 || pad2.X != 111 || pad3.Report != default)
+    throw new Exception("Menu guard did not pause automation while leaving the focused physical pad usable.");
+router.Tick(now.AddMilliseconds(501));
+router.SetMenuGuardActive(false);
+if (pad3.Report != default)
+    throw new Exception("A stale automation frame resumed after the menu guard cleared.");
 if (!router.ApplyLine("{\"type\":\"focus\",\"slot\":3}", now) ||
     pad3.Report.Buttons != 0x1000 || pad2.Report.Buttons != 0)
     throw new Exception("Focus did not move physical input.");

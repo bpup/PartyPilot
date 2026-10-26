@@ -178,6 +178,20 @@ try
             throw new InvalidOperationException("Focus pad mapping does not match the connected virtual controllers.");
         var pairingSignals = new PairingSignalTracker();
         var pairingGate = protectedPairing ? new ProtectedPairingGate() : null;
+        var menuGuard = new MenuGuardTracker();
+        static void PublishMenuChanges(IReadOnlyList<MenuGuardChange> changes)
+        {
+            foreach (var change in changes)
+            {
+                var state = change.Phase switch
+                {
+                    MenuGuardPhase.MenuDetected => "menu_detected",
+                    MenuGuardPhase.Settling => "settling",
+                    _ => "clear"
+                };
+                Console.WriteLine(JsonSerializer.Serialize(new { @event = "menu_guard", slot = change.Slot, state }));
+            }
+        }
         var windowStability = new WindowStabilityTracker();
         var loginReadiness = new LoginReadiness();
         var nextLoginCapture = DateTime.MinValue;
@@ -212,6 +226,7 @@ try
                         nextLoginCapture = DateTime.MinValue;
                         reportedLoginSource = LoginReadinessSource.Waiting;
                         router.NeutralAll();
+                        menuGuard.Reset();
                         router.ApplyLine(JsonSerializer.Serialize(new { type = "focus", slot = control.Slot }), DateTime.UtcNow);
                         Console.WriteLine(JsonSerializer.Serialize(new { @event = "pairing_armed", slot = control.Slot,
                             pid = pairingTargetPid, window_handle = pairingTargetWindow }));
@@ -222,6 +237,7 @@ try
                         pairingTargetWindow = 0;
                         windowStability.Reset();
                         router.NeutralAll();
+                        menuGuard.Reset();
                         router.ApplyLine(JsonSerializer.Serialize(new { type = "focus", slot = mainSlot }), DateTime.UtcNow);
                         Console.WriteLine(JsonSerializer.Serialize(new { @event = "pairing_settling" }));
                     }
@@ -293,6 +309,17 @@ try
                         stable && foreground, loginReadiness.Ready);
                     router.SetPhysical(observation.Forwarded, observedAt,
                         allowDirectRightStick: pairingGate.Phase == ProtectedPairingPhase.Complete);
+                    if (pairingGate.Phase == ProtectedPairingPhase.Complete)
+                    {
+                        var changes = menuGuard.Observe(router.FocusedSlot, observation.Forwarded.Buttons, observedAt);
+                        router.SetMenuGuardActive(menuGuard.AnyActive);
+                        PublishMenuChanges(changes);
+                    }
+                    else
+                    {
+                        menuGuard.Reset();
+                        router.SetMenuGuardActive(false);
+                    }
                     if (observation.ReleasedSlot != 0)
                         Console.WriteLine(JsonSerializer.Serialize(new { @event = "a_release", slot = observation.ReleasedSlot }));
                     if (observation.Completed)
@@ -301,6 +328,9 @@ try
                 else
                 {
                     router.SetPhysical(state.Gamepad);
+                    var changes = menuGuard.Observe(router.FocusedSlot, state.Gamepad.Buttons, DateTime.UtcNow);
+                    router.SetMenuGuardActive(menuGuard.AnyActive);
+                    PublishMenuChanges(changes);
                     var pairedSlot = pairingSignals.Observe((state.Gamepad.Buttons & 0x1000) != 0, router.FocusedSlot);
                     if (pairedSlot != 0)
                         Console.WriteLine(JsonSerializer.Serialize(new { @event = "a_release", slot = pairedSlot }));
