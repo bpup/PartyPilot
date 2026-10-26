@@ -10,6 +10,7 @@ import (
 	"partypilot/internal/arealog"
 	"partypilot/internal/focus"
 	"partypilot/internal/follow"
+	"partypilot/internal/navigation"
 	"partypilot/internal/party"
 	"partypilot/internal/partylog"
 	"partypilot/internal/telemetry"
@@ -28,6 +29,7 @@ type Engine struct {
 	slots            []int
 	samples          map[int]telemetry.Sample
 	areas            map[int]arealog.Signal
+	terrains         map[int]boundTerrain
 	leaderName       string
 	memberNames      map[int]string
 	stopped          string
@@ -197,6 +199,8 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 	}
 	positions := make(map[int]follow.Position, len(e.slots))
 	deadFollowers := make(map[int]bool)
+	terrainWait := make(map[int]bool)
+	terrains := make(map[int]*navigation.Grid)
 	for _, slot := range e.slots {
 		sample, hasSample := e.samples[slot]
 		area, hasArea := e.areas[slot]
@@ -217,9 +221,42 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 			Seen: sample.SeenUTC, Valid: true,
 			Area: strings.ToLower(area.AreaID) + fmt.Sprintf(":%d", area.Seed),
 		}
+		if bound, configured := e.terrains[slot]; configured {
+			if sample.AreaHash != bound.binding.AreaHash || sample.SeenUTC.Before(bound.seen) ||
+				!strings.EqualFold(area.AreaID, bound.binding.AreaID) || area.Seed != bound.binding.Seed ||
+				!bound.grid.ContainsPoint(positions[slot].X, positions[slot].Y) {
+				delete(positions, slot)
+				terrainWait[slot] = true
+			} else {
+				terrains[slot] = bound.grid
+			}
+		}
 	}
-	commands := e.coordinator.Step(now, positions)
+	for slot := range e.terrains {
+		if _, ok := terrains[slot]; !ok {
+			terrainWait[slot] = true
+			continue
+		}
+		bound := e.terrains[slot]
+		for other, position := range positions {
+			if position.Area == bound.grid.Area &&
+				(e.samples[other].AreaHash != bound.binding.AreaHash ||
+					!bound.grid.ContainsPoint(position.X, position.Y)) {
+				terrainWait[slot] = true
+				delete(terrains, slot)
+				break
+			}
+		}
+	}
+	for slot := range terrainWait {
+		delete(positions, slot)
+	}
+	commands := e.coordinator.StepWithTerrains(now, positions, terrains)
 	for slot, command := range commands {
+		if terrainWait[slot] {
+			commands[slot] = follow.Command{State: follow.Waiting, Reason: "terrain binding evidence missing"}
+			continue
+		}
 		if deadFollowers[slot] {
 			commands[slot] = follow.Command{State: follow.Waiting, Reason: "dead follower"}
 			continue

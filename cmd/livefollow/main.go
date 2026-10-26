@@ -323,12 +323,13 @@ func main() {
 	lastFocusedLeads := flag.Bool("last-focused-leads", false, "use manually focused player as the current follow MAIN")
 	autoFlask := flag.Bool("auto-flask", false, "enable life and mana flask decisions for explicitly bound clients")
 	address := flag.String("listen", "127.0.0.1:47617", "loopback sensor address")
-	var logs, exes sources
+	var logs, exes, terrainBindings sources
 	var names memberNames
 	var targets followTargets
 	var playerStops stopDistances
 	flag.Var(&logs, "log", "SLOT=Client.txt path")
 	flag.Var(&exes, "exe", "SLOT=game executable path")
+	flag.Var(&terrainBindings, "terrain-binding", "SLOT=JSON path with explicit capture and live instance mapping")
 	flag.Var(&names, "member-name", "SLOT=confirmed character name for departure detection")
 	flag.Var(&targets, "follow-target", "SLOT=TARGET; 0 means Current MAIN")
 	flag.Var(&playerStops, "stop-player", "SLOT=VALUE; individual stop distance from 0 to 200")
@@ -355,6 +356,17 @@ func main() {
 		os.Exit(2)
 	}
 	defer engine.Close()
+	for slot, path := range terrainBindings {
+		binding, loadErr := live.LoadTerrainBinding(path)
+		if loadErr != nil {
+			fmt.Fprintln(os.Stderr, loadErr)
+			os.Exit(2)
+		}
+		if err := engine.SetTerrainBinding(slot, binding); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	}
 	engine.SetLeaderName(*leaderName)
 	for slot, name := range names {
 		if err := engine.SetMemberName(slot, name); err != nil {

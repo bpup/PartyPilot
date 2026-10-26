@@ -137,6 +137,15 @@ func (c *Coordinator) Step(now time.Time, positions map[int]follow.Position) map
 }
 
 func (c *Coordinator) StepWithTerrain(now time.Time, positions map[int]follow.Position, terrain *navigation.Grid) map[int]follow.Command {
+	return c.stepWithTerrainForSlot(now, positions, func(int) *navigation.Grid { return terrain })
+}
+
+// StepWithTerrains supplies each follower its own caller-provided area map.
+func (c *Coordinator) StepWithTerrains(now time.Time, positions map[int]follow.Position, terrains map[int]*navigation.Grid) map[int]follow.Command {
+	return c.stepWithTerrainForSlot(now, positions, func(slot int) *navigation.Grid { return terrains[slot] })
+}
+
+func (c *Coordinator) stepWithTerrainForSlot(now time.Time, positions map[int]follow.Position, terrainFor func(int) *navigation.Grid) map[int]follow.Command {
 	activeLeader := c.leader
 	if c.lastFocusedLeads {
 		activeLeader = c.lastManualFocus
@@ -163,7 +172,7 @@ func (c *Coordinator) StepWithTerrain(now time.Time, positions map[int]follow.Po
 			engine.Reset()
 			c.lastTargets[slot] = target
 		}
-		commands[slot] = engine.StepWithTerrain(now, positions[target], positions[slot], terrain)
+		commands[slot] = engine.StepWithTerrain(now, positions[target], positions[slot], terrainFor(slot))
 	}
 	return commands
 }

@@ -92,6 +92,15 @@ func (g *Grid) cellAt(x, y float64) (Cell, bool) {
 	return cell, g.contains(cell)
 }
 
+// ContainsPoint checks the same coordinate conversion used by path search.
+func (g *Grid) ContainsPoint(x, y float64) bool {
+	if g == nil || !g.Valid() {
+		return false
+	}
+	_, ok := g.cellAt(x, y)
+	return ok
+}
+
 func (g *Grid) center(cell Cell) (float64, float64) {
 	if g.TargetNavigation {
 		return g.OriginX + float64(cell.X)*g.CellSize,

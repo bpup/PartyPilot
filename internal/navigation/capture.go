@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 var ErrCandidateCapture = errors.New("invalid diagnostic terrain capture")
@@ -19,26 +20,32 @@ type CandidateCapture struct {
 	Data        []byte
 	BytesPerRow int
 	Rows        int
+	ProcessID   int
+	AreaHash    string
+	SeenUTC     time.Time
+	RawGridX    float64
+	RawGridY    float64
 }
 
 type captureMetadata struct {
-	Status      string   `json:"Status"`
-	ProcessID   int      `json:"ProcessId"`
-	AreaHash    string   `json:"AreaHash"`
-	AreaAddress string   `json:"AreaAddress"`
-	Anchor      string   `json:"Anchor"`
-	PackedStart string   `json:"PackedStart"`
-	RawGridX    float64  `json:"RawGridX"`
-	RawGridY    float64  `json:"RawGridY"`
-	Width       int      `json:"Width"`
-	Height      int      `json:"Height"`
-	BytesPerRow int      `json:"BytesPerRow"`
-	PackedBytes int      `json:"PackedBytes"`
-	PatchX      int      `json:"PatchX"`
-	PatchY      int      `json:"PatchY"`
-	PatchRows   []string `json:"PatchRows"`
-	SHA256      string   `json:"Sha256"`
-	DataFile    string   `json:"DataFile"`
+	Status      string    `json:"Status"`
+	ProcessID   int       `json:"ProcessId"`
+	AreaHash    string    `json:"AreaHash"`
+	AreaAddress string    `json:"AreaAddress"`
+	Anchor      string    `json:"Anchor"`
+	PackedStart string    `json:"PackedStart"`
+	RawGridX    float64   `json:"RawGridX"`
+	RawGridY    float64   `json:"RawGridY"`
+	Width       int       `json:"Width"`
+	Height      int       `json:"Height"`
+	BytesPerRow int       `json:"BytesPerRow"`
+	PackedBytes int       `json:"PackedBytes"`
+	PatchX      int       `json:"PatchX"`
+	PatchY      int       `json:"PatchY"`
+	PatchRows   []string  `json:"PatchRows"`
+	SHA256      string    `json:"Sha256"`
+	DataFile    string    `json:"DataFile"`
+	SeenUTC     time.Time `json:"SeenUtc"`
 }
 
 func LoadCandidateCapture(metadataPath string) (*CandidateCapture, error) {
@@ -86,7 +93,9 @@ func LoadCandidateCapture(metadataPath string) (*CandidateCapture, error) {
 		!capturePatchMatches(data, meta) {
 		return nil, ErrCandidateCapture
 	}
-	return &CandidateCapture{Data: data, BytesPerRow: meta.BytesPerRow, Rows: meta.Height}, nil
+	return &CandidateCapture{Data: data, BytesPerRow: meta.BytesPerRow,
+		Rows: meta.Height, ProcessID: meta.ProcessID, AreaHash: meta.AreaHash,
+		SeenUTC: meta.SeenUTC, RawGridX: meta.RawGridX, RawGridY: meta.RawGridY}, nil
 }
 
 func capturePatchMatches(data []byte, meta captureMetadata) bool {
