@@ -17,6 +17,8 @@ ExileCore2 传感器新增默认关闭的 `DiagnoseRadarEntities`。开启后每
 | 无新鲜数据、失焦、窗口身份变化 | 样本时间、Win32 窗口句柄/进程/前台查询 | 隐藏或停止覆盖层的保护逻辑；Windows 行为待实测 |
 | Tab 显示切换 | 随附指南中的默认按键；Win32 当前按键状态 | 轮询按下沿，尚未在游戏中核对与原有 Tab 行为的关系 |
 
+地面标签悬停另有默认关闭的 `GroundHover` 只读诊断，严格标记为 `ui_hover_only`。它不能证明手柄当前选中物品或拾取资格，不接入拾取输入；见[自动拾取取证](AUTO_PICKUP_RESEARCH.md)。
+
 ## 待确认与待实现
 
 - Windows/PoE2 实机上 ExileCore2 当前可见实体、`Pos` 坐标与目标版世界/网格坐标的对应关系。

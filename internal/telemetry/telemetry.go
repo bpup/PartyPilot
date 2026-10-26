@@ -30,8 +30,21 @@ type Sample struct {
 	RadarEntities            []RadarEntity        `json:"RadarEntities,omitempty"`
 	RadarStatus              string               `json:"RadarStatus,omitempty"`
 	RadarSeenUTC             *time.Time           `json:"RadarSeenUtc,omitempty"`
+	GroundHover              *GroundHover         `json:"GroundHover,omitempty"`
+	GroundHoverStatus        string               `json:"GroundHoverStatus,omitempty"`
 	VisiblePlayers           []VisiblePlayer      `json:"VisiblePlayers,omitempty"`
 	VisiblePlayersStatus     string               `json:"VisiblePlayersStatus,omitempty"`
+}
+
+// GroundHover records only the entity under a UI ground-label hover. It is
+// not evidence of a controller-selected card, player ownership, or pickup safety.
+type GroundHover struct {
+	EntityID uint64  `json:"EntityId"`
+	Address  string  `json:"Address,omitempty"`
+	Path     string  `json:"Path"`
+	ItemPath *string `json:"ItemPath,omitempty"`
+	Name     *string `json:"Name,omitempty"`
+	Evidence string  `json:"Evidence"`
 }
 
 // VisiblePlayer is diagnostic evidence only. It does not establish a local
@@ -90,10 +103,34 @@ func Decode(data []byte) (Sample, error) {
 		!validLocalSlotCandidates(item.LocalSlotCandidates, item.LocalSlotCandidateStatus,
 			item.ObservedLocalAddress, item.IngameDataAddress) ||
 		!validRadar(item.RadarEntities, item.RadarStatus, item.RadarSeenUTC) ||
+		!validGroundHover(item.GroundHover, item.GroundHoverStatus, item.RadarSeenUTC) ||
 		!validVisiblePlayers(item.VisiblePlayers, item.ObservedLocalAddress) {
 		return Sample{}, ErrInvalidSample
 	}
 	return item, nil
+}
+
+func validGroundHover(hover *GroundHover, status string, seen *time.Time) bool {
+	if status == "" {
+		return hover == nil
+	}
+	if seen == nil || seen.IsZero() {
+		return false
+	}
+	if status == "none" || status == "scan_failed" {
+		return hover == nil
+	}
+	if status != "ui_hover_observed" || hover == nil || hover.EntityID == 0 ||
+		hover.Evidence != "ui_hover_only" || !validAddress(hover.Address) ||
+		!strings.HasPrefix(hover.Path, "Metadata/") || len(hover.Path) > 256 ||
+		(hover.ItemPath == nil) != (hover.Name == nil) {
+		return false
+	}
+	if hover.ItemPath != nil && (!strings.HasPrefix(*hover.ItemPath, "Metadata/Items/") ||
+		len(*hover.ItemPath) > 256 || strings.TrimSpace(*hover.Name) == "" || len(*hover.Name) > 96) {
+		return false
+	}
+	return true
 }
 
 func validRadar(entities []RadarEntity, status string, seen *time.Time) bool {

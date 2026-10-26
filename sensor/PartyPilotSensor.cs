@@ -101,6 +101,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         object[]? radarEntities = null;
         string? radarStatus = null;
         DateTime? radarSeenUtc = null;
+        object? groundHover = null;
+        string? groundHoverStatus = null;
         if (Settings.DiagnoseRadarEntities.Value && now - _lastRadarSentUtc >= TimeSpan.FromMilliseconds(500))
         {
             _lastRadarSentUtc = now;
@@ -113,6 +115,15 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             catch
             {
                 radarStatus = "scan_failed";
+            }
+            try
+            {
+                groundHover = ReadGroundHover();
+                groundHoverStatus = groundHover is null ? "none" : "ui_hover_observed";
+            }
+            catch
+            {
+                groundHoverStatus = "scan_failed";
             }
         }
 
@@ -140,6 +151,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             RadarEntities = radarEntities,
             RadarStatus = radarStatus,
             RadarSeenUtc = radarSeenUtc,
+            GroundHover = groundHover,
+            GroundHoverStatus = groundHoverStatus,
             VisiblePlayers = visiblePlayers,
             VisiblePlayersStatus = visiblePlayersStatus
         });
@@ -186,6 +199,47 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     }
 
     private static string? FormatAddress(long address) => address > 0 ? $"0x{address:X}" : null;
+
+    private object? ReadGroundHover()
+    {
+        // This is UI hover evidence only. It does not prove a controller card is selected
+        // or that any player can pick up this item.
+        var hovered = GameController.IngameState.IngameUi.ItemsOnGroundLabelElement?.ItemOnHover;
+        if (hovered == null || hovered.Id == 0) return null;
+        var path = hovered.Path;
+        if (string.IsNullOrWhiteSpace(path) ||
+            !path.StartsWith("Metadata/", StringComparison.Ordinal) ||
+            Encoding.UTF8.GetByteCount(path) > 256) return null;
+        string? itemPath = null;
+        string? itemName = null;
+        try
+        {
+            var item = hovered.GetComponent<WorldItem>()?.ItemEntity;
+            var candidatePath = item?.Path;
+            var candidateName = item?.GetComponent<Base>()?.Name?.Trim();
+            if (candidatePath?.StartsWith("Metadata/Items/", StringComparison.OrdinalIgnoreCase) == true &&
+                Encoding.UTF8.GetByteCount(candidatePath) <= 256 &&
+                !string.IsNullOrWhiteSpace(candidateName) &&
+                Encoding.UTF8.GetByteCount(candidateName) <= 96)
+            {
+                itemPath = candidatePath;
+                itemName = candidateName;
+            }
+        }
+        catch
+        {
+            // Keep the observed hover identity without claiming its inner item resolved.
+        }
+        return new
+        {
+            EntityId = hovered.Id,
+            Address = FormatAddress(hovered.Address),
+            Path = path,
+            ItemPath = itemPath,
+            Name = itemName,
+            Evidence = "ui_hover_only"
+        };
+    }
 
     private object[] ReadRadarEntities(uint observedLocalId, float localX, float localY)
     {
