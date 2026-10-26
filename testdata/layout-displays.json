@@ -1,0 +1,4 @@
+[
+  {"id":"monitor-1","work":{"left":0,"top":0,"width":1920,"height":1080},"primary":true},
+  {"id":"monitor-2","work":{"left":-1080,"top":0,"width":1080,"height":1920},"primary":false}
+]
