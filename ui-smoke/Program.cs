@@ -7,6 +7,7 @@ using Avalonia.Threading;
 using PartyPilot.Desktop;
 
 PartyRosterCounterSmoke.Run();
+AutoPartyCoordinatorSmoke.Run();
 
 if (args.Contains("--client3-plan-only"))
 {
