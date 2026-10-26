@@ -304,6 +304,9 @@ func TestTargetTerrainUsesMarkedRecoveryWhenAvoidanceHasNoRoute(t *testing.T) {
 	}
 	grid := &navigation.Grid{Area: "instance", CellSize: 1, Width: 45, Height: 31,
 		TargetNavigation: true}
+	for y := 1; y < 30; y++ {
+		grid.Blocked = append(grid.Blocked, navigation.Cell{X: 15, Y: y})
+	}
 	command := engine.StepWithTerrain(at,
 		Position{X: 25, Y: 15, Area: "instance", Seen: at, Valid: true},
 		Position{X: 5, Y: 15, Area: "instance", Seen: at, Valid: true}, grid)

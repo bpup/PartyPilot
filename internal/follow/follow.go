@@ -78,6 +78,8 @@ func (e *Engine) Reset() {
 	e.sprint.Reset()
 	e.lastSprintObservation = time.Time{}
 	e.sprintDown = false
+	e.route = nil
+	e.routeTerrain = nil
 }
 
 type point struct{ x, y float64 }
@@ -101,6 +103,11 @@ type Engine struct {
 	sprint                classicSprint
 	lastSprintObservation time.Time
 	sprintDown            bool
+	route                 []navigation.Waypoint
+	routeTerrain          *navigation.Grid
+	planOrigin            point
+	planTarget            point
+	planAvoid             point
 }
 
 func New(config Config) (*Engine, bool) {
@@ -182,6 +189,7 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 		e.sprint.Reset()
 		e.sprintDown = false
 		e.lastSprintObservation = time.Time{}
+		e.route = nil
 		if e.config.TrailSpacing > 0 {
 			e.trail = []point{{leader.X, leader.Y}}
 		}
@@ -206,6 +214,7 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 			e.sprint.Reset()
 			e.sprintDown = false
 			e.lastSprintObservation = time.Time{}
+			e.route = nil
 			return Command{State: Holding, Distance: distance}
 		}
 		// The supplied build detours around the leader when the direct trail
@@ -227,8 +236,8 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 	if terrain != nil {
 		var ok bool
 		if e.config.TargetTrail && terrain.TargetNavigation {
-			dx, dy, ok = terrain.NextDirectionAvoid(follower.X, follower.Y,
-				targetX, targetY, leader.X, leader.Y, 5)
+			dx, dy, ok = e.targetRouteDirection(terrain,
+				follower.X, follower.Y, targetX, targetY, leader.X, leader.Y)
 			if !ok {
 				recoveryX, recoveryY := playerDetour(leader.X, leader.Y,
 					follower.X, follower.Y, targetX, targetY)

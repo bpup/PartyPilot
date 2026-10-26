@@ -99,8 +99,13 @@ func (g *Grid) targetWaypoints(fromX, fromY, toX, toY float64,
 	}
 	startIndex, goalIndex := g.index(start), g.index(goal)
 	if startIndex == goalIndex {
-		if g.lineOfSight(access, fromX, fromY, toX, toY, 0, avoid) {
+		if g.lineOfSight(access, fromX, fromY, toX, toY, 1, avoid) {
 			return []Waypoint{{toX, toY}}, true
+		}
+		startX, startY := g.center(start)
+		if g.hasClearFollowSegment(access, fromX, fromY, startX, startY, avoid) &&
+			g.lineOfSight(access, startX, startY, toX, toY, 1, avoid) {
+			return []Waypoint{{startX, startY}, {toX, toY}}, true
 		}
 		return nil, false
 	}
@@ -170,28 +175,33 @@ func (g *Grid) targetWaypoints(fromX, fromY, toX, toY float64,
 	}
 	points[len(points)-1] = Waypoint{toX, toY}
 	var simplified []Waypoint
-	current := Waypoint{fromX, fromY}
 	for index, checks := 0, 0; index < len(points)-1; {
-		chosen := -1
-		for next := len(points) - 1; next > index && checks < 8192; next-- {
+		chosen := index + 1
+		for next := len(points) - 1; next > chosen && checks < 8192; next-- {
 			checks++
-			if g.lineOfSight(access, current.X, current.Y, points[next].X, points[next].Y, 1, avoid) {
+			if g.lineOfSight(access, points[index].X, points[index].Y,
+				points[next].X, points[next].Y, 1, avoid) {
 				chosen = next
 				break
 			}
 		}
-		if chosen < 0 {
-			chosen = index + 1
-			if !g.lineOfSight(access, current.X, current.Y,
-				points[chosen].X, points[chosen].Y, 0, avoid) {
-				return nil, false
-			}
-		}
-		current = points[chosen]
-		simplified = append(simplified, current)
+		simplified = append(simplified, points[chosen])
 		index = chosen
 	}
-	return simplified, len(simplified) > 0
+	if len(simplified) == 0 {
+		return nil, false
+	}
+	if g.lineOfSight(access, fromX, fromY,
+		simplified[0].X, simplified[0].Y, 1, avoid) {
+		return simplified, true
+	}
+	startX, startY := g.center(start)
+	if g.hasClearFollowSegment(access, fromX, fromY, startX, startY, avoid) &&
+		g.lineOfSight(access, startX, startY,
+			simplified[0].X, simplified[0].Y, 1, avoid) {
+		return append([]Waypoint{{startX, startY}}, simplified...), true
+	}
+	return nil, false
 }
 
 func (g *Grid) targetDirection(fromX, fromY, toX, toY float64) (float64, float64, bool) {

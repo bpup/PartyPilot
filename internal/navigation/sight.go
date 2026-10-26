@@ -12,6 +12,57 @@ func (g *Grid) HasLineOfSight(fromX, fromY, toX, toY float64, clearance int) boo
 	return g.lineOfSight(newGridAccess(g), fromX, fromY, toX, toY, clearance, nil)
 }
 
+// HasClearFollowSegmentAvoid mirrors the supplied build's short escape from
+// an obstructed starting cell. The leader exclusion applies to both checks.
+func (g *Grid) HasClearFollowSegmentAvoid(fromX, fromY, toX, toY,
+	avoidX, avoidY, radius float64) bool {
+	if !g.Valid() || !g.TargetNavigation || !finite(avoidX) || !finite(avoidY) ||
+		!finite(radius) || radius <= 0 {
+		return false
+	}
+	access := newGridAccess(g)
+	avoid := &avoidRegion{x: avoidX, y: avoidY, radius: radius}
+	return g.hasClearFollowSegment(access, fromX, fromY, toX, toY, avoid)
+}
+
+func (g *Grid) hasClearFollowSegment(access gridAccess, fromX, fromY, toX, toY float64,
+	avoid *avoidRegion) bool {
+	if g.lineOfSight(access, fromX, fromY, toX, toY, 1, avoid) {
+		return true
+	}
+	return math.Hypot(toX-fromX, toY-fromY) <= 4*g.CellSize &&
+		g.lineOfSight(access, fromX, fromY, fromX, fromY, 0, avoid) &&
+		!g.lineOfSight(access, fromX, fromY, fromX, fromY, 1, avoid) &&
+		g.lineOfSight(access, toX, toY, toX, toY, 1, avoid) &&
+		g.lineOfSight(access, fromX, fromY, toX, toY, 0, avoid)
+}
+
+// AdvanceTargetRoute skips reached points and takes the furthest visible
+// remaining point, matching the target's route reuse rule.
+func (g *Grid) AdvanceTargetRoute(route []Waypoint, fromX, fromY,
+	avoidX, avoidY, radius float64) []Waypoint {
+	if !g.Valid() || !g.TargetNavigation || len(route) == 0 ||
+		!finite(fromX) || !finite(fromY) || !finite(avoidX) || !finite(avoidY) ||
+		!finite(radius) || radius <= 0 {
+		return nil
+	}
+	access := newGridAccess(g)
+	avoid := &avoidRegion{x: avoidX, y: avoidY, radius: radius}
+	i := 0
+	for i < len(route)-1 && math.Hypot(fromX-route[i].X, fromY-route[i].Y) <= 3 &&
+		g.lineOfSight(access, fromX, fromY, route[i+1].X, route[i+1].Y, 1, avoid) {
+		i++
+	}
+	for candidate := len(route) - 1; candidate > i; candidate-- {
+		if g.lineOfSight(access, fromX, fromY,
+			route[candidate].X, route[candidate].Y, 1, avoid) {
+			i = candidate
+			break
+		}
+	}
+	return append([]Waypoint(nil), route[i:]...)
+}
+
 type avoidRegion struct {
 	x, y, radius float64
 }
