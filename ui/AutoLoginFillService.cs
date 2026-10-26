@@ -22,7 +22,14 @@ internal static class LoginSurfaceGuard
     internal static bool LooksLikeLogin(LoginWindowFrame frame, LoginCalibration calibration)
     {
         if (!calibration.Matches(frame.Width, frame.Height, calibration.LayoutKey) ||
-            frame.Pixels.Length < (long)frame.Width * frame.Height * 4) return false;
+            FindSubmitBandTop(frame) is not { } submitTop) return false;
+        return calibration.PasswordY * frame.Height < submitTop - frame.Height * 0.035;
+    }
+
+    internal static int? FindSubmitBandTop(LoginWindowFrame frame)
+    {
+        if (frame.Width < 320 || frame.Height < 240 ||
+            frame.Pixels.Length < (long)frame.Width * frame.Height * 4) return null;
         var left = Math.Max(0, frame.Width / 2 - Math.Min(420, frame.Width / 3));
         var right = Math.Min(frame.Width - 1, frame.Width / 2 + Math.Min(420, frame.Width / 3));
         var top = Math.Max(frame.Height / 2, (int)(frame.Height * 0.68));
@@ -49,11 +56,9 @@ internal static class LoginSurfaceGuard
             }
             if (rows == 0) firstRedRow = y;
             rows++;
-            if (rows >= Math.Max(3, frame.Height / 80) &&
-                calibration.PasswordY * frame.Height < firstRedRow - frame.Height * 0.035)
-                return true;
+            if (rows >= Math.Max(3, frame.Height / 80)) return firstRedRow;
         }
-        return false;
+        return null;
     }
 }
 

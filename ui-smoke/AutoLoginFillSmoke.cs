@@ -74,8 +74,23 @@ internal static class AutoLoginFillSmoke
             for (var x = 350; x < 650; x++) pixels[(y * 1000 + x) * 4 + 2] = 90;
         var frame = new LoginWindowFrame(pixels, 1000, 800, 120, 80);
         if (!LoginSurfaceGuard.LooksLikeLogin(frame, calibration) ||
+            LoginSurfaceGuard.FindSubmitBandTop(frame) is null ||
             LoginSurfaceGuard.LooksLikeLogin(frame with { Pixels = new byte[pixels.Length] }, calibration))
             throw new Exception("Synthetic login surface guard accepted a missing submit band.");
+
+        var markingPort = new FakePort(frame);
+        markingPort.InitialFrames.Enqueue(frame with { Pixels = new byte[pixels.Length] });
+        var markedFrame = await new LoginMarkCaptureService(markingPort,
+            (_, _) => Task.CompletedTask, 4).CaptureAsync(CancellationToken.None);
+        if (markedFrame is null || markedFrame.Width != frame.Width ||
+            markingPort.Calls.Count(call => call == "capture") != 3 ||
+            markingPort.Calls.Contains("click"))
+            throw new Exception("Guided marking captured an unverified or unstable login surface.");
+        var absentMarkPort = new FakePort(frame with { Pixels = new byte[pixels.Length] });
+        if (await new LoginMarkCaptureService(absentMarkPort,
+                (_, _) => Task.CompletedTask, 3).CaptureAsync(CancellationToken.None) is not null ||
+            absentMarkPort.Calls.Contains("click"))
+            throw new Exception("Guided marking displayed a screenshot without the login control.");
 
         var port = new FakePort(frame);
         var service = new AutoLoginFillService(port, (_, _) => Task.CompletedTask);

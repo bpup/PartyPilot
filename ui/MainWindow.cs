@@ -42,6 +42,7 @@ public sealed class MainWindow : Window
     private readonly TextBlock[] _autoLoginResults = new TextBlock[3];
     private readonly bool[] _autoLoginPreferenceReady = new bool[3];
     private readonly LaunchedClient?[] _preparedAutoLoginWindows = new LaunchedClient?[3];
+    private readonly LaunchedClient?[] _manualAutoLoginWindows = new LaunchedClient?[3];
     private readonly Button _check = new();
     private readonly Button _launch = new();
     private readonly Button _attach = new();
@@ -379,10 +380,12 @@ public sealed class MainWindow : Window
                 {
                     _accountPresent[client - 1] = true;
                     _preparedAutoLoginWindows[client - 1] = null;
+                    _manualAutoLoginWindows[client - 1] = null;
                 }
                 _accountResults[client - 1].Text = result.Success
                     ? _accountProfiles.Describe(client) : result.Message;
                 UpdateAutoLoginControls();
+                UpdateBridgeControls();
             };
             remove.Click += (_, _) =>
             {
@@ -391,12 +394,14 @@ public sealed class MainWindow : Window
                 {
                     _accountPresent[client - 1] = false;
                     _preparedAutoLoginWindows[client - 1] = null;
+                    _manualAutoLoginWindows[client - 1] = null;
                     email.Text = string.Empty;
                     password.Text = string.Empty;
                     _autoLoginChoices[client - 1].IsChecked = false;
                 }
                 _accountResults[client - 1].Text = result.Message;
                 UpdateAutoLoginControls();
+                UpdateBridgeControls();
             };
             actions.Children.Add(save);
             actions.Children.Add(remove);
@@ -414,9 +419,14 @@ public sealed class MainWindow : Window
             clearMark.Click += (_, _) =>
             {
                 var deleted = _loginCalibrations.Delete(client);
-                if (deleted) _preparedAutoLoginWindows[client - 1] = null;
+                if (deleted)
+                {
+                    _preparedAutoLoginWindows[client - 1] = null;
+                    _manualAutoLoginWindows[client - 1] = null;
+                }
                 _calibrationResults[client - 1].Text = deleted
                     ? "登录字段标记已清除。" : "登录字段标记无法清除。";
+                UpdateBridgeControls();
             };
             calibrationActions.Children.Add(calibrate);
             calibrationActions.Children.Add(clearMark);
@@ -446,7 +456,11 @@ public sealed class MainWindow : Window
                     var saved = _autoLoginPreferences.Save(client, enabled);
                     _autoLoginPreferenceReady[client - 1] = saved.Success;
                     automaticStatus.Text = saved.Message;
-                    if (saved.Success && !enabled) _preparedAutoLoginWindows[client - 1] = null;
+                    if (saved.Success)
+                    {
+                        _preparedAutoLoginWindows[client - 1] = null;
+                        _manualAutoLoginWindows[client - 1] = null;
+                    }
                 }
                 UpdateBridgeControls();
             };
@@ -754,6 +768,7 @@ public sealed class MainWindow : Window
             _autoPartyCancellation?.Cancel();
             _launchedClients = [];
             Array.Clear(_preparedAutoLoginWindows);
+            Array.Clear(_manualAutoLoginWindows);
             _rosterStatus.Text = "绑定窗口后，可在游戏内打开 Current Party 面板再检查；结果仅是画面候选行数。";
             _ = StopRadarAsync();
             StopPrivacy();
@@ -806,6 +821,7 @@ public sealed class MainWindow : Window
         _autoPartyCancellation?.Cancel();
         _launchedClients = [];
         Array.Clear(_preparedAutoLoginWindows);
+        Array.Clear(_manualAutoLoginWindows);
         UpdateLoginCalibrationControls();
         UpdateAutoLoginControls();
         _rosterStatus.Text = "窗口绑定已清除；请重新绑定后检查 Current Party。";
@@ -880,8 +896,13 @@ public sealed class MainWindow : Window
                 return;
             }
             var saved = _loginCalibrations.Save(clientNumber, calibration);
-            if (saved.Success) _preparedAutoLoginWindows[clientNumber - 1] = null;
+            if (saved.Success)
+            {
+                _preparedAutoLoginWindows[clientNumber - 1] = null;
+                _manualAutoLoginWindows[clientNumber - 1] = null;
+            }
             _calibrationResults[clientNumber - 1].Text = saved.Message;
+            UpdateBridgeControls();
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
@@ -1262,7 +1283,10 @@ public sealed class MainWindow : Window
             _selectedTopology?.Clients[next.Client - 1].Count == 1 &&
             _accountPresent[next.Client - 1] &&
             _autoLoginChoices[next.Client - 1].IsChecked == true
-                ? _preparedAutoLoginWindows[next.Client - 1] is { } prepared &&
+                ? _manualAutoLoginWindows[next.Client - 1] is { } manual &&
+                  next.Client <= _launchedClients.Count && manual == _launchedClients[next.Client - 1]
+                    ? "手动登录后检测当前画面"
+                    : _preparedAutoLoginWindows[next.Client - 1] is { } prepared &&
                   next.Client <= _launchedClients.Count && prepared == _launchedClients[next.Client - 1]
                     ? "核验已填账号并检测登录画面"
                     : "填入账号并检测登录画面"
@@ -1572,7 +1596,8 @@ public sealed class MainWindow : Window
         {
             if (topology.Clients[current.Client - 1].Count == 1 &&
                 _accountPresent[current.Client - 1] &&
-                _autoLoginChoices[current.Client - 1].IsChecked == true)
+                _autoLoginChoices[current.Client - 1].IsChecked == true &&
+                _manualAutoLoginWindows[current.Client - 1] != client)
             {
                 var credential = _accountProfiles.Load(current.Client);
                 var stored = _loginCalibrations.Load(current.Client);
@@ -1936,6 +1961,7 @@ public sealed class MainWindow : Window
         {
             _launchedClients = [];
             Array.Clear(_preparedAutoLoginWindows);
+            Array.Clear(_manualAutoLoginWindows);
             _rosterStatus.Text = "正在重新识别游戏窗口；完成绑定后可检查 Current Party。";
         }
         UpdateClientRows();
@@ -1995,26 +2021,77 @@ public sealed class MainWindow : Window
     private async Task<string?> PrepareAutoLoginsAfterBindingAsync(PartyTopology topology,
         IReadOnlyList<LaunchedClient> clients)
     {
-        var configurations = new AutoLoginStartupConfiguration[topology.ClientCount];
-        for (var index = 0; index < configurations.Length; index++)
-        {
-            if (topology.Clients[index].Count == 1 && _accountPresent[index] &&
-                !_autoLoginPreferenceReady[index])
-                return $"客户端 {index + 1} 自动填入设置无效；请重新选择，未发送登录输入。";
-            var enabled = topology.Clients[index].Count == 1 &&
-                _autoLoginChoices[index].IsChecked == true;
-            configurations[index] = new(enabled,
-                enabled ? _accountProfiles.Load(index + 1) : null,
-                enabled ? _loginCalibrations.Load(index + 1).Calibration : null);
-        }
-        if (!AutoLoginStartupPlan.TryCreate(topology, clients, configurations,
-                out var items, out var reason)) return reason;
-        if (items.Count == 0) return null;
         using var cancellation = new CancellationTokenSource();
         _autoLoginFillCancellation = cancellation;
         UpdateAutoLoginControls();
         try
         {
+            var credentials = new AccountCredential?[topology.ClientCount];
+            for (var index = 0; index < credentials.Length; index++)
+            {
+                if (topology.Clients[index].Count != 1 ||
+                    _autoLoginChoices[index].IsChecked != true) continue;
+                if (!_autoLoginPreferenceReady[index])
+                    return $"客户端 {index + 1} 自动填入设置无效；请重新选择，未发送登录输入。";
+                credentials[index] = _accountProfiles.Load(index + 1);
+                if (credentials[index] is null)
+                    return $"客户端 {index + 1} 没有可读取的受保护账号资料；未发送登录输入。";
+            }
+            if (credentials.OfType<AccountCredential>()
+                .GroupBy(credential => credential.Email, StringComparer.OrdinalIgnoreCase)
+                .Any(group => group.Count() > 1))
+                return "多个独立客户端保存了同一账号邮箱；已停止所有自动填入。";
+            var configurations = new AutoLoginStartupConfiguration[topology.ClientCount];
+            var manualCount = 0;
+            for (var index = 0; index < configurations.Length; index++)
+            {
+                cancellation.Token.ThrowIfCancellationRequested();
+                if (topology.Clients[index].Count != 1 ||
+                    _autoLoginChoices[index].IsChecked != true)
+                {
+                    configurations[index] = new(false, null, null);
+                    continue;
+                }
+                var credential = credentials[index]!;
+                var calibration = _loginCalibrations.Load(index + 1).Calibration;
+                if (calibration is null)
+                {
+                    _status.Text = $"等待客户端 {index + 1} 登录画面，以便首次标记字段…";
+                    var frame = await new LoginMarkCaptureService(
+                        new WindowsLoginInputPort(clients[index])).CaptureAsync(cancellation.Token);
+                    if (frame is null)
+                    {
+                        _manualAutoLoginWindows[index] = clients[index];
+                        _autoLoginResults[index].Text = "未能核对登录画面；此窗口本次改为手动登录。";
+                        manualCount++;
+                        configurations[index] = new(false, null, null);
+                        continue;
+                    }
+                    var dialog = new LoginCalibrationDialog(index + 1, frame, topology.Id);
+                    calibration = await dialog.ShowDialog<LoginCalibration?>(this);
+                    cancellation.Token.ThrowIfCancellationRequested();
+                    if (calibration is null)
+                    {
+                        _manualAutoLoginWindows[index] = clients[index];
+                        _autoLoginResults[index].Text = "已选择此窗口本次手动登录；没有保存字段标记。";
+                        manualCount++;
+                        configurations[index] = new(false, null, null);
+                        continue;
+                    }
+                    if (_closing || !ReferenceEquals(_selectedTopology, topology) ||
+                        index >= _launchedClients.Count ||
+                        _launchedClients[index] != clients[index] ||
+                        !LoginCalibrationCapture.MatchesCurrentViewport(
+                            clients[index], calibration, topology.Id))
+                        return "标记期间窗口身份或布局发生变化；没有保存字段标记。";
+                    var saved = _loginCalibrations.Save(index + 1, calibration);
+                    if (!saved.Success) return saved.Message;
+                    _calibrationResults[index].Text = saved.Message;
+                }
+                configurations[index] = new(true, credential, calibration);
+            }
+            if (!AutoLoginStartupPlan.TryCreate(topology, clients, configurations,
+                    out var items, out var reason)) return reason;
             foreach (var item in items)
             {
                 cancellation.Token.ThrowIfCancellationRequested();
@@ -2034,7 +2111,8 @@ public sealed class MainWindow : Window
                 _preparedAutoLoginWindows[item.Client - 1] = item.Window;
                 await Task.Delay(900, cancellation.Token);
             }
-            return $"已为 {items.Count} 个独立客户端填入账号；配对时将重新核验登录画面。";
+            if (items.Count == 0 && manualCount == 0) return null;
+            return $"已为 {items.Count} 个独立客户端填入账号；{manualCount} 个窗口本次手动登录。配对时将重新核验已填入的登录画面。";
         }
         catch (OperationCanceledException)
         {
