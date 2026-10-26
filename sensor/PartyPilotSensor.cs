@@ -232,6 +232,9 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         object[]? radarEntities = null;
         string? radarStatus = null;
         DateTime? radarSeenUtc = null;
+        object? uiObservation = null;
+        string? uiObservationStatus = null;
+        DateTime? uiObservationSeenUtc = null;
         object? groundHover = null;
         string? groundHoverStatus = null;
         if (!Settings.DiagnoseRadarEntities.Value && _monsterTrackerAreaHash.HasValue)
@@ -259,6 +262,16 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 _monsterTracker.Reset();
                 _monsterTrackerAreaHash = null;
                 radarStatus = "scan_failed";
+            }
+            uiObservationSeenUtc = now;
+            try
+            {
+                uiObservation = ReadUiObservation();
+                uiObservationStatus = "observed";
+            }
+            catch
+            {
+                uiObservationStatus = "scan_failed";
             }
             try
             {
@@ -493,6 +506,9 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             RadarEntities = radarEntities,
             RadarStatus = radarStatus,
             RadarSeenUtc = radarSeenUtc,
+            UiObservation = uiObservation,
+            UiObservationStatus = uiObservationStatus,
+            UiObservationSeenUtc = uiObservationSeenUtc,
             GroundHover = groundHover,
             GroundHoverStatus = groundHoverStatus,
             ItemCards = itemCards,
@@ -724,5 +740,27 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         _monsterTracker.EndFrame();
         return RadarPacketBudget.Select(candidates.OrderByDescending(item => item.Navigation)
             .ThenBy(item => item.Distance).Select(item => item.Value));
+    }
+
+    private object ReadUiObservation()
+    {
+        var ui = GameController.IngameState.IngameUi;
+        return new
+        {
+            LoadingObserved = TryReadUiBool(() => GameController.IsLoading),
+            InventoryPanelVisible = TryReadUiBool(() => ui.InventoryPanel?.IsVisible),
+            StashElementVisible = TryReadUiBool(() => ui.StashElement?.IsVisible),
+            ChatBoxVisible = TryReadUiBool(() => ui.ChatBox?.IsVisible),
+            ControllerGeneralMenuVisible = TryReadUiBool(() => ui.ControllerGeneralMenu?.IsVisible),
+            SettingsPanelVisible = TryReadUiBool(() => ui.SettingsPanel?.IsVisible),
+            OpenLeftPanelVisible = TryReadUiBool(() => ui.OpenLeftPanel?.IsVisible),
+            OpenRightPanelVisible = TryReadUiBool(() => ui.OpenRightPanel?.IsVisible)
+        };
+    }
+
+    private static bool? TryReadUiBool(Func<bool?> read)
+    {
+        try { return read(); }
+        catch { return null; }
     }
 }

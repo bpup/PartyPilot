@@ -36,6 +36,9 @@ type Sample struct {
 	RadarEntities              []RadarEntity        `json:"RadarEntities,omitempty"`
 	RadarStatus                string               `json:"RadarStatus,omitempty"`
 	RadarSeenUTC               *time.Time           `json:"RadarSeenUtc,omitempty"`
+	UiObservation              *UiObservation       `json:"UiObservation,omitempty"`
+	UiObservationStatus        string               `json:"UiObservationStatus,omitempty"`
+	UiObservationSeenUTC       *time.Time           `json:"UiObservationSeenUtc,omitempty"`
 	GroundHover                *GroundHover         `json:"GroundHover,omitempty"`
 	GroundHoverStatus          string               `json:"GroundHoverStatus,omitempty"`
 	ItemCards                  []RawItemCard        `json:"ItemCards,omitempty"`
@@ -49,6 +52,19 @@ type Sample struct {
 	PackedTerrainCaptureStatus string               `json:"PackedTerrainCaptureStatus,omitempty"`
 	VisiblePlayers             []VisiblePlayer      `json:"VisiblePlayers,omitempty"`
 	VisiblePlayersStatus       string               `json:"VisiblePlayersStatus,omitempty"`
+}
+
+// UiObservation contains raw panel visibility reads. It is not a verified
+// game-input safety state or a command to pause automation.
+type UiObservation struct {
+	LoadingObserved              *bool `json:"LoadingObserved"`
+	InventoryPanelVisible        *bool `json:"InventoryPanelVisible"`
+	StashElementVisible          *bool `json:"StashElementVisible"`
+	ChatBoxVisible               *bool `json:"ChatBoxVisible"`
+	ControllerGeneralMenuVisible *bool `json:"ControllerGeneralMenuVisible"`
+	SettingsPanelVisible         *bool `json:"SettingsPanelVisible"`
+	OpenLeftPanelVisible         *bool `json:"OpenLeftPanelVisible"`
+	OpenRightPanelVisible        *bool `json:"OpenRightPanelVisible"`
 }
 
 // RawTerrainSummary is diagnostic evidence only. Values are not walkability flags.
@@ -215,6 +231,7 @@ func Decode(data []byte) (Sample, error) {
 			item.SkillBindSourceSeenUTC, item.LocalSlotCandidates,
 			item.ObservedLocalAddress, item.SeenUTC) ||
 		!validRadar(item.RadarEntities, item.RadarStatus, item.RadarSeenUTC) ||
+		!validUiObservation(item.UiObservation, item.UiObservationStatus, item.UiObservationSeenUTC) ||
 		!validGroundHover(item.GroundHover, item.GroundHoverStatus, item.RadarSeenUTC) ||
 		!validRawItemCards(item.ItemCards, item.ItemCardStatus, item.ItemCardSeenUTC,
 			item.LocalSlotCandidates) ||
@@ -225,6 +242,19 @@ func Decode(data []byte) (Sample, error) {
 		return Sample{}, ErrInvalidSample
 	}
 	return item, nil
+}
+
+func validUiObservation(observation *UiObservation, status string, seen *time.Time) bool {
+	if status == "" {
+		return observation == nil && seen == nil
+	}
+	if seen == nil || seen.IsZero() {
+		return false
+	}
+	if status == "scan_failed" {
+		return observation == nil
+	}
+	return status == "observed" && observation != nil
 }
 
 func validRawTerrain(summary *RawTerrainSummary, status string, seen *time.Time) bool {
