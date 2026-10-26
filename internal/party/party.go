@@ -43,20 +43,13 @@ func New(players []focus.Player, leader int, config follow.Config) (*Coordinator
 }
 
 // SetFollowTarget assigns a specific player as one follower's target.
-// Target zero restores Current MAIN routing.
+// Self or inactive choices restore Current MAIN, matching the supplied
+// navigation setting's FollowTargetChoice normalization.
 func (c *Coordinator) SetFollowTarget(slot, target int) error {
 	if _, exists := c.followers[slot]; !exists {
 		return errors.New("follower is not in roster")
 	}
-	if target == slot {
-		return errors.New("player cannot follow itself")
-	}
-	if target != 0 {
-		if _, exists := c.followers[target]; !exists {
-			return errors.New("follow target is not in roster")
-		}
-	}
-	if target == 0 {
+	if _, active := c.followers[target]; target == slot || !active {
 		delete(c.followTargets, slot)
 	} else {
 		c.followTargets[slot] = target

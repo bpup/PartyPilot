@@ -63,10 +63,11 @@ func parseFollowTargets(value string) (map[int]int, error) {
 			return nil, fmt.Errorf("invalid follow target %q", entry)
 		}
 		slot, slotErr := strconv.Atoi(parts[0])
-		target, targetErr := strconv.Atoi(parts[1])
-		if slotErr != nil || targetErr != nil || slot < 1 || slot > 6 || target < 1 || target > 6 {
+		targetValue, targetErr := strconv.ParseInt(parts[1], 10, 32)
+		if slotErr != nil || targetErr != nil || slot < 1 || slot > 6 {
 			return nil, fmt.Errorf("invalid follow target %q", entry)
 		}
+		target := int(targetValue)
 		if _, exists := targets[slot]; exists {
 			return nil, fmt.Errorf("duplicate follow target for player %d", slot)
 		}

@@ -133,8 +133,23 @@ func TestSpecificFollowTargetAndReturnToCurrentMain(t *testing.T) {
 	if command := coordinator.Step(now, positions)[2]; command.X >= 0 {
 		t.Fatalf("current MAIN target was not restored: %+v", command)
 	}
-	if coordinator.SetFollowTarget(2, 2) == nil || coordinator.SetFollowTarget(2, 6) == nil {
-		t.Fatal("invalid follow target accepted")
+	for _, target := range []int{2, 6, 7, -1} {
+		if err := coordinator.SetFollowTarget(2, target); err != nil {
+			t.Fatal(err)
+		}
+		if command := coordinator.Step(now, positions)[2]; command.X >= 0 {
+			t.Fatalf("self or inactive target did not return to current MAIN: target=%d command=%+v", target, command)
+		}
+	}
+	if coordinator.SetFollowTarget(6, 1) == nil {
+		t.Fatal("inactive follower accepted")
+	}
+	coordinator.SetLastFocusedLeads(true)
+	if err := coordinator.Focus(3); err != nil {
+		t.Fatal(err)
+	}
+	if command := coordinator.Step(now, positions)[2]; command.X <= 0 {
+		t.Fatalf("normalized current MAIN choice did not follow the new MAIN: %+v", command)
 	}
 }
 
