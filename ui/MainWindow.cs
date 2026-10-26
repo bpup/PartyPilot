@@ -41,9 +41,11 @@ public sealed class MainWindow : Window
     private readonly CheckBox[] _autoLoginChoices = new CheckBox[3];
     private readonly TextBlock[] _autoLoginResults = new TextBlock[3];
     private readonly bool[] _autoLoginPreferenceReady = new bool[3];
+    private readonly LaunchedClient?[] _preparedAutoLoginWindows = new LaunchedClient?[3];
     private readonly Button _check = new();
     private readonly Button _launch = new();
     private readonly Button _attach = new();
+    private readonly Button _cancelAutoLogin = new();
     private readonly Button _probeRoster = new();
     private readonly TextBlock _rosterStatus = new();
     private readonly StackPanel[] _inviteRows = new StackPanel[6];
@@ -353,7 +355,7 @@ public sealed class MainWindow : Window
     private Border BuildAccountStep()
     {
         var panel = Step("2A", "ACCOUNTS · 账号资料",
-            "按客户端保存独立 PoE 账号；密码只写入当前 Windows 用户保护的本地资料。每端一名角色时可选择自动填入；绑定游戏窗口后须确认邮箱和密码字段。");
+            "按客户端保存独立 PoE 账号；密码只写入当前 Windows 用户保护的本地资料。每端一名角色时可启用启动后自动填入；须先确认邮箱和密码字段。");
         for (var index = 0; index < 3; index++)
         {
             var client = index + 1;
@@ -373,7 +375,11 @@ public sealed class MainWindow : Window
             {
                 var result = _accountProfiles.Save(client, email.Text, password.Text);
                 if (result.Success) password.Text = string.Empty;
-                if (result.Success) _accountPresent[client - 1] = true;
+                if (result.Success)
+                {
+                    _accountPresent[client - 1] = true;
+                    _preparedAutoLoginWindows[client - 1] = null;
+                }
                 _accountResults[client - 1].Text = result.Success
                     ? _accountProfiles.Describe(client) : result.Message;
                 UpdateAutoLoginControls();
@@ -384,6 +390,7 @@ public sealed class MainWindow : Window
                 if (result.Success)
                 {
                     _accountPresent[client - 1] = false;
+                    _preparedAutoLoginWindows[client - 1] = null;
                     email.Text = string.Empty;
                     password.Text = string.Empty;
                     _autoLoginChoices[client - 1].IsChecked = false;
@@ -406,7 +413,9 @@ public sealed class MainWindow : Window
             var clearMark = new Button { Content = "清除字段标记", IsEnabled = OperatingSystem.IsWindows() };
             clearMark.Click += (_, _) =>
             {
-                _calibrationResults[client - 1].Text = _loginCalibrations.Delete(client)
+                var deleted = _loginCalibrations.Delete(client);
+                if (deleted) _preparedAutoLoginWindows[client - 1] = null;
+                _calibrationResults[client - 1].Text = deleted
                     ? "登录字段标记已清除。" : "登录字段标记无法清除。";
             };
             calibrationActions.Children.Add(calibrate);
@@ -420,7 +429,7 @@ public sealed class MainWindow : Window
             _autoLoginPreferenceReady[index] = loginPreference.Success;
             var automatic = new CheckBox
             {
-                Content = "此独立客户端在配对前自动填入账号和密码",
+                Content = "此独立客户端启动后自动填入账号，配对前复核",
                 IsThreeState = true,
                 IsChecked = loginPreference.Success ? loginPreference.Enabled : null
             };
@@ -437,6 +446,7 @@ public sealed class MainWindow : Window
                     var saved = _autoLoginPreferences.Save(client, enabled);
                     _autoLoginPreferenceReady[client - 1] = saved.Success;
                     automaticStatus.Text = saved.Message;
+                    if (saved.Success && !enabled) _preparedAutoLoginWindows[client - 1] = null;
                 }
                 UpdateBridgeControls();
             };
@@ -453,7 +463,7 @@ public sealed class MainWindow : Window
 
     private Border BuildLaunchStep()
     {
-        var panel = Step("3", "PREPARE & START · 准备并开始", "检查配置后，可启动游戏窗口或绑定已运行窗口。此步骤不执行账号登录或角色配对。");
+        var panel = Step("3", "PREPARE & START · 准备并开始", "检查配置后可启动或绑定游戏窗口；已启用的独立客户端会尝试填入账号。此步骤不提交登录或执行角色配对。");
         _applyLayout.Content = "对游戏窗口应用布局";
         panel.Children.Add(_applyLayout);
         _layoutMode.ItemsSource = new[] { "stacked", "tiled", "multiple" };
@@ -471,9 +481,13 @@ public sealed class MainWindow : Window
         _launch.Click += async (_, _) => await RunLauncherAsync(ClientAction.Start);
         _attach.Content = "绑定已运行窗口";
         _attach.Click += async (_, _) => await RunLauncherAsync(ClientAction.Attach);
+        _cancelAutoLogin.Content = "取消账号准备";
+        _cancelAutoLogin.IsEnabled = false;
+        _cancelAutoLogin.Click += (_, _) => _autoLoginFillCancellation?.Cancel();
         actions.Children.Add(_check);
         actions.Children.Add(_launch);
         actions.Children.Add(_attach);
+        actions.Children.Add(_cancelAutoLogin);
         panel.Children.Add(actions);
         _probeRoster.Content = "检查 Current Party 人数";
         _probeRoster.Click += async (_, _) => await ProbeRosterAsync();
@@ -739,6 +753,7 @@ public sealed class MainWindow : Window
             _inviteCancellation?.Cancel();
             _autoPartyCancellation?.Cancel();
             _launchedClients = [];
+            Array.Clear(_preparedAutoLoginWindows);
             _rosterStatus.Text = "绑定窗口后，可在游戏内打开 Current Party 面板再检查；结果仅是画面候选行数。";
             _ = StopRadarAsync();
             StopPrivacy();
@@ -772,9 +787,9 @@ public sealed class MainWindow : Window
                 .Select(client => $"客户端 {client}").ToArray();
             _inviteTarget.SelectedIndex = count > 1 ? 0 : -1;
         }
-        _check.IsEnabled = !_busy && !_pairingHasStarted && count > 0;
-        _launch.IsEnabled = !_busy && !_pairingHasStarted && count > 0;
-        _attach.IsEnabled = !_busy && !_pairingHasStarted && count > 0;
+        _check.IsEnabled = !_busy && !_pairingHasStarted && _bridge is null && count > 0;
+        _launch.IsEnabled = _check.IsEnabled;
+        _attach.IsEnabled = _check.IsEnabled;
         UpdateRosterControls();
         UpdateAutoPartyControls();
         UpdateBridgeControls();
@@ -790,6 +805,7 @@ public sealed class MainWindow : Window
         _inviteCancellation?.Cancel();
         _autoPartyCancellation?.Cancel();
         _launchedClients = [];
+        Array.Clear(_preparedAutoLoginWindows);
         UpdateLoginCalibrationControls();
         UpdateAutoLoginControls();
         _rosterStatus.Text = "窗口绑定已清除；请重新绑定后检查 Current Party。";
@@ -816,11 +832,13 @@ public sealed class MainWindow : Window
 
     private void UpdateAutoLoginControls()
     {
+        _cancelAutoLogin.IsEnabled = _autoLoginFillCancellation is not null;
         for (var index = 0; index < _autoLoginChoices.Length; index++)
             if (_autoLoginChoices[index] is not null)
             {
                 _accountSaveButtons[index].IsEnabled = OperatingSystem.IsWindows() &&
-                    !_armRequested && !_pairingHasStarted;
+                    !_armRequested && !_pairingHasStarted && !_busy &&
+                    _autoLoginFillCancellation is null;
                 _accountDeleteButtons[index].IsEnabled = _accountSaveButtons[index].IsEnabled;
                 _autoLoginChoices[index].IsEnabled = OperatingSystem.IsWindows() &&
                     !_armRequested && !_pairingHasStarted && !_busy &&
@@ -861,8 +879,9 @@ public sealed class MainWindow : Window
                 _calibrationResults[clientNumber - 1].Text = "窗口身份或布局已改变；没有保存字段标记。";
                 return;
             }
-            _calibrationResults[clientNumber - 1].Text =
-                _loginCalibrations.Save(clientNumber, calibration).Message;
+            var saved = _loginCalibrations.Save(clientNumber, calibration);
+            if (saved.Success) _preparedAutoLoginWindows[clientNumber - 1] = null;
+            _calibrationResults[clientNumber - 1].Text = saved.Message;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
@@ -1243,7 +1262,11 @@ public sealed class MainWindow : Window
             _selectedTopology?.Clients[next.Client - 1].Count == 1 &&
             _accountPresent[next.Client - 1] &&
             _autoLoginChoices[next.Client - 1].IsChecked == true
-                ? "填入账号并检测登录画面" : "开始检测当前登录画面";
+                ? _preparedAutoLoginWindows[next.Client - 1] is { } prepared &&
+                  next.Client <= _launchedClients.Count && prepared == _launchedClients[next.Client - 1]
+                    ? "核验已填账号并检测登录画面"
+                    : "填入账号并检测登录画面"
+                : "开始检测当前登录画面";
         _confirmRole.IsEnabled = _bridge is not null && _pairing?.AReleased == true;
         _playerCount.IsEnabled = _bridge is null && !_busy;
         _topologyVariant.IsEnabled = _bridge is null && !_busy;
@@ -1253,6 +1276,9 @@ public sealed class MainWindow : Window
         _rightStickFollowerOverride.IsEnabled = _bridge is null && !_busy;
         _lastFocusedLeads.IsEnabled = _bridge is null && !_busy;
         _autoFlask.IsEnabled = _bridge is null && !_busy && _selectedTopology?.Id == "2-split";
+        _check.IsEnabled = !_busy && !_pairingHasStarted && _bridge is null && _selectedTopology is not null;
+        _launch.IsEnabled = _check.IsEnabled;
+        _attach.IsEnabled = _check.IsEnabled;
         UpdateAutoLoginControls();
         UpdateLoginCalibrationControls();
         for (var index = 0; index < _paths.Length; index++)
@@ -1561,29 +1587,37 @@ public sealed class MainWindow : Window
                 }
                 using var cancellation = new CancellationTokenSource();
                 _autoLoginFillCancellation = cancellation;
+                UpdateAutoLoginControls();
                 _pairingStatus.Text = $"正在核对客户端 {current.Client} 登录画面并填入已保存账号…";
                 AutoLoginFillResult filled;
                 try
                 {
-                    filled = await new AutoLoginFillService(new WindowsLoginInputPort(client))
-                        .FillAsync(credential, calibration, cancellation.Token);
+                    var alreadyPrepared = _preparedAutoLoginWindows[current.Client - 1] == client;
+                    var service = new AutoLoginFillService(new WindowsLoginInputPort(client),
+                        captureAttempts: alreadyPrepared ? 45 : 195);
+                    filled = alreadyPrepared
+                        ? await service.VerifyPreparedAsync(calibration, cancellation.Token)
+                        : await service.FillAsync(credential, calibration, cancellation.Token);
                 }
                 finally
                 {
                     if (ReferenceEquals(_autoLoginFillCancellation, cancellation))
                         _autoLoginFillCancellation = null;
+                    UpdateAutoLoginControls();
                 }
                 if (!filled.Success || !ReferenceEquals(_bridge, bridge) ||
                     !ReferenceEquals(_selectedTopology, topology) ||
                     current.Client > _launchedClients.Count ||
                     _launchedClients[current.Client - 1] != client)
                 {
+                    _preparedAutoLoginWindows[current.Client - 1] = null;
                     _pairingStatus.Text = filled.Message;
                     _autoLoginResults[current.Client - 1].Text = filled.Message;
                     _armRequested = false;
                     UpdateBridgeControls();
                     return;
                 }
+                _preparedAutoLoginWindows[current.Client - 1] = client;
                 _autoLoginResults[current.Client - 1].Text = filled.Message;
             }
             _pairingStatus.Text = "已发送当前角色的配对准备请求；等待桥接确认。";
@@ -1833,8 +1867,9 @@ public sealed class MainWindow : Window
 
     private async Task RunLauncherAsync(ClientAction action)
     {
-        if (_busy || _pairingHasStarted)
+        if (_busy || _pairingHasStarted || _bridge is not null)
         {
+            _status.Text = "请先停止手柄桥接，再重新检查、启动或绑定游戏窗口。";
             return;
         }
         if (!OperatingSystem.IsWindows())
@@ -1900,6 +1935,7 @@ public sealed class MainWindow : Window
         if (action != ClientAction.Check)
         {
             _launchedClients = [];
+            Array.Clear(_preparedAutoLoginWindows);
             _rosterStatus.Text = "正在重新识别游戏窗口；完成绑定后可检查 Current Party。";
         }
         UpdateClientRows();
@@ -1936,6 +1972,14 @@ public sealed class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(output.Result)) message.AppendLine().Append(output.Result.Trim());
             if (!string.IsNullOrWhiteSpace(error.Result)) message.AppendLine().Append(error.Result.Trim());
             _status.Text = message.ToString();
+            if (action != ClientAction.Check && process.ExitCode == 0 &&
+                _launchedClients.Count == _selectedTopology.ClientCount)
+            {
+                var preparation = await PrepareAutoLoginsAfterBindingAsync(_selectedTopology,
+                    _launchedClients.ToArray());
+                if (!string.IsNullOrEmpty(preparation))
+                    _status.Text = message + Environment.NewLine + preparation;
+            }
         }
         catch (Exception exception)
         {
@@ -1945,6 +1989,66 @@ public sealed class MainWindow : Window
         {
             _busy = false;
             UpdateClientRows();
+        }
+    }
+
+    private async Task<string?> PrepareAutoLoginsAfterBindingAsync(PartyTopology topology,
+        IReadOnlyList<LaunchedClient> clients)
+    {
+        var configurations = new AutoLoginStartupConfiguration[topology.ClientCount];
+        for (var index = 0; index < configurations.Length; index++)
+        {
+            if (topology.Clients[index].Count == 1 && _accountPresent[index] &&
+                !_autoLoginPreferenceReady[index])
+                return $"客户端 {index + 1} 自动填入设置无效；请重新选择，未发送登录输入。";
+            var enabled = topology.Clients[index].Count == 1 &&
+                _autoLoginChoices[index].IsChecked == true;
+            configurations[index] = new(enabled,
+                enabled ? _accountProfiles.Load(index + 1) : null,
+                enabled ? _loginCalibrations.Load(index + 1).Calibration : null);
+        }
+        if (!AutoLoginStartupPlan.TryCreate(topology, clients, configurations,
+                out var items, out var reason)) return reason;
+        if (items.Count == 0) return null;
+        using var cancellation = new CancellationTokenSource();
+        _autoLoginFillCancellation = cancellation;
+        UpdateAutoLoginControls();
+        try
+        {
+            foreach (var item in items)
+            {
+                cancellation.Token.ThrowIfCancellationRequested();
+                if (_closing || !ReferenceEquals(_selectedTopology, topology) ||
+                    item.Client > _launchedClients.Count ||
+                    _launchedClients[item.Client - 1] != item.Window)
+                    return "游戏窗口绑定已变化；自动填入停止。";
+                _status.Text = $"等待客户端 {item.Client} 登录画面并核对账号字段…";
+                var result = await new AutoLoginFillService(new WindowsLoginInputPort(item.Window))
+                    .FillAsync(item.Credential, item.Calibration, cancellation.Token);
+                _autoLoginResults[item.Client - 1].Text = result.Message;
+                if (!result.Success) return $"客户端 {item.Client}：{result.Message}";
+                if (!ReferenceEquals(_selectedTopology, topology) ||
+                    item.Client > _launchedClients.Count ||
+                    _launchedClients[item.Client - 1] != item.Window)
+                    return "游戏窗口绑定已变化；自动填入停止。";
+                _preparedAutoLoginWindows[item.Client - 1] = item.Window;
+                await Task.Delay(900, cancellation.Token);
+            }
+            return $"已为 {items.Count} 个独立客户端填入账号；配对时将重新核验登录画面。";
+        }
+        catch (OperationCanceledException)
+        {
+            return "自动填入已取消；未提交登录。";
+        }
+        catch (IOException error)
+        {
+            return error.Message;
+        }
+        finally
+        {
+            if (ReferenceEquals(_autoLoginFillCancellation, cancellation))
+                _autoLoginFillCancellation = null;
+            UpdateAutoLoginControls();
         }
     }
 

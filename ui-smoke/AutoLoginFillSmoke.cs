@@ -8,6 +8,7 @@ internal static class AutoLoginFillSmoke
         internal bool LoseFocusAfterEmail;
         internal bool ClearSucceeds = true;
         internal LoginWindowFrame? NextFrame;
+        internal readonly Queue<LoginWindowFrame?> InitialFrames = new();
         private bool _exact = true;
         private int _pastes;
         private int _captures;
@@ -21,9 +22,12 @@ internal static class AutoLoginFillSmoke
         {
             Calls.Add("capture");
             _captures++;
+            if (InitialFrames.Count > 0) return Task.FromResult(InitialFrames.Dequeue());
             return Task.FromResult<LoginWindowFrame?>(_captures > 1 ? NextFrame ?? frame : frame);
         }
-        public bool IsExact(LoginWindowFrame current) => _exact && current == frame;
+        public bool IsExact(LoginWindowFrame current) => _exact &&
+            current.Width == frame.Width && current.Height == frame.Height &&
+            current.ScreenX == frame.ScreenX && current.ScreenY == frame.ScreenY;
         public bool TryGetCursor(out (int X, int Y) cursor)
         {
             Calls.Add("cursor");
@@ -81,6 +85,22 @@ internal static class AutoLoginFillSmoke
                 "tab", "select", "clipboard", "paste", "click", "clear", "restore"
             ]))
             throw new Exception("Verified login fill did not preserve the expected input sequence.");
+
+        var waitingPort = new FakePort(frame);
+        waitingPort.InitialFrames.Enqueue(frame with { Pixels = new byte[pixels.Length] });
+        if (!(await new AutoLoginFillService(waitingPort, (_, _) => Task.CompletedTask, 4)
+                .FillAsync(credential, calibration, CancellationToken.None)).Success ||
+            waitingPort.Calls.Count(call => call == "capture") != 3)
+            throw new Exception("Automatic login did not wait for a stable login form.");
+
+        var preparedPort = new FakePort(frame);
+        if (!(await new AutoLoginFillService(preparedPort, (_, _) => Task.CompletedTask, 2)
+                .VerifyPreparedAsync(calibration, CancellationToken.None)).Success ||
+            preparedPort.Calls.Contains("clipboard") ||
+            !preparedPort.Calls.SequenceEqual([
+                "focus", "capture", "capture", "cursor", "click", "restore"
+            ]))
+            throw new Exception("Prepared login revalidation sent credentials or skipped the field exit.");
 
         var missingPort = new FakePort(frame with { Pixels = new byte[pixels.Length] });
         if ((await new AutoLoginFillService(missingPort, (_, _) => Task.CompletedTask)
