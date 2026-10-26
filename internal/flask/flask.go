@@ -57,7 +57,24 @@ type playerState struct {
 	life     ruleState
 	mana     ruleState
 	lastWard *float64
+	empty    map[string]*emptyFlaskWatch
 }
+
+type emptyFlaskWatch struct {
+	pressedAt      time.Time
+	pressedPercent float64
+	awaitingResult bool
+	misses         int
+	empty          bool
+	emptyPercent   float64
+}
+
+const (
+	emptyFlaskVerifyDelay = 900 * time.Millisecond
+	emptyFlaskRecovery    = 1.5
+	emptyFlaskMissLimit   = 3
+	emptyFlaskRearm       = 3.0
+)
 
 type Engine struct {
 	players map[int]*playerState
@@ -111,6 +128,7 @@ func (engine *Engine) Step(player int, now time.Time, vitals Vitals, rules Setti
 		return nil, errors.New("out-of-order flask frame")
 	}
 	state.lastStep = now
+	state.verifyEmptyFlasks(now, vitals)
 	if menuOpen {
 		return nil, nil
 	}
@@ -141,7 +159,77 @@ func (engine *Engine) Step(player int, now time.Time, vitals Vitals, rules Setti
 	if result := evaluate("mana", player, now, vitals.Mana, rules.Mana, &state.mana, false, false); result != nil {
 		activations = append(activations, *result)
 	}
-	return activations, nil
+	return state.withoutEmptyFlasks(now, vitals, activations), nil
+}
+
+func (state *playerState) verifyEmptyFlasks(now time.Time, vitals Vitals) {
+	for resource, watch := range state.empty {
+		percent, known := resourcePercent(vitals, resource)
+		if !known {
+			continue
+		}
+		if watch.awaitingResult && now.Sub(watch.pressedAt) >= emptyFlaskVerifyDelay {
+			watch.awaitingResult = false
+			if percent-watch.pressedPercent >= emptyFlaskRecovery {
+				watch.misses = 0
+				watch.empty = false
+			} else {
+				watch.misses++
+				if watch.misses >= emptyFlaskMissLimit {
+					watch.empty = true
+					watch.emptyPercent = percent
+				}
+			}
+		}
+		if watch.empty && percent-watch.emptyPercent >= emptyFlaskRearm {
+			watch.empty = false
+			watch.misses = 0
+		}
+	}
+}
+
+func (state *playerState) withoutEmptyFlasks(now time.Time, vitals Vitals, activations []Activation) []Activation {
+	if len(activations) == 0 {
+		return activations
+	}
+	if state.empty == nil {
+		state.empty = make(map[string]*emptyFlaskWatch)
+	}
+	kept := activations[:0]
+	for _, activation := range activations {
+		watch := state.empty[activation.Resource]
+		if watch == nil {
+			watch = &emptyFlaskWatch{}
+			state.empty[activation.Resource] = watch
+		}
+		if watch.empty {
+			continue
+		}
+		watch.pressedAt = now
+		watch.pressedPercent = activation.Percent
+		if percent, known := resourcePercent(vitals, activation.Resource); known {
+			watch.pressedPercent = percent
+		}
+		watch.awaitingResult = true
+		kept = append(kept, activation)
+	}
+	return kept
+}
+
+func resourcePercent(vitals Vitals, resource string) (float64, bool) {
+	var pool Pool
+	switch resource {
+	case "life":
+		pool = vitals.Life
+	case "mana":
+		pool = vitals.Mana
+	default:
+		return 0, false
+	}
+	if pool.Current == nil || pool.Maximum == nil || *pool.Maximum <= 0 {
+		return 0, false
+	}
+	return min(100, max(0, *pool.Current / *pool.Maximum * 100)), true
 }
 
 func evaluate(resource string, player int, now time.Time, pool Pool, rule Rule, state *ruleState, held, force bool) *Activation {

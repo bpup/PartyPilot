@@ -138,3 +138,47 @@ func TestWardDefersLifeAndBreakForcesOneDecision(t *testing.T) {
 		t.Fatalf("missing ward was treated as a break: %+v %v", got, err)
 	}
 }
+
+func TestEmptyFlaskStopsAfterThreeMissesAndRearmsOnRecovery(t *testing.T) {
+	rules, _ := ResetProfiles(1)
+	rules.Mana.Enabled = false
+	rules.Life.Sustained = true
+	rules.Life.Cooldown = time.Second
+	engine := New()
+	start := time.Unix(100, 0)
+	step := func(after time.Duration, life float64, known bool) []Activation {
+		t.Helper()
+		data := vitals(life, 100)
+		if !known {
+			data.Life = Pool{}
+		}
+		got, err := engine.Step(1, start.Add(after), data, rules, false, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := step(0, 50, true); len(got) != 1 {
+		t.Fatalf("initial dose missing: %+v", got)
+	}
+	step(900*time.Millisecond, 50, false) // Unknown response cannot count as a miss.
+	for _, after := range []time.Duration{time.Second, 2 * time.Second} {
+		if got := step(after, 50, true); len(got) != 1 {
+			t.Fatalf("dose at %v unexpectedly suppressed: %+v", after, got)
+		}
+		step(after+900*time.Millisecond, 50, true)
+	}
+	if got := step(3*time.Second, 50, true); len(got) != 0 {
+		t.Fatalf("empty flask continued firing: %+v", got)
+	}
+	if got := step(3100*time.Millisecond, 53, true); len(got) != 0 {
+		t.Fatalf("rearm bypassed the configured cooldown: %+v", got)
+	}
+	if got := step(4*time.Second, 53, true); len(got) != 1 {
+		t.Fatalf("three-point recovery did not rearm the flask: %+v", got)
+	}
+	engine.ResetPlayer(1)
+	if got := step(4100*time.Millisecond, 50, true); len(got) != 1 {
+		t.Fatalf("session reset retained empty-flask state: %+v", got)
+	}
+}
