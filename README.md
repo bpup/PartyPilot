@@ -2,7 +2,7 @@
 
 独立开发的 PoE2 多角色跟随软件工作区。当前交付包含 **跟随决策内核、实时诊断链路、回放工具与初步桌面入口**；Windows 和 PoE2 游戏内控制尚未验收。它与 `bpup/poe2-scripts` 没有代码或构建依赖。
 
-`release/desktop/PartyPilot.Desktop.exe` 是 Windows x64 自包含桌面程序，按所提供版本主页的“选择输入 → 选择人数 → 准备并开始”顺序组织。它提供 1–6 人的 [角色与客户端布局选项](TOPOLOGY_RESEARCH.md)，依所选布局显示 1–3 个客户端程序路径；2P、3P、5P 的初始布局与所提供版本的设置相符。客户端路径、Steam/Epic 启动 URI、窗口布局预检、显式启动和已运行窗口绑定接到 `PartyPilot-ClientLaunch.exe`。最多三个 P1–P4 系统虚拟手柄的布局可从桌面启动受保护桥接：须先启动或绑定每个游戏窗口，取得进程 ID 与窗口句柄，用户逐角色启动登录画面检测。桥接要求对应窗口位置与尺寸稳定、确实位于前台，才转发受保护的 A 键短按；失焦或窗口变化会回中或中断短按。游戏内角色加入仍由用户确认，最后等待手柄回中。实体手柄隔离仅由用户勾选确认，程序尚未核验 HidHide 或游戏内结果；登录画面仅以窗口下方中央区域的颜色特征判断，连续两帧命中后放行，20 秒未命中则进入有标记的超时回退，尚未在真实游戏画面验证。需要四个系统手柄或第三客户端 P5/P6 进程内输入的布局会明确禁用桥接。自动跟随、战斗与雷达尚未接入这个界面，不能把“启动游戏窗口”或“人工确认配对”视为“开始完整组队”。人数必须主动选择，启动按钮在选择前保持禁用；macOS 可编译和预览界面，但实际游戏启动只在 Windows 开放。
+`release/desktop/PartyPilot.Desktop.exe` 是 Windows x64 自包含桌面程序，按所提供版本主页的“选择输入 → 选择人数 → 准备并开始”顺序组织。它提供 1–6 人的 [角色与客户端布局选项](TOPOLOGY_RESEARCH.md)，依所选布局显示 1–3 个客户端程序路径；2P、3P、5P 的初始布局与所提供版本的设置相符。客户端路径、Steam/Epic 启动 URI、窗口布局预检、显式启动和已运行窗口绑定接到 `PartyPilot-ClientLaunch.exe`。最多三个 P1–P4 系统虚拟手柄的布局可从桌面启动受保护桥接：须先启动或绑定每个游戏窗口，取得进程 ID 与窗口句柄，用户逐角色启动登录画面检测。桥接要求对应窗口位置与尺寸稳定、确实位于前台，才转发受保护的 A 键短按；失焦或窗口变化会回中或中断短按。游戏内角色加入仍由用户确认，最后等待手柄回中。实体手柄隔离仅由用户勾选确认，程序尚未核验 HidHide 或游戏内结果；登录画面仅以窗口下方中央区域的颜色特征判断，连续两帧命中后放行，20 秒未命中则进入有标记的超时回退，尚未在真实游戏画面验证。需要四个系统手柄或第三客户端 P5/P6 进程内输入的布局会明确禁用桥接。双客户端、每端一名角色的布局可在配对确认后启动实时跟随决策；战斗与雷达尚未接入界面，不能把“启动游戏窗口”或“人工确认配对”视为“开始完整组队”。人数必须主动选择，启动按钮在选择前保持禁用；macOS 可编译和预览界面，但实际游戏启动只在 Windows 开放。
 
 ```sh
 dotnet build ui/PartyPilot.Desktop.csproj -c Release
@@ -110,7 +110,7 @@ PartyPilot-FlaskReplay.exe -replay testdata/flask-combined-example.jsonl -combin
 PartyPilot-LiveFollow.exe -roster 1:1234,2:5678 -leader 1 -leader-name Leader -exe "1=C:\\PoE2-A\\PathOfExile.exe" -exe "2=C:\\PoE2-B\\PathOfExile.exe" -stop 2 -resume 3 -catchup 10 -max-age 750ms -log-max-age 30m
 ```
 
-桌面入口现可在“双客户端、每端一名角色”完成手柄配对后启动此实时决策程序，并把 P2 的方向送到系统虚拟手柄槽位 P3；可随时停止，或在桥接退出时撤销自动方向。停止、恢复、追赶距离与位置/日志有效期必须由操作者明确填写；可选填队长角色名以启用已有的被跟随成员离队停机规则。界面区分缺少位置、区域实例证据不足、位置过期以及队伍解散/离队的锁定停机，不借用测试示例作为默认配置。这个接线只通过无界面检查与 Windows 目标编译，尚未在 Windows/PoE2 验证真实传感器、区域身份、角色绑定或移动方向。
+桌面入口现可在“双客户端、每端一名角色”完成手柄配对后启动此实时决策程序，并把 P2 的方向送到系统虚拟手柄槽位 P3；可随时停止，或在桥接退出时撤销自动方向。停止、恢复、追赶距离与位置/日志有效期必须由操作者明确填写；可选填队长角色名以启用已有的被跟随成员离队停机规则。界面区分缺少位置、区域实例证据不足、位置过期以及队伍解散/离队的锁定停机，不借用测试示例作为默认配置。无界面检查还用本机模拟的两个子进程验证了“等待 → 跟随 → 退出后回中”的桌面到桥接传递；这未执行真实 Windows 手柄或游戏输入。Windows 目标编译已通过，真实传感器、区域身份、角色绑定和移动方向仍待 Windows/PoE2 验证。
 
 该链路已用合成 UDP 与日志验证“等待 → 追赶 → 样本过期等待”、“追赶 → 被跟随成员离队后持续等待”和“追赶 → 日志消失后等待并退出”，并交叉编译 Windows 程序。进程路径读取采用 Microsoft 文档中的 [OpenProcess](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openprocess) 与 [QueryFullProcessImageNameW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-queryfullprocessimagenamew)。离队文案及角色名仍缺真实 `Client.txt` 样本验证；没有真实 Windows/PoE2 运行证据，也没有验证 ExileCore2 的坐标系与虚拟摇杆方向映射，因此输出仍属于 **implementation-aligned / integration-pending**。
 

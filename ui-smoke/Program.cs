@@ -172,6 +172,7 @@ foreach (var invalid in new[]
     catch (InvalidOperationException) { }
 }
 window.Close();
+await Task.Run(ProcessPipelineSmoke.RunAsync).ConfigureAwait(false);
 
 sealed class SmokeApp : Application
 {
