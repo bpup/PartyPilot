@@ -40,9 +40,8 @@ type Engine struct {
 // independent sensor is a world position; an unknown space is never driven.
 const worldPerGridUnit = 10.869565217391305
 
-// The supplied build holds cross-client follow when the two motion frames
-// differ by more than 100 ms. SeenUTC is the independent sensor's capture time;
-// its separate source TickMs check is not yet available here.
+// The supplied build holds cross-client follow when source ticks or receipt
+// timestamps differ by more than 100 ms.
 const maxCrossClientMotionSkew = 100 * time.Millisecond
 
 func (e *Engine) SetLeaderName(name string) {
@@ -163,10 +162,13 @@ func New(roster map[int]int, leader int, config follow.Config, logAge time.Durat
 
 func (e *Engine) ObserveSample(sample telemetry.Sample) bool {
 	slot, exists := e.pidToSlot[sample.ProcessID]
-	if !exists || sample.SeenUTC.IsZero() || sample.CoordinateSpace != "world" {
+	if !exists || sample.SeenUTC.IsZero() || sample.TickMS <= 0 ||
+		sample.ReceivedAt.IsZero() || sample.CoordinateSpace != "world" {
 		return false
 	}
-	if previous, exists := e.samples[slot]; exists && sample.SeenUTC.Before(previous.SeenUTC) {
+	if previous, exists := e.samples[slot]; exists &&
+		(sample.SeenUTC.Before(previous.SeenUTC) || sample.TickMS < previous.TickMS ||
+			sample.ReceivedAt.Before(previous.ReceivedAt)) {
 		return false
 	}
 	e.samples[slot] = sample
@@ -210,7 +212,8 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 	for _, slot := range e.slots {
 		sample, hasSample := e.samples[slot]
 		area, hasArea := e.areas[slot]
-		if !hasSample || !hasArea || sample.SeenUTC.Before(area.ObservedAt) {
+		if !hasSample || !hasArea || sample.SeenUTC.Before(area.ObservedAt) ||
+			sample.ReceivedAt.After(now) || now.Sub(sample.ReceivedAt) > e.sampleAge {
 			continue
 		}
 		if area.Origin != "live" || area.ObservedAt.After(now) || now.Sub(area.ObservedAt) > e.logAge {
@@ -266,11 +269,15 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 		if slot == e.leader {
 			continue
 		}
-		follower, followerOK := positions[slot]
-		leader, leaderOK := positions[target]
+		_, followerOK := positions[slot]
+		_, leaderOK := positions[target]
 		if followerOK && leaderOK {
-			skew := follower.Seen.Sub(leader.Seen)
-			if skew > maxCrossClientMotionSkew || skew < -maxCrossClientMotionSkew {
+			follower := e.samples[slot]
+			leader := e.samples[target]
+			receiptSkew := follower.ReceivedAt.Sub(leader.ReceivedAt)
+			tickSkew := follower.TickMS - leader.TickMS
+			if receiptSkew > maxCrossClientMotionSkew || receiptSkew < -maxCrossClientMotionSkew ||
+				tickSkew > 100 || tickSkew < -100 {
 				skewWait[slot] = true
 			}
 		}

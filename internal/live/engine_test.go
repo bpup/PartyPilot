@@ -29,6 +29,12 @@ func TestIsometricStickMatchesSuppliedFollowDirection(t *testing.T) {
 
 func observeGridSample(engine *Engine, sample telemetry.Sample) bool {
 	sample.CoordinateSpace = "world"
+	if sample.TickMS == 0 {
+		sample.TickMS = sample.SeenUTC.UnixMilli()
+	}
+	if sample.ReceivedAt.IsZero() {
+		sample.ReceivedAt = sample.SeenUTC
+	}
 	sample.X *= worldPerGridUnit
 	sample.Y *= worldPerGridUnit
 	return engine.ObserveSample(sample)
@@ -43,6 +49,14 @@ func TestLiveFollowRequiresKnownWorldCoordinateSpace(t *testing.T) {
 	}
 	if engine.ObserveSample(telemetry.Sample{ProcessID: 101, SeenUTC: now, X: 120}) {
 		t.Fatal("unmarked position was accepted for movement")
+	}
+	if engine.ObserveSample(telemetry.Sample{ProcessID: 101, SeenUTC: now,
+		TickMS: now.UnixMilli(), CoordinateSpace: "world", X: 120}) {
+		t.Fatal("sample without receiver timestamp was accepted")
+	}
+	if engine.ObserveSample(telemetry.Sample{ProcessID: 101, SeenUTC: now,
+		ReceivedAt: now, CoordinateSpace: "world", X: 120}) {
+		t.Fatal("sample without source tick was accepted")
 	}
 	for _, slot := range []int{1, 2} {
 		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
@@ -89,6 +103,43 @@ func TestLiveCrossClientMotionSkewHoldsOnlyAffectedFollower(t *testing.T) {
 	observeGridSample(engine, telemetry.Sample{ProcessID: 101, SeenUTC: start.Add(160 * time.Millisecond), X: 40})
 	if got := engine.Step(start.Add(160 * time.Millisecond))[3]; got.State != follow.CatchingUp {
 		t.Fatalf("synchronized pair did not resume: %+v", got)
+	}
+}
+
+func TestLiveCrossClientChecksSourceAndReceiptSkewSeparately(t *testing.T) {
+	for _, variant := range []string{"source", "receipt"} {
+		t.Run(variant, func(t *testing.T) {
+			start := time.Now().UTC()
+			engine, err := New(map[int]int{1: 101, 2: 202}, 1,
+				follow.Config{StopDistance: 2, ResumeDistance: 5, CatchUpDistance: 10,
+					MaxAge: time.Second}, time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer engine.Close()
+			for _, slot := range []int{1, 2} {
+				engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
+					ObservedAt: start, Origin: "live"})
+			}
+			leaderAt := start.Add(10 * time.Millisecond)
+			followerAt := start.Add(11 * time.Millisecond)
+			observeGridSample(engine, telemetry.Sample{ProcessID: 101, SeenUTC: leaderAt,
+				TickMS: leaderAt.UnixMilli(), ReceivedAt: leaderAt, X: 20})
+			follower := telemetry.Sample{ProcessID: 202, SeenUTC: followerAt,
+				TickMS: followerAt.UnixMilli(), ReceivedAt: followerAt, X: 0}
+			stepAt := followerAt
+			if variant == "source" {
+				follower.TickMS += 150
+			} else {
+				follower.ReceivedAt = followerAt.Add(150 * time.Millisecond)
+				stepAt = follower.ReceivedAt
+			}
+			observeGridSample(engine, follower)
+			if got := engine.Step(stepAt)[2]; got.State != follow.Waiting ||
+				got.Reason != "cross-client motion skew" {
+				t.Fatalf("%s skew moved: %+v", variant, got)
+			}
+		})
 	}
 }
 

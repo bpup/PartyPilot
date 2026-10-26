@@ -313,11 +313,13 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         }
 
         var position = render.Pos;
+        var sourceTickMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         // AreaName is diagnostic only. It does not identify a specific instance.
         var message = JsonSerializer.Serialize(new
         {
             ProcessId = GameController.Window.Process.Id,
             SeenUtc = now,
+            TickMs = sourceTickMs,
             AreaName = GameController.Area.CurrentArea?.Name,
             AreaHash = GameController.IngameState.Data.CurrentAreaHash,
             CoordinateSpace = "world",

@@ -12,6 +12,8 @@ import (
 type Sample struct {
 	ProcessID                  int                  `json:"ProcessId"`
 	SeenUTC                    time.Time            `json:"SeenUtc"`
+	TickMS                     int64                `json:"TickMs,omitempty"`
+	ReceivedAt                 time.Time            `json:"-"`
 	AreaName                   string               `json:"AreaName"`
 	AreaHash                   uint32               `json:"AreaHash"`
 	CoordinateSpace            string               `json:"CoordinateSpace,omitempty"`
@@ -191,7 +193,7 @@ func Decode(data []byte) (Sample, error) {
 	if err := json.Unmarshal(data, &item); err != nil {
 		return Sample{}, err
 	}
-	if item.ProcessID <= 0 || item.SeenUTC.IsZero() ||
+	if item.ProcessID <= 0 || item.SeenUTC.IsZero() || item.TickMS < 0 ||
 		(item.CoordinateSpace != "" && item.CoordinateSpace != "world") ||
 		!finite(item.X) || !finite(item.Y) || !finite(item.Z) ||
 		!validPool(item.Life, item.LifeMax) || !validPool(item.Mana, item.ManaMax) ||

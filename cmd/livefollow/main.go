@@ -275,6 +275,7 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 		count, _, err := conn.ReadFromUDP(data)
 		if err == nil {
 			if sample, decodeErr := telemetry.Decode(data[:count]); decodeErr == nil {
+				sample.ReceivedAt = time.Now().UTC()
 				if engine.ObserveSample(sample) && flasks != nil {
 					activations, err = flasks.ObserveSample(sample, time.Now().UTC())
 					if err != nil {
