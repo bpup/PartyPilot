@@ -32,6 +32,11 @@ type Engine struct {
 	stopped          string
 }
 
+// Target 0.6.17 uses grid coordinates for follow distances. Its distributed
+// core maps grid deltas to world deltas with this factor. Render.Pos from the
+// independent sensor is a world position; an unknown space is never driven.
+const worldPerGridUnit = 10.869565217391305
+
 func (e *Engine) SetLeaderName(name string) {
 	e.memberNames[e.baseLeader] = strings.TrimSpace(name)
 	e.leaderName = e.memberNames[e.leader]
@@ -148,7 +153,7 @@ func New(roster map[int]int, leader int, config follow.Config, logAge time.Durat
 
 func (e *Engine) ObserveSample(sample telemetry.Sample) bool {
 	slot, exists := e.pidToSlot[sample.ProcessID]
-	if !exists || sample.SeenUTC.IsZero() {
+	if !exists || sample.SeenUTC.IsZero() || sample.CoordinateSpace != "world" {
 		return false
 	}
 	if previous, exists := e.samples[slot]; exists && sample.SeenUTC.Before(previous.SeenUTC) {
@@ -205,7 +210,8 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 			continue
 		}
 		positions[slot] = follow.Position{
-			X: sample.X, Y: sample.Y, Seen: sample.SeenUTC, Valid: true,
+			X: sample.X / worldPerGridUnit, Y: sample.Y / worldPerGridUnit,
+			Seen: sample.SeenUTC, Valid: true,
 			Area: strings.ToLower(area.AreaID) + fmt.Sprintf(":%d", area.Seed),
 		}
 	}

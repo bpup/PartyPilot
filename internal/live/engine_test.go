@@ -10,6 +10,35 @@ import (
 	"partypilot/internal/telemetry"
 )
 
+func observeGridSample(engine *Engine, sample telemetry.Sample) bool {
+	sample.CoordinateSpace = "world"
+	sample.X *= worldPerGridUnit
+	sample.Y *= worldPerGridUnit
+	return engine.ObserveSample(sample)
+}
+
+func TestLiveFollowRequiresKnownWorldCoordinateSpace(t *testing.T) {
+	now := time.Now().UTC()
+	engine, err := New(map[int]int{1: 101, 2: 202}, 1,
+		follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if engine.ObserveSample(telemetry.Sample{ProcessID: 101, SeenUTC: now, X: 120}) {
+		t.Fatal("unmarked position was accepted for movement")
+	}
+	for _, slot := range []int{1, 2} {
+		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
+			ObservedAt: now, Origin: "live"})
+	}
+	observeGridSample(engine, telemetry.Sample{ProcessID: 101, SeenUTC: now.Add(time.Millisecond), X: 12})
+	observeGridSample(engine, telemetry.Sample{ProcessID: 202, SeenUTC: now.Add(time.Millisecond), X: 0})
+	command := engine.Step(now.Add(time.Millisecond))[2]
+	if command.State != follow.CatchingUp || command.Distance < 11.99 || command.Distance > 12.01 {
+		t.Fatalf("world coordinates were not converted to target grid distance: %+v", command)
+	}
+}
+
 func TestLiveFollowRequiresFreshMatchingLogAndNewSamples(t *testing.T) {
 	now := time.Now().UTC()
 	config := follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}
@@ -21,8 +50,8 @@ func TestLiveFollowRequiresFreshMatchingLogAndNewSamples(t *testing.T) {
 	if state(now) != follow.Waiting {
 		t.Fatal("missing sources must wait")
 	}
-	engine.ObserveSample(telemetry.Sample{ProcessID: 101, SeenUTC: now, X: 12})
-	engine.ObserveSample(telemetry.Sample{ProcessID: 202, SeenUTC: now, X: 0})
+	observeGridSample(engine, telemetry.Sample{ProcessID: 101, SeenUTC: now, X: 12})
+	observeGridSample(engine, telemetry.Sample{ProcessID: 202, SeenUTC: now, X: 0})
 	if state(now) != follow.Waiting {
 		t.Fatal("position alone must not enable following")
 	}
@@ -34,13 +63,13 @@ func TestLiveFollowRequiresFreshMatchingLogAndNewSamples(t *testing.T) {
 		t.Fatal("samples predating area evidence must wait")
 	}
 	sampleAt := now.Add(2 * time.Millisecond)
-	engine.ObserveSample(telemetry.Sample{ProcessID: 101, SeenUTC: sampleAt, X: 12})
-	engine.ObserveSample(telemetry.Sample{ProcessID: 202, SeenUTC: sampleAt, X: 0})
+	observeGridSample(engine, telemetry.Sample{ProcessID: 101, SeenUTC: sampleAt, X: 12})
+	observeGridSample(engine, telemetry.Sample{ProcessID: 202, SeenUTC: sampleAt, X: 0})
 	if state(sampleAt) != follow.CatchingUp {
 		t.Fatal("fresh matching sources must produce catch-up decision")
 	}
 	engine.ObserveArea(arealog.Signal{Slot: 2, AreaID: "G2_4", Seed: 456, ObservedAt: sampleAt, Origin: "live"})
-	engine.ObserveSample(telemetry.Sample{ProcessID: 202, SeenUTC: sampleAt.Add(time.Millisecond), X: 0})
+	observeGridSample(engine, telemetry.Sample{ProcessID: 202, SeenUTC: sampleAt.Add(time.Millisecond), X: 0})
 	if state(sampleAt.Add(time.Millisecond)) != follow.Waiting {
 		t.Fatal("different instance must stop")
 	}
@@ -49,10 +78,10 @@ func TestLiveFollowRequiresFreshMatchingLogAndNewSamples(t *testing.T) {
 		t.Fatal("history must not enable controller decisions")
 	}
 	engine.ObserveArea(arealog.Signal{Slot: 2, AreaID: "G2_4", Seed: 123, ObservedAt: sampleAt.Add(time.Millisecond), Origin: "live"})
-	engine.ObserveSample(telemetry.Sample{ProcessID: 202, SeenUTC: sampleAt.Add(2 * time.Millisecond), X: 0})
+	observeGridSample(engine, telemetry.Sample{ProcessID: 202, SeenUTC: sampleAt.Add(2 * time.Millisecond), X: 0})
 	later := now.Add(12 * time.Second)
-	engine.ObserveSample(telemetry.Sample{ProcessID: 101, SeenUTC: later, X: 12})
-	engine.ObserveSample(telemetry.Sample{ProcessID: 202, SeenUTC: later, X: 0})
+	observeGridSample(engine, telemetry.Sample{ProcessID: 101, SeenUTC: later, X: 12})
+	observeGridSample(engine, telemetry.Sample{ProcessID: 202, SeenUTC: later, X: 0})
 	if state(later) != follow.Waiting {
 		t.Fatal("expired area evidence must stop")
 	}
@@ -72,7 +101,7 @@ func TestDepartureLatchesStopUntilSessionRestart(t *testing.T) {
 		if slot == 1 {
 			x = 12
 		}
-		engine.ObserveSample(telemetry.Sample{ProcessID: pid, SeenUTC: now.Add(time.Millisecond), X: x})
+		observeGridSample(engine, telemetry.Sample{ProcessID: pid, SeenUTC: now.Add(time.Millisecond), X: x})
 	}
 	if engine.Step(now.Add(time.Millisecond))[2].State != follow.CatchingUp {
 		t.Fatal("expected live decision before party departure")
@@ -84,8 +113,8 @@ func TestDepartureLatchesStopUntilSessionRestart(t *testing.T) {
 	if !engine.ObserveParty(partylog.Event{Kind: partylog.MemberLeft, ClientSlot: 2, MemberName: "leader"}) {
 		t.Fatal("configured leader departure did not stop")
 	}
-	engine.ObserveSample(telemetry.Sample{ProcessID: 101, SeenUTC: now.Add(2 * time.Millisecond), X: 12})
-	engine.ObserveSample(telemetry.Sample{ProcessID: 202, SeenUTC: now.Add(2 * time.Millisecond), X: 0})
+	observeGridSample(engine, telemetry.Sample{ProcessID: 101, SeenUTC: now.Add(2 * time.Millisecond), X: 12})
+	observeGridSample(engine, telemetry.Sample{ProcessID: 202, SeenUTC: now.Add(2 * time.Millisecond), X: 0})
 	command := engine.Step(now.Add(2 * time.Millisecond))[2]
 	if command.State != follow.Waiting || command.Reason != "followed member left party" {
 		t.Fatalf("departure stop did not latch: %+v", command)
@@ -113,7 +142,7 @@ func TestManualFocusChangesLiveMainAndFormerLeaderFollows(t *testing.T) {
 		if slot == 2 {
 			x = 12
 		}
-		engine.ObserveSample(telemetry.Sample{ProcessID: pid, SeenUTC: now.Add(time.Millisecond), X: x})
+		observeGridSample(engine, telemetry.Sample{ProcessID: pid, SeenUTC: now.Add(time.Millisecond), X: x})
 	}
 	if engine.ObserveManualFocus(3) == nil || engine.Leader() != 1 {
 		t.Fatal("unknown manual MAIN accepted")
@@ -143,7 +172,7 @@ func TestLiveFollowUsesConfiguredTargetAndCurrentMainFallback(t *testing.T) {
 	for slot, pid := range map[int]int{1: 101, 2: 202, 3: 303} {
 		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
 			ObservedAt: now, Origin: "live"})
-		engine.ObserveSample(telemetry.Sample{ProcessID: pid, SeenUTC: now.Add(time.Millisecond),
+		observeGridSample(engine, telemetry.Sample{ProcessID: pid, SeenUTC: now.Add(time.Millisecond),
 			X: map[int]float64{1: 0, 2: 20, 3: 30}[slot]})
 	}
 	at := now.Add(time.Millisecond)
@@ -182,7 +211,7 @@ func TestLiveFollowChecksTheSelectedTargetsInstance(t *testing.T) {
 		}
 		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: seed,
 			ObservedAt: now, Origin: "live"})
-		engine.ObserveSample(telemetry.Sample{ProcessID: pid, SeenUTC: now.Add(time.Millisecond),
+		observeGridSample(engine, telemetry.Sample{ProcessID: pid, SeenUTC: now.Add(time.Millisecond),
 			X: map[int]float64{1: 0, 2: 0, 3: 20}[slot]})
 	}
 	at := now.Add(time.Millisecond)
@@ -197,7 +226,7 @@ func TestLiveFollowChecksTheSelectedTargetsInstance(t *testing.T) {
 	}
 	engine.ObserveArea(arealog.Signal{Slot: 3, AreaID: "G2_4", Seed: 99,
 		ObservedAt: at.Add(time.Millisecond), Origin: "live"})
-	engine.ObserveSample(telemetry.Sample{ProcessID: 303, SeenUTC: at.Add(2 * time.Millisecond), X: 20})
+	observeGridSample(engine, telemetry.Sample{ProcessID: 303, SeenUTC: at.Add(2 * time.Millisecond), X: 20})
 	if command := engine.Step(at.Add(2 * time.Millisecond))[2]; command.State != follow.Waiting {
 		t.Fatalf("P2 moved after selected P3 entered another instance: %+v", command)
 	}
@@ -240,7 +269,7 @@ func TestThreeIndependentClientsFollowCurrentMain(t *testing.T) {
 	for slot, pid := range map[int]int{1: 101, 2: 202, 3: 303} {
 		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
 			ObservedAt: now, Origin: "live"})
-		engine.ObserveSample(telemetry.Sample{ProcessID: pid, SeenUTC: now.Add(time.Millisecond),
+		observeGridSample(engine, telemetry.Sample{ProcessID: pid, SeenUTC: now.Add(time.Millisecond),
 			X: float64((slot - 1) * 10)})
 	}
 	initial := engine.Step(now.Add(time.Millisecond))
@@ -266,9 +295,9 @@ func TestLiveFollowRejectsUnknownAndOldSamples(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if engine.ObserveSample(telemetry.Sample{ProcessID: 303, SeenUTC: now}) ||
-		!engine.ObserveSample(telemetry.Sample{ProcessID: 202, SeenUTC: now}) ||
-		engine.ObserveSample(telemetry.Sample{ProcessID: 202, SeenUTC: now.Add(-time.Second)}) {
+	if observeGridSample(engine, telemetry.Sample{ProcessID: 303, SeenUTC: now}) ||
+		!observeGridSample(engine, telemetry.Sample{ProcessID: 202, SeenUTC: now}) ||
+		observeGridSample(engine, telemetry.Sample{ProcessID: 202, SeenUTC: now.Add(-time.Second)}) {
 		t.Fatal("sample identity or ordering failed")
 	}
 	if engine.ObserveArea(arealog.Signal{Slot: 3, AreaID: "x", Seed: 1, ObservedAt: now}) {
@@ -287,21 +316,21 @@ func TestManualOverrideRequiresFreshLivingFollower(t *testing.T) {
 		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123, ObservedAt: now, Origin: "live"})
 	}
 	hp := 100.0
-	engine.ObserveSample(telemetry.Sample{ProcessID: 101, SeenUTC: now.Add(time.Millisecond), X: 12})
-	engine.ObserveSample(telemetry.Sample{ProcessID: 202, SeenUTC: now.Add(time.Millisecond), X: 0, Life: &hp})
+	observeGridSample(engine, telemetry.Sample{ProcessID: 101, SeenUTC: now.Add(time.Millisecond), X: 12})
+	observeGridSample(engine, telemetry.Sample{ProcessID: 202, SeenUTC: now.Add(time.Millisecond), X: 0, Life: &hp})
 	if command := engine.Step(now.Add(time.Millisecond))[2]; command.State != follow.CatchingUp || !command.ManualOverrideEligible {
 		t.Fatalf("living follower should allow right-stick movement: %+v", command)
 	}
-	engine.ObserveSample(telemetry.Sample{ProcessID: 202, SeenUTC: now.Add(2 * time.Millisecond), X: 12, Life: &hp})
+	observeGridSample(engine, telemetry.Sample{ProcessID: 202, SeenUTC: now.Add(2 * time.Millisecond), X: 12, Life: &hp})
 	if command := engine.Step(now.Add(2 * time.Millisecond))[2]; command.State != follow.Holding || !command.ManualOverrideEligible {
 		t.Fatalf("living holding follower should allow manual movement: %+v", command)
 	}
 	dead := 0.0
-	engine.ObserveSample(telemetry.Sample{ProcessID: 202, SeenUTC: now.Add(3 * time.Millisecond), X: 0, Life: &dead})
+	observeGridSample(engine, telemetry.Sample{ProcessID: 202, SeenUTC: now.Add(3 * time.Millisecond), X: 0, Life: &dead})
 	if command := engine.Step(now.Add(3 * time.Millisecond))[2]; command.ManualOverrideEligible || command.State != follow.Waiting || command.Reason != "dead follower" {
 		t.Fatalf("dead follower should not receive automated or manual movement: %+v", command)
 	}
-	engine.ObserveSample(telemetry.Sample{ProcessID: 202, SeenUTC: now.Add(4 * time.Millisecond), X: 0})
+	observeGridSample(engine, telemetry.Sample{ProcessID: 202, SeenUTC: now.Add(4 * time.Millisecond), X: 0})
 	if command := engine.Step(now.Add(4 * time.Millisecond))[2]; command.ManualOverrideEligible {
 		t.Fatalf("missing life data should not allow manual movement: %+v", command)
 	}
@@ -320,7 +349,7 @@ func TestVisiblePlayerDiagnosticDoesNotBecomeFollowerEvidence(t *testing.T) {
 	for _, slot := range []int{1, 2} {
 		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123, ObservedAt: now, Origin: "live"})
 	}
-	engine.ObserveSample(telemetry.Sample{ProcessID: 101, SeenUTC: now.Add(time.Millisecond), X: 12,
+	observeGridSample(engine, telemetry.Sample{ProcessID: 101, SeenUTC: now.Add(time.Millisecond), X: 12,
 		VisiblePlayers: []telemetry.VisiblePlayer{
 			{EntityID: 11, Name: "Leader", X: 12, IsObservedLocal: true},
 			{EntityID: 12, Name: "Other", X: 0},

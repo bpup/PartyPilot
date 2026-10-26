@@ -14,6 +14,7 @@ type Sample struct {
 	SeenUTC                  time.Time            `json:"SeenUtc"`
 	AreaName                 string               `json:"AreaName"`
 	AreaHash                 uint32               `json:"AreaHash"`
+	CoordinateSpace          string               `json:"CoordinateSpace,omitempty"`
 	X                        float64              `json:"X"`
 	Y                        float64              `json:"Y"`
 	Z                        float64              `json:"Z"`
@@ -154,6 +155,7 @@ func Decode(data []byte) (Sample, error) {
 		return Sample{}, err
 	}
 	if item.ProcessID <= 0 || item.SeenUTC.IsZero() ||
+		(item.CoordinateSpace != "" && item.CoordinateSpace != "world") ||
 		!finite(item.X) || !finite(item.Y) || !finite(item.Z) ||
 		!validPool(item.Life, item.LifeMax) || !validPool(item.Mana, item.ManaMax) ||
 		!validPool(item.EnergyShield, item.EnergyShieldMax) ||

@@ -253,6 +253,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             SeenUtc = now,
             AreaName = GameController.Area.CurrentArea?.Name,
             AreaHash = GameController.IngameState.Data.CurrentAreaHash,
+            CoordinateSpace = "world",
             X = position.X,
             Y = position.Y,
             Z = position.Z,
