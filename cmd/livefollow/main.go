@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"partypilot/internal/arealog"
+	"partypilot/internal/clientprocess"
 	"partypilot/internal/follow"
 	"partypilot/internal/live"
 	"partypilot/internal/partylog"
@@ -81,6 +82,22 @@ func resolveLogs(roster map[int]int, logs, exes sources) (map[int]string, error)
 	return paths, arealog.ValidatePaths(paths)
 }
 
+func verifyProcessBindings(roster map[int]int, paths map[int]string) error {
+	if !clientprocess.Supported {
+		return nil
+	}
+	for slot, pid := range roster {
+		executable, err := clientprocess.ExecutablePath(pid)
+		if err != nil {
+			return fmt.Errorf("slot %d process %d: %w", slot, pid, err)
+		}
+		if err := clientprocess.ValidateLogBinding(executable, paths[slot]); err != nil {
+			return fmt.Errorf("slot %d process/log binding: %w", slot, err)
+		}
+	}
+	return nil
+}
+
 type frame struct {
 	Focused  int                    `json:"focused"`
 	Commands map[int]follow.Command `json:"commands"`
@@ -119,6 +136,11 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 	}()
 	data := make([]byte, 4096)
 	encoder := json.NewEncoder(os.Stdout)
+	fail := func(reason string, err error) error {
+		engine.Stop(reason)
+		_ = encoder.Encode(frame{Focused: leader, Commands: engine.Step(time.Now().UTC())})
+		return err
+	}
 	for {
 		_ = conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 		count, _, err := conn.ReadFromUDP(data)
@@ -127,16 +149,19 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 				engine.ObserveSample(sample)
 			}
 		} else if timeout, ok := err.(net.Error); !ok || !timeout.Timeout() {
-			return err
+			return fail("sensor read failed", err)
 		}
 		if err := arealog.ValidatePaths(paths); err != nil {
-			return err
+			return fail("log source changed", err)
+		}
+		if err := verifyProcessBindings(roster, paths); err != nil {
+			return fail("process/log binding changed", err)
 		}
 		now := time.Now().UTC()
 		for _, slot := range slots {
 			lines, err := tails[slot].Poll()
 			if err != nil {
-				return fmt.Errorf("slot %d log: %w", slot, err)
+				return fail("log read failed", fmt.Errorf("slot %d log: %w", slot, err))
 			}
 			for _, line := range lines {
 				if signal, ok := arealog.ParseGeneration(line, slot, now); ok {
@@ -174,6 +199,10 @@ func main() {
 	}
 	paths, err := resolveLogs(roster, logs, exes)
 	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	if err := verifyProcessBindings(roster, paths); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}

@@ -30,6 +30,13 @@ type Engine struct {
 
 func (e *Engine) SetLeaderName(name string) { e.leaderName = strings.TrimSpace(name) }
 
+func (e *Engine) Stop(reason string) {
+	if e.stopped == "" {
+		e.stopped = reason
+	}
+	e.coordinator.ResetFollow()
+}
+
 // ObserveParty latches a stop. A later position or area update cannot resume
 // following; restarting the session requires an explicit operator action.
 func (e *Engine) ObserveParty(event partylog.Event) bool {
@@ -54,8 +61,7 @@ func (e *Engine) ObserveParty(event partylog.Event) bool {
 	if reason == "" {
 		return false
 	}
-	e.stopped = reason
-	e.coordinator.ResetFollow()
+	e.Stop(reason)
 	return true
 }
 
