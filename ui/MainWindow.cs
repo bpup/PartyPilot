@@ -158,6 +158,7 @@ public sealed class MainWindow : Window
     private readonly TextBlock _followStatus = new();
     private readonly TextBox _radarScale = new();
     private readonly TextBox[] _radarTerrainPaths = new TextBox[3];
+    private readonly CheckBox _radarAutoTerrain = new();
     private readonly TextBox _radarHotkeyText = new();
     private readonly TextBlock _radarHotkeyStatus = new();
     private readonly RadarHotkeyPreferenceStore _radarHotkeyPreferences = new();
@@ -1065,6 +1066,9 @@ public sealed class MainWindow : Window
         _radarScale.HorizontalAlignment = HorizontalAlignment.Left;
         _radarScale.TextChanged += (_, _) => UpdateRadarControls();
         panel.Children.Add(_radarScale);
+        _radarAutoTerrain.Content = "自动查找本次传感器的候选地形采集（实验性）";
+        _radarAutoTerrain.IsChecked = false;
+        panel.Children.Add(_radarAutoTerrain);
         panel.Children.Add(Label("候选地形采集文件（可选；需在游戏中核对区域与地图方向）", 12, MutedBrush));
         for (var index = 0; index < _radarTerrainPaths.Length; index++)
         {
@@ -1775,13 +1779,15 @@ public sealed class MainWindow : Window
                     throw new InvalidDataException($"客户端 {index + 1} 的候选地形文件或进程身份无效。");
                 captures.Add(capture.ProcessId, capture);
             }
-            var session = RadarSession.Start(_launchedClients, scale, _radarHotkey, captures);
+            var catalog = _radarAutoTerrain.IsChecked == true
+                ? new RadarTerrainCatalog(RadarTerrainCatalog.SensorDirectory) : null;
+            var session = RadarSession.Start(_launchedClients, scale, _radarHotkey, captures, catalog);
             session.Ended += RadarEnded;
             session.FrameReceived += RadarFrameReceived;
             _radar = session;
-            _radarStatus.Text = captures.Count == 0
+            _radarStatus.Text = captures.Count == 0 && catalog is null
                 ? "雷达已打开；等待各游戏进程的只读标记。失焦或样本过期会隐藏标记。"
-                : "雷达已打开；候选地形仅在进程、区域与角色格坐标均匹配时显示，游戏内地图方向待核对。";
+                : "雷达已打开；候选地形会在进程、区域与角色格坐标均匹配时显示，游戏内地图方向待核对。";
         }
         catch (Exception exception)
         {
@@ -1800,7 +1806,7 @@ public sealed class MainWindow : Window
     {
         _radarStatus.Text = $"已收到游戏进程 {pid} 的 {count} 个实体标记；" +
             (terrainVisible ? "候选地形已绘制，游戏内地图方向待核对。" :
-                "候选地形未匹配或未填写；仅当前游戏窗口在前台时显示标记。");
+                "候选地形尚未匹配；仅当前游戏窗口在前台时显示标记。");
     }
 
     private async Task StopRadarAsync()

@@ -19,7 +19,7 @@ public sealed class RadarOverlayWindow : Window
     private readonly LaunchedClient _client;
     private readonly double _scale;
     private readonly RadarVisibility _visibility;
-    private readonly RadarTerrainCapture? _terrain;
+    private RadarTerrainCapture? _terrain;
     private readonly bool _renderOnly;
     private readonly Canvas _canvas = new();
     private readonly DispatcherTimer _positionTimer = new() { Interval = TimeSpan.FromMilliseconds(50) };
@@ -86,6 +86,13 @@ public sealed class RadarOverlayWindow : Window
         if (frame.ProcessId != _client.Pid) return;
         _frame = frame;
         Draw();
+    }
+
+    public void Apply(RadarFrame frame, RadarTerrainCapture? terrain)
+    {
+        if (frame.ProcessId != _client.Pid) return;
+        _terrain = terrain;
+        Apply(frame);
     }
 
     private void Draw()

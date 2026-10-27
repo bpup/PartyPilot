@@ -58,16 +58,29 @@ internal static class RadarTerrainCaptureSmoke
                 projected[(1 * 4 + 2) * 4 + 3] != 72 ||
                 projected[(1 * 4 + 0) * 4 + 3] != 0)
                 throw new Exception("Radar terrain preview lost blocked, walkable, or outside-map pixels.");
+            var autoDirectory = Path.Combine(directory, "auto");
+            Directory.CreateDirectory(autoDirectory);
+            var catalog = new RadarTerrainCatalog(autoDirectory);
+            var scanAt = DateTime.UtcNow;
+            if (catalog.FindMatching(matching, scanAt) is not null)
+                throw new Exception("Radar found terrain before the sensor captured it.");
+            File.Copy(dataPath, Path.Combine(autoDirectory, "capture.packed"));
+            File.Copy(metadataPath, Path.Combine(autoDirectory, "terrain-123-test.json"));
+            if (catalog.FindMatching(matching, scanAt.AddSeconds(1)) is not null ||
+                catalog.FindMatching(matching, scanAt.AddSeconds(3)) is not { } discovered ||
+                !discovered.Matches(matching) ||
+                catalog.FindMatching(matching with { AreaHash = 43 }, scanAt.AddSeconds(4)) is not null)
+                throw new Exception("Radar did not discover a new matching capture or reject a new area.");
             var terrainWindow = new RadarOverlayWindow(new LaunchedClient(123, 1, "C:/Game.exe"),
-                2, new RadarVisibility(), capture, renderOnly: true);
+                2, new RadarVisibility(), renderOnly: true);
             terrainWindow.Show();
-            terrainWindow.Apply(matching);
+            terrainWindow.Apply(matching, discovered);
             terrainWindow.UpdateLayout();
             if (!terrainWindow.TerrainVisible ||
                 terrainWindow.GetLogicalDescendants().OfType<Image>().Count() != 1 ||
                 terrainWindow.CaptureRenderedFrame() is null)
                 throw new Exception("Matching terrain was not drawn behind radar markers.");
-            terrainWindow.Apply(matching with { AreaHash = 43 });
+            terrainWindow.Apply(matching with { AreaHash = 43 }, null);
             if (terrainWindow.TerrainVisible ||
                 terrainWindow.GetLogicalDescendants().OfType<Image>().Any())
                 throw new Exception("Radar drew candidate terrain for a different area.");

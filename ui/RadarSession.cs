@@ -13,6 +13,8 @@ internal sealed class RadarSession : IAsyncDisposable
     private readonly Dictionary<int, RadarLandmarkCache> _landmarks = new();
     private readonly Dictionary<int, nint> _gameHandles;
     private readonly RadarVisibility _visibility;
+    private readonly IReadOnlyDictionary<int, RadarTerrainCapture>? _manualTerrains;
+    private readonly RadarTerrainCatalog? _terrainCatalog;
     private readonly DispatcherTimer _hotkeyTimer = new() { Interval = TimeSpan.FromMilliseconds(25) };
     private RadarHotkeyBinding _hotkey;
     private readonly Task _receiveTask;
@@ -22,7 +24,9 @@ internal sealed class RadarSession : IAsyncDisposable
     public event Action<int, int, bool>? FrameReceived;
 
     private RadarSession(UdpClient receiver, Dictionary<int, RadarOverlayWindow> windows,
-        Dictionary<int, nint> gameHandles, RadarHotkeyBinding hotkey, RadarVisibility visibility)
+        Dictionary<int, nint> gameHandles, RadarHotkeyBinding hotkey, RadarVisibility visibility,
+        IReadOnlyDictionary<int, RadarTerrainCapture>? manualTerrains,
+        RadarTerrainCatalog? terrainCatalog)
     {
         _receiver = receiver;
         _windows = windows;
@@ -30,6 +34,8 @@ internal sealed class RadarSession : IAsyncDisposable
         _gameHandles = gameHandles;
         _hotkey = hotkey;
         _visibility = visibility;
+        _manualTerrains = manualTerrains;
+        _terrainCatalog = terrainCatalog;
         foreach (var window in windows.Values) window.TargetLost += OnTargetLost;
         _hotkeyTimer.Tick += OnHotkeyTimer;
         _hotkeyTimer.Start();
@@ -54,7 +60,8 @@ internal sealed class RadarSession : IAsyncDisposable
     }
 
     public static RadarSession Start(IReadOnlyList<LaunchedClient> clients, double scale,
-        RadarHotkeyBinding hotkey, IReadOnlyDictionary<int, RadarTerrainCapture>? terrains = null)
+        RadarHotkeyBinding hotkey, IReadOnlyDictionary<int, RadarTerrainCapture>? terrains = null,
+        RadarTerrainCatalog? terrainCatalog = null)
     {
         if (!OperatingSystem.IsWindows() || clients.Count is < 1 or > 3 ||
             clients.Any(client => client.Pid <= 0 || client.WindowHandle == 0) ||
@@ -77,7 +84,7 @@ internal sealed class RadarSession : IAsyncDisposable
             }
             session = new RadarSession(receiver, windows,
                 clients.ToDictionary(client => client.Pid, client => (nint)client.WindowHandle),
-                hotkey, visibility);
+                hotkey, visibility, terrains, terrainCatalog);
             foreach (var window in windows.Values) window.Show();
             if (windows.Values.Any(window => window.TargetIsLost))
                 throw new InvalidOperationException("A bound game window disappeared before radar startup completed.");
@@ -107,11 +114,15 @@ internal sealed class RadarSession : IAsyncDisposable
                 {
                     if (!RadarFrames.TryParse(packet.Buffer, pid, DateTime.UtcNow, out var frame) || frame == null)
                         continue;
+                    RadarTerrainCapture? terrain = null;
+                    if (_manualTerrains is not null && _manualTerrains.TryGetValue(pid, out var manual) &&
+                        manual.Matches(frame)) terrain = manual;
+                    terrain ??= _terrainCatalog?.FindMatching(frame, DateTime.UtcNow);
                     Dispatcher.UIThread.Post(() =>
                     {
                         if (_disposed) return;
                         var enriched = _landmarks[pid].Apply(frame);
-                        window.Apply(enriched);
+                        window.Apply(enriched, terrain);
                         FrameReceived?.Invoke(pid, enriched.Markers.Count, window.TerrainVisible);
                     });
                     break;
