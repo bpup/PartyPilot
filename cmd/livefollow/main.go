@@ -600,7 +600,7 @@ func main() {
 		if *orderedInput {
 			flaskSession, err = live.NewOrderedFlaskSession(engine, *maxAge)
 		} else {
-			flaskSession, err = live.NewFlaskSession(roster, *maxAge)
+			flaskSession, err = live.NewFlaskSession(engine, *maxAge)
 		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)

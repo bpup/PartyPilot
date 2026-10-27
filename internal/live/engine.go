@@ -524,6 +524,28 @@ func (e *Engine) currentLife(slot int, motion telemetry.Sample, area arealog.Sig
 	return vital.Life
 }
 
+// flaskActionReady binds a separate-client resource reading to a fresh
+// process, motion frame and live area generation before it can request input.
+func (e *Engine) flaskActionReady(slot int, now time.Time) bool {
+	if e.stopped != "" {
+		return false
+	}
+	motion, hasMotion := e.samples[slot]
+	vital, hasVital := e.vitals[slot]
+	area, hasArea := e.areas[slot]
+	if !hasMotion || !hasVital || !hasArea || area.Origin != "live" ||
+		area.ObservedAt.After(now) || now.Sub(area.ObservedAt) > e.logAge ||
+		motion.SeenUTC.Before(area.ObservedAt) || motion.SeenUTC.After(now) ||
+		motion.ReceivedAt.After(now) || now.Sub(motion.ReceivedAt) > e.sampleAge ||
+		vital.SeenUTC.Before(area.ObservedAt) || vital.SeenUTC.After(now) ||
+		vital.ReceivedAt.After(now) || now.Sub(vital.ReceivedAt) > e.sampleAge ||
+		motion.AreaHash == 0 || vital.AreaHash == 0 ||
+		motion.AreaHash != vital.AreaHash || vital.Life == nil || *vital.Life <= 0 {
+		return false
+	}
+	return true
+}
+
 // orderedVitalActionReady requires a fresh, area-bound motion and resource
 // observation for every local role before a slow frame can request input.
 func (e *Engine) orderedVitalActionReady(processID int, now time.Time) bool {

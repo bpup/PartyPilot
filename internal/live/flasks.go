@@ -37,16 +37,19 @@ func NewOrderedFlaskSession(liveEngine *Engine, maxAge time.Duration) (*FlaskSes
 	return session, nil
 }
 
-func NewFlaskSession(roster map[int]int, maxAge time.Duration) (*FlaskSession, error) {
-	if len(roster) < 1 || len(roster) > 3 || maxAge <= 0 {
+func NewFlaskSession(liveEngine *Engine, maxAge time.Duration) (*FlaskSession, error) {
+	if liveEngine == nil || len(liveEngine.pidToRoles) < 1 ||
+		len(liveEngine.pidToRoles) > 3 || maxAge <= 0 {
 		return nil, errors.New("flasks require 1–3 bound clients and positive sample age")
 	}
 	session := &FlaskSession{engine: flask.New(), pidSlot: make(map[int]int),
-		menuOpen: make(map[int]bool), seen: make(map[int]time.Time), maxAge: maxAge}
-	for slot, pid := range roster {
-		if slot < 1 || slot > 6 || pid <= 0 || session.pidSlot[pid] != 0 {
-			return nil, errors.New("invalid or duplicate flask process binding")
+		live: liveEngine, menuOpen: make(map[int]bool), seen: make(map[int]time.Time),
+		maxAge: maxAge}
+	for pid, roles := range liveEngine.pidToRoles {
+		if pid <= 0 || len(roles) != 1 || roles[0].Slot < 1 || roles[0].Slot > 6 {
+			return nil, errors.New("separate-client flasks require one bound role per process")
 		}
+		slot := roles[0].Slot
 		session.pidSlot[pid] = slot
 		session.menuOpen[slot] = true // Unknown is held until the bridge reports a state.
 	}
@@ -76,6 +79,9 @@ func (session *FlaskSession) ObserveSample(sample telemetry.Sample, now time.Tim
 		return nil, nil
 	}
 	session.seen[slot] = sample.SeenUTC
+	if !session.live.flaskActionReady(slot, now) {
+		return nil, nil
+	}
 	if sample.Life == nil || sample.LifeMax == nil || *sample.Life <= 0 || *sample.LifeMax <= 0 ||
 		sample.Mana == nil || sample.ManaMax == nil || *sample.ManaMax <= 0 {
 		return nil, nil

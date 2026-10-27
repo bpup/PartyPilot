@@ -144,12 +144,13 @@ func TestIndividualStopArguments(t *testing.T) {
 }
 
 func TestMenuInputRequiresBoundPlayerAndOpenStream(t *testing.T) {
-	session, err := live.NewFlaskSession(map[int]int{1: 101, 2: 202}, time.Second)
+	engine, err := live.New(map[int]int{1: 101, 2: 202}, 1,
+		follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
-	engine, err := live.New(map[int]int{1: 101, 2: 202}, 1,
-		follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}, time.Minute)
+	defer engine.Close()
+	session, err := live.NewFlaskSession(engine, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
