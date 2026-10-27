@@ -49,6 +49,8 @@ jobs:
       - name: Desktop headless checks
         shell: pwsh
         run: dotnet run --project ui-smoke/PartyPilot.Desktop.Smoke.csproj -c Release -- "$env:RUNNER_TEMP\PartyPilot-ui-preview.png"
+      - name: Desktop native overlay check
+        run: dotnet run --project ui-native-smoke/PartyPilot.Desktop.NativeSmoke.csproj -c Release
       - name: Save desktop previews
         if: success()
         uses: actions/upload-artifact@v4
