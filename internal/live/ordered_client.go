@@ -57,6 +57,26 @@ type OrderedLocalPlayer struct {
 const unverifiedExileCoreSlotSource = "unverified_exilecore_local_slot_candidate"
 const experimentalStaticVectorSource = "experimental_static_vector_0.6.17"
 
+type orderedIdentity struct {
+	areaHash    uint32
+	areaAddress string
+	addresses   []string
+}
+
+func (identity orderedIdentity) matches(frame OrderedClientFrame) bool {
+	if identity.areaHash != frame.AreaHash ||
+		identity.areaAddress != frame.AreaInstanceAddress ||
+		len(identity.addresses) != len(frame.OrderedAddresses) {
+		return false
+	}
+	for index, address := range identity.addresses {
+		if address != frame.OrderedAddresses[index] {
+			return false
+		}
+	}
+	return true
+}
+
 func validStaticVectorPointer(value string) bool {
 	if !strings.HasPrefix(value, "0x") || len(value) <= 2 {
 		return false
@@ -128,6 +148,15 @@ func (e *Engine) ObserveOrderedClient(frame OrderedClientFrame) bool {
 		e.invalidateOrderedIfCurrent(roles, frame)
 		return false
 	}
+	if frame.PlayerOrderSource == experimentalStaticVectorSource {
+		if pinned, exists := e.orderedIdentities[frame.ProcessID]; exists &&
+			pinned.areaHash == frame.AreaHash &&
+			pinned.areaAddress == frame.AreaInstanceAddress &&
+			!pinned.matches(frame) {
+			e.invalidateOrderedIfCurrent(roles, frame)
+			return false
+		}
+	}
 	byLocal := make(map[int]OrderedLocalPlayer, len(frame.Players))
 	for _, player := range frame.Players {
 		if player.LocalPlayer < 1 || player.LocalPlayer > len(roles) ||
@@ -166,6 +195,12 @@ func (e *Engine) ObserveOrderedClient(frame OrderedClientFrame) bool {
 	}
 	for _, role := range roles {
 		e.storeSample(role.Slot, updates[role.Slot])
+	}
+	if frame.PlayerOrderSource == experimentalStaticVectorSource {
+		e.orderedIdentities[frame.ProcessID] = orderedIdentity{
+			areaHash: frame.AreaHash, areaAddress: frame.AreaInstanceAddress,
+			addresses: append([]string(nil), frame.OrderedAddresses...),
+		}
 	}
 	return true
 }

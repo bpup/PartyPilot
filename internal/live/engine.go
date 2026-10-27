@@ -27,6 +27,7 @@ type Engine struct {
 	sampleAge             time.Duration
 	pidToSlot             map[int]int
 	pidToRoles            map[int][]RoleBinding
+	orderedIdentities     map[int]orderedIdentity
 	slotToPID             map[int]int
 	slots                 []int
 	samples               map[int]telemetry.Sample
@@ -259,7 +260,8 @@ func NewWithBindings(bindings []RoleBinding, leader int, config follow.Config,
 	}
 	return &Engine{coordinator: coordinator, leader: leader, baseLeader: leader,
 		logAge: logAge, sampleAge: config.MaxAge, memberNames: make(map[int]string),
-		pidToSlot: pidToSlot, pidToRoles: pidToRoles, slotToPID: slotToPID,
+		pidToSlot: pidToSlot, pidToRoles: pidToRoles,
+		orderedIdentities: make(map[int]orderedIdentity), slotToPID: slotToPID,
 		slots: slots, samples: make(map[int]telemetry.Sample),
 		vitals: make(map[int]telemetry.Sample), strictVitals: make(map[int]bool),
 		areas: make(map[int]arealog.Signal)}, nil

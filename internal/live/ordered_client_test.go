@@ -221,6 +221,68 @@ func TestOrderedMotionDoesNotRequireSlowVitals(t *testing.T) {
 	}
 }
 
+func TestExperimentalOrderedRolesStopOnSameAreaReorder(t *testing.T) {
+	now := time.Now().UTC()
+	engine, err := NewWithBindings([]RoleBinding{{1, 1, 1, 101}, {2, 1, 2, 101}},
+		1, follow.Config{StopDistance: 2, ResumeDistance: 3,
+			CatchUpDistance: 10, MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	if !engine.ObserveClientArea(101, arealog.Signal{AreaID: "G2_4", Seed: 123,
+		ObservedAt: now, Origin: "live"}) {
+		t.Fatal("client area was not applied")
+	}
+	frame := OrderedClientFrame{ProcessID: 101, SeenUTC: now, ReceivedAt: now,
+		TickMS: now.UnixMilli(), AreaHash: 55, AreaInstanceAddress: "0x100000",
+		VectorHeaderAddress: "0x100100", OrderedAddresses: []string{"0x200000", "0x300000"},
+		CoordinateSpace: "world", PlayerOrderReliable: true,
+		PlayerOrderSource: experimentalStaticVectorSource,
+		Players: []OrderedLocalPlayer{{LocalPlayer: 1, X: 30 * worldPerGridUnit},
+			{LocalPlayer: 2, X: 0}}}
+	if !engine.ObserveOrderedClient(frame) || engine.Step(now)[2].State != follow.CatchingUp {
+		t.Fatal("initial ordered pair did not follow")
+	}
+	swapped := frame
+	swapped.SeenUTC = now.Add(time.Millisecond)
+	swapped.ReceivedAt = swapped.SeenUTC
+	swapped.TickMS++
+	swapped.OrderedAddresses = []string{"0x300000", "0x200000"}
+	swapped.Players = []OrderedLocalPlayer{{LocalPlayer: 1, X: 0},
+		{LocalPlayer: 2, X: 30 * worldPerGridUnit}}
+	if engine.ObserveOrderedClient(swapped) ||
+		engine.Step(swapped.SeenUTC)[2].State != follow.Waiting {
+		t.Fatal("same-area role reorder kept follower movement active")
+	}
+	swapped.SeenUTC = now.Add(2 * time.Millisecond)
+	swapped.ReceivedAt = swapped.SeenUTC
+	swapped.TickMS++
+	if engine.ObserveOrderedClient(swapped) {
+		t.Fatal("repeated reordered frame silently became the new role binding")
+	}
+	restored := frame
+	restored.SeenUTC = now.Add(3 * time.Millisecond)
+	restored.ReceivedAt = restored.SeenUTC
+	restored.TickMS += 3
+	if !engine.ObserveOrderedClient(restored) ||
+		engine.Step(restored.SeenUTC)[2].State != follow.CatchingUp {
+		t.Fatal("original role order did not recover")
+	}
+	if !engine.ObserveClientArea(101, arealog.Signal{AreaID: "G2_5", Seed: 456,
+		ObservedAt: now.Add(4 * time.Millisecond), Origin: "live"}) {
+		t.Fatal("new client area was not applied")
+	}
+	swapped.SeenUTC = now.Add(5 * time.Millisecond)
+	swapped.ReceivedAt = swapped.SeenUTC
+	swapped.TickMS += 3
+	swapped.AreaHash = 56
+	swapped.AreaInstanceAddress = "0x110000"
+	if !engine.ObserveOrderedClient(swapped) {
+		t.Fatal("new area instance could not establish its own ordered addresses")
+	}
+}
+
 func TestUnverifiedSlotCandidateCannotBePromotedByReliableFlag(t *testing.T) {
 	now := time.Now().UTC()
 	engine, err := NewWithBindings([]RoleBinding{{1, 1, 1, 101}, {2, 1, 2, 101}},
