@@ -184,6 +184,12 @@ internal static class RadarTerrainCaptureSmoke
             if (!RadarTerrainCapture.TryLoad(metadataPath, out var unclipped) || unclipped is null ||
                 !unclipped.Renderable(0, 0) || !unclipped.Renderable(127, 63))
                 throw new Exception("Radar clipped terrain without a 1..4 ramp value.");
+            data = Enumerable.Repeat((byte)0xFF, 4096).ToArray();
+            data[0] = 0x11;
+            File.WriteAllBytes(dataPath, data);
+            File.WriteAllText(metadataPath, Metadata("11"));
+            if (RadarTerrainCapture.TryLoad(metadataPath, out _))
+                throw new Exception("Radar accepted a manually bound map with invalid terrain values.");
         }
         finally
         {

@@ -457,6 +457,17 @@ void TestPackedTerrainProbe()
         Read(address, size);
     Require(PackedTerrainProbe.Scan(area, 10, 20, ReadShortHeader).Status ==
         "candidate_patch_observed", "A readable 1 KiB area header was rejected.");
+    var lateHeader = new byte[1024];
+    const int lateTuple = 760;
+    BitConverter.GetBytes(4L).CopyTo(lateHeader, lateTuple);
+    BitConverter.GetBytes(4L).CopyTo(lateHeader, lateTuple + 8);
+    BitConverter.GetBytes(packedStart).CopyTo(lateHeader, lateTuple + 184);
+    BitConverter.GetBytes(packedStart + packed.Length).CopyTo(lateHeader, lateTuple + 192);
+    BitConverter.GetBytes(bytesPerRow).CopyTo(lateHeader, lateTuple + 184 + 24);
+    byte[]? ReadLateHeader(long address, int size) =>
+        address == area ? size <= 1024 ? lateHeader : null : Read(address, size);
+    Require(PackedTerrainProbe.Scan(area, 10, 20, ReadLateHeader).Status ==
+        "candidate_patch_observed", "A candidate near the end of a partial area header was skipped.");
     var anchored = PackedTerrainProbe.ScanAnchors([
         new("state_pointer_static_656", 0),
         new("ingame_data_address", area)

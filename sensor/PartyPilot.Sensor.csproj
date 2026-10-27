@@ -7,6 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../common/PackedTerrainValueProfile.cs" Link="PackedTerrainValueProfile.cs" />
     <Reference Include="ExileCore2">
       <HintPath>$(EXILECORE2_DIR)/ExileCore2.dll</HintPath>
       <Private>false</Private>

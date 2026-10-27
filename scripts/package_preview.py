@@ -73,7 +73,8 @@ def check_binaries_current() -> None:
         return [path for path in (ROOT / folder).rglob("*.cs")
                 if "obj" not in path.parts and "bin" not in path.parts]
 
-    shared = [*ROOT.glob("data/*.json"), ROOT / "sensor/QuestTileRules.cs",
+    shared = [*ROOT.glob("data/*.json"), ROOT / "common/PackedTerrainValueProfile.cs",
+              ROOT / "sensor/QuestTileRules.cs",
               ROOT / "sensor/GeneratedRoomClassifier.cs"]
     binaries = {
         ROOT / "release/desktop/PartyPilot.Desktop.exe":

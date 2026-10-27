@@ -77,7 +77,7 @@ internal static class PackedTerrainProbe
         if (header is null) return new Result("header_unreadable", null);
         Candidate? selected = null;
         var ambiguous = false;
-        for (var offset = 0; offset + 184 + 144 + 4 <= header.Length; offset += 8)
+        for (var offset = 0; offset + 184 + 16 <= header.Length; offset += 8)
         {
             var tilesX = BitConverter.ToInt64(header, offset);
             var tilesY = BitConverter.ToInt64(header, offset + 8);
@@ -90,6 +90,7 @@ internal static class PackedTerrainProbe
             if (length is < 4096 or > MaxPackedBytes) continue;
             for (var relative = 24; relative <= 144; relative += 4)
             {
+                if (vector + relative + 4 > header.Length) break;
                 var bytesPerRow = BitConverter.ToInt32(header, vector + relative);
                 if (bytesPerRow <= 0 || length % bytesPerRow != 0) continue;
                 var height = length / bytesPerRow;
@@ -100,15 +101,10 @@ internal static class PackedTerrainProbe
                     gridX >= width || gridY >= height) continue;
                 var sample = read(start, Math.Min(16 * 1024, (int)length));
                 if (sample == null || sample.Length != Math.Min(16 * 1024, (int)length)) continue;
-                var inRange = 0;
-                foreach (var value in sample)
-                {
-                    if ((value & 15) <= 5) inRange++;
-                    if ((value >> 4) <= 5) inRange++;
-                }
-                if (inRange * 5 < sample.Length * 8) continue; // at least 80% of nibbles
+                var (sampledBytes, inRange) = PackedTerrainValueProfile.Sample(sample);
+                if (!PackedTerrainValueProfile.IsAccepted(sampledBytes, inRange)) continue;
                 var candidate = new Candidate(start, bytesPerRow, (int)height,
-                    sample.Length * 2, inRange, offset - 24, (int)tilesX, (int)tilesY);
+                    sampledBytes * 2, inRange, offset - 24, (int)tilesX, (int)tilesY);
                 if (selected != null && selected != candidate) ambiguous = true;
                 else selected = candidate;
                 break;

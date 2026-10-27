@@ -167,6 +167,9 @@ public sealed class RadarTerrainCapture
             if (data.Length != packedBytes ||
                 !CryptographicOperations.FixedTimeEquals(
                     Convert.FromHexString(sha), SHA256.HashData(data))) return false;
+            var profile = PackedTerrainValueProfile.Sample(data);
+            if (!PackedTerrainValueProfile.IsAccepted(profile.Bytes, profile.InRangeNibbles))
+                return false;
             var patchWidth = -1;
             var rowNumber = 0;
             foreach (var value in patchRows.EnumerateArray())
