@@ -168,6 +168,15 @@ public sealed class RadarLandmarkCache
     private string? _areaAddress;
     private DateTime _lastSeenUtc;
 
+    public bool TryApply(RadarFrame frame, out RadarFrame? enriched)
+    {
+        enriched = null;
+        if (_lastSeenUtc != default && frame.SeenUtc < _lastSeenUtc)
+            return false;
+        enriched = Apply(frame);
+        return true;
+    }
+
     public RadarFrame Apply(RadarFrame frame)
     {
         if (_lastSeenUtc != default && frame.SeenUtc < _lastSeenUtc)

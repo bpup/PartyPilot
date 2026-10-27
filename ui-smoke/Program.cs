@@ -357,6 +357,12 @@ if (retained.Markers.Count != 1 || retained.Markers[0].Category != "waypoint" ||
     throw new Exception("Radar retained transient markers or landmarks after an area change.");
 var sameHashNewAddress = new RadarLandmarkCache();
 sameHashNewAddress.Apply(radarFrame);
+if (sameHashNewAddress.TryApply(radarFrame with
+    { SeenUtc = radarFrame.SeenUtc.AddMilliseconds(-1), AreaHash = 99, Markers = [] }, out _) ||
+    !sameHashNewAddress.TryApply(radarFrame with
+    { SeenUtc = radarFrame.SeenUtc.AddMilliseconds(1), Markers = [] }, out var orderedRadar) ||
+    orderedRadar?.Markers.Count != 1)
+    throw new Exception("An older radar packet replaced a newer overlay frame.");
 if (sameHashNewAddress.Apply(radarFrame with
     { AreaAddress = "0xABCD00", SeenUtc = radarFrame.SeenUtc.AddMilliseconds(1), Markers = [] }).Markers.Count != 0 ||
     sameHashNewAddress.Apply(radarFrame with

@@ -130,7 +130,8 @@ internal sealed class RadarSession : IAsyncDisposable
                     Dispatcher.UIThread.Post(() =>
                     {
                         if (_disposed) return;
-                        var enriched = _landmarks[pid].Apply(frame);
+                        if (!_landmarks[pid].TryApply(frame, out var enriched) || enriched is null)
+                            return;
                         window.Apply(enriched, terrain);
                         FrameReceived?.Invoke(pid, enriched.Markers.Count, window.TerrainVisible);
                     });
