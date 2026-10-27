@@ -259,6 +259,7 @@ TestSkillBindTable();
 SkillBindSourceScannerTests.Run();
 AreaEntityMapSnapshotReaderTests.Run();
 AreaEntityMapLocatorTests.Run();
+DormantNavigationSurveyTests.Run();
 Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
     RadarClassifier.Category("Metadata/MiscellaneousObjects/Waypoint") == "waypoint" &&
     RadarClassifier.Category("Metadata/Effects/QuestMarker") == "quest" &&

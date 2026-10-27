@@ -33,6 +33,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     private DateTime _lastRadarSentUtc;
     private DateTime _lastDormantMapScanUtc;
     private object? _dormantMapObservation;
+    private readonly DormantNavigationSurvey _dormantSurvey = new();
     private long _dormantMapStateAddress;
     private long _dormantMapDataAddress;
     private long _dormantMapLocalAddress;
@@ -61,6 +62,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             _monsterTrackerAreaHash = null;
             _dormantMapObservation = null;
             _lastDormantMapScanUtc = default;
+            _dormantSurvey.Reset();
             return;
         }
         var now = DateTime.UtcNow;
@@ -284,6 +286,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         {
             _dormantMapObservation = null;
             _lastDormantMapScanUtc = default;
+            _dormantSurvey.Reset();
         }
         else if (_dormantMapStateAddress != frameStateAddress ||
                  _dormantMapDataAddress != frameDataAddress ||
@@ -292,6 +295,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         {
             _dormantMapObservation = null;
             _lastDormantMapScanUtc = default;
+            _dormantSurvey.Reset();
         }
         if (Settings.DiagnoseDormantAreaMap.Value &&
             now - _lastDormantMapScanUtc >= TimeSpan.FromSeconds(2))
@@ -311,42 +315,40 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 var map = AreaEntityMapLocator.Locate(frameStateAddress,
                     player!.Id, frameLocalAddress, ReadMap);
                 if (!SameAreaAndPlayer())
+                {
+                    _dormantSurvey.Reset();
                     _dormantMapObservation = new { Status = "game_identity_changed" };
+                }
                 else
                 {
-                    var samples = map.Sleeping.Take(16).Select(entry => new
+                    var samples = map.Sleeping.Take(16).Select(entry =>
                     {
-                        EntityId = entry.Id,
-                        Address = FormatAddress(entry.Address),
-                        Path = RawMetadataPathReader.Read(entry.Address, ReadMap),
-                        Position = RawRenderPositionReader.Read(entry.Address, ReadMap)
-                    }).ToArray();
-                    var navigation = new List<object>();
-                    foreach (var entry in map.Sleeping.Take(256))
-                    {
+                        string? path = null;
+                        RawRenderPositionReader.Position? position = null;
                         try
                         {
-                            var path = RawMetadataPathReader.Read(entry.Address, ReadMap);
-                            var category = RadarClassifier.Category(path);
-                            if (path == null || category == null || !RadarClassifier.IsNavigation(category))
-                                continue;
-                            var candidatePosition = RawRenderPositionReader.Read(entry.Address, ReadMap);
-                            if (candidatePosition == null) continue;
-                            navigation.Add(new
-                            {
-                                EntityId = entry.Id,
-                                Category = category,
-                                Path = path,
-                                Label = category == "quest" ? RadarClassifier.QuestLabel(path) :
-                                    category == "boss" ? RadarClassifier.BossLabel(path) : null,
-                                X = candidatePosition.WorldX,
-                                Y = candidatePosition.WorldY,
-                                Z = candidatePosition.WorldZ
-                            });
-                            if (navigation.Count == 24) break;
+                            path = RawMetadataPathReader.Read(entry.Address, ReadMap);
+                            position = RawRenderPositionReader.Read(entry.Address, ReadMap);
                         }
-                        catch { /* A malformed entity cannot become a navigation marker. */ }
-                    }
+                        catch { /* Keep this diagnostic sample without asserting its contents. */ }
+                        return new
+                        {
+                            EntityId = entry.Id,
+                            Address = FormatAddress(entry.Address),
+                            Path = path,
+                            Position = position
+                        };
+                    }).ToArray();
+                    var navigation = map.Status == "candidate_unverified_build"
+                        ? _dormantSurvey.Capture(
+                            $"{frameProcessId}:{frameStateAddress:X}:{frameDataAddress:X}:" +
+                            $"{frameLocalAddress:X}:{frameAreaHash}:{map.AreaAddress}:{map.EntityListOffset}",
+                            map.Sleeping,
+                            address => RawMetadataPathReader.Read(address, ReadMap),
+                            address => RawRenderPositionReader.Read(address, ReadMap),
+                            render.Pos.X, render.Pos.Y)
+                        : null;
+                    if (navigation == null) _dormantSurvey.Reset();
                     _dormantMapObservation = new
                     {
                         SeenUtc = now,
@@ -357,14 +359,25 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                         SleepingCount = map.Sleeping.Length,
                         Samples = samples,
                         LocalPosition = RawRenderPositionReader.Read(frameLocalAddress, ReadMap),
-                        NavigationCandidates = navigation,
-                        NavigationScanTruncated = map.Sleeping.Length > 256
+                        NavigationCandidates = navigation?.NavigationCandidates ?? [],
+                        NavigationBatchScanned = navigation?.BatchScanned ?? 0,
+                        NavigationTotalEntities = navigation?.TotalEntities ?? 0,
+                        NavigationSweepCompleted = navigation?.SweepCompleted ?? false,
+                        NavigationRememberedCount = navigation?.RememberedCount ?? 0,
+                        NavigationOutputTruncated = navigation?.OutputTruncated ?? false
                     };
                     if (!SameAreaAndPlayer())
+                    {
+                        _dormantSurvey.Reset();
                         _dormantMapObservation = new { Status = "game_identity_changed" };
+                    }
                 }
             }
-            catch { _dormantMapObservation = new { Status = "scan_failed" }; }
+            catch
+            {
+                _dormantSurvey.Reset();
+                _dormantMapObservation = new { Status = "scan_failed" };
+            }
         }
         if (!Settings.DiagnoseRadarEntities.Value && _monsterTrackerAreaHash.HasValue)
         {

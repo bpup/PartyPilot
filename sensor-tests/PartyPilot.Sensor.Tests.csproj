@@ -38,5 +38,6 @@
     <Compile Include="../sensor/SkillBindSourceScanner.cs" Link="SkillBindSourceScanner.cs" />
     <Compile Include="../sensor/AreaEntityMapSnapshotReader.cs" Link="AreaEntityMapSnapshotReader.cs" />
     <Compile Include="../sensor/AreaEntityMapLocator.cs" Link="AreaEntityMapLocator.cs" />
+    <Compile Include="../sensor/DormantNavigationSurvey.cs" Link="DormantNavigationSurvey.cs" />
   </ItemGroup>
 </Project>
