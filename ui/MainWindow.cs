@@ -137,6 +137,7 @@ public sealed class MainWindow : Window
     private readonly CheckBox _closeRangeMirror = new();
     private readonly TextBox _closeMirrorDuration = new();
     private readonly CheckBox _classicCollisionDodge = new();
+    private readonly CheckBox _experimentalWarpClick = new();
     private readonly TextBlock _terrainBindingStatus = new();
     private readonly TextBox _followLeaderName = new();
     private readonly ComboBox[] _followTargets = new ComboBox[6];
@@ -1045,6 +1046,9 @@ public sealed class MainWindow : Window
         _followPauseKeyStatus.Foreground = MutedBrush;
         _followPauseKeyStatus.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(_followPauseKeyStatus);
+        _experimentalWarpClick.Content = "实验：P3/P4 跨区追 P1/P2 时识别头像和菜单并尝试传送（仅双客户端）";
+        _experimentalWarpClick.IsChecked = false;
+        panel.Children.Add(_experimentalWarpClick);
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
         _startFollow.Content = "开始跟随";
         _startFollow.Click += async (_, _) => await StartFollowAsync();
@@ -2438,6 +2442,8 @@ public sealed class MainWindow : Window
         _classicCollisionDodge.IsEnabled = _follow is null && !_busy &&
             _selectedTopology?.Id is ("2-split" or "3-three-singles") &&
             _classicSprintCatchUp.IsChecked == true;
+        _experimentalWarpClick.IsEnabled = _follow is null && !_busy &&
+            _selectedTopology?.Id == "4-balanced" && OperatingSystem.IsWindows();
         var valid = LiveFollowPlan.TryCreate(_followStop.Text, _followCatchup.Text,
             _followMaxAge.Text, _followLogAge.Text, _followLeaderName.Text, out _);
         if (_aggressiveBlinkCatchUp.IsChecked == true)
@@ -3257,8 +3263,10 @@ public sealed class MainWindow : Window
                 followerMirror: _followerMirror,
                 flaskSupportFile: _bridge.AutoFlaskEnabled ? flaskSupport.RuntimeFile : null,
                 flaskRulesFile: _bridge.AutoFlaskEnabled ? flaskRules.RuntimeFile : null,
-                flaskCustomFile: flaskCustom?.RuntimeFile);
+                flaskCustomFile: flaskCustom?.RuntimeFile,
+                experimentalWarpClick: _experimentalWarpClick.IsChecked == true);
             session.StatusChanged += FollowStatusChanged;
+            session.WarpStatusChanged += FollowWarpStatusChanged;
             session.Ended += FollowEnded;
             _follow = session;
             session.StartReading();
@@ -3286,7 +3294,10 @@ public sealed class MainWindow : Window
         {
             var requests = string.Join(" · ", frame.Handoffs.Select(item =>
                 $"客户端 {item.DestinationClient} 的 P{item.DriverPlayer} 需传送至 P{item.TargetPlayer}"));
-            _followStatus.Text = $"检测到跨区：{requests}；自动传送尚未接入，跨区自动方向已停止。";
+            _followStatus.Text = _experimentalWarpClick.IsChecked == true &&
+                frame.Handoffs.All(item => item.DestinationClient == 2 && item.TargetPlayer is 1 or 2)
+                ? $"检测到跨区：{requests}；正在尝试实验性视觉传送，跨区自动方向已停止。"
+                : $"检测到跨区：{requests}；自动传送未开启，跨区自动方向已停止。";
             return;
         }
         if (_selectedTopology?.Id is "3-three-singles" or "4-balanced" or
@@ -3325,6 +3336,9 @@ public sealed class MainWindow : Window
             _ => "等待新鲜位置、区域日志与队伍状态；自动方向已停止。"
         };
     }
+
+    private void FollowWarpStatusChanged(string detail) =>
+        _followStatus.Text = $"跨区视觉传送：{detail}";
 
     private async void FollowEnded(string reason)
     {
@@ -3366,6 +3380,7 @@ public sealed class MainWindow : Window
         try
         {
             session.StatusChanged -= FollowStatusChanged;
+            session.WarpStatusChanged -= FollowWarpStatusChanged;
             session.Ended -= FollowEnded;
             await session.DisposeAsync();
             _followStatus.Text = "跟随已停止，自动输入已撤销。";

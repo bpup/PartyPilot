@@ -5,6 +5,64 @@ internal static class ProcessPipelineSmoke
 {
     public static async Task RunAsync()
     {
+        const int visionWidth = 1280;
+        const int visionHeight = 720;
+        var portraitPixels = new byte[visionWidth * visionHeight * 4];
+        for (var y = 150; y < 195; y++)
+        for (var x = 4; x < 80; x++)
+        for (var channel = 0; channel < 3; channel++)
+            portraitPixels[(y * visionWidth + x) * 4 + channel] = (byte)(x % 3 == 0 ? 220 : 20);
+        for (var y = 270; y < 315; y++)
+        for (var x = 4; x < 80; x++)
+        for (var channel = 0; channel < 3; channel++)
+            portraitPixels[(y * visionWidth + x) * 4 + channel] = (byte)(x % 3 == 0 ? 220 : 20);
+        var portraits = PartyWarpVision.FindTwoPortraits(portraitPixels, visionWidth, visionHeight);
+        if (portraits is null || portraits.FirstY is < 150 or > 195 ||
+            portraits.SecondY is < 270 or > 315 ||
+            PartyWarpVision.FindTwoPortraits(new byte[portraitPixels.Length],
+                visionWidth, visionHeight) is not null)
+            throw new Exception($"Warp portrait detection did not require two live textured rows: {portraits}.");
+        var menuBefore = new byte[portraitPixels.Length];
+        var menuAfter = new byte[portraitPixels.Length];
+        for (var y = 50; y < 450; y++)
+        for (var x = 80; x < 450; x++)
+        {
+            var offset = (y * visionWidth + x) * 4;
+            menuAfter[offset] = 80;
+            menuAfter[offset + 1] = 80;
+            menuAfter[offset + 2] = 80;
+        }
+        foreach (var y in new[] { 185, 240 })
+        for (var x = 84; x < 373; x++)
+        {
+            var offset = (y * visionWidth + x) * 4;
+            menuAfter[offset] = 65;
+            menuAfter[offset + 1] = 115;
+            menuAfter[offset + 2] = 140;
+        }
+        var menuAction = PartyWarpVision.FindFirstAction(menuBefore, menuAfter,
+            visionWidth, visionHeight);
+        if (menuAction is null || menuAction.Y is < 190 or > 235 ||
+            PartyWarpVision.FindFirstAction(menuBefore, menuBefore,
+                visionWidth, visionHeight) is not null)
+            throw new Exception("Warp action detection did not require a changed menu and live action borders.");
+        var warpBefore = new LoginWindowFrame(portraitPixels, visionWidth, visionHeight, 100, 200);
+        var warpMenu = new byte[portraitPixels.Length];
+        for (var index = 0; index < warpMenu.Length; index++)
+            warpMenu[index] = menuAfter[index] != 0 ? menuAfter[index] : portraitPixels[index];
+        var warpPort = new FakeWarpPort(warpBefore,
+            new LoginWindowFrame(warpMenu, visionWidth, visionHeight, 100, 200), warpBefore);
+        var warpClick = await new PartyWarpClickService(warpPort, TimeSpan.Zero)
+            .TryClickAsync(0, CancellationToken.None);
+        if (!warpClick.ActionClicked || !warpClick.MenuDismissed ||
+            warpPort.RightClicks.Count != 1 || warpPort.LeftClicks.Count != 1 ||
+            warpPort.RestoredCursor != (4, 5))
+            throw new Exception("Bound warp click did not require current portraits and menu dismissal.");
+        var noMenu = new FakeWarpPort(warpBefore, warpBefore);
+        var noMenuResult = await new PartyWarpClickService(noMenu, TimeSpan.Zero)
+            .TryClickAsync(1, CancellationToken.None);
+        if (noMenuResult.ActionClicked || noMenu.LeftClicks.Count != 0)
+            throw new Exception("Warp clicked without a visually confirmed current menu.");
         var triple = PartyTopologies.ForPlayerCount(3)
             .Single(item => item.Id == "3-three-singles");
         var tripleFrame = LiveFollowFrame.ParseDynamic(
@@ -763,5 +821,23 @@ internal static class ProcessPipelineSmoke
         {
             Directory.Delete(directory, recursive: true);
         }
+    }
+
+    private sealed class FakeWarpPort(params LoginWindowFrame[] captures) : IWarpInputPort
+    {
+        private int _next;
+        internal readonly List<(int X, int Y)> RightClicks = [];
+        internal readonly List<(int X, int Y)> LeftClicks = [];
+        internal (int X, int Y)? RestoredCursor;
+        public Task<bool> FocusAsync(CancellationToken token) => Task.FromResult(true);
+        public Task<LoginWindowFrame?> CaptureAsync(CancellationToken token) =>
+            Task.FromResult<LoginWindowFrame?>(_next < captures.Length ? captures[_next++] : null);
+        public bool IsExact(LoginWindowFrame frame) => true;
+        public bool TryGetCursor(out (int X, int Y) cursor) { cursor = (4, 5); return true; }
+        public bool RightClick(int screenX, int screenY)
+        { RightClicks.Add((screenX, screenY)); return true; }
+        public bool Click(int screenX, int screenY)
+        { LeftClicks.Add((screenX, screenY)); return true; }
+        public void RestoreCursor((int X, int Y) cursor) => RestoredCursor = cursor;
     }
 }
