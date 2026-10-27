@@ -3215,6 +3215,17 @@ public sealed class MainWindow : Window
             _followStatus.Text = "镜像时长必须为 50–5000 毫秒。";
             return;
         }
+        var radarStartedForFollow = false;
+        if (enableExperimentalWarp && _radar is null)
+        {
+            StartRadar();
+            if (_radar is null)
+            {
+                _followStatus.Text = $"实验性跨区追赶需要雷达采样：{_radarStatus.Text}";
+                return;
+            }
+            radarStartedForFollow = true;
+        }
         _busy = true;
         UpdateFollowControls();
         _followStatus.Text = "正在核对进程、日志与传感器输入…";
@@ -3282,6 +3293,8 @@ public sealed class MainWindow : Window
         }
         catch (Exception error)
         {
+            if (radarStartedForFollow && _follow is null)
+                await StopRadarAsync();
             _followStatus.Text = $"跟随未启动：{error.Message}";
         }
         finally
