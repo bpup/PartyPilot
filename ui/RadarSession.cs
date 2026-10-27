@@ -26,6 +26,7 @@ internal sealed class RadarSession : IAsyncDisposable
 
     public event Action<string>? Ended;
     public event Action<int, int, bool>? FrameReceived;
+    internal event Action<RadarFrame>? FrameObserved;
 
     private RadarSession(UdpClient receiver, Dictionary<int, RadarOverlayWindow> windows,
         Dictionary<int, nint> gameHandles, RadarHotkeyBinding hotkey, RadarVisibility visibility,
@@ -169,6 +170,7 @@ internal sealed class RadarSession : IAsyncDisposable
                             _lastFullFrames[pid] = enriched;
                             _lastTerrains[pid] = terrain;
                             window.Apply(enriched, terrain);
+                            FrameObserved?.Invoke(enriched);
                             FrameReceived?.Invoke(pid, enriched.Markers.Count, window.TerrainVisible);
                         });
                         break;
@@ -190,6 +192,7 @@ internal sealed class RadarSession : IAsyncDisposable
                         _lastTerrains.TryGetValue(pid, out var terrain);
                         if (terrain != null && !terrain.MetadataUnchanged()) terrain = null;
                         window.ApplyMotion(moved, terrain);
+                        FrameObserved?.Invoke(moved);
                         FrameReceived?.Invoke(pid, moved.Markers.Count, window.TerrainVisible);
                     });
                     break;

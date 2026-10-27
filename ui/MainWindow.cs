@@ -1850,6 +1850,7 @@ public sealed class MainWindow : Window
                 captures, catalog, appearance);
             session.Ended += RadarEnded;
             session.FrameReceived += RadarFrameReceived;
+            session.FrameObserved += RadarFrameObserved;
             _radar = session;
             _radarStatus.Text = captures.Count == 0 && catalog is null
                 ? $"地图覆盖层已启动，按 {_radarHotkey.DisplayText} 显示；等待各游戏进程的只读标记。失焦或样本过期会隐藏标记。"
@@ -1875,6 +1876,8 @@ public sealed class MainWindow : Window
                 "候选地形尚未匹配；仅当前游戏窗口在前台时显示标记。");
     }
 
+    private void RadarFrameObserved(RadarFrame frame) => _follow?.ObserveRadarFrame(frame);
+
     private async Task StopRadarAsync()
     {
         if (_radarStopping || _radar is null) return;
@@ -1886,6 +1889,7 @@ public sealed class MainWindow : Window
         {
             session.Ended -= RadarEnded;
             session.FrameReceived -= RadarFrameReceived;
+            session.FrameObserved -= RadarFrameObserved;
             await session.DisposeAsync();
             _radarStatus.Text = "雷达已关闭。";
         }
@@ -3305,7 +3309,11 @@ public sealed class MainWindow : Window
                    PartyWarpControllerPlan.FromFrame(frame, _selectedTopology) is not null)
                     ? "正在尝试实验性传送"
                     : "当前跨区请求不支持自动传送";
-            _followStatus.Text = $"检测到跨区：{requests}；{warpState}，跨区自动方向已停止。";
+            var anchorState = _follow is not null && frame.Handoffs.Any(item =>
+                _follow.MatchTransitionAnchor(item) is not null)
+                ? "；雷达发现同路径入口候选，尚未自动靠近或交互"
+                : string.Empty;
+            _followStatus.Text = $"检测到跨区：{requests}；{warpState}，跨区自动方向已停止{anchorState}。";
             return;
         }
         if (_selectedTopology?.Id is "3-three-singles" or "4-balanced" or

@@ -24,6 +24,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     private readonly bool _catchUpPriority;
     private readonly int _customRuleCount;
     private readonly IReadOnlyList<LaunchedClient> _clients;
+    private readonly TransitionAnchorEvidence _transitionAnchors = new();
     private readonly bool _experimentalWarpClick;
     private readonly CancellationTokenSource _warpCancellation = new();
     private CancellationTokenSource? _warpAttemptCancellation;
@@ -43,6 +44,20 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     public event Action<FollowBridgeFrame>? StatusChanged;
     public event Action<string>? WarpStatusChanged;
     public event Action<string>? Ended;
+
+    internal void ObserveRadarFrame(RadarFrame frame)
+    {
+        if (_stopping) return;
+        for (var index = 0; index < _clients.Count; index++)
+            if (_clients[index].Pid == frame.ProcessId)
+            {
+                _transitionAnchors.Observe(index + 1, frame);
+                break;
+            }
+    }
+
+    internal TransitionAnchorMatch? MatchTransitionAnchor(FollowHandoffRequest request) =>
+        _transitionAnchors.Match(request, _topology, DateTime.UtcNow);
 
     private LiveFollowSession(Process process, BridgeSession bridge, PartyTopology topology,
         Task<string> readError, FollowBridgeFrame initialFrame, bool relayMainInput,
