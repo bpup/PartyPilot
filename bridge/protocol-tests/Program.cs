@@ -104,6 +104,16 @@ if (!BridgeProtocol.TryParseMainInputSubscription(
     BridgeProtocol.TryParseMainInputSubscription(
         "{\"type\":\"main_input_subscription\",\"enabled\":true,\"slot\":1}", out _))
     throw new Exception("Main input subscription accepted an ambiguous bridge command.");
+if (!BridgeProtocol.TryParseWarpToMainSubscription(
+        "{\"type\":\"warp_to_main_subscription\",\"enabled\":true}", out var warpEnabled) ||
+    !warpEnabled ||
+    !BridgeProtocol.TryParseWarpToMainSubscription(
+        "{\"type\":\"warp_to_main_subscription\",\"enabled\":false}", out warpEnabled) ||
+    warpEnabled || BridgeProtocol.TryParseWarpToMainSubscription(
+        "{\"type\":\"warp_to_main_subscription\",\"enabled\":1}", out _) ||
+    BridgeProtocol.TryParseWarpToMainSubscription(
+        "{\"type\":\"warp_to_main_subscription\",\"enabled\":true,\"slot\":1}", out _))
+    throw new Exception("Warp to MAIN subscription accepted an ambiguous bridge command.");
 if (!BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"catching_up\",\"x\":1,\"y\":0,\"sprint_down\":true}", out var sprintCommand) ||
     !sprintCommand.SprintDown ||
     BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0,\"sprint_down\":true}", out _) ||
@@ -934,6 +944,43 @@ fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0001, LeftTrigger = 180
 if (fourthRouter.FocusedSlot != 4 || fourthPads[4].Report.Buttons != 0x0001 ||
     fourthPads[4].Report.LeftTrigger != 180)
     throw new Exception("Four-player mode suppressed an unassigned LT+D-pad action.");
+fourthRouter.SetWarpToMainShortcutEnabled(true);
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0008, LeftTrigger = 180 },
+    now.AddMilliseconds(500));
+if (!fourthRouter.WarpToMainPressed || fourthPads[4].Report.Buttons != 0 ||
+    fourthPads[4].Report.LeftTrigger != 0)
+    throw new Exception("LT+D-pad Right did not trigger and suppress the manual warp chord.");
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0008, LeftTrigger = 180 },
+    now.AddMilliseconds(510));
+if (fourthRouter.WarpToMainPressed)
+    throw new Exception("Held manual warp chord triggered repeatedly.");
+fourthRouter.SetPhysical(default, now.AddMilliseconds(520));
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0008, LeftTrigger = 180 },
+    now.AddMilliseconds(530));
+if (!fourthRouter.WarpToMainPressed)
+    throw new Exception("Released manual warp chord could not trigger cancellation.");
+if (!fourthRouter.BeginAutoParty(now.AddMilliseconds(535)))
+    throw new Exception("Manual warp input could not acquire bridge menu ownership.");
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0008, LeftTrigger = 180 },
+    now.AddMilliseconds(536));
+if (fourthRouter.WarpToMainPressed)
+    throw new Exception("Bridge menu ownership repeated a held manual warp chord.");
+fourthRouter.SetPhysical(default, now.AddMilliseconds(537));
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0008, LeftTrigger = 180 },
+    now.AddMilliseconds(538));
+if (!fourthRouter.WarpToMainPressed)
+    throw new Exception("Manual warp could not be cancelled while bridge menus owned the pads.");
+fourthRouter.EndAutoParty();
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0008, LeftTrigger = 180 },
+    now.AddMilliseconds(539));
+if (fourthRouter.WarpToMainPressed)
+    throw new Exception("Ending bridge menu ownership repeated a held warp chord.");
+fourthRouter.SetWarpToMainShortcutEnabled(false);
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0008, LeftTrigger = 180 },
+    now.AddMilliseconds(540));
+if (fourthRouter.WarpToMainPressed || fourthPads[4].Report.Buttons != 0x0008 ||
+    fourthPads[4].Report.LeftTrigger != 180)
+    throw new Exception("Inactive manual warp shortcut captured game input.");
 var sixPads = Enumerable.Range(1, 6).ToDictionary(slot => slot, _ => new FakePad());
 var sixRouter = new BridgeRouter(sixPads.ToDictionary(entry => entry.Key,
     entry => (IPadOutput)entry.Value));

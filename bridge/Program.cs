@@ -623,6 +623,21 @@ try
                         enabled = publishMainInput }));
                     continue;
                 }
+                if (BridgeProtocol.TryParseWarpToMainSubscription(line, out var warpShortcutEnabled))
+                {
+                    if (warpShortcutEnabled && (!physicalMode ||
+                        pairingGate?.Phase != ProtectedPairingPhase.Complete ||
+                        focusPads is null || focusPads.Count < 4))
+                    {
+                        Console.Error.WriteLine("Warp to MAIN shortcut requires four or more paired physical roles.");
+                        router.NeutralAll();
+                        return 1;
+                    }
+                    router.SetWarpToMainShortcutEnabled(warpShortcutEnabled);
+                    Console.WriteLine(JsonSerializer.Serialize(new
+                        { @event = "warp_to_main_subscription", enabled = warpShortcutEnabled }));
+                    continue;
+                }
                 if (pairingGate is not null && BridgeProtocol.TryParsePairingControl(line, out var control))
                 {
                     if (control.Type == "arm_pairing" && outputs.ContainsKey(control.Slot) &&
@@ -885,6 +900,8 @@ try
                     Console.WriteLine(JsonSerializer.Serialize(new { @event = "focus_changed", slot = router.FocusedSlot }));
                 if (router.LastManualFocusSlot != previousManualFocusSlot)
                     Console.WriteLine(JsonSerializer.Serialize(new { @event = "manual_focus", slot = router.LastManualFocusSlot }));
+                if (router.WarpToMainPressed)
+                    Console.WriteLine(JsonSerializer.Serialize(new { @event = "warp_to_main_pressed" }));
                 var inputAt = DateTime.UtcNow;
                 if (publishMainInput && pairingGate?.Phase == ProtectedPairingPhase.Complete &&
                     inputAt >= nextMainInput)

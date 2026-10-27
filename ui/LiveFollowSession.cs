@@ -22,6 +22,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     private readonly object _mainInputGate = new();
     private MainInputSample? _pendingMainInput;
     private readonly bool _relayMainInput;
+    private readonly bool _wantsWarpShortcut;
     private readonly bool _catchUpPriority;
     private readonly int _customRuleCount;
     private readonly IReadOnlyList<LaunchedClient> _clients;
@@ -38,6 +39,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     private int _manualWarpDesired;
     private bool _manualWarpExecuting;
     private int _inputSubscriptionActive;
+    private int _warpShortcutSubscribed;
     private readonly SemaphoreSlim _controlSignal = new(0);
     private readonly CancellationTokenSource _controlCancellation = new();
     private readonly Task<string> _readError;
@@ -84,6 +86,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         _playerToPad = topology.Slots.ToDictionary(slot => slot.PartyPlayer, slot => slot.RuntimePad);
         _readError = readError;
         _relayMainInput = relayMainInput;
+        _wantsWarpShortcut = relayMainInput && !experimentalWarpClick &&
+            topology.Id is ("4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced");
         _catchUpPriority = catchUpPriority;
         _customRuleCount = customRuleCount;
         _clients = clients.ToArray();
@@ -107,6 +111,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             }
         }
         if (relayMainInput) bridge.MainInputChanged += OnMainInputChanged;
+        if (_wantsWarpShortcut) bridge.WarpToMainPressed += OnWarpToMainPressed;
     }
 
     private void OnMainInputChanged(MainInputSample sample)
@@ -136,6 +141,22 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         {
             _pendingFocus.Enqueue(player);
             _controlSignal.Release();
+        }
+    }
+
+    private void OnWarpToMainPressed()
+    {
+        try
+        {
+            var started = ToggleManualWarpToMain();
+            Dispatcher.UIThread.Post(() => WarpStatusChanged?.Invoke(started
+                ? "手柄 LT + 十字键右：已请求手动追到 MAIN。"
+                : "手柄 LT + 十字键右：已请求取消手动追到 MAIN。"));
+        }
+        catch (InvalidOperationException error)
+        {
+            Dispatcher.UIThread.Post(() => WarpStatusChanged?.Invoke(
+                "手柄追到 MAIN 未执行：" + error.Message));
         }
     }
 
@@ -453,6 +474,11 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 await bridge.SetMainInputSubscriptionAsync(true);
                 Volatile.Write(ref session._inputSubscriptionActive, 1);
             }
+            if (session._wantsWarpShortcut)
+            {
+                await bridge.SetWarpToMainSubscriptionAsync(true);
+                Volatile.Write(ref session._warpShortcutSubscribed, 1);
+            }
             return session;
         }
         catch (Exception error)
@@ -460,6 +486,12 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             if (session is not null)
             {
                 bridge.MainInputChanged -= session.OnMainInputChanged;
+                bridge.WarpToMainPressed -= session.OnWarpToMainPressed;
+                if (session._wantsWarpShortcut && bridge.IsRunning)
+                {
+                    try { await bridge.SetWarpToMainSubscriptionAsync(false); }
+                    catch (Exception stopError) when (stopError is IOException or InvalidOperationException or TimeoutException) { }
+                }
                 if (relayMainInput && bridge.IsRunning)
                 {
                     try { await bridge.SetMainInputSubscriptionAsync(false); }
@@ -560,6 +592,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         {
             _controlCancellation.Cancel();
             _warpAttemptCancellation?.Cancel();
+            await StopWarpShortcutAsync();
             await StopMainInputAsync();
             if (!_stopping)
             {
@@ -781,6 +814,15 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         catch (Exception error) when (error is IOException or InvalidOperationException or TimeoutException) { }
     }
 
+    private async Task StopWarpShortcutAsync()
+    {
+        if (!_wantsWarpShortcut) return;
+        _bridge.WarpToMainPressed -= OnWarpToMainPressed;
+        if (Interlocked.Exchange(ref _warpShortcutSubscribed, 0) == 0 || !_bridge.IsRunning) return;
+        try { await _bridge.SetWarpToMainSubscriptionAsync(false); }
+        catch (Exception error) when (error is IOException or InvalidOperationException or TimeoutException) { }
+    }
+
     public async ValueTask DisposeAsync()
     {
         _stopping = true;
@@ -789,6 +831,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         _entryAttemptCancellation?.Cancel();
         _bridge.MenuGuardChanged -= OnMenuGuardChanged;
         _bridge.ManualFocusChanged -= OnManualFocusChanged;
+        await StopWarpShortcutAsync();
         await StopMainInputAsync();
         _controlCancellation.Cancel();
         if (!_process.HasExited) _process.Kill();

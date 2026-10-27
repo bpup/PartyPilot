@@ -1064,6 +1064,9 @@ public sealed class MainWindow : Window
         actions.Children.Add(_manualWarpToMain);
         actions.Children.Add(_stopFollow);
         panel.Children.Add(actions);
+        var manualWarpGuide = Label("实体手柄：LT + 十字键右，手动追到 MAIN；再按一次取消。仅在实时跟随运行且关闭自动跨区实验选项时生效。", 12, MutedBrush);
+        manualWarpGuide.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(manualWarpGuide);
         _followStatus.Text = "等待配对完成；真实游戏中的方向与角色绑定尚未验证。";
         _followStatus.Foreground = MutedBrush;
         _followStatus.TextWrapping = TextWrapping.Wrap;

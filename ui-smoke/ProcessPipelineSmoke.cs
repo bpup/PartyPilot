@@ -533,6 +533,10 @@ internal static class ProcessPipelineSmoke
                 "print('{\"event\":\"ready\",\"slots\":[1,2,3,4],\"physical_mode\":true,\"physical_wgi\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"menu_guard_enabled\":true,\"last_focused_leads\":false,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:2,3:3,4:4\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
                 "for line in sys.stdin:\n" +
                 "    command=json.loads(line)\n" +
+                "    if command.get('type') == 'warp_to_main_subscription':\n" +
+                "        enabled=command['enabled']\n" +
+                "        print(json.dumps({'event':'warp_to_main_subscription','enabled':enabled}),flush=True)\n" +
+                "        if enabled: print('{\"event\":\"warp_to_main_pressed\"}',flush=True)\n" +
                 "    if command.get('type','').startswith('auto_party_'):\n" +
                 "        print(json.dumps({'event':'auto_party_control','type':command['type'],'slot':command.get('slot',0),'buttons':command.get('buttons',0)}),flush=True)\n");
             File.WriteAllText(client3BridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
@@ -900,6 +904,15 @@ internal static class ProcessPipelineSmoke
                 false, useWgi: true))
             {
                 wgiBridge.StartReading();
+                var warpPresses = 0;
+                wgiBridge.WarpToMainPressed += () => Interlocked.Increment(ref warpPresses);
+                await wgiBridge.SetWarpToMainSubscriptionAsync(true);
+                var warpDeadline = DateTime.UtcNow.AddSeconds(2);
+                while (Volatile.Read(ref warpPresses) == 0 && DateTime.UtcNow < warpDeadline)
+                    await Task.Delay(10);
+                if (Volatile.Read(ref warpPresses) != 1)
+                    throw new Exception("Warp to MAIN bridge event did not reach the desktop session.");
+                await wgiBridge.SetWarpToMainSubscriptionAsync(false);
                 await wgiBridge.BeginAutoPartyAsync(CancellationToken.None);
                 try
                 {

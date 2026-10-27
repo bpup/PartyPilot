@@ -59,6 +59,9 @@ internal sealed class BridgeRouter
     private short _manualY;
     private ushort _previousButtons;
     private byte _previousLeftTrigger;
+    private bool _warpToMainShortcutEnabled;
+    private bool _warpToMainWasPressed;
+    public bool WarpToMainPressed { get; private set; }
     private bool _autoPartyActive;
     private DateTime _autoPartyExpiresUtc;
     private int _autoPartySlot;
@@ -110,6 +113,13 @@ internal sealed class BridgeRouter
     }
 
     public int FocusedSlot => _physicalMode ? _focusedSlot : 0;
+    public void SetWarpToMainShortcutEnabled(bool enabled)
+    {
+        _warpToMainShortcutEnabled = enabled && _physicalMode;
+        _warpToMainWasPressed = _warpToMainShortcutEnabled &&
+            (_physicalReport.Buttons & 0x0008) != 0 && _physicalReport.LeftTrigger > 30;
+        WarpToMainPressed = false;
+    }
     public int LastManualFocusSlot => _physicalMode ? _lastManualFocusSlot : 0;
     public bool AutoPartyActive => _autoPartyActive;
     public int AutoPartySlot => _autoPartySlot;
@@ -280,7 +290,12 @@ internal sealed class BridgeRouter
     public void SetPhysical(XInputGamepad gamepad, DateTime? observedAtUtc = null,
         bool allowDirectRightStick = true)
     {
+        WarpToMainPressed = false;
         if (!_physicalMode) return;
+        var warpChord = _warpToMainShortcutEnabled &&
+            (gamepad.Buttons & 0x0008) != 0 && gamepad.LeftTrigger > 30;
+        WarpToMainPressed = warpChord && !_warpToMainWasPressed;
+        _warpToMainWasPressed = warpChord;
         if (_autoPartyActive) return;
         const ushort leftThumb = 0x0040;
         const ushort rightThumb = 0x0080;
@@ -350,6 +365,11 @@ internal sealed class BridgeRouter
         }
         _previousButtons = gamepad.Buttons;
         _previousLeftTrigger = gamepad.LeftTrigger;
+        if (warpChord)
+        {
+            gamepad.Buttons &= unchecked((ushort)~0x0008);
+            gamepad.LeftTrigger = 0;
+        }
         gamepad.Buttons &= unchecked((ushort)~(leftThumb | rightThumb));
         if (leftTrigger && ((up && _focusPads.ContainsKey(5)) ||
                             (down && _focusPads.ContainsKey(6))))
@@ -592,6 +612,7 @@ internal sealed class BridgeRouter
         _allowDirectRightStick = false;
         _previousButtons = 0;
         _previousLeftTrigger = 0;
+        WarpToMainPressed = false;
         _reportBatch?.BeginBatch();
         try
         {

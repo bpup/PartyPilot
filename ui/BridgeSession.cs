@@ -24,6 +24,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     private CombatPending? _pendingCombat;
     private TaskCompletionSource? _pendingHybridPairingComplete;
     private TaskCompletionSource<bool>? _pendingMainInputSubscription;
+    private TaskCompletionSource<bool>? _pendingWarpToMainSubscription;
     private bool _mainInputStreaming;
     private int _lastFocusedSlot;
     private int _lastManualFocusedSlot;
@@ -57,6 +58,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     public event Action? AutoPartyExpired;
     public event Action<int>? ManualFocusChanged;
     public event Action<MainInputSample>? MainInputChanged;
+    public event Action? WarpToMainPressed;
     public event Action<int, int, long>? HybridFocusChanged;
     public event Action<int, int, long>? HybridConfirmReleased;
 
@@ -761,6 +763,28 @@ internal sealed class BridgeSession : IAsyncDisposable
         }
     }
 
+    internal async Task SetWarpToMainSubscriptionAsync(bool enabled,
+        CancellationToken token = default)
+    {
+        if (IsHybridMode) throw new InvalidOperationException("追到 MAIN 手柄快捷键需要实体手柄。");
+        if (_readEvents == Task.CompletedTask || !IsRunning)
+            throw new InvalidOperationException("桥接事件未运行，无法设置追到 MAIN 快捷键。");
+        var pending = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (Interlocked.CompareExchange(ref _pendingWarpToMainSubscription, pending, null) is not null)
+            throw new InvalidOperationException("追到 MAIN 快捷键设置仍在进行。");
+        try
+        {
+            await WriteCommandAsync(JsonSerializer.Serialize(new
+                { type = "warp_to_main_subscription", enabled }), token);
+            if (await pending.Task.WaitAsync(TimeSpan.FromSeconds(2), token) != enabled)
+                throw new InvalidDataException("追到 MAIN 快捷键确认与请求不一致。");
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref _pendingWarpToMainSubscription, null, pending);
+        }
+    }
+
     private async Task WriteCommandAsync(string command, CancellationToken token = default)
     {
         await _inputGate.WaitAsync(token);
@@ -837,6 +861,14 @@ internal sealed class BridgeSession : IAsyncDisposable
                         Volatile.Write(ref _mainInputStreaming, enabled);
                         Volatile.Read(ref _pendingMainInputSubscription)?.TrySetResult(enabled);
                     }
+                    else if (kind.GetString() == "warp_to_main_subscription" &&
+                        root.TryGetProperty("enabled", out var warpSubscriptionValue) &&
+                        warpSubscriptionValue.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                        Volatile.Read(ref _pendingWarpToMainSubscription)?.TrySetResult(
+                            warpSubscriptionValue.GetBoolean());
+                    else if (kind.GetString() == "warp_to_main_pressed" &&
+                        root.EnumerateObject().Count() == 1)
+                        WarpToMainPressed?.Invoke();
                     else if (kind.GetString() == "main_input" &&
                         Volatile.Read(ref _mainInputStreaming) &&
                         MainInputSample.TryParse(root, _allSlots, DateTime.UtcNow, out var input))
@@ -910,6 +942,8 @@ internal sealed class BridgeSession : IAsyncDisposable
                 new InvalidOperationException("Keyboard bridge exited before pairing completion."));
             Volatile.Read(ref _pendingMainInputSubscription)?.TrySetException(
                 new InvalidOperationException("Controller bridge exited before main input subscription."));
+            Volatile.Read(ref _pendingWarpToMainSubscription)?.TrySetException(
+                new InvalidOperationException("Controller bridge exited before warp shortcut subscription."));
             if (!_stopping)
             {
                 Dispatcher.UIThread.Post(() => Ended?.Invoke(failure ?? "Virtual controller bridge exited."));
