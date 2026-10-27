@@ -226,6 +226,18 @@ Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
     RadarClassifier.Category("Metadata/Effects/QuestMarker") == "quest" &&
     RadarClassifier.Category("Metadata/Terrain/Gallows/Act3/Objects/MachinariumGeneratorButton") == "quest" &&
     RadarClassifier.QuestLabel("Metadata/Terrain/Gallows/Act3/Objects/MachinariumGeneratorButton") == "Soul Core Generator" &&
+    RadarClassifier.Category("Metadata/Monsters/HyenaMonster/Objects/BossRoomMinimapIcon") == "boss" &&
+    RadarClassifier.BossLabel("Metadata/Monsters/HyenaMonster/Objects/BossRoomMinimapIcon") == "Rathbreaker" &&
+    RadarClassifier.QuestLabel("Metadata/Items/QuestItems/FinalLetter") == "Final Letter (Skill Points)" &&
+    RadarClassifier.QuestLabel("Metadata/Monsters/KingInTheMists") == "The King in the Mists (Spirit)" &&
+    RadarClassifier.QuestLabel("Metadata/Monsters/KabalaConstrictor") == "Kabala (Skill Points)" &&
+    RadarClassifier.QuestLabel("Metadata/Monsters/MightySilverfist") == "Mighty Silverfist (Skill Points)" &&
+    RadarClassifier.QuestLabel("Metadata/Monsters/Ignagduk") == "Ignagduk (Spirit)" &&
+    RadarClassifier.QuestLabel("Metadata/Monsters/YamaTheWhite") == "Yama the White (Skill Points)" &&
+    RadarClassifier.QuestLabel("Metadata/Monsters/Oswin") == "Oswin (Skill Points)" &&
+    RadarClassifier.QuestLabel("Metadata/Monsters/Akthi") == "Akthi and Anundr (Skill Points)" &&
+    RadarClassifier.QuestLabel("Metadata/Monsters/Lythara") == "Lythara (Spirit)" &&
+    RadarClassifier.QuestLabel("Metadata/Monsters/AbominableYeti") == "Abominable Yeti (Skill Points)" &&
     RadarClassifier.Category("Metadata/Effects/PermanentEffect") == null &&
     RadarClassifier.Category("Metadata/Effects/PortalFlash") == null &&
     RadarClassifier.Category("Metadata/Items/ChestPiece") == null &&
@@ -239,7 +251,8 @@ Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
     RadarClassifier.Category("Metadata/Characters/Player") == null &&
     RadarClassifier.IsWorldItemWrapperPath("Metadata/MiscellaneousObjects/WorldItem@123") &&
     !RadarClassifier.IsWorldItemWrapperPath("Metadata/Items/Weapons/Sword") &&
-    RadarClassifier.IsNavigation("waypoint") && RadarClassifier.IsNavigation("quest") && !RadarClassifier.IsNavigation("monster"),
+    RadarClassifier.IsNavigation("waypoint") && RadarClassifier.IsNavigation("quest") &&
+    RadarClassifier.IsNavigation("boss") && !RadarClassifier.IsNavigation("monster"),
     "Path-only radar categories admitted unsupported entities or lost navigation markers.");
 
 void TestSkillBindTable()

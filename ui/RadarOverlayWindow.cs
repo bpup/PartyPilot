@@ -78,6 +78,7 @@ public sealed class RadarOverlayWindow : Window
         "player" => NamePrivacy.Mask(marker.Label),
         "loot" => marker.Label ?? string.Empty,
         "quest" => marker.Label ?? string.Empty,
+        "boss" => marker.Label ?? string.Empty,
         _ => marker.Path.Split('/').Last()
     };
 
@@ -137,7 +138,7 @@ public sealed class RadarOverlayWindow : Window
             if (!double.IsFinite(x) || !double.IsFinite(y) ||
                 x < 8 || y < 8 || x > Bounds.Width - 8 || y > Bounds.Height - 8) continue;
             AddDot(x, y, marker.Category == "monster" ? 7 : 10, MarkerBrush(marker.Category));
-            if (marker.Category is "checkpoint" or "waypoint" or "portal" or "transition" or "player" or "loot" or "quest")
+            if (marker.Category is "checkpoint" or "waypoint" or "portal" or "transition" or "player" or "loot" or "quest" or "boss")
             {
                 var label = new TextBlock
                 {
@@ -175,6 +176,7 @@ public sealed class RadarOverlayWindow : Window
         "league" => Brushes.Magenta,
         "loot" => Brushes.Yellow,
         "quest" => Brushes.YellowGreen,
+        "boss" => Brushes.Red,
         "portal" => Brushes.MediumPurple,
         "waypoint" => Brushes.DeepSkyBlue,
         "checkpoint" => Brushes.LimeGreen,

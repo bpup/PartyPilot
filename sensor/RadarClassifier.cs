@@ -8,6 +8,7 @@ public static class RadarClassifier
     {
         if (string.IsNullOrWhiteSpace(path) ||
             !path.StartsWith("Metadata/", StringComparison.OrdinalIgnoreCase)) return null;
+        if (BossLabel(path) != null) return "boss";
         if (QuestLabel(path) != null) return "quest";
         if (path.StartsWith("Metadata/Effects/", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("Metadata/Projectiles/", StringComparison.OrdinalIgnoreCase) ||
@@ -29,7 +30,11 @@ public static class RadarClassifier
     }
 
     public static bool IsNavigation(string category) =>
-        category is "checkpoint" or "waypoint" or "portal" or "transition" or "quest";
+        category is "checkpoint" or "waypoint" or "portal" or "transition" or "quest" or "boss";
+
+    public static string? BossLabel(string path) =>
+        path.Equals("Metadata/Monsters/HyenaMonster/Objects/BossRoomMinimapIcon",
+            StringComparison.OrdinalIgnoreCase) ? "Rathbreaker" : null;
 
     // Explicit markers and named objectives observed in the supplied 0.6.17
     // rules. A path match is a location hint, not proof of active quest state.
@@ -53,8 +58,19 @@ public static class RadarClassifier
         if (path.Contains("GembloomSkull", StringComparison.OrdinalIgnoreCase)) return "Gembloom Skull (Spirit)";
         if (path.Contains("GemrotSkull", StringComparison.OrdinalIgnoreCase)) return "Gemrot Skull (Spirit)";
         if (path.Contains("UnaLute", StringComparison.OrdinalIgnoreCase)) return "Una's Lute (Skill Points)";
-        if (path.Contains("SuicideNote", StringComparison.OrdinalIgnoreCase)) return "Final Letter (Skill Points)";
+        if (path.Contains("FinalLetter", StringComparison.OrdinalIgnoreCase) ||
+            path.Contains("SuicideNote", StringComparison.OrdinalIgnoreCase)) return "Final Letter (Skill Points)";
         if (path.Contains("Crowbell", StringComparison.OrdinalIgnoreCase)) return "The Crowbell (Skill Points)";
+        if (path.Contains("KingInTheMists", StringComparison.OrdinalIgnoreCase)) return "The King in the Mists (Spirit)";
+        if (path.Contains("KabalaConstrictor", StringComparison.OrdinalIgnoreCase)) return "Kabala (Skill Points)";
+        if (path.Contains("MightySilverfist", StringComparison.OrdinalIgnoreCase)) return "Mighty Silverfist (Skill Points)";
+        if (path.Contains("Ignagduk", StringComparison.OrdinalIgnoreCase)) return "Ignagduk (Spirit)";
+        if (path.Contains("YamaTheWhite", StringComparison.OrdinalIgnoreCase)) return "Yama the White (Skill Points)";
+        if (path.Contains("Oswin", StringComparison.OrdinalIgnoreCase)) return "Oswin (Skill Points)";
+        if (path.Contains("Akthi", StringComparison.OrdinalIgnoreCase) ||
+            path.Contains("Anundr", StringComparison.OrdinalIgnoreCase)) return "Akthi and Anundr (Skill Points)";
+        if (path.Contains("Lythara", StringComparison.OrdinalIgnoreCase)) return "Lythara (Spirit)";
+        if (path.Contains("AbominableYeti", StringComparison.OrdinalIgnoreCase)) return "Abominable Yeti (Skill Points)";
         return null;
     }
 

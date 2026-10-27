@@ -395,6 +395,24 @@ if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(questRadarText), 12
     RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
         questRadarText.Replace("\"Label\":\"Quest marker\"", "\"Label\":null")), 123, DateTime.UtcNow, out _))
     throw new Exception("Radar quest marker parsing or display failed.");
+var bossRadarText = radarText.Replace(
+    "\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\"",
+    "\"Category\":\"boss\",\"Path\":\"Metadata/Monsters/HyenaMonster/Objects/BossRoomMinimapIcon\",\"Label\":\"Rathbreaker\"");
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(bossRadarText), 123, DateTime.UtcNow, out var bossRadarFrame) ||
+    bossRadarFrame?.Markers[1].Category != "boss" ||
+    RadarOverlayWindow.DisplayLabel(bossRadarFrame.Markers[1]) != "Rathbreaker" ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        bossRadarText.Replace("\"Label\":\"Rathbreaker\"", "\"Label\":\"Unknown\"")),
+        123, DateTime.UtcNow, out _))
+    throw new Exception("Radar boss arena icon parsing or display failed.");
+var bossWindow = new RadarOverlayWindow(new LaunchedClient(123, 1, "C:/Game.exe"),
+    2, new RadarVisibility(), renderOnly: true);
+bossWindow.Show();
+bossWindow.Apply(bossRadarFrame);
+bossWindow.UpdateLayout();
+if (!bossWindow.GetLogicalDescendants().OfType<TextBlock>().Any(label => label.Text == "Rathbreaker"))
+    throw new Exception("Radar did not draw the named boss room marker.");
+bossWindow.Close();
 var questCache = new RadarLandmarkCache();
 questCache.Apply(questRadarFrame);
 if (questCache.Apply(questRadarFrame with

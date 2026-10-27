@@ -115,10 +115,14 @@ public static class RadarFrames
                      Encoding.UTF8.GetByteCount(itemPath) > 256 ||
                      stack is < 1 or > 999_999 ||
                      (rarity != null && rarity is not ("normal" or "magic" or "rare" or "unique")))) return false;
+                if (category == "boss" &&
+                    (!path.Equals("Metadata/Monsters/HyenaMonster/Objects/BossRoomMinimapIcon",
+                        StringComparison.OrdinalIgnoreCase) || label != "Rathbreaker" ||
+                     itemPath != null || stack != null || rarity != null)) return false;
                 if (category == "quest" &&
                     (string.IsNullOrWhiteSpace(label) || Encoding.UTF8.GetByteCount(label) > 96 ||
                      itemPath != null || stack != null || rarity != null)) return false;
-                if (category is not ("player" or "loot" or "quest") &&
+                if (category is not ("player" or "loot" or "quest" or "boss") &&
                     (label != null || itemPath != null || stack != null || rarity != null)) return false;
                 markers.Add(new RadarMarker(id, category, path, label, itemPath, stack, rarity, x, y));
             }
@@ -145,7 +149,7 @@ public static class RadarFrames
         address > 0;
 
     private static bool KnownCategory(string value) => value is
-        "monster" or "checkpoint" or "waypoint" or "portal" or "transition" or "npc" or "chest" or "shrine" or "player" or "league" or "loot" or "quest";
+        "monster" or "checkpoint" or "waypoint" or "portal" or "transition" or "npc" or "chest" or "shrine" or "player" or "league" or "loot" or "quest" or "boss";
 
     private static bool WorldItemWrapperPath(string path)
     {
