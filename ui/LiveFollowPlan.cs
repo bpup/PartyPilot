@@ -29,6 +29,7 @@ public sealed record LiveFollowPlan(double Stop, double Catchup,
 
 public sealed record FlaskBridgeRequest(int Player, string Resource, string? DirectInput = null);
 public sealed record FollowPadCommand(int Player, int Pad, string Command, string Status, string? Reason);
+public sealed record FollowHandoffRequest(int DestinationClient, int DriverPlayer, int TargetPlayer);
 
 public sealed record FollowBridgeFrame(string Command, string Status, string? Reason)
 {
@@ -36,10 +37,42 @@ public sealed record FollowBridgeFrame(string Command, string Status, string? Re
     public int FocusedPlayer { get; init; }
     public int FollowerPad { get; init; }
     public IReadOnlyList<FollowPadCommand> PadCommands { get; init; } = [];
+    public IReadOnlyList<FollowHandoffRequest> Handoffs { get; init; } = [];
 }
 
 public static class LiveFollowFrame
 {
+    public static IReadOnlyList<FollowHandoffRequest> ParseHandoffs(string json,
+        PartyTopology topology)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        if (!root.TryGetProperty("handoffs", out var value)) return [];
+        if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() > topology.ClientCount)
+            throw new InvalidDataException("Live follow returned an invalid handoff list.");
+        var result = new List<FollowHandoffRequest>();
+        var destinations = new HashSet<int>();
+        foreach (var item in value.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object || item.EnumerateObject().Count() != 4 ||
+                !item.TryGetProperty("destination_client", out var clientValue) ||
+                !clientValue.TryGetInt32(out var client) ||
+                !item.TryGetProperty("driver_player", out var driverValue) ||
+                !driverValue.TryGetInt32(out var driver) ||
+                !item.TryGetProperty("target_player", out var targetValue) ||
+                !targetValue.TryGetInt32(out var target) ||
+                !item.TryGetProperty("state", out var state) ||
+                state.ValueKind != JsonValueKind.String ||
+                state.GetString() != "warp_requested" || !destinations.Add(client) ||
+                !topology.Slots.Any(slot => slot.Client == client &&
+                    slot.LocalPlayer == 1 && slot.PartyPlayer == driver) ||
+                !topology.Slots.Any(slot => slot.PartyPlayer == target && slot.Client != client))
+                throw new InvalidDataException("Live follow returned an unbound handoff request.");
+            result.Add(new FollowHandoffRequest(client, driver, target));
+        }
+        return result;
+    }
+
     public static FollowBridgeFrame ApplyCatchUpPriority(FollowBridgeFrame frame, bool enabled)
     {
         if (!enabled) return frame;

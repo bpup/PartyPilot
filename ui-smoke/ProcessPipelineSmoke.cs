@@ -91,6 +91,27 @@ internal static class ProcessPipelineSmoke
             fourTopology, lastFocusedLeads: false);
         if (!fixedFourFrame.PadCommands.Select(command => command.Player).SequenceEqual([2, 3, 4]))
             throw new Exception("Fixed P1 leadership lost followers in the four-player layout.");
+        var crossArea = LiveFollowSession.ParseFrame(
+            "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}," +
+            "\"3\":{\"state\":\"waiting\"},\"4\":{\"state\":\"waiting\"}}," +
+            "\"handoffs\":[{\"destination_client\":2,\"driver_player\":3," +
+            "\"target_player\":1,\"state\":\"warp_requested\"}]}",
+            fourTopology, lastFocusedLeads: false);
+        if (crossArea.Handoffs.Count != 1 ||
+            crossArea.Handoffs[0] != new FollowHandoffRequest(2, 3, 1) ||
+            crossArea.PadCommands.Any(command => command.Status != "waiting"))
+            throw new Exception("Cross-area request changed a neutral follower or lost its bound client.");
+        try
+        {
+            LiveFollowSession.ParseFrame(
+                "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}," +
+                "\"3\":{\"state\":\"waiting\"},\"4\":{\"state\":\"waiting\"}}," +
+                "\"handoffs\":[{\"destination_client\":2,\"driver_player\":4," +
+                "\"target_player\":1,\"state\":\"warp_requested\"}]}",
+                fourTopology, lastFocusedLeads: false);
+            throw new Exception("Cross-area request accepted P4 as the wrong client driver.");
+        }
+        catch (InvalidDataException) { }
         var fourSwitched = LiveFollowFrame.ParseDynamic(
             "{\"focused\":4,\"commands\":{\"1\":{\"state\":\"waiting\"}," +
             "\"2\":{\"state\":\"waiting\"},\"3\":{\"state\":\"waiting\"}}}", fourTopology);

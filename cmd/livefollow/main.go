@@ -373,6 +373,7 @@ type frame struct {
 	Focused  int                    `json:"focused"`
 	Commands map[int]follow.Command `json:"commands"`
 	Flasks   []flask.Activation     `json:"flasks,omitempty"`
+	Handoffs []live.HandoffRequest  `json:"handoffs,omitempty"`
 }
 
 type menuInput struct {
@@ -614,7 +615,9 @@ func run(address string, roster map[int]int, paths map[int]string, offsets logSt
 				engine.ObserveClientLogLine(roster[slot], line, now)
 			}
 		}
-		if err := encoder.Encode(frame{Focused: engine.Leader(), Commands: engine.Step(now), Flasks: activations}); err != nil {
+		commands := engine.Step(now)
+		if err := encoder.Encode(frame{Focused: engine.Leader(), Commands: commands,
+			Flasks: activations, Handoffs: engine.CrossAreaRequests(now)}); err != nil {
 			return err
 		}
 	}

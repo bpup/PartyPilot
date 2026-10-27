@@ -153,11 +153,14 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             : Array.Empty<string>())];
 
     internal static FollowBridgeFrame ParseFrame(string json, PartyTopology topology,
-        bool lastFocusedLeads, int customRuleCount = 0) =>
-        lastFocusedLeads || topology.PlayerCount > 2
+        bool lastFocusedLeads, int customRuleCount = 0)
+    {
+        var parsed = lastFocusedLeads || topology.PlayerCount > 2
             ? LiveFollowFrame.ParseDynamic(json, topology, customRuleCount)
             : LiveFollowFrame.Parse(json, 2, topology.Slots[1].RuntimePad,
                 customRuleCount: customRuleCount);
+        return parsed with { Handoffs = LiveFollowFrame.ParseHandoffs(json, topology) };
+    }
 
     public static async Task<LiveFollowSession> StartAsync(string executable, PartyTopology topology,
         IReadOnlyList<LaunchedClient> clients, BridgeSession bridge, LiveFollowPlan plan,
@@ -467,6 +470,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 }
                 var changed = Current.Status != frame.Status || Current.Reason != frame.Reason ||
                     Current.FocusedPlayer != frame.FocusedPlayer ||
+                    !Current.Handoffs.SequenceEqual(frame.Handoffs) ||
                     !Current.PadCommands.Select(command => (command.Pad, command.Status, command.Reason))
                         .SequenceEqual(frame.PadCommands.Select(command => (command.Pad, command.Status, command.Reason)));
                 Current = frame;

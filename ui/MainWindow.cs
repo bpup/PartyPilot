@@ -3282,6 +3282,13 @@ public sealed class MainWindow : Window
             _followStatus.Text = "跟随已暂停；所有自动方向已回中，恢复后仍需新鲜位置与区域证据。";
             return;
         }
+        if (frame.Handoffs.Count > 0)
+        {
+            var requests = string.Join(" · ", frame.Handoffs.Select(item =>
+                $"客户端 {item.DestinationClient} 的 P{item.DriverPlayer} 需传送至 P{item.TargetPlayer}"));
+            _followStatus.Text = $"检测到跨区：{requests}；自动传送尚未接入，跨区自动方向已停止。";
+            return;
+        }
         if (_selectedTopology?.Id is "3-three-singles" or "4-balanced" or
             "5-third-solo" or "5-main-solo" or "6-balanced" &&
             frame.Reason is not ("party disbanded" or "local client left party" or "followed member left party"))
