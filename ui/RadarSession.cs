@@ -78,6 +78,7 @@ internal sealed class RadarSession : IAsyncDisposable
     private void OnHotkeyTimer(object? sender, EventArgs args)
     {
         if (_disposed) return;
+        if (_registeredHotkey is not null) return;
         var foreground = GetForegroundWindow();
         var gameForeground = _windows.Any(item => !item.Value.TargetIsLost &&
             _gameHandles[item.Key] == foreground);

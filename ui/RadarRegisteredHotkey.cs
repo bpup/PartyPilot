@@ -9,6 +9,7 @@ internal sealed class RadarRegisteredHotkey : IDisposable
     private const int HotkeyId = 21251;
     private const uint WmHotkey = 0x0312;
     private const uint WmQuit = 0x0012;
+    private const uint NoRepeat = 0x4000;
     private readonly RadarHotkeyBinding _binding;
     private readonly Action _pressed;
     private readonly Thread _thread;
@@ -48,7 +49,7 @@ internal sealed class RadarRegisteredHotkey : IDisposable
                 _ready.TrySetResult(false);
                 return;
             }
-            var modifiers = (_binding.Control ? 2u : 0u) |
+            var modifiers = NoRepeat | (_binding.Control ? 2u : 0u) |
                 (_binding.Alt ? 1u : 0u) | (_binding.Shift ? 4u : 0u);
             if (!RegisterHotKey(0, HotkeyId, modifiers, (uint)_binding.VirtualKey))
             {

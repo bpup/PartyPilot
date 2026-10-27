@@ -441,5 +441,10 @@ public sealed class RadarVisibility
         _keyWasDown = keyDown;
     }
 
-    public void ObserveRegisteredPress(bool gameForeground) => Observe(gameForeground, true);
+    // WM_HOTKEY is a distinct press event. Its release may occur entirely
+    // between polling ticks, so it must not share the polling edge latch.
+    public void ObserveRegisteredPress(bool gameForeground)
+    {
+        if (gameForeground) Enabled = !Enabled;
+    }
 }

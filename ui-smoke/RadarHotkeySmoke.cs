@@ -45,5 +45,14 @@ internal static class RadarHotkeySmoke
         visibility.Observe(true, true);
         if (visibility.Enabled)
             throw new Exception("A held shortcut retoggled radar after leaving and reentering the game.");
+
+        var registered = new RadarVisibility();
+        registered.ObserveRegisteredPress(false);
+        if (registered.Enabled)
+            throw new Exception("A registered shortcut outside the game opened radar.");
+        registered.ObserveRegisteredPress(true);
+        registered.ObserveRegisteredPress(true);
+        if (registered.Enabled)
+            throw new Exception("Two separate registered Tab presses did not toggle radar twice.");
     }
 }
