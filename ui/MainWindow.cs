@@ -383,7 +383,7 @@ public sealed class MainWindow : Window
         _inputMode.SelectionChanged += (_, _) =>
         {
             _pairingStatus.Text = HybridSelected
-                ? "键鼠模式要求客户端 1 仅有 P1。选择双客户端受支持布局并绑定窗口后，可准备虚拟手柄。"
+                ? "键鼠模式要求客户端 1 仅有 P1。启动游戏前会先建立虚拟手柄；绑定现有窗口后也可手动准备。"
                 : "实体手柄模式需要确认 HidHide 隔离与输入设备。";
             UpdateBridgeControls();
         };
@@ -1043,7 +1043,7 @@ public sealed class MainWindow : Window
             _pairingStatus.Text = selection.PlayerCount == 1
                 ? "单人模式由 P1 原生键鼠操作；无需准备虚拟手柄。"
                 : HybridTopologySupport.CanBridge(selection)
-                    ? "客户端 1 仅有 P1；绑定两个游戏窗口后可准备键鼠虚拟手柄。"
+                    ? "客户端 1 仅有 P1；启动游戏前先建立键鼠虚拟手柄，绑定现有窗口后也可手动准备。"
                     : "目标版键鼠模式要求客户端 1 仅有 P1；此布局的键鼠桥接尚未接入。";
         if (_bridge is null && topologyChanged) _autoFlask.IsChecked = selection?.Id is "2-split" or "3-three-singles";
         var count = _selectedTopology?.ClientCount ?? 0;
@@ -2144,7 +2144,7 @@ public sealed class MainWindow : Window
         }
     }
 
-    private async Task PrepareHybridBridgeAsync()
+    private async Task PrepareHybridBridgeAsync(BridgeSession? prelaunchBridge = null)
     {
         var topology = _selectedTopology;
         var clients = _launchedClients.ToArray();
@@ -2168,14 +2168,19 @@ public sealed class MainWindow : Window
             _pairingStatus.Text = "找不到 PartyPilot.Bridge.exe；请使用完整发布目录。";
             return;
         }
+        var wasBusy = _busy;
         _busy = true;
         UpdateBridgeControls();
         _pairingStatus.Text = "正在核对键鼠模式的游戏窗口和虚拟手柄…";
+        BridgeSession? session = null;
         try
         {
-            var session = await BridgeSession.StartHybridAsync(executable, topology.Slots, clients,
-                _hybridBindings, menuGuardEnabled: _menuGuard.IsChecked == true,
-                followerMirror: _followerMirror);
+            session = prelaunchBridge ?? await BridgeSession.StartHybridAsync(executable,
+                topology.Slots, clients, _hybridBindings,
+                menuGuardEnabled: _menuGuard.IsChecked == true, followerMirror: _followerMirror);
+            if (prelaunchBridge is not null)
+                await prelaunchBridge.BindHybridAsync(topology.Slots, clients, _hybridBindings,
+                    _menuGuard.IsChecked == true, _followerMirror);
             Volatile.Write(ref _hybridFocusedPlayer, 1);
             Volatile.Write(ref _hybridFocusTransition, 0);
             _hybridFocusKeysDown.Clear();
@@ -2206,11 +2211,15 @@ public sealed class MainWindow : Window
         }
         catch (Exception error)
         {
+            if (session is not null && ReferenceEquals(_bridge, session))
+                await StopBridgeAsync();
+            else if (session is not null)
+                await session.DisposeAsync();
             _pairingStatus.Text = $"键鼠桥接未就绪：{error.Message}";
         }
         finally
         {
-            _busy = false;
+            _busy = wasBusy;
             UpdateBridgeControls();
         }
     }
@@ -2897,7 +2906,27 @@ public sealed class MainWindow : Window
                     _status.Text = "先确认并保存菜单保护及跟随按键设置；游戏尚未启动。";
                     return;
                 }
-                _status.Text = "正在启动并绑定游戏窗口；完成后准备键鼠虚拟手柄。";
+                if (!HybridTopologySupport.CanBridge(_selectedTopology) ||
+                    _hybridBindings.KeyAt(0) == 0 || _hybridBindings.KeyAt(11) == 0 ||
+                    Enumerable.Range(1, _selectedTopology.PlayerCount - 1)
+                        .Any(index => _hybridBindings.KeyAt(index) == 0))
+                {
+                    _status.Text = "键鼠布局或配对按键尚未就绪；游戏尚未启动。";
+                    return;
+                }
+                var bridgeExecutable = BridgeSession.FindExecutable();
+                if (bridgeExecutable is null)
+                {
+                    _status.Text = "找不到 PartyPilot.Bridge.exe，无法在游戏启动前准备虚拟手柄。";
+                    return;
+                }
+                var gameExecutables = Enumerable.Range(0, _selectedTopology.ClientCount)
+                    .Select(index => _paths[index].Text?.Trim() ?? "").ToArray();
+                _status.Text = "正在创建键鼠虚拟手柄，游戏尚未启动…";
+                prelaunchBridge = await BridgeSession.StartHybridPrelaunchAsync(bridgeExecutable,
+                    _selectedTopology.Slots, gameExecutables, _hybridBindings,
+                    _menuGuard.IsChecked == true, _followerMirror);
+                _status.Text = "键鼠虚拟手柄已就绪；正在启动游戏窗口…";
             }
             else if (action == ClientAction.Start)
             {
@@ -3024,6 +3053,8 @@ public sealed class MainWindow : Window
                 {
                     if (prelaunchBridge is not null && ReferenceEquals(_bridge, prelaunchBridge))
                         await StopBridgeAsync();
+                    else if (prelaunchBridge?.IsRunning == true)
+                        await prelaunchBridge.DisposeAsync();
                     _status.Text = action == ClientAction.Start
                         ? $"游戏可能已启动，但无法核对其窗口身份：{bindingError.Message}"
                         : $"已运行窗口的身份信息无效：{bindingError.Message}";
@@ -3036,9 +3067,11 @@ public sealed class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(error.Result)) message.AppendLine().Append(error.Result.Trim());
             _status.Text = message.ToString();
             if (prelaunchBridge is not null && (process.ExitCode != 0 ||
-                !ReferenceEquals(_bridge, prelaunchBridge) || !prelaunchBridge.IsRunning))
+                (!prelaunchBridge.IsHybridMode && !ReferenceEquals(_bridge, prelaunchBridge)) ||
+                !prelaunchBridge.IsRunning))
             {
                 if (ReferenceEquals(_bridge, prelaunchBridge)) await StopBridgeAsync();
+                else if (prelaunchBridge.IsRunning) await prelaunchBridge.DisposeAsync();
                 _status.Text = process.ExitCode == 0
                     ? "游戏窗口已识别，但启动前手柄桥接中断；请先重新准备桥接再配对。"
                     : message + Environment.NewLine + "虚拟手柄已释放。";
@@ -3047,6 +3080,16 @@ public sealed class MainWindow : Window
             if (action != ClientAction.Check && process.ExitCode == 0 &&
                 _launchedClients.Count == _selectedTopology.ClientCount)
             {
+                if (prelaunchBridge?.IsHybridMode == true)
+                {
+                    await PrepareHybridBridgeAsync(prelaunchBridge);
+                    if (!ReferenceEquals(_bridge, prelaunchBridge))
+                    {
+                        if (prelaunchBridge.IsRunning) await prelaunchBridge.DisposeAsync();
+                        _status.Text = "游戏窗口已识别，但键鼠桥接绑定失败：" + _pairingStatus.Text;
+                        return;
+                    }
+                }
                 var preparation = await PrepareAutoLoginsAfterBindingAsync(_selectedTopology,
                     _launchedClients.ToArray());
                 if (!string.IsNullOrEmpty(preparation))
@@ -3057,6 +3100,8 @@ public sealed class MainWindow : Window
         {
             if (prelaunchBridge is not null && ReferenceEquals(_bridge, prelaunchBridge))
                 await StopBridgeAsync();
+            else if (prelaunchBridge?.IsRunning == true)
+                await prelaunchBridge.DisposeAsync();
             _status.Text = $"启动或绑定失败：{exception.Message}";
         }
         finally

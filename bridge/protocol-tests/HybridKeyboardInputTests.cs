@@ -51,6 +51,32 @@ internal static class HybridKeyboardInputTests
         var gameA = Path.GetFullPath("PoE2.exe");
         var gameB = Path.GetFullPath("PoE2B.exe");
         var wrongGame = Path.GetFullPath("Other.exe");
+        if (!HybridBindRequest.ValidPrelaunchPads(["--hybrid-player-pads", "2:2"],
+                [1, 2], out var prelaunchPads) || prelaunchPads != "2:2" ||
+            HybridBindRequest.ValidPrelaunchPads(["--hybrid-player-pads", "2:3,3:5"],
+                [1, 2], out _) ||
+            !HybridBindRequest.TryParse(
+                "{\"type\":\"bind_hybrid\",\"player_pads\":\"2:2\",\"window_map\":\"1:10:100,2:20:200\"}",
+                [1, 2], [gameA, gameB], out var bound, out var boundPrivate) ||
+            bound?.PlayerWindows[2] != new HybridGameWindow(20, 200) || boundPrivate is not null ||
+            HybridBindRequest.TryParse(
+                "{\"type\":\"bind_hybrid\",\"player_pads\":\"2:2\",\"window_map\":\"1:10:100,2:10:100\"}",
+                [1, 2], [gameA, gameB], out _, out _) ||
+            HybridBindRequest.TryParse(
+                "{\"type\":\"bind_hybrid\",\"player_pads\":\"2:3,3:5\",\"window_map\":\"1:10:100,2:20:200,3:30:300\"}",
+                [1, 2, 3, 4], [gameA, gameB, Path.GetFullPath("PathOfExile.exe")], out _, out _))
+            throw new Exception("Prelaunch keyboard pads or late game-window binding were accepted ambiguously.");
+        var thirdGame = Path.GetFullPath("PathOfExile.exe");
+        var thirdBinding = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            type = "bind_hybrid", player_pads = "2:3,3:5",
+            window_map = "1:10:100,2:20:200,3:30:300",
+            client3 = new { pid = 30, window_handle = 300, game_exe = thirdGame, players = "5" }
+        });
+        if (!HybridBindRequest.TryParse(thirdBinding, [1, 2, 3, 4],
+                [gameA, gameB, thirdGame], out var boundThird, out var boundThirdOptions) ||
+            boundThird?.PlayerPads[3] != 5 || boundThirdOptions?.PrivateSlots.SequenceEqual([5]) != true)
+            throw new Exception("Prelaunch rejected an exact private Client 3 binding.");
         if (!plan.MatchesGameProcesses([gameA, gameB],
                 pid => pid == 10 ? gameA : gameB) ||
             plan.MatchesGameProcesses([gameA], _ => gameA) ||

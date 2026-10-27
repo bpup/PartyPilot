@@ -23,6 +23,9 @@ internal sealed class BridgeSession : IAsyncDisposable
     private int _lastFocusedSlot;
     private int _lastManualFocusedSlot;
     private bool _stopping;
+    private bool _hybridPrelaunchPending;
+    private string? _hybridPrelaunchPads;
+    private int[]? _hybridPrelaunchSlots;
 
     public bool AutoFlaskEnabled { get; }
     internal bool IsHybridMode { get; }
@@ -180,6 +183,127 @@ internal sealed class BridgeSession : IAsyncDisposable
     {
         if (_readEvents != Task.CompletedTask) throw new InvalidOperationException("Bridge events are already being read.");
         _readEvents = ReadEventsAsync();
+    }
+
+    internal static async Task<BridgeSession> StartHybridPrelaunchAsync(string executable,
+        IReadOnlyList<PartySlot> partySlots, IReadOnlyList<string> gameExecutables,
+        HybridBindingConfig bindings, bool menuGuardEnabled,
+        FollowerMirrorConfig followerMirror)
+    {
+        var followers = partySlots.Skip(1).ToArray();
+        var slots = followers.Length == 1 ? new[] { 1, 2 } : new[] { 1, 2, 3, 4 };
+        var runtimePads = partySlots.Select(slot => slot.RuntimePad).ToArray();
+        if (!(runtimePads.SequenceEqual([1, 3]) || runtimePads.SequenceEqual([1, 3, 4]) ||
+              runtimePads.SequenceEqual([1, 3, 5]) ||
+              runtimePads.SequenceEqual([1, 3, 4, 5, 6])) ||
+            gameExecutables.Count != (runtimePads.Max() >= 5 ? 3 : 2) ||
+            gameExecutables.Any(path => !Path.IsPathFullyQualified(path) || !File.Exists(path)))
+            throw new ArgumentException("Keyboard prelaunch needs the selected topology and existing game executables.");
+        var outputForRuntime = followers.ToDictionary(slot => slot.RuntimePad,
+            slot => followers.Length == 1 ? 2 : slot.RuntimePad);
+        var playerPads = string.Join(',', followers.Select(slot =>
+            $"{slot.PartyPlayer}:{outputForRuntime[slot.RuntimePad]}"));
+        var start = new ProcessStartInfo(executable)
+        {
+            WorkingDirectory = Path.GetDirectoryName(executable)!, UseShellExecute = false,
+            RedirectStandardInput = true, RedirectStandardOutput = true,
+            RedirectStandardError = true, CreateNoWindow = true
+        };
+        foreach (var argument in new[] { "--enable-controller", "--hybrid-keyboard",
+            "--hybrid-prelaunch", "--slots", string.Join(',', slots),
+            "--hybrid-player-pads", playerPads, "--hybrid-binding-keys", bindings.Encode(),
+            "--follower-mirror", followerMirror.Encode() }) start.ArgumentList.Add(argument);
+        if (!menuGuardEnabled) start.ArgumentList.Add("--disable-menu-guard");
+        foreach (var game in gameExecutables)
+        {
+            start.ArgumentList.Add("--game-exe");
+            start.ArgumentList.Add(game);
+        }
+        var process = Process.Start(start) ??
+            throw new InvalidOperationException("Keyboard prelaunch bridge did not start.");
+        var readError = process.StandardError.ReadToEndAsync();
+        try
+        {
+            var line = await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            if (!IsExpectedHybridPrelaunch(line, slots, playerPads, bindings.Encode(),
+                    menuGuardEnabled, followerMirror.Encode()))
+                throw new InvalidOperationException("Keyboard bridge did not confirm prelaunch virtual pads.");
+            return new BridgeSession(process, readError, false, false, slots,
+                [1, ..outputForRuntime.Values], hybridMode: true,
+                hybridOutputForRuntime: outputForRuntime)
+            {
+                _hybridPrelaunchPending = true,
+                _hybridPrelaunchPads = playerPads,
+                _hybridPrelaunchSlots = slots
+            };
+        }
+        catch (Exception error)
+        {
+            await StopProcessAsync(process);
+            var diagnostic = (await readError).Trim();
+            process.Dispose();
+            throw new InvalidOperationException(string.IsNullOrEmpty(diagnostic)
+                ? error.Message : $"{error.Message} {diagnostic}", error);
+        }
+    }
+
+    internal async Task BindHybridAsync(IReadOnlyList<PartySlot> partySlots,
+        IReadOnlyList<LaunchedClient> clients, HybridBindingConfig bindings,
+        bool menuGuardEnabled, FollowerMirrorConfig followerMirror)
+    {
+        if (!_hybridPrelaunchPending || !IsRunning || _hybridPrelaunchSlots is null ||
+            _hybridPrelaunchPads is null || clients.Count is < 2 or > 3 ||
+            partySlots.Any(slot => slot.Client > clients.Count))
+            throw new InvalidOperationException("Keyboard prelaunch bridge is not waiting for these game windows.");
+        var windowMap = string.Join(',', partySlots.Select(slot =>
+            $"{slot.PartyPlayer}:{clients[slot.Client - 1].Pid}:{clients[slot.Client - 1].WindowHandle}"));
+        var privatePlan = clients.Count == 3 ? new PrivateClient3Plan(clients[2].Pid,
+            clients[2].WindowHandle, Path.GetFullPath(clients[2].Executable),
+            partySlots.Any(slot => slot.RuntimePad == 6)) : null;
+        await WriteCommandAsync(JsonSerializer.Serialize(new
+        {
+            type = "bind_hybrid", player_pads = _hybridPrelaunchPads, window_map = windowMap,
+            client3 = privatePlan is null ? null : new
+            {
+                pid = privatePlan.Pid, window_handle = privatePlan.WindowHandle,
+                game_exe = privatePlan.Executable,
+                players = privatePlan.IncludePad6 ? "5,6" : "5"
+            }
+        }, new JsonSerializerOptions { DefaultIgnoreCondition =
+            System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull }));
+        var line = await _process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(45));
+        if (line is null || !IsExpectedHybridReady(line, _hybridPrelaunchSlots,
+                _hybridPrelaunchPads, windowMap, bindings.Encode(), menuGuardEnabled,
+                followerMirror, privatePlan))
+            throw new InvalidOperationException("Keyboard bridge did not confirm bound game windows.");
+        _hybridPrelaunchPending = false;
+    }
+
+    internal static bool IsExpectedHybridPrelaunch(string? line, int[] slots, string playerPads,
+        string bindingKeys, bool menuGuardEnabled, string followerMirror)
+    {
+        try
+        {
+            using var json = JsonDocument.Parse(line ?? "");
+            var root = json.RootElement;
+            return root.TryGetProperty("event", out var kind) && kind.GetString() == "prelaunch_ready" &&
+                root.TryGetProperty("hybrid_mode", out var hybrid) && hybrid.GetBoolean() &&
+                root.TryGetProperty("physical_mode", out var physical) && !physical.GetBoolean() &&
+                root.TryGetProperty("slots", out var selected) &&
+                selected.EnumerateArray().Select(value => value.GetInt32()).SequenceEqual(slots) &&
+                root.TryGetProperty("hybrid_player_pads", out var pads) &&
+                pads.GetString() == playerPads &&
+                root.TryGetProperty("hybrid_binding_keys", out var keys) &&
+                keys.GetString() == bindingKeys &&
+                root.TryGetProperty("menu_guard_enabled", out var guard) &&
+                guard.GetBoolean() == menuGuardEnabled &&
+                root.TryGetProperty("follower_mirror", out var mirror) &&
+                mirror.GetString() == followerMirror;
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException)
+        {
+            return false;
+        }
     }
 
     internal static async Task<BridgeSession> StartHybridAsync(string executable,

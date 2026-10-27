@@ -193,6 +193,7 @@ if (args.Length == 4 && args[0] == "--probe-xinput" && args[2] == "--samples" &&
 }
 
 var hybridMode = args.Contains("--hybrid-keyboard");
+var hybridPrelaunch = args.Contains("--hybrid-prelaunch");
 if (!args.Contains("--enable-controller") || !BridgeSlots.TryParse(args, out var slots) ||
     !CompositeClient3Options.TryParse(args, out var client3Options) ||
     !FocusPadMap.TryParse(args, slots, client3Options?.PrivateSlots ?? [], out var focusPads) ||
@@ -241,9 +242,16 @@ if (directSlotPosition >= 0 && (args.Count(arg => arg == "--direct-right-stick-s
     return 2;
 }
 var protectedPairing = args.Contains("--pairing-protected");
+if (hybridPrelaunch && (!hybridMode || args.Contains("--hybrid-window-map") ||
+    args.Contains("--client3-pid") ||
+    !HybridBindRequest.ValidPrelaunchPads(args, slots, out _)))
+{
+    Console.Error.WriteLine("Keyboard prelaunch must bind game windows after virtual pads are ready.");
+    return 2;
+}
 if (hybridMode && (physicalMode || protectedPairing || autoFlaskEnabled || combatEnabled ||
     rightStickFollowerOverride || focusPads is not null ||
-    !HybridKeyboardPlan.TryParse(args, slots, out _)))
+    (!hybridPrelaunch && !HybridKeyboardPlan.TryParse(args, slots, out _))))
 {
     Console.Error.WriteLine("Keyboard and mouse mode requires an exact player pad and game window map, without physical controller options.");
     return 2;
@@ -267,7 +275,7 @@ var gamePaths = args.Select((value, index) => (value, index))
     .Select(item => item.index + 1 < args.Length ? args[item.index + 1] : "")
     .ToArray();
 HybridKeyboardPlan? hybridPlan = null;
-if (hybridMode && (!HybridKeyboardPlan.TryParse(args, slots, out hybridPlan) ||
+if (hybridMode && ((!hybridPrelaunch && !HybridKeyboardPlan.TryParse(args, slots, out hybridPlan)) ||
     gamePaths.Length is < 1 or > 3 ||
     gamePaths.Any(path => !Path.IsPathFullyQualified(path) || !File.Exists(path))))
 {
@@ -372,13 +380,6 @@ try
         Console.Error.WriteLine("The selected physical controller is not connected before virtual pads start.");
         return 2;
     }
-    using var privateClient3 = client3Options is { } attach
-        ? await Client3RuntimeAttach.AttachAsync(attach.Pid, attach.WindowHandle,
-            attach.GameExecutable, attach.IncludeP6) : null;
-    var privateOutputs = new Client3PadOutputs();
-    if (privateClient3 is not null &&
-        !privateOutputs.Bind(privateClient3, client3Options!.Value.IncludeP6))
-        throw new InvalidOperationException("Client 3 input became unavailable before routing.");
     using var client = new ViGEmClient();
     var pads = new Dictionary<int, IXbox360Controller>();
     try
@@ -400,6 +401,44 @@ try
             Console.Error.WriteLine("Virtual XInput indices are unknown, duplicated, or overlap the physical controller. Controllers stopped.");
             return 2;
         }
+        if (hybridPrelaunch)
+        {
+            HybridBindRequest.ValidPrelaunchPads(args, slots, out var prelaunchPads);
+            Console.WriteLine(JsonSerializer.Serialize(new { @event = "prelaunch_ready", slots,
+                hybrid_mode = true, physical_mode = false,
+                hybrid_player_pads = prelaunchPads,
+                hybrid_binding_keys = hybridBindings.Encode(),
+                menu_guard_enabled = menuGuardEnabled,
+                follower_mirror = followerMirror.Encode() }));
+            var bindLine = await Console.In.ReadLineAsync();
+            if (!HybridBindRequest.TryParse(bindLine, slots, gamePaths,
+                out hybridPlan, out client3Options) || hybridPlan is null ||
+                string.Join(',', hybridPlan.PlayerPads.OrderBy(entry => entry.Key)
+                    .Select(entry => $"{entry.Key}:{entry.Value}")) != prelaunchPads ||
+                hybridPlan.PlayerWindows.Values.Any(window =>
+                    !ForegroundWindowProbe.IsExistingTarget(window.Pid, window.Handle)) ||
+                !hybridPlan.MatchesGameProcesses(gamePaths, pid =>
+                {
+                    try
+                    {
+                        using var process = Process.GetProcessById(pid);
+                        return process.MainModule?.FileName;
+                    }
+                    catch (Exception error) when (error is InvalidOperationException or
+                        System.ComponentModel.Win32Exception or UnauthorizedAccessException)
+                    {
+                        return null;
+                    }
+                }))
+                throw new InvalidOperationException("Keyboard window binding did not match the live game clients.");
+        }
+        using var privateClient3 = client3Options is { } attach
+            ? await Client3RuntimeAttach.AttachAsync(attach.Pid, attach.WindowHandle,
+                attach.GameExecutable, attach.IncludeP6) : null;
+        var privateOutputs = new Client3PadOutputs();
+        if (privateClient3 is not null &&
+            !privateOutputs.Bind(privateClient3, client3Options!.Value.IncludeP6))
+            throw new InvalidOperationException("Client 3 input became unavailable before routing.");
         Console.Error.WriteLine($"Connected {pads.Count} virtual controller(s).");
         var outputs = pads.ToDictionary(
             entry => entry.Key,
