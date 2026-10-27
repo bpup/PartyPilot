@@ -770,6 +770,26 @@ void TestQuestTileProbe()
     Require(rotated is { Anchors: [{ Category: "campaign", Label: "Mud Burrow",
         RotationX: 1, RotationY: 2, RotationSwap: true }] },
         "A rotated campaign tile did not override its generic exit marker.");
+    const long worldData = 0x800000;
+    const long details = 0x900000;
+    const long vendorRow = 0xA00000;
+    const long vendorText = 0xB00000;
+    var vendorId = new byte[80];
+    System.Text.Encoding.Unicode.GetBytes("G1_8").CopyTo(vendorId, 0);
+    memory[state + 776] = BitConverter.GetBytes(worldData);
+    memory[worldData + 152] = BitConverter.GetBytes(details);
+    memory[details + 144] = BitConverter.GetBytes(vendorRow);
+    memory[vendorRow] = BitConverter.GetBytes(vendorText);
+    memory[vendorText] = vendorId;
+    Require(RawAreaIdReader.Read(state, Read) == "G1_8",
+        "Matching corrected and vendor area IDs were rejected.");
+    Array.Clear(vendorId);
+    System.Text.Encoding.Unicode.GetBytes("G1_9").CopyTo(vendorId, 0);
+    Require(RawAreaIdReader.Read(state, Read) == null,
+        "Conflicting game-build area IDs were accepted.");
+    memory.Remove(state + 656);
+    Require(RawAreaIdReader.Read(state, Read) == "G1_9",
+        "The original vendor-build world-data chain was not read.");
 }
 var largeLoot = Enumerable.Range(1, 96).Select(index => (object)new
 {
