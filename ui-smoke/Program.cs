@@ -18,6 +18,7 @@ AutoLoginPreferenceSmoke.Run();
 AutoLoginStartupPlanSmoke.Run();
 LeadershipPreferenceSmoke.Run();
 MenuGuardPreferenceSmoke.Run();
+FollowerMirrorPreferenceSmoke.Run();
 AutoPartyCoordinatorSmoke.Run();
 AutoPartyHotkeySmoke.Run();
 AutoPartyKeyPreferenceSmoke.Run();

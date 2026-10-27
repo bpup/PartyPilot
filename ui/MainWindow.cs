@@ -89,6 +89,11 @@ public sealed class MainWindow : Window
     private readonly TextBlock _menuGuardStatus = new();
     private readonly MenuGuardPreferenceStore _menuGuardPreferences = new();
     private bool _menuGuardPreferenceReady;
+    private readonly FollowerMirrorPreferenceStore _followerMirrorPreferences = new();
+    private FollowerMirrorConfig _followerMirror = FollowerMirrorConfig.Default;
+    private bool _followerMirrorPreferenceReady;
+    private readonly Button _followerMirrorButton = new();
+    private readonly TextBlock _followerMirrorStatus = new();
     private readonly CheckBox _lastFocusedLeads = new();
     private readonly TextBlock _leadershipPreferenceStatus = new();
     private readonly LeadershipPreferenceStore _leadershipPreferences = new();
@@ -432,6 +437,17 @@ public sealed class MainWindow : Window
         };
         panel.Children.Add(_menuGuard);
         panel.Children.Add(_menuGuardStatus);
+        var followerMirror = _followerMirrorPreferences.Load();
+        _followerMirrorPreferenceReady = followerMirror.Success;
+        _followerMirror = followerMirror.Config;
+        _followerMirrorButton.Content = "设置 P1–P6 跟随按键";
+        _followerMirrorButton.Click += async (_, _) => await EditFollowerMirrorAsync();
+        panel.Children.Add(_followerMirrorButton);
+        _followerMirrorStatus.Text = followerMirror.Success
+            ? "目标版默认镜像全部动作；可为各角色单独选择。"
+            : "跟随按键设置无效；请重新选择并保存。";
+        _followerMirrorStatus.Foreground = MutedBrush;
+        panel.Children.Add(_followerMirrorStatus);
         var leadership = _leadershipPreferences.Load();
         _leadershipPreferenceReady = leadership.Success;
         _lastFocusedLeads.Content = "最近手动聚焦的角色成为 MAIN";
@@ -1622,11 +1638,13 @@ public sealed class MainWindow : Window
             ? "单人原生键鼠无需桥接" : HybridSelected ? "准备键鼠虚拟手柄" : "准备虚拟手柄";
         _prepareBridge.IsEnabled = !_busy && _bridge is null && gamePathsReady &&
             _menuGuardPreferenceReady && _menuGuard.IsChecked is bool &&
+            (HybridSelected || _followerMirrorPreferenceReady) &&
             (HybridSelected ? hybridSupported && _gameHotkeys?.IsStarted == true :
                 supported && _leadershipPreferenceReady && _lastFocusedLeads.IsChecked is bool &&
                 (useWgi || _physicalIndex.SelectedIndex is >= 0 and <= 3) &&
                 _isolationConfirmed.IsChecked == true && !string.IsNullOrWhiteSpace(_physicalDevice.Text));
         _stopBridge.IsEnabled = _bridge is not null;
+        _followerMirrorButton.IsEnabled = _bridge is null && !_busy;
         _armPairing.IsEnabled = !HybridSelected && _bridge is not null && _pairing?.Current is not null &&
             _launchedClients.Count == _selectedTopology?.ClientCount &&
             _pairing.Armed == false && _pairing.AReleased == false && !_armRequested && !_busy &&
@@ -1784,6 +1802,20 @@ public sealed class MainWindow : Window
         _gameHotkeys?.SetHybridBindings(selected);
         _hybridBindingsStatus.Text = "键鼠按键映射已保存；下一次准备桥接时生效。";
         ApplyGameShortcutKeys();
+    }
+
+    private async Task EditFollowerMirrorAsync()
+    {
+        if (_bridge is not null || _busy) return;
+        var selected = await new FollowerMirrorDialog(_followerMirror)
+            .ShowDialog<FollowerMirrorConfig?>(this);
+        if (selected is null) return;
+        _followerMirrorPreferenceReady = _followerMirrorPreferences.Save(selected);
+        if (_followerMirrorPreferenceReady) _followerMirror = selected;
+        _followerMirrorStatus.Text = _followerMirrorPreferenceReady
+            ? "跟随按键已保存；下次准备桥接时生效。"
+            : "跟随按键保存失败；重新保存前不能准备桥接。";
+        UpdateBridgeControls();
     }
 
     private bool RadarKeyConflicts(RadarHotkeyBinding binding) =>
@@ -2051,9 +2083,10 @@ public sealed class MainWindow : Window
             _pairingStatus.Text = "手柄桥接需要 Windows、已选布局与空闲桥接会话。";
             return;
         }
-        if (!_menuGuardPreferenceReady || _menuGuard.IsChecked is not bool)
+        if (!_menuGuardPreferenceReady || _menuGuard.IsChecked is not bool ||
+            (!HybridSelected && !_followerMirrorPreferenceReady))
         {
-            _pairingStatus.Text = "先确认并保存菜单保护设置，再准备桥接。";
+            _pairingStatus.Text = "先确认并保存菜单保护及跟随按键设置，再准备桥接。";
             return;
         }
         if (HybridSelected)
@@ -2097,7 +2130,7 @@ public sealed class MainWindow : Window
                 _physicalDevice.Text.Trim(), gameExecutables, _rightStickFollowerOverride.IsChecked == true,
                 _selectedTopology.Id is "2-split" or "3-three-singles" && _autoFlask.IsChecked == true,
                 useWgi, privatePlan, lastFocusedLeads: _lastFocusedLeads.IsChecked == true,
-                menuGuardEnabled: _menuGuard.IsChecked == true);
+                menuGuardEnabled: _menuGuard.IsChecked == true, followerMirror: _followerMirror);
             ActivateBridge(session, _selectedTopology);
         }
         catch (Exception error)
@@ -2860,9 +2893,10 @@ public sealed class MainWindow : Window
             }
             else if (action == ClientAction.Start)
             {
-                if (!_menuGuardPreferenceReady || _menuGuard.IsChecked is not bool)
+                if (!_menuGuardPreferenceReady || _menuGuard.IsChecked is not bool ||
+                    !_followerMirrorPreferenceReady)
                 {
-                    _status.Text = "先确认并保存菜单保护设置；游戏尚未启动。";
+                    _status.Text = "先确认并保存菜单保护及跟随按键设置；游戏尚未启动。";
                     return;
                 }
                 if (_isolationConfirmed.IsChecked != true || string.IsNullOrWhiteSpace(_physicalDevice.Text))
@@ -2906,7 +2940,7 @@ public sealed class MainWindow : Window
                             _rightStickFollowerOverride.IsChecked == true,
                             _selectedTopology.Id is "2-split" or "3-three-singles" && _autoFlask.IsChecked == true,
                             useWgi, lastFocusedLeads: _lastFocusedLeads.IsChecked == true,
-                            menuGuardEnabled: _menuGuard.IsChecked == true);
+                            menuGuardEnabled: _menuGuard.IsChecked == true, followerMirror: _followerMirror);
                         ActivateBridge(session, _selectedTopology);
                         prelaunchBridge = session;
                     }

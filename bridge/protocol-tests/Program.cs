@@ -1,4 +1,5 @@
 using PartyPilot.Bridge;
+using PartyPilot.Common;
 using System.Runtime.InteropServices;
 
 if (!ControllerStartupCheckRequest.TryParse(["--check-startup", "--device", "HID\\DEVICE",
@@ -266,6 +267,43 @@ mirroredRouter.SetMenuGuardActive(false);
 mirroredRouter.SetFollowerMirrorEnabled(false);
 if (mirroredFollower.Report.Buttons != 0 || mirroredFollower.Report.LeftTrigger != 0)
     throw new Exception("Disabled follower mirror retained physical actions.");
+var selectedMirror = FollowerMirrorConfig.Default.WithPlayer(2, 1 | 2 | 128);
+if (!FollowerMirrorConfig.TryParse(selectedMirror.Encode(), out var parsedMirror) ||
+    parsedMirror?.Encode() != selectedMirror.Encode() ||
+    FollowerMirrorConfig.TryParse("1:8191,2:0,3:8191", out _) ||
+    FollowerMirrorConfig.TryParse("1:8191,2:0,3:8191,4:8191,5:8191,6:8192", out _))
+    throw new Exception("Follower button settings accepted an incomplete profile or lost a player mask.");
+var selectedPads = new Dictionary<int, IPadOutput>
+    { [1] = new FakePad(), [2] = new FakePad(), [3] = new FakePad() };
+var selectedRouter = new BridgeRouter(selectedPads);
+if (!selectedRouter.ConfigurePhysical(1, focusPads: new Dictionary<int, int> { [1] = 1, [2] = 2 },
+        followerMirror: selectedMirror) ||
+    !selectedRouter.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", now))
+    throw new Exception("Per-player mirror routing setup failed.");
+selectedRouter.SetPhysical(new XInputGamepad
+    { Buttons = 0xF30F, LeftTrigger = 20, RightTrigger = 30 }, now);
+selectedRouter.SetFollowerMirrorEnabled(true);
+if (((FakePad)selectedPads[2]).Report.Buttons != 0x1000 ||
+    ((FakePad)selectedPads[2]).Report.LeftTrigger != 20 ||
+    ((FakePad)selectedPads[2]).Report.RightTrigger != 0 ||
+    ((FakePad)selectedPads[3]).Report.Buttons != 0)
+    throw new Exception("Per-player mirror leaked an unselected action or an unassigned pad.");
+selectedRouter.SetFollowerMirrorEnabled(false);
+var disabledMirror = FollowerMirrorConfig.Default.WithPlayer(1, 0);
+var dynamicPads = new Dictionary<int, IPadOutput> { [1] = new FakePad(), [2] = new FakePad() };
+var dynamicMirror = new BridgeRouter(dynamicPads);
+if (!dynamicMirror.ConfigurePhysical(1, lastFocusedLeads: true, followerMirror: disabledMirror) ||
+    !dynamicMirror.ApplyLine("{\"slot\":1,\"state\":\"following\",\"x\":1,\"y\":0}", now))
+    throw new Exception("Dynamic MAIN mirror setup failed.");
+dynamicMirror.SetPhysical(new XInputGamepad { Buttons = 0x1000 }, now);
+dynamicMirror.SetPhysical(new XInputGamepad { Buttons = 0x0080 }, now.AddMilliseconds(10));
+dynamicMirror.SetPhysical(default, now.AddMilliseconds(20));
+dynamicMirror.SetPhysical(new XInputGamepad { Buttons = 0x0080 }, now.AddMilliseconds(410));
+dynamicMirror.ApplyLine("{\"slot\":1,\"state\":\"following\",\"x\":1,\"y\":0}", now.AddMilliseconds(411));
+dynamicMirror.SetPhysical(new XInputGamepad { Buttons = 0x1000 }, now.AddMilliseconds(420));
+dynamicMirror.SetFollowerMirrorEnabled(true);
+if (((FakePad)dynamicPads[1]).Report.Buttons != 0)
+    throw new Exception("P1 mirror setting was ignored when P1 became a follower.");
 var dodgeArbiter = new DodgeSprintButtonArbiter();
 if (dodgeArbiter.Resolve(0, true, now) != 0x2000 ||
     dodgeArbiter.Resolve(0x2000, true, now.AddMilliseconds(25)) != 0 ||

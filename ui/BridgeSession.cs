@@ -69,7 +69,8 @@ internal sealed class BridgeSession : IAsyncDisposable
     public static async Task<BridgeSession> StartAsync(string executable, IReadOnlyList<PartySlot> partySlots, int physicalIndex,
         string deviceInstance, IReadOnlyList<string> gameExecutables, bool rightStickFollowerOverride,
         bool autoFlaskEnabled = false, bool useWgi = false, PrivateClient3Plan? privatePlan = null,
-        bool lastFocusedLeads = false, bool menuGuardEnabled = true)
+        bool lastFocusedLeads = false, bool menuGuardEnabled = true,
+        FollowerMirrorConfig? followerMirror = null)
     {
         var slots = partySlots.Where(item => item.Client != 3).Select(item => item.RuntimePad).ToArray();
         var privateSlots = partySlots.Where(item => item.Client == 3)
@@ -135,6 +136,11 @@ internal sealed class BridgeSession : IAsyncDisposable
         if (rightStickFollowerOverride) start.ArgumentList.Add("--right-stick-follower-override");
         if (autoFlaskEnabled) start.ArgumentList.Add("--enable-auto-flask");
         if (!menuGuardEnabled) start.ArgumentList.Add("--disable-menu-guard");
+        if (followerMirror is not null)
+        {
+            start.ArgumentList.Add("--follower-mirror");
+            start.ArgumentList.Add(followerMirror.Encode());
+        }
         if (lastFocusedLeads) start.ArgumentList.Add("--last-focused-leads");
         if (directRightStickSlot != 0)
         {
@@ -149,7 +155,7 @@ internal sealed class BridgeSession : IAsyncDisposable
                 TimeSpan.FromSeconds(privatePlan is null ? 15 : 45));
             if (readyLine is null || !IsExpectedReady(readyLine, slots, focusPadMap,
                 rightStickFollowerOverride, directRightStickSlot, autoFlaskEnabled, useWgi, privatePlan,
-                lastFocusedLeads, menuGuardEnabled))
+                lastFocusedLeads, menuGuardEnabled, followerMirror))
             {
                 throw new InvalidOperationException("Virtual controller bridge did not confirm the requested pad slots.");
             }
@@ -265,7 +271,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     internal static bool IsExpectedReady(string line, int[] slots, string focusPadMap,
         bool rightStickFollowerOverride, int directRightStickSlot, bool autoFlaskEnabled, bool useWgi,
         PrivateClient3Plan? privatePlan, bool lastFocusedLeads = false,
-        bool menuGuardEnabled = true)
+        bool menuGuardEnabled = true, FollowerMirrorConfig? followerMirror = null)
     {
         try
         {
@@ -280,6 +286,8 @@ internal sealed class BridgeSession : IAsyncDisposable
                    flaskMode.GetBoolean() == autoFlaskEnabled &&
                    root.TryGetProperty("menu_guard_enabled", out var menuGuard) &&
                    menuGuard.GetBoolean() == menuGuardEnabled &&
+                   (followerMirror is null || root.TryGetProperty("follower_mirror", out var mirror) &&
+                    mirror.GetString() == followerMirror.Encode()) &&
                    root.TryGetProperty("last_focused_leads", out var dynamicMain) &&
                    dynamicMain.GetBoolean() == lastFocusedLeads &&
                    root.TryGetProperty("right_stick_follower_override", out var rightStick) &&

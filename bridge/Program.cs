@@ -216,6 +216,17 @@ var menuGuardEnabled = !args.Contains("--disable-menu-guard");
 var wgiMode = args.Contains("--physical-wgi");
 var physicalMode = wgiMode || args.Contains("--physical-index") || args.Contains("--main-slot") ||
     args.Contains("--physical-hidden-confirmed") || args.Contains("--right-stick-follower-override");
+var mirrorPosition = Array.IndexOf(args, "--follower-mirror");
+FollowerMirrorConfig? requestedMirror = null;
+if (mirrorPosition >= 0 && (!physicalMode ||
+    args.Count(arg => arg == "--follower-mirror") != 1 ||
+    mirrorPosition + 1 >= args.Length ||
+    !FollowerMirrorConfig.TryParse(args[mirrorPosition + 1], out requestedMirror)))
+{
+    Console.Error.WriteLine("Follower mirror needs one complete P1–P6 setting.");
+    return 2;
+}
+var followerMirror = requestedMirror ?? FollowerMirrorConfig.Default;
 var autoFlaskEnabled = args.Contains("--enable-auto-flask");
 var combatEnabled = args.Contains("--enable-combat");
 var rightStickFollowerOverride = args.Contains("--right-stick-follower-override");
@@ -394,7 +405,7 @@ try
         }
         var router = new BridgeRouter(outputs, privateClient3 is null ? null : privateOutputs);
         if (physicalMode && !router.ConfigurePhysical(mainSlot, rightStickFollowerOverride, focusPads,
-            directRightStickSlot, lastFocusedLeads))
+            directRightStickSlot, lastFocusedLeads, followerMirror))
             throw new InvalidOperationException("Focus pad mapping does not match the connected virtual controllers.");
         if (hybridPlan is not null && !router.ConfigureHybridKeyboard(hybridPlan.PlayerPads, hybridBindings))
             throw new InvalidOperationException("Keyboard player mapping does not match the connected virtual controllers.");
@@ -433,6 +444,7 @@ try
             menu_guard_enabled = menuGuardEnabled,
             right_stick_follower_override = rightStickFollowerOverride,
             last_focused_leads = lastFocusedLeads,
+            follower_mirror = physicalMode ? followerMirror.Encode() : "",
             direct_right_stick_slot = directRightStickSlot,
             private_client3_pid = client3Options?.Pid ?? 0,
             private_client3_slots = client3Options?.PrivateSlots ?? [],

@@ -29,6 +29,8 @@ internal sealed class BridgeRouter
     private readonly Dictionary<int, PadRoute> _routes;
     private readonly IReportBatch? _reportBatch;
     private IReadOnlyDictionary<int, int> _focusPads = new Dictionary<int, int>();
+    private IReadOnlyDictionary<int, int> _playerForPad = new Dictionary<int, int>();
+    private FollowerMirrorConfig _followerMirror = FollowerMirrorConfig.Default;
     private bool _physicalMode;
     private HybridKeyboardState? _hybridKeyboard;
     private HybridBindingConfig _hybridBindings = HybridBindingConfig.Default;
@@ -118,7 +120,7 @@ internal sealed class BridgeRouter
 
     public bool ConfigurePhysical(int mainSlot, bool rightStickFollowerOverride = false,
         IReadOnlyDictionary<int, int>? focusPads = null, int directRightStickSlot = 0,
-        bool lastFocusedLeads = false)
+        bool lastFocusedLeads = false, FollowerMirrorConfig? followerMirror = null)
     {
         if (_hybridKeyboard is not null || !_routes.ContainsKey(mainSlot)) return false;
         if (directRightStickSlot != 0 && (!rightStickFollowerOverride ||
@@ -131,6 +133,8 @@ internal sealed class BridgeRouter
             (explicitFocusPads && (!focusPads.TryGetValue(1, out var firstPad) || firstPad != mainSlot)))
             return false;
         _focusPads = new Dictionary<int, int>(focusPads);
+        _playerForPad = focusPads.ToDictionary(entry => entry.Value, entry => entry.Key);
+        _followerMirror = followerMirror ?? FollowerMirrorConfig.Default;
         _physicalMode = true;
         _rightStickFollowerOverride = rightStickFollowerOverride;
         _lastFocusedLeads = lastFocusedLeads;
@@ -584,7 +588,7 @@ internal sealed class BridgeRouter
             (Math.Abs((int)_manualX) > 8000 || Math.Abs((int)_manualY) > 8000))
         {
             route.Output.SetReport(WithFlasks(WithFollowerMirror(
-                PadReport.FromMovement(_manualX, _manualY), route), route));
+                PadReport.FromMovement(_manualX, _manualY), slot, route), route));
             return;
         }
         var automation = route.Automation;
@@ -593,25 +597,29 @@ internal sealed class BridgeRouter
             {
                 Buttons = (ushort)(automation.Buttons | _hybridKeyboard.MainFollowMirrorButtons)
             };
-        route.Output.SetReport(WithFlasks(WithFollowerMirror(automation, route), route));
+        route.Output.SetReport(WithFlasks(WithFollowerMirror(automation, slot, route), route));
     }
 
-    private PadReport WithFollowerMirror(PadReport automation, PadRoute route)
+    private PadReport WithFollowerMirror(PadReport automation, int slot, PadRoute route)
     {
         if (!_followerMirrorEnabled || !_physicalConnected)
         {
             route.DodgeSprint.Reset();
             return automation;
         }
-        const ushort mirroredButtons = 0xF30F; // A/B/X/Y, LB/RB and D-pad; not Start/View.
-        var input = (ushort)(_physicalReport.Buttons & mirroredButtons);
+        if (!_playerForPad.TryGetValue(slot, out var player))
+        {
+            route.DodgeSprint.Reset();
+            return automation;
+        }
+        var input = (ushort)(_physicalReport.Buttons & _followerMirror.ButtonsForPlayer(player));
         var buttons = route.DodgeSprint.Resolve(input,
             (automation.Buttons & 0x2000) != 0, DateTime.UtcNow);
         return automation with
         {
             Buttons = (ushort)((automation.Buttons & ~0x2000) | buttons),
-            LeftTrigger = _physicalReport.LeftTrigger,
-            RightTrigger = _physicalReport.RightTrigger
+            LeftTrigger = _followerMirror.LeftTriggerForPlayer(player) ? _physicalReport.LeftTrigger : (byte)0,
+            RightTrigger = _followerMirror.RightTriggerForPlayer(player) ? _physicalReport.RightTrigger : (byte)0
         };
     }
 

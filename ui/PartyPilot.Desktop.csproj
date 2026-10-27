@@ -12,5 +12,6 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../common/HybridBindingConfig.cs" Link="HybridBindingConfig.cs" />
+    <Compile Include="../common/FollowerMirrorConfig.cs" Link="FollowerMirrorConfig.cs" />
   </ItemGroup>
 </Project>
