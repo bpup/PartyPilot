@@ -21,7 +21,7 @@ public static class LocalSlotMotionSampler
                 observedLocalAddress, visiblePaths, read, readMissingPath,
                 ingameStateAddress)) return null;
         var positionOffset = readPosition is null
-            ? RawRenderPositionReader.SelectUniqueOffset(observedLocalAddress, read,
+            ? RawRenderPositionReader.SelectObservedOffset(observedLocalAddress, read,
                 observedX, observedY, observedZ)
             : verifiedPositionOffset;
         if (positionOffset is not null and not

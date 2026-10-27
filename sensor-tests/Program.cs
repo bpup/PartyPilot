@@ -430,17 +430,17 @@ void TestRawRenderPositionReader()
         comparison.WorldXYDistance > 200 &&
         RawRenderPositionReader.CompareLocal(position!, float.NaN, 20, 5) == null,
         "Independent local Render position was not compared in both candidate scales.");
-    Require(RawRenderPositionReader.SelectUniqueOffset(entity, ReadRaw,
+    Require(RawRenderPositionReader.SelectObservedOffset(entity, ReadRaw,
         108.69565f, 217.3913f, 5) == 312,
         "The default Render position offset was not uniquely selected.");
     raw[render + 184] = BitConverter.GetBytes(10f)
         .Concat(BitConverter.GetBytes(20f)).Concat(BitConverter.GetBytes(5f)).ToArray();
-    Require(RawRenderPositionReader.SelectUniqueOffset(entity, ReadRaw, 10, 20, 5) == 184 &&
+    Require(RawRenderPositionReader.SelectObservedOffset(entity, ReadRaw, 10, 20, 5) == 184 &&
         RawRenderPositionReader.Read(entity, ReadRaw, 184)?.WorldX == 10,
         "The alternate static Render offset was not selected by the observed local player.");
     raw[render + 312] = raw[render + 184];
-    Require(RawRenderPositionReader.SelectUniqueOffset(entity, ReadRaw, 10, 20, 5) == null,
-        "Two matching Render layouts were treated as a unique control source.");
+    Require(RawRenderPositionReader.SelectObservedOffset(entity, ReadRaw, 10, 20, 5) == 312,
+        "Matching Render layouts did not prefer the supplied probe's active default offset.");
     raw[render + 312] = BitConverter.GetBytes(108.69565f)
         .Concat(BitConverter.GetBytes(217.3913f))
         .Concat(BitConverter.GetBytes(5f)).ToArray();

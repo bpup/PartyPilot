@@ -16,9 +16,10 @@ public static class RawRenderPositionReader
     public const int DefaultWorldPositionOffset = 312;
     public const int GameHelperWorldPositionOffset = 184;
 
-    // The supplied offset table names both layouts. Only a unique match to
-    // the independently observed local player may select a layout for P2.
-    public static int? SelectUniqueOffset(long localEntity,
+    // The supplied probe reads the active default layout at +312. Prefer it
+    // when both static layouts agree with the independently observed player;
+    // the alternate layout remains a candidate only if the default disagrees.
+    public static int? SelectObservedOffset(long localEntity,
         Func<long, int, byte[]?> read, float observedX, float observedY, float observedZ)
     {
         var component = FindRenderComponent(localEntity, read);
@@ -29,8 +30,8 @@ public static class RawRenderPositionReader
             CompareLocal(normal, observedX, observedY, observedZ) is { WorldXYDistance: 0 };
         var helperMatches = helper is not null &&
             CompareLocal(helper, observedX, observedY, observedZ) is { WorldXYDistance: 0 };
-        if (normalMatches == helperMatches) return null;
-        return normalMatches ? DefaultWorldPositionOffset : GameHelperWorldPositionOffset;
+        if (normalMatches) return DefaultWorldPositionOffset;
+        return helperMatches ? GameHelperWorldPositionOffset : null;
     }
 
     public static LocalComparison? CompareLocal(Position raw,
