@@ -2970,7 +2970,7 @@ public sealed class MainWindow : Window
                 aggressiveBlinkCatchUp: _aggressiveBlinkCatchUp.IsChecked == true,
                 aggressiveSprintRetryDelay: _aggressiveBlinkCatchUp.IsChecked == true
                     ? int.Parse(_aggressiveSprintRetryDelay.Text!, CultureInfo.InvariantCulture) : 800,
-                relayMainInput: enableCloseMirror || enableAttackMirror,
+                relayMainInput: !_bridge.IsHybridMode,
                 closeRangeMirror: enableCloseMirror,
                 closeMirrorDuration: int.Parse(_closeMirrorDuration.Text!, CultureInfo.InvariantCulture),
                 followerMirror: _followerMirror);

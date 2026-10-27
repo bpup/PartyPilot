@@ -29,7 +29,7 @@ func (e *Engine) SetAcceptMainInput(enabled bool) {
 
 func (e *Engine) SetMirrorAttackDirection(enabled, catchUpPriority bool) {
 	e.mirrorAttackDirection = enabled
-	e.catchUpPriority = enabled && catchUpPriority
+	e.catchUpPriority = catchUpPriority
 }
 
 func (e *Engine) ObserveMainInput(input MainInput, now time.Time) bool {

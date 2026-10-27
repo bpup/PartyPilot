@@ -105,3 +105,48 @@ func TestMirrorAttackDirectionCanMoveHoldingFollower(t *testing.T) {
 		t.Fatalf("holding follower did not mirror attack direction: %+v", got)
 	}
 }
+
+func TestAttackReleasesSprintWhenDirectionMirroringIsDisabled(t *testing.T) {
+	at := time.Unix(2500, 0).UTC()
+	engine, err := New(map[int]int{1: 101, 2: 202}, 1,
+		follow.Config{StopDistance: 2, ResumeDistance: 5, CatchUpDistance: 30,
+			MaxAge: time.Second, TargetTrail: true}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	for _, slot := range []int{1, 2} {
+		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
+			ObservedAt: at, Origin: "live"})
+	}
+	frameAt := at.Add(time.Millisecond)
+	for _, sample := range []telemetry.Sample{
+		{ProcessID: 101, SeenUTC: frameAt, X: 40},
+		{ProcessID: 202, SeenUTC: frameAt},
+	} {
+		if !observeGridSample(engine, sample) {
+			t.Fatal("position was rejected")
+		}
+	}
+	engine.SetAcceptMainInput(true)
+	engine.SetMirrorAttackDirection(false, true)
+	baseline := engine.Step(frameAt)[2]
+	if baseline.State != follow.CatchingUp || !baseline.SprintDown {
+		t.Fatalf("test did not establish catch-up sprint: %+v", baseline)
+	}
+	if !engine.ObserveMainInput(MainInput{Slot: 1, LeftY: 1, AttackActive: true,
+		ObservedAt: frameAt}, frameAt) {
+		t.Fatal("attack input was rejected")
+	}
+	protected := engine.Step(frameAt)[2]
+	if !protected.SprintDown || protected.AttackDirection ||
+		math.Abs(protected.X-baseline.X) > 0.001 || math.Abs(protected.Y-baseline.Y) > 0.001 {
+		t.Fatalf("catch-up priority did not retain sprint and direction: %+v", protected)
+	}
+	engine.SetMirrorAttackDirection(false, false)
+	released := engine.Step(frameAt)[2]
+	if released.SprintDown || released.AttackDirection ||
+		math.Abs(released.X-baseline.X) > 0.001 || math.Abs(released.Y-baseline.Y) > 0.001 {
+		t.Fatalf("attack did not release sprint independently of direction mirroring: %+v", released)
+	}
+}

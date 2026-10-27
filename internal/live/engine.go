@@ -488,19 +488,21 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 			command.ManualOverrideEligible = true
 		}
 		command = e.applyCloseMirror(slot, command, now, positions, terrains)
-		if e.mirrorAttackDirection &&
-			(command.State == follow.Holding || command.State == follow.Following ||
-				command.State == follow.CatchingUp) &&
-			!(command.State == follow.CatchingUp && e.catchUpPriority) {
+		if command.State == follow.Holding || command.State == follow.Following ||
+			command.State == follow.CatchingUp {
 			if input, ok := e.CurrentMainInput(now); ok && !input.Blocked && input.AttackActive {
-				command.SprintDown = false
-				length := math.Hypot(input.LeftX, input.LeftY)
-				if length*length > 0.03 {
-					command.X, command.Y = input.LeftX/length, input.LeftY/length
-					command.Reason = "Attack direction"
-					command.AttackDirection = true
-					command.MirrorMovement = false
-					command.MirrorIdle = false
+				if !(command.State == follow.CatchingUp && e.catchUpPriority) {
+					command.SprintDown = false
+					if e.mirrorAttackDirection {
+						length := math.Hypot(input.LeftX, input.LeftY)
+						if length*length > 0.03 {
+							command.X, command.Y = input.LeftX/length, input.LeftY/length
+							command.Reason = "Attack direction"
+							command.AttackDirection = true
+							command.MirrorMovement = false
+							command.MirrorIdle = false
+						}
+					}
 				}
 			}
 		}
