@@ -33,6 +33,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     private SkillBindSourceScanner.Result? _skillBindSource;
     private string? _skillBindSourceStatus;
     private DateTime _lastRadarSentUtc;
+    private DateTime _lastRadarMotionUtc;
     private bool _radarStreamHealthy;
     private DateTime _lastDormantMapScanUtc;
     private object? _dormantMapObservation;
@@ -80,7 +81,14 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             _lastFastCandidateSentUtc = now;
             EmitFastOrderedCandidate(now);
         }
-        if (now - _lastSentUtc < TimeSpan.FromMilliseconds(100)) return;
+        var fullFrameDue = now - _lastSentUtc >= TimeSpan.FromMilliseconds(100);
+        if (!fullFrameDue && Settings.DiagnoseRadarEntities.Value && _radarStreamHealthy &&
+            now - _lastRadarMotionUtc >= TimeSpan.FromMilliseconds(25))
+        {
+            _lastRadarMotionUtc = now;
+            EmitRadarMotion(now);
+        }
+        if (!fullFrameDue) return;
         _lastSentUtc = now;
 
         var player = GameController.Player;
@@ -882,45 +890,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         if (radarSeenUtc.HasValue) _udp.Send(bytes, bytes.Length, RadarReceiver);
         if (Settings.DiagnoseRadarEntities.Value && _radarStreamHealthy && frameAreaHash != 0)
         {
-            double? motionGridX = radarGridX;
-            double? motionGridY = radarGridY;
-            string? motionStateAreaAddress = radarStateAreaAddress;
-            var needsRawGrid = Settings.DiagnoseTerrain.Value || Settings.DiagnoseDormantAreaMap.Value;
-            if (needsRawGrid && !radarSeenUtc.HasValue)
-            {
-                try
-                {
-                    byte[]? ReadMotionMap(long address, int size)
-                    {
-                        try { return GameController.IngameState.Data.M.ReadMem(address, size); }
-                        catch { return null; }
-                    }
-                    var raw = RawRenderPositionReader.Read(frameLocalAddress, ReadMotionMap);
-                    motionGridX = raw?.GridX;
-                    motionGridY = raw?.GridY;
-                    var pointer = ReadMotionMap(frameStateAddress + 656, 8);
-                    motionStateAreaAddress = pointer is { Length: 8 }
-                        ? FormatAddress(BitConverter.ToInt64(pointer)) : null;
-                }
-                catch { motionGridX = null; motionGridY = null; }
-            }
-            if (!needsRawGrid || motionGridX.HasValue && motionGridY.HasValue)
-            {
-                var motion = JsonSerializer.SerializeToUtf8Bytes(new
-                {
-                    Kind = "radar_motion",
-                    ProcessId = frameProcessId,
-                    SeenUtc = now,
-                    AreaHash = frameAreaHash,
-                    RadarAreaAddress = FormatAddress(frameDataAddress),
-                    RadarStateAreaAddress = motionStateAreaAddress,
-                    X = position.X,
-                    Y = position.Y,
-                    RadarGridX = motionGridX,
-                    RadarGridY = motionGridY
-                });
-                _udp.Send(motion, motion.Length, RadarReceiver);
-            }
+            _lastRadarMotionUtc = now;
+            EmitRadarMotion(now);
         }
         var privacyPulse = JsonSerializer.SerializeToUtf8Bytes(new
         {
@@ -929,6 +900,65 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             PrivacyStatus = "render-ok"
         });
         _udp.Send(privacyPulse, privacyPulse.Length, PrivacyReceiver);
+    }
+
+    private void EmitRadarMotion(DateTime seenUtc)
+    {
+        try
+        {
+            var player = GameController.Player;
+            var render = player?.GetComponent<Render>();
+            if (render is null || player is null) return;
+            var stateAddress = GameController.IngameState.Address;
+            var areaAddress = GameController.IngameState.Data.Address;
+            var areaHash = GameController.IngameState.Data.CurrentAreaHash;
+            var playerAddress = player.Address;
+            var processId = GameController.Window.Process.Id;
+            if (stateAddress <= 0 || areaAddress <= 0 || playerAddress <= 0 ||
+                areaHash == 0 || processId <= 0) return;
+            var position = render.Pos;
+            if (!float.IsFinite(position.X) || !float.IsFinite(position.Y)) return;
+
+            double? gridX = null;
+            double? gridY = null;
+            string? stateAreaAddress = null;
+            if (Settings.DiagnoseTerrain.Value || Settings.DiagnoseDormantAreaMap.Value)
+            {
+                byte[]? Read(long address, int size)
+                {
+                    try { return GameController.IngameState.Data.M.ReadMem(address, size); }
+                    catch { return null; }
+                }
+                var raw = RawRenderPositionReader.Read(playerAddress, Read);
+                if (raw is null) return;
+                gridX = raw.GridX;
+                gridY = raw.GridY;
+                var pointer = Read(stateAddress + 656, 8);
+                if (pointer is not { Length: 8 }) return;
+                stateAreaAddress = FormatAddress(BitConverter.ToInt64(pointer));
+                if (stateAreaAddress is null) return;
+            }
+            if (GameController.IngameState.Address != stateAddress ||
+                GameController.IngameState.Data.Address != areaAddress ||
+                GameController.IngameState.Data.CurrentAreaHash != areaHash ||
+                GameController.Player?.Address != playerAddress ||
+                GameController.Window.Process.Id != processId) return;
+            var motion = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                Kind = "radar_motion",
+                ProcessId = processId,
+                SeenUtc = seenUtc,
+                AreaHash = areaHash,
+                RadarAreaAddress = FormatAddress(areaAddress),
+                RadarStateAreaAddress = stateAreaAddress,
+                X = position.X,
+                Y = position.Y,
+                RadarGridX = gridX,
+                RadarGridY = gridY
+            });
+            _udp.Send(motion, motion.Length, RadarReceiver);
+        }
+        catch { }
     }
 
     private void EmitFastOrderedCandidate(DateTime seenUtc)
