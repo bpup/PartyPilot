@@ -89,7 +89,7 @@ internal static class RadarTerrainCaptureSmoke
             var projected = RadarTerrainRaster.Render(capture,
                 matching with { GridX = 1, GridY = 0 }, 64, 64, 8);
             if (projected[(32 * 64 + 26) * 4 + 3] != 0 ||
-                projected[(27 * 64 + 32) * 4 + 3] != 224 ||
+                projected[(27 * 64 + 32) * 4 + 3] != 90 ||
                 projected[(63 * 64) * 4 + 3] != 0)
                 throw new Exception($"Radar terrain preview lost blocked, walkable, or outside-map pixels: " +
                     $"blocked={projected[(32 * 64 + 26) * 4 + 3]}, " +
@@ -107,23 +107,22 @@ internal static class RadarTerrainCaptureSmoke
                 {
                     var cellX = (int)Math.Floor(gridX);
                     var cellY = (int)Math.Floor(gridY);
-                    if (capture.Renderable(cellX, cellY) &&
-                        neighbors.Any(delta => cellX + delta.X < 0 || cellY + delta.Y < 0 ||
-                                cellX + delta.X >= capture.Width ||
-                                cellY + delta.Y >= capture.Height ||
-                                !capture.Renderable(cellX + delta.X, cellY + delta.Y)))
-                        expected = 224;
+                    if (capture.Renderable(cellX, cellY))
+                        expected = neighbors.Any(delta => cellX + delta.X < 0 || cellY + delta.Y < 0 ||
+                            cellX + delta.X >= capture.Width ||
+                            cellY + delta.Y >= capture.Height ||
+                            !capture.Renderable(cellX + delta.X, cellY + delta.Y)) ? 90 : 38;
                 }
                 if (projected[(y * 64 + x) * 4 + 3] != expected)
                     throw new Exception($"Incremental radar projection changed pixel ({x},{y}).");
             }
             var interior = RadarTerrainRaster.Render(capture, matching, 1, 1, 1);
-            if (interior[3] != 0)
-                throw new Exception("Radar terrain filled its interior despite the active overlay's zero background opacity.");
+            if (!interior.SequenceEqual(new byte[] { 9, 7, 5, 38 }))
+                throw new Exception("Radar terrain interior did not use the target's default fill colour and opacity.");
             var diagonal = RadarTerrainRaster.Render(capture,
                 matching with { GridX = 1, GridY = 1 }, 1, 1, 1);
-            if (diagonal[3] != 0)
-                throw new Exception("A diagonal blocked cell incorrectly became a wall edge.");
+            if (diagonal[3] != 38)
+                throw new Exception("A diagonal blocked neighbor incorrectly became a wall edge.");
             var autoDirectory = Path.Combine(directory, "auto");
             Directory.CreateDirectory(autoDirectory);
             var catalog = new RadarTerrainCatalog(autoDirectory);

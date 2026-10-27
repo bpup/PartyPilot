@@ -4,6 +4,11 @@ namespace PartyPilot.Desktop;
 // coordinate. This does not establish the candidate's game-world calibration.
 public static class RadarTerrainRaster
 {
+    // 0.6.17 defaults: map 42%, border 40%, background 15%.
+    // The target's terrain bitmap scales base alphas 224 and 38 by these
+    // settings; Avalonia's Premul bitmap needs the corresponding BGRA bytes.
+    private const byte BorderAlpha = 90;
+    private const byte BackgroundAlpha = 38;
     private static readonly (int X, int Y)[] CardinalNeighbors =
         [(-1, 0), (1, 0), (0, -1), (0, 1)];
 
@@ -48,16 +53,20 @@ public static class RadarTerrainRaster
                     boundary = IsBoundary(capture, gridX, gridY);
                     boundaryByCell.Add(key, boundary);
                 }
-                if (!boundary) continue;
-                // RadarFeedPump prepares the bitmap injected into RadarCanvas.
-                // Its default mapBackgroundOpacity is zero, so the active
-                // overlay path keeps interior cells transparent even though
-                // RadarCanvas.BuildTerrainBitmap has a faint fill.
-                // Convert the visible border to premultiplied BGRA.
-                pixels[offset] = 174;
-                pixels[offset + 1] = 184;
-                pixels[offset + 2] = 184;
-                pixels[offset + 3] = 224;
+                if (boundary)
+                {
+                    pixels[offset] = 70;
+                    pixels[offset + 1] = 74;
+                    pixels[offset + 2] = 74;
+                    pixels[offset + 3] = BorderAlpha;
+                }
+                else
+                {
+                    pixels[offset] = 9;
+                    pixels[offset + 1] = 7;
+                    pixels[offset + 2] = 5;
+                    pixels[offset + 3] = BackgroundAlpha;
+                }
             }
         }
         return pixels;
