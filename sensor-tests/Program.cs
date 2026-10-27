@@ -539,6 +539,8 @@ void TestGeneratedRoomProbe()
     Require(result.Status == "candidate_rooms_observed" && result.Graphs == 1 &&
         result.RoomsChecked == 2 && result.ValidPaths == 1 && !result.SamplesTruncated &&
         result.Samples is [{ Left: 1, Top: 1, Right: 2, Bottom: 3 }] &&
+        result.MatchedAnchors == 1 && !result.AnchorsTruncated &&
+        result.Anchors is [{ Category: "boss", Label: "Boss arena", GridX: 34.5, GridY: 46 }] &&
         result.Samples[0].Path.EndsWith("boss_1.arm", StringComparison.Ordinal),
         "Generated-room candidate path or bounded tile rectangle changed.");
     Require(GeneratedRoomProbe.Scan(area, 92, 92, (_, _) => null).Status ==
@@ -546,6 +548,26 @@ void TestGeneratedRoomProbe()
     BitConverter.GetBytes(graphsAddress + 151).CopyTo(vector, 8);
     Require(GeneratedRoomProbe.Scan(area, 92, 92, Read).Status == "not_ready",
         "A partial graph record was accepted.");
+    Require(GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act1/1_13/Rooms/Unique/blacksmith.arm") ==
+            new GeneratedRoomClassifier.Marker("quest", "Blacksmith") &&
+        GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act2/2_8/Rooms/Unique/unique_01.arm") ==
+            new GeneratedRoomClassifier.Marker("quest", "Final Letter (Skill Points)") &&
+        GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act2/2_8/Rooms/Unique/exit_01.arm") ==
+            new GeneratedRoomClassifier.Marker("transition", "Path of Mourning") &&
+        GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act2/2_10_1/Rooms/Unique/entrance_foundry_1.arm") ==
+            new GeneratedRoomClassifier.Marker("transition", "Mawdun Mine · Rudja") &&
+        GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act3/3_3/Rooms/exit_SnakePit_01.arm") ==
+            new GeneratedRoomClassifier.Marker("transition", "Venom Crypts") &&
+        GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act2/2_10_1/Rooms/Cavern/checkpoint_cc_01.arm") ==
+            new GeneratedRoomClassifier.Marker("checkpoint", "Checkpoint") &&
+        GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act1/1_15/Rooms/Unique/stairs_up_1.arm") ==
+            new GeneratedRoomClassifier.Marker("transition", "Stairs up") &&
+        GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act3/3_3/Rooms/exit_FloodedDepths_02.arm") ==
+            new GeneratedRoomClassifier.Marker("transition", "Area exit · Flooded Depths") &&
+        GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act3/3_3/Rooms/exit_SnakePit_OneWay_01.arm") == null &&
+        GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act1/1_15/Rooms/Fill/stairs_decorative_1.arm") == null &&
+        GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act1/1_6/Rooms/crossroads_1.arm") == null,
+        "Generated-room marker rules admitted an unsupported room or lost a named anchor.");
 }
 var largeLoot = Enumerable.Range(1, 96).Select(index => (object)new
 {

@@ -13,15 +13,19 @@ internal static class GeneratedRoomProbe
     private const int MaxGraphs = 256;
     private const int MaxRooms = 4096;
     private const int MaxSamples = 32;
+    private const int MaxAnchors = 64;
 
     internal sealed record Room(string Path, int Left, int Top, int Right, int Bottom);
+    internal sealed record Anchor(string Path, string Category, string Label,
+        double GridX, double GridY);
     internal sealed record Result(string Status, int Graphs, int RoomsChecked,
-        int ValidPaths, bool SamplesTruncated, Room[] Samples);
+        int ValidPaths, bool SamplesTruncated, Room[] Samples,
+        int MatchedAnchors, bool AnchorsTruncated, Anchor[] Anchors);
 
     internal static Result Scan(long area, int gridWidth, int gridHeight,
         Func<long, int, byte[]?> read)
     {
-        var empty = new Result("not_ready", 0, 0, 0, false, []);
+        var empty = new Result("not_ready", 0, 0, 0, false, [], 0, false, []);
         if (!Pointer(area) || gridWidth < 23 || gridHeight < 23) return empty;
         var vector = read(area + GraphVectorOffset, 24);
         if (vector is not { Length: 24 }) return empty with { Status = "graph_vector_unreadable" };
@@ -38,6 +42,9 @@ internal static class GeneratedRoomProbe
         var validPaths = 0;
         var truncated = false;
         var samples = new List<Room>();
+        var anchors = new List<Anchor>();
+        var matchedAnchors = 0;
+        var anchorsTruncated = false;
         for (var graph = 0; graph < graphCount; graph++)
         {
             var offset = graph * GraphBytes + RoomVectorOffset;
@@ -46,7 +53,12 @@ internal static class GeneratedRoomProbe
             var roomCapacity = BitConverter.ToInt64(graphs, offset + 16);
             if (!Vector(roomStart, roomEnd, roomCapacity, RoomBytes, MaxRooms)) continue;
             var count = (int)((roomEnd - roomStart) / RoomBytes);
-            if (checkedRooms + count > MaxRooms) { truncated = true; break; }
+            if (checkedRooms + count > MaxRooms)
+            {
+                truncated = true;
+                anchorsTruncated = true;
+                break;
+            }
             var records = read(roomStart, count * RoomBytes);
             if (records == null || records.Length != count * RoomBytes) continue;
             checkedRooms += count;
@@ -65,10 +77,19 @@ internal static class GeneratedRoomProbe
                 validPaths++;
                 if (samples.Count < MaxSamples) samples.Add(new Room(path, left, top, right, bottom));
                 else truncated = true;
+                if (GeneratedRoomClassifier.Classify(path) is { } marker)
+                {
+                    matchedAnchors++;
+                    if (anchors.Count < MaxAnchors)
+                        anchors.Add(new Anchor(path, marker.Category, marker.Label,
+                            (left + (double)right) * 11.5, (top + (double)bottom) * 11.5));
+                    else anchorsTruncated = true;
+                }
             }
         }
         return new Result(validPaths > 0 ? "candidate_rooms_observed" : "no_room_paths",
-            graphCount, checkedRooms, validPaths, truncated, samples.ToArray());
+            graphCount, checkedRooms, validPaths, truncated, samples.ToArray(),
+            matchedAnchors, anchorsTruncated, anchors.ToArray());
     }
 
     private static bool TryPath(long asset, Func<long, int, byte[]?> read, out string path)

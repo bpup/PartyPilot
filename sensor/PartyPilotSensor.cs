@@ -625,7 +625,20 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             PackedTerrainProbe = packedTerrainProbe,
             PackedTerrainStatus = packedTerrainStatus,
             PackedTerrainCaptureStatus = packedTerrainCaptureStatus,
-            GeneratedRoomProbe = generatedRoomProbe,
+            GeneratedRoomProbe = generatedRoomProbe is null ? null : new
+            {
+                generatedRoomProbe.Status,
+                generatedRoomProbe.Graphs,
+                generatedRoomProbe.RoomsChecked,
+                generatedRoomProbe.ValidPaths,
+                generatedRoomProbe.SamplesTruncated,
+                SamplesOmitted = Math.Max(0, generatedRoomProbe.Samples.Length - 4),
+                Samples = generatedRoomProbe.Samples.Take(4),
+                generatedRoomProbe.MatchedAnchors,
+                generatedRoomProbe.AnchorsTruncated,
+                AnchorsOmitted = Math.Max(0, generatedRoomProbe.Anchors.Length - 8),
+                Anchors = generatedRoomProbe.Anchors.Take(8)
+            },
             VisiblePlayers = visiblePlayers,
             VisiblePlayersStatus = visiblePlayersStatus
         });
