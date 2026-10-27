@@ -20,6 +20,8 @@
 
 进一步反查目标 `NoddPilot.Offsets.Reading.AreaEntityListReader.TryResolveAreaInstance`，可见其先在游戏状态对象加上 `InGameStateAreaInstanceOffset` 读取指针；该偏移的公开静态默认值是 656。诊断现在也从 ExileCore2 的 `IngameState.Address + 656` 只读取得第二个实验区域基址，与 `IngameState.Data.Address` 分别扫描、去重并比较。输出包含状态指针解析出的区域地址、两种基址是否相等、实际产生候选的区域地址；两种基址若给出相互冲突的角色顺序，结果为 `conflicting_candidates`。目标运行时可能启用了不同偏移，当前没有 PoE2 实机证据证明两种基址任何一个等于目标的真实 `areaInstance`；即便候选相同，也不会自动绑定 P2。
 
+继续核对当前用于编译插件的 `work/exilecore2-ref/ExileCore2.dll`：其 `ExileCore2.PoEMemory.MemoryObjects.IngameState.get_Data` 方法体在 IL 中仅有 `ldarg.0; ret`，既没有读取 `WorldDataOffset`，也没有读取 `IngameState.Address + 656`。同一程序集反编译出的 `UpdateData` 也没有可追溯的区域指针赋值。这份参考程序集的静态方法体不能建立两个区域基址的等价关系，更不能证明游戏运行时的真实地址；下一步必须用 Windows/PoE2 录制到的同帧地址和换区行为核对。现有候选身份状态保持不变。
+
 原始物品卡片诊断在两项开关同时开启时，可把 owner 与上面的**新鲜有序候选**精确比对，并仅输出 `unverified_vector_order_candidate` 的本地 1/2 槽位编号。还要求 owner 同时等于唯一可见玩家实体地址；关闭候选扫描、状态地址变化、候选冲突或地址不符时不输出。所提供版本的 `PlayerSlotVectorResolver` 会从区域实体列表逐一读取角色路径，并记录向量头地址供后续重验；独立版现在也记录所选候选向量头，物品卡片关联前重读向量头、顺序和角色路径，变化时丢弃缓存候选。这里仍使用 ExileCore2 当前可见实体及静态默认的原始路径读取，尚未取得等价的完整区域实体列表，故候选不能升级为可靠槽位或驱动输入。
 
 静态反编译所提供的 `NoddPilot.Offsets.dll` 可见：`MonsterEntityReader.TryReadWorldPosition` 先按名称解析实体的 `Render` 组件，再从该组件读取三个 float；`EntityMapOffsets.Default` 的位置偏移为 312，世界坐标除以 10.869565 得到网格坐标。独立版现仅在已找到 1–2 个有序角色候选时，按这套公开默认偏移尝试只读组件链，并在读完后重验槽位向量；输出 `RawPositions`、`RawPositionsSeenUtc` 与 `RenderComponentAddress` 作为最多缓存一秒的候选诊断。合成内存检查覆盖组件归属与无效坐标。目标版可加载不同的运行时偏移；目前没有实机数据证明这些地址或坐标正确，也没有证据证明它们与 ExileCore2 的当前角色坐标语义一致。`RawPositions` 不参与实时跟随、角色绑定或手柄输入。
