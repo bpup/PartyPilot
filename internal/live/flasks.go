@@ -141,8 +141,7 @@ func (session *FlaskSession) ObserveSample(sample telemetry.Sample, now time.Tim
 	if !session.live.flaskActionReady(slot, now) {
 		return nil, nil
 	}
-	if sample.Life == nil || sample.LifeMax == nil || *sample.Life <= 0 || *sample.LifeMax <= 0 ||
-		sample.Mana == nil || sample.ManaMax == nil || *sample.ManaMax <= 0 {
+	if sample.Life == nil || sample.LifeMax == nil || *sample.Life <= 0 || *sample.LifeMax <= 0 {
 		return nil, nil
 	}
 	rules, err := session.rulesFor(slot)
@@ -180,9 +179,8 @@ func (session *FlaskSession) ObserveOrderedVitals(frame OrderedVitalsFrame,
 	for _, player := range frame.Players {
 		if player.LocalPlayer < 1 || player.LocalPlayer > len(roles) ||
 			player.Life == nil || player.LifeMax == nil ||
-			player.Mana == nil || player.ManaMax == nil ||
 			!validOrderedPool(player.Life, player.LifeMax) || *player.LifeMax <= 0 ||
-			!validOrderedPool(player.Mana, player.ManaMax) || *player.ManaMax <= 0 ||
+			!validOrderedPool(player.Mana, player.ManaMax) ||
 			!validOrderedPool(player.EnergyShield, player.EnergyShieldMax) {
 			return nil, nil
 		}

@@ -109,3 +109,41 @@ func TestLiveDrinkerOptionsMustAgreeAcrossTargets(t *testing.T) {
 		t.Fatalf("drinker options did not reach own rules: %+v %v", rules, err)
 	}
 }
+
+func TestLiveNoManaDrinkerCanUseOwnLifeFlask(t *testing.T) {
+	liveEngine, err := New(map[int]int{1: 101, 2: 202}, 1,
+		follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10,
+			MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer liveEngine.Close()
+	session, err := NewFlaskSession(liveEngine, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := session.ConfigureSupport([]FlaskSupportBinding{{DrinkerPlayer: 2,
+		BuildHasNoMana: true, Monitor: flask.SupportMonitor{TargetPlayer: 1,
+			MonitorResource: "Life", TriggerPercent: 50, FlaskResource: "Life"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.SetMenuGuard(2, "clear"); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Unix(300, 0)
+	liveEngine.ObserveArea(arealog.Signal{Slot: 2, AreaID: "G2_4", Seed: 123,
+		ObservedAt: start, Origin: "live"})
+	num := func(value float64) *float64 { return &value }
+	sample := telemetry.Sample{ProcessID: 202, SeenUTC: start.Add(time.Millisecond),
+		ReceivedAt: start.Add(time.Millisecond), TickMS: start.Add(time.Millisecond).UnixMilli(),
+		CoordinateSpace: "world", AreaHash: 55, Life: num(30), LifeMax: num(100),
+		Mana: num(0), ManaMax: num(0)}
+	if !liveEngine.ObserveSample(sample) {
+		t.Fatal("zero-mana resource sample was rejected")
+	}
+	activations, err := session.ObserveSample(sample, sample.SeenUTC)
+	if err != nil || len(activations) != 1 || activations[0].Player != 2 ||
+		activations[0].Resource != "life" {
+		t.Fatalf("no-mana drinker did not use own life flask: %+v %v", activations, err)
+	}
+}
