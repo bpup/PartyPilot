@@ -66,6 +66,7 @@ func (c Config) Valid() bool {
 func (e *Engine) Reset() {
 	e.moving = false
 	e.catchingUp = false
+	e.teleportRecovery = false
 	e.trail = nil
 	e.hasLeader = false
 	e.trailArea = ""
@@ -97,6 +98,7 @@ type Engine struct {
 	config                Config
 	moving                bool
 	catchingUp            bool
+	teleportRecovery      bool
 	trail                 []point
 	lastLeader            point
 	hasLeader             bool
@@ -201,8 +203,9 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 	}
 	dx, dy := leader.X-follower.X, leader.Y-follower.Y
 	distance := math.Hypot(dx, dy)
+	jump := false
 	if e.config.TargetTrail {
-		e.updateTargetTrail(leader, follower)
+		jump = e.updateTargetTrail(leader, follower)
 	} else if e.config.TrailSpacing > 0 {
 		if reason := e.updateTrail(leader); reason != "" {
 			e.moving = false
@@ -224,6 +227,7 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 			(!e.moving && distance < e.config.ResumeDistance)) {
 		e.moving = false
 		e.catchingUp = false
+		e.teleportRecovery = false
 		e.holdingTarget = false
 		e.heldTarget = point{}
 		e.sprint.Reset()
@@ -236,6 +240,29 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 			e.trail = []point{{leader.X, leader.Y}}
 		}
 		return Command{State: Holding, Distance: distance}
+	}
+	entryDistance := math.Max(e.config.StopDistance+1, e.config.CatchUpDistance)
+	if e.config.TargetTrail {
+		entryDistance = math.Max(entryDistance, 20)
+	}
+	releaseDistance := e.config.StopDistance
+	if e.config.NormalSprintCatchUp {
+		releaseDistance = math.Max(releaseDistance, entryDistance*0.65)
+	}
+	if jump && distance > releaseDistance {
+		e.catchingUp = true
+		e.teleportRecovery = true
+	} else if !e.catchingUp && distance >= entryDistance {
+		e.catchingUp = true
+	} else if e.catchingUp && distance <= releaseDistance {
+		e.catchingUp = false
+	}
+	if !e.catchingUp {
+		e.teleportRecovery = false
+	}
+	state := Following
+	if e.catchingUp {
+		state = CatchingUp
 	}
 	targetX, targetY := leader.X, leader.Y
 	reason := ""
@@ -254,6 +281,7 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 		if e.holdingTarget {
 			e.moving = false
 			e.catchingUp = false
+			e.teleportRecovery = false
 			e.sprint.Reset()
 			e.sprintDown = false
 			e.lastSprintObservation = time.Time{}
@@ -287,16 +315,16 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 		var ok bool
 		if e.config.TargetTrail && terrain.TargetNavigation {
 			if e.planner != nil {
-				var state navigation.PathState
-				dx, dy, state = e.asyncTargetRouteDirection(terrain,
+				var pathState navigation.PathState
+				dx, dy, pathState = e.asyncTargetRouteDirection(terrain,
 					follower.X, follower.Y, targetX, targetY, leader.X, leader.Y)
-				if state == navigation.PathPending {
+				if pathState == navigation.PathPending {
 					e.sprintDown = false
 					e.normalSprintDirection = point{}
 					e.normalSprintSince = time.Time{}
-					return Command{State: Following, Distance: distance, Reason: "Planning route"}
+					return Command{State: state, Distance: distance, Reason: "Planning route"}
 				}
-				ok = state == navigation.PathReady
+				ok = pathState == navigation.PathReady
 			} else {
 				dx, dy, ok = e.targetRouteDirection(terrain,
 					follower.X, follower.Y, targetX, targetY, leader.X, leader.Y)
@@ -330,23 +358,6 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 		dx, dy = dx/distance, dy/distance
 	}
 	e.moving = true
-	state := Following
-	entryDistance := math.Max(e.config.StopDistance+1, e.config.CatchUpDistance)
-	if e.config.TargetTrail {
-		entryDistance = math.Max(entryDistance, 20)
-	}
-	releaseDistance := e.config.StopDistance
-	if e.config.NormalSprintCatchUp {
-		releaseDistance = math.Max(releaseDistance, entryDistance*0.65)
-	}
-	if !e.catchingUp && distance >= entryDistance {
-		e.catchingUp = true
-	} else if e.catchingUp && distance <= releaseDistance {
-		e.catchingUp = false
-	}
-	if e.catchingUp {
-		state = CatchingUp
-	}
 	if e.config.TargetTrail {
 		observedAt := leader.Seen
 		if follower.Seen.After(observedAt) {
@@ -369,6 +380,16 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 					point{follower.X, follower.Y}, observedAt)
 			}
 			e.lastSprintObservation = observedAt
+		}
+	}
+	if e.teleportRecovery {
+		switch {
+		case reason == "Obstacle recovery":
+			reason = "Teleport obstacle recovery"
+		case len(e.route) > 0:
+			reason = "Teleport terrain path"
+		default:
+			reason = "Teleport catch-up"
 		}
 	}
 	return Command{
@@ -422,7 +443,7 @@ func playerDetour(lx, ly, fx, fy, tx, ty float64) (float64, float64) {
 	return rightX, rightY
 }
 
-func (e *Engine) updateTargetTrail(leader, follower Position) {
+func (e *Engine) updateTargetTrail(leader, follower Position) bool {
 	current := point{leader.X, leader.Y}
 	jump := false
 	if len(e.trail) > 0 && e.trailArea == leader.Area {
@@ -453,7 +474,15 @@ func (e *Engine) updateTargetTrail(leader, follower Position) {
 		e.trailArea = leader.Area
 		e.holdingTarget = false
 		e.heldTarget = point{}
-		return
+		if jump {
+			e.route = nil
+			e.routeTerrain = nil
+			e.planningTerrain = nil
+			e.clearPlanner()
+			e.normalSprintDirection = point{}
+			e.normalSprintSince = time.Time{}
+		}
+		return jump
 	}
 	e.lastLeader = current
 	last := e.trail[len(e.trail)-1]
@@ -463,6 +492,7 @@ func (e *Engine) updateTargetTrail(leader, follower Position) {
 	if len(e.trail) > 1200 {
 		e.trail = e.trail[len(e.trail)-1200:]
 	}
+	return false
 }
 
 func (e *Engine) trailingTarget(distance float64) point {

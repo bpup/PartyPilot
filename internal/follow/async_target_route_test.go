@@ -21,10 +21,10 @@ func TestAsyncTargetPathHoldsUntilRouteReady(t *testing.T) {
 		grid.Blocked = append(grid.Blocked, navigation.Cell{X: 10, Y: y})
 	}
 	at := time.Now()
-	leader := Position{X: 25, Y: 15, Area: "instance", Seen: at, Valid: true}
+	leader := Position{X: 35, Y: 15, Area: "instance", Seen: at, Valid: true}
 	follower := Position{X: 5, Y: 15, Area: "instance", Seen: at, Valid: true}
 	first := engine.StepWithTerrain(at, leader, follower, grid)
-	if first.State != Following || first.Reason != "Planning route" ||
+	if first.State != CatchingUp || first.Reason != "Planning route" ||
 		first.X != 0 || first.Y != 0 || first.SprintDown {
 		t.Fatalf("async route moved before search completion: %+v", first)
 	}
@@ -32,7 +32,7 @@ func TestAsyncTargetPathHoldsUntilRouteReady(t *testing.T) {
 	for time.Now().Before(deadline) {
 		command := engine.StepWithTerrain(at.Add(time.Millisecond), leader, follower, grid)
 		if command.Reason != "Planning route" {
-			if command.State != Following || command.Y == 0 {
+			if command.State != CatchingUp || command.Y == 0 {
 				t.Fatalf("ready detour missing: %+v", command)
 			}
 			return
