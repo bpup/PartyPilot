@@ -104,6 +104,34 @@ using (var fast = System.Text.Json.JsonDocument.Parse(FastOrderedCandidateFrame.
         root.GetProperty("Players")[1].GetProperty("X").GetSingle() == 30,
         "Fast candidate packet promoted an unverified order or lost P2 motion.");
 }
+var experimental = FastOrderedCandidateFrame.TryEncodeExperimentalControl(
+    101, 42, "TestArea", motion, motionSeen, motionSeen.Ticks);
+Require(experimental is not null, "Complete two-slot source was not exposed for opt-in testing.");
+using (var control = System.Text.Json.JsonDocument.Parse(experimental!))
+    Require(control.RootElement.GetProperty("PlayerOrderReliable").GetBoolean() &&
+        control.RootElement.GetProperty("PlayerOrderSource").GetString() ==
+            FastOrderedCandidateFrame.ExperimentalControlSource &&
+        control.RootElement.GetProperty("Players").GetArrayLength() == 2,
+        "Experimental control frame lost ordered local positions.");
+foreach (var invalid in new[]
+{
+    motion! with { StatePointerMatchesDataAddress = false },
+    motion! with { SelectedAreaAddress = "0x900000" },
+    motion! with { ContainsObservedLocal = false },
+    motion! with { RawPositions = [motion!.RawPositions![0], null] },
+    motion! with { RawPositions = [motion!.RawPositions![0],
+        motion.RawPositions[1]! with { WorldX = float.NaN }] },
+    motion! with { ObservedLocalPositionComparison = null }
+})
+    Require(FastOrderedCandidateFrame.TryEncodeExperimentalControl(
+        101, 42, "TestArea", invalid, motionSeen, motionSeen.Ticks) is null,
+        "An incomplete or mismatched candidate reached experimental control.");
+Require(FastOrderedCandidateFrame.TryEncodeExperimentalControl(
+    101, 42, "TestArea", motion, motionSeen.AddMilliseconds(20), motionSeen.Ticks) is null,
+    "A stale position capture reached experimental control.");
+Require(FastOrderedCandidateFrame.TryEncodeExperimentalControl(
+    101, 0, "TestArea", motion, motionSeen, motionSeen.Ticks) is null,
+    "An unknown area reached experimental control.");
 using (var fast = System.Text.Json.JsonDocument.Parse(FastOrderedCandidateFrame.Encode(
     101, 42, "TestArea", null, motionSeen, motionSeen.Ticks)))
     Require(!fast.RootElement.GetProperty("PlayerOrderReliable").GetBoolean() &&

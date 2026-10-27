@@ -58,9 +58,9 @@ ExileCore2 参考程序集的 `Render.Pos` 暴露三维向量，但反编译代�
 
 同一进程的两名角色现可由**同一条**已按进程绑定的 `Client.txt` 区域生成记录更新；较旧的记录不会只覆盖其中一名角色。该客户端的本地离队或队伍解散记录也会停止整个跟随会话。实时命令行现有的单角色客户端布局改用这条日志解析入口，合成原始日志行测试已通过。
 
-实时命令行还新增须显式开启的 `-experimental-ordered-input`：每名角色用 `-role-bind ROLE:CLIENT:LOCAL:PID` 绑定，`-log`/`-exe` 按客户端编号提供，每个客户端只需一份日志。该模式分开接收完整的 `ordered_client` 快速位置报文和 `ordered_vitals` 慢速资源报文；普通传感器报文及 `LocalSlotCandidates` 不能进入此入口。资源报文只更新资源，不会替换位置；不完整的当前资源帧会撤销旧资源而保留位置。单客户端双角色的本机合成 UDP/日志检查观察到“等待 → 追赶 → 顺序失效后等待”，以及位置跟随、资源补充、死亡停机的独立报文链路。报文里的 `PlayerOrderReliable` 仍是发送方声明，不构成可信数据源证明；当前没有可用的生产端，桌面也没有启用该模式，Windows/PoE2 行为未验证。
+实时命令行还新增须显式开启的 `-experimental-ordered-input`：每名角色用 `-role-bind ROLE:CLIENT:LOCAL:PID` 绑定，`-log`/`-exe` 按客户端编号提供，每个客户端只需一份日志。该模式分开接收完整的 `ordered_client` 快速位置报文和 `ordered_vitals` 慢速资源报文；普通传感器报文及 `LocalSlotCandidates` 不能进入此入口。资源报文只更新资源，不会替换位置；不完整的当前资源帧会撤销旧资源而保留位置。单客户端双角色的本机合成 UDP/日志检查观察到“等待 → 追赶 → 顺序失效后等待”，以及位置跟随、资源补充、死亡停机的独立报文链路。报文里的 `PlayerOrderReliable` 仍是发送方声明，不构成可信数据源证明。现在有默认关闭的 ExileCore2 实验生产端：须同时开启 `DiagnoseLocalSlotCandidates` 与 `ExperimentalOrderedFollow`，并满足同进程区域指针与 ExileCore2 数据地址相等、唯一向量、当前角色在向量中及同帧两槽原始位置完整等条件，才向实时端口发送实验有序帧；条件丢失时发送撤销帧。桌面已能启动 4/6 人的有序输入模式，但 Windows/PoE2 的角色顺序和移动效果未验证。
 
-再次对照所提供 0.6.17 的 `PlayerSlotVectorResolver.Resolve` 与 `ProbeSession.CaptureMotion`：目标探针从其独立解析的 `AreaInstance` 搜索本地角色向量，读取完整的有序角色位置后才把 `playerOrderReliable` 置为 true。PartyPilot 目前只在 ExileCore2 的两个候选区域基址附近扫描向量，快速诊断帧固定为 `PlayerOrderReliable=false`，并发送到与实时跟随分开的端口。两条地址链尚未通过真实游戏的同帧数据证明等价，故不能仅凭静态偏移把诊断帧升级为生产输入。实时接收端现在还会明确拒绝把该诊断来源改写为 true 的报文，并撤销同进程旧方向；这只防止误用，不提供新的角色位置来源。下一项必需证据仍是 Windows/PoE2 的同帧区域地址、两槽角色地址与画面动作对照。
+再次对照所提供 0.6.17 的 `PlayerSlotVectorResolver.Resolve` 与 `ProbeSession.CaptureMotion`：目标探针从其独立解析的 `AreaInstance` 搜索本地角色向量，读取完整的有序角色位置后才把 `playerOrderReliable` 置为 true。PartyPilot 仍从 ExileCore2 的候选区域基址附近扫描向量；普通快速诊断帧固定为 `PlayerOrderReliable=false`，并发送到与实时跟随分开的端口。新增的独立实验编码器只在上述严格条件成立时，用另一个明确标识的来源向实时端口发帧，绝不把普通诊断来源改写为 true。两条地址链尚未通过真实游戏同帧数据证明等价，所以实验开关默认关闭，不能把这条链称为已验证生产输入。下一项必需证据仍是 Windows/PoE2 的同帧区域地址、两槽角色地址与画面动作对照。
 
 显式开启 `-auto-flask` 后，慢速资源帧可按本地 1/2 槽分别输出 P1–P6 的药剂请求。每名角色的菜单状态初始为未知，须由控制输入明确报告可操作；资源帧还须新鲜、完整，并与当前角色位置、进程日志区域和非零区域哈希相符。合成测试覆盖同窗口 P2、第三客户端 P6、重放/过期报文、缺少区域或位置以及哈希不一致时的拦截。请求尚未经过桌面双角色路由或 Windows/PoE2 的实际手柄验证。
 

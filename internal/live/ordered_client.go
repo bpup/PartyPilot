@@ -21,9 +21,9 @@ type RoleBinding struct {
 	ProcessID   int
 }
 
-// OrderedClientFrame is a future input boundary for an independently verified
-// local-player vector. The current ExileCore2 candidate scan does not produce
-// this frame and must not be promoted into it without game validation.
+// OrderedClientFrame is the explicit input boundary for local-player vectors.
+// A producer's reliability flag is a claim; the experimental static-vector
+// producer still needs game validation before it can establish correct roles.
 type OrderedClientFrame struct {
 	ProcessID           int                  `json:"ProcessId"`
 	SeenUTC             time.Time            `json:"SeenUtc"`

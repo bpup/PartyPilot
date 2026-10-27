@@ -110,7 +110,7 @@ GOOS=windows GOARCH=amd64 go build -o PartyPilot.exe ./cmd/partypilot
 
 实时内核还可把同一游戏进程的单份 `Client.txt` 区域生成及离队记录作用到其两名本地角色；该路径已用合成日志行验证，双角色实时命令行与游戏内行为仍未接入或验收。
 
-开启 `DiagnoseLocalSlotCandidates` 时，诊断现会按所提供版本的公开默认偏移尝试读取候选角色的原始三维坐标，放在 `LocalSlotCandidates.RawPositions` 中；读不到的位置为 `null`。同一诊断还给出当前角色的 ExileCore2 坐标到原始世界/网格 XY 的两种数值距离，不自动判断哪种坐标系正确。这不是经游戏验证的第二角色位置，也不会进入自动跟随或输入，具体边界见[同窗口角色身份核对](SAME_CLIENT_RESEARCH.md)。
+开启 `DiagnoseLocalSlotCandidates` 时，诊断现会按所提供版本的公开默认偏移尝试读取候选角色的原始三维坐标，放在 `LocalSlotCandidates.RawPositions` 中；读不到的位置为 `null`。同一诊断还给出当前角色的 ExileCore2 坐标到原始世界/网格 XY 的两种数值距离，不自动判断哪种坐标系正确。这不是经游戏验证的第二角色位置。默认不会进入自动跟随；显式开启 `ExperimentalOrderedFollow` 后，完整双槽候选才可能作为实验输入发送，具体边界见[同窗口角色身份核对](SAME_CLIENT_RESEARCH.md)。
 
 可将 `PartyPilot-SensorLog.exe` 的输出保存为 JSONL，再运行 `PartyPilot-SlotAudit.exe -input sensorlog.jsonl` 查看每个进程的双槽完整帧、坐标差距、顺序变化、换区与每槽运动次数。该报告只帮助实机取证，不会启用自动控制。
 
@@ -201,7 +201,7 @@ PartyPilot-FlaskReplay.exe -replay testdata/flask-custom-example.jsonl
 
 共享药剂可在桌面的“设置共享药剂 · Drinker”中按饮用者分别配置其他角色的监测规则，选择目标版的监测资源、阈值、快速补满与饮用药剂；自动药剂开启时，桌面会把已启用的 Drinker 监测、无魔力构筑或持续喝药设置经 `-auto-flask -flask-support-file <绝对路径>` 交给实时程序；后两项也作用于饮用者自己的药剂。配置格式见 `testdata/flask-support-live.json`，损坏或缺字段的桌面设置会阻止自动药剂跟随启动。实时程序只在两名已绑定角色的进程、位置、资源读数及有效区域日志都通过核对，且区域 ID 与 seed 一致时输出 `support` 请求；饮用者菜单保护仍生效。双客户端合成样本及桌面假进程验证了配置传递、请求、冷却、恢复后重置与不同实例阻断。PoE2 中的角色数据、手柄映射和实际喝药效果均待验证。
 
-`release/PartyPilot-LiveFollow.exe` 把现有传感器 UDP 位置流与每客户端独立日志接入跟随内核，输出与 `BridgeFeed` 兼容的逐帧决策。它要求 `-roster 1:进程ID,2:进程ID`、每槽位 `-log` 或 `-exe`、队长和显式距离/时效参数；当前仅支持 2–3 个游戏进程且每进程一名角色。在 Windows 上，启动与运行期间会只读查询各进程的程序路径，要求指定日志与该程序目录下的 `logs/Client.txt` 为同一文件；校验失败时输出等待命令并退出。macOS 上只运行合成数据测试，无法执行该 Windows 进程校验。启动前的日志记录不会让实时决策开始移动；所有已绑定客户端日志都必须在启动后写入相同区域 ID 与 seed，且各自再收到新的位置样本。进程、日志、位置或区域证据缺失、过期或不一致时输出等待命令。跨客户端的目标与跟随者样本若源 `TickMs` 或本机接收时间相差超过 100 毫秒，只让该跟随者等待。传感器的 `TickMs` 取自采集位置后独立读取的 Unix 毫秒时间，接收时间由实时跟随程序收到 UDP 报文时记录；缺任一项的旧样本不能驱动跟随。此双时间门禁依据所提供版本的静态代码实现，采集与接收时序仍待 Windows/PoE2 核对。可选的 `-terrain-binding 槽位=绑定.json` 把完整候选压缩地图送入实时规划；启用地形模式时须为所有参与客户端分别绑定采集文件，并核对进程、区域哈希、日志 ID/seed、坐标映射及跨客户端地图布局。缺少任一绑定或比对不通过时保持等待；两端还须各出现三个不同源时间的位置帧才开始规划。绑定文件格式与未验证边界见[地形与绕行取证](TERRAIN_RESEARCH.md)。识别到队伍解散或任一已配置客户端本地离队时，跟随停止并锁定到本次进程结束；指定 `-leader-name` 后，被跟随角色离队也会触发同样的停止。其他成员离队不会触发该规则。示例中的距离是受控测试值，不是目标软件参数：
+`release/PartyPilot-LiveFollow.exe` 把现有传感器 UDP 位置流与每客户端独立日志接入跟随内核，输出与 `BridgeFeed` 兼容的逐帧决策。它要求 `-roster 1:进程ID,2:进程ID`、每槽位 `-log` 或 `-exe`、队长和显式距离/时效参数；常规位置输入支持 2–3 个游戏进程且每进程一名角色；4 人与 6 人的双角色布局须在各传感器中显式开启实验有序输入，角色顺序和游戏内效果尚未验证。在 Windows 上，启动与运行期间会只读查询各进程的程序路径，要求指定日志与该程序目录下的 `logs/Client.txt` 为同一文件；校验失败时输出等待命令并退出。macOS 上只运行合成数据测试，无法执行该 Windows 进程校验。启动前的日志记录不会让实时决策开始移动；所有已绑定客户端日志都必须在启动后写入相同区域 ID 与 seed，且各自再收到新的位置样本。进程、日志、位置或区域证据缺失、过期或不一致时输出等待命令。跨客户端的目标与跟随者样本若源 `TickMs` 或本机接收时间相差超过 100 毫秒，只让该跟随者等待。传感器的 `TickMs` 取自采集位置后独立读取的 Unix 毫秒时间，接收时间由实时跟随程序收到 UDP 报文时记录；缺任一项的旧样本不能驱动跟随。此双时间门禁依据所提供版本的静态代码实现，采集与接收时序仍待 Windows/PoE2 核对。可选的 `-terrain-binding 槽位=绑定.json` 把完整候选压缩地图送入实时规划；启用地形模式时须为所有参与客户端分别绑定采集文件，并核对进程、区域哈希、日志 ID/seed、坐标映射及跨客户端地图布局。缺少任一绑定或比对不通过时保持等待；两端还须各出现三个不同源时间的位置帧才开始规划。绑定文件格式与未验证边界见[地形与绕行取证](TERRAIN_RESEARCH.md)。识别到队伍解散或任一已配置客户端本地离队时，跟随停止并锁定到本次进程结束；指定 `-leader-name` 后，被跟随角色离队也会触发同样的停止。其他成员离队不会触发该规则。示例中的距离是受控测试值，不是目标软件参数：
 
 ```sh
 PartyPilot-LiveFollow.exe -roster 1:1234,2:5678 -leader 1 -leader-name Leader -member-name 2=Second -exe "1=C:\\PoE2-A\\PathOfExile.exe" -exe "2=C:\\PoE2-B\\PathOfExile.exe" -stop 2 -catchup 10 -max-age 750ms -log-max-age 30m

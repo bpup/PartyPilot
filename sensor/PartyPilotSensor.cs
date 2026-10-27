@@ -56,7 +56,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             return;
         }
         var now = DateTime.UtcNow;
-        if (Settings.DiagnoseLocalSlotCandidates.Value && Settings.DiagnoseFastOrderedMotion.Value &&
+        if (Settings.DiagnoseLocalSlotCandidates.Value &&
+            (Settings.DiagnoseFastOrderedMotion.Value || Settings.ExperimentalOrderedFollow.Value) &&
             now - _lastFastCandidateSentUtc >= TimeSpan.FromMilliseconds(20))
         {
             _lastFastCandidateSentUtc = now;
@@ -815,13 +816,21 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                     ReadCandidate, address => RawCharacterPathReader.Read(address, ReadCandidate),
                     SameIdentity, render.Pos.X, render.Pos.Y, render.Pos.Z, seenUtc,
                     ingameStateAddress: stateAddress);
-                if (captured == null) return; // Identity or vector changed during capture.
+                // A failed revalidation must revoke a previously accepted ordered frame.
             }
             if (!SameIdentity()) return;
             var bytes = FastOrderedCandidateFrame.Encode(processId, areaHash,
                 GameController.Area.CurrentArea?.Name, captured, seenUtc,
                 DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-            _udp.Send(bytes, bytes.Length, FastCandidateReceiver);
+            if (Settings.DiagnoseFastOrderedMotion.Value)
+                _udp.Send(bytes, bytes.Length, FastCandidateReceiver);
+            if (Settings.ExperimentalOrderedFollow.Value)
+            {
+                var control = FastOrderedCandidateFrame.TryEncodeExperimentalControl(
+                    processId, areaHash, GameController.Area.CurrentArea?.Name, captured,
+                    seenUtc, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) ?? bytes;
+                _udp.Send(control, control.Length, Receiver);
+            }
         }
         catch
         {

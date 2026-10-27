@@ -113,7 +113,7 @@ func TestOrderedMotionDoesNotRequireSlowVitals(t *testing.T) {
 	motion := OrderedClientFrame{ProcessID: 101, SeenUTC: now.Add(time.Millisecond),
 		ReceivedAt: now.Add(time.Millisecond), TickMS: now.UnixMilli() + 1,
 		CoordinateSpace: "world", PlayerOrderReliable: true,
-		PlayerOrderSource: "verified fixture", Players: []OrderedLocalPlayer{
+		PlayerOrderSource: "experimental_static_vector_0.6.17", Players: []OrderedLocalPlayer{
 			{LocalPlayer: 1, X: 30 * worldPerGridUnit},
 			{LocalPlayer: 2, X: 0},
 		}}
