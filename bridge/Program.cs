@@ -516,7 +516,13 @@ try
                 }
                 if (BridgeProtocol.TryParseAutoParty(line, out var partyControl))
                 {
-                    if (!physicalMode || pairingGate?.Phase != ProtectedPairingPhase.Complete ||
+                    var partyReady = physicalMode
+                        ? pairingGate?.Phase == ProtectedPairingPhase.Complete
+                        : hybridPlan is not null && router.HybridPairingComplete;
+                    var hybridPulseWindowReady = partyControl.Type != "auto_party_pulse" ||
+                        hybridPlan is null || hybridPlan.TryGetAutoPartyWindow(partyControl.Slot, out var pulseWindow) &&
+                        ForegroundWindowProbe.IsExpectedForeground(pulseWindow.Pid, pulseWindow.Handle);
+                    if (!partyReady || !hybridPulseWindowReady ||
                         (partyControl.Type == "auto_party_begin" && !router.BeginAutoParty(DateTime.UtcNow)) ||
                         (partyControl.Type == "auto_party_renew" && !router.RenewAutoParty(DateTime.UtcNow)) ||
                         (partyControl.Type == "auto_party_pulse" &&
@@ -585,6 +591,14 @@ try
                 }
                 var target = hybridPlan.PlayerWindows[router.HybridFocusedPlayer];
                 router.SetHybridForeground(ForegroundWindowProbe.IsExpectedForeground(target.Pid, target.Handle));
+                if (router.AutoPartyPulseActive(DateTime.UtcNow) &&
+                    (!hybridPlan.TryGetAutoPartyWindow(router.AutoPartySlot, out var pulseWindow) ||
+                     !ForegroundWindowProbe.IsExpectedForeground(pulseWindow.Pid, pulseWindow.Handle)))
+                {
+                    router.NeutralAll();
+                    Console.Error.WriteLine("Auto Party game window lost exact foreground during a menu pulse.");
+                    return 1;
+                }
             }
             if (physicalMode)
             {

@@ -1659,9 +1659,11 @@ public sealed class MainWindow : Window
             return;
         }
         _autoPartyKeyValue = selected;
-        _gameHotkeys?.SetKeys(AutoPartyKeyBinding.VirtualKey(selected),
-            AutoPartyKeyBinding.VirtualKey(_followPauseKeyValue));
-        _autoPartyKeyStatus.Text = OperatingSystem.IsWindows() &&
+        ApplyGameShortcutKeys();
+        _autoPartyKeyStatus.Text = _bridge?.IsHybridMode == true &&
+            GameKeyboardShortcutHook.IsHybridVirtualKey(AutoPartyKeyBinding.VirtualKey(selected))
+            ? "自动组队快捷键与键鼠操作冲突，本次会话已禁用；仍可使用按钮。"
+            : OperatingSystem.IsWindows() &&
             _gameHotkeys is { IsStarted: false }
             ? "快捷键已保存，但键鼠监听未能启用；仍可使用自动组队按钮。"
             : selected == "None"
@@ -1691,14 +1693,28 @@ public sealed class MainWindow : Window
             return;
         }
         _followPauseKeyValue = selected;
-        _gameHotkeys?.SetKeys(AutoPartyKeyBinding.VirtualKey(_autoPartyKeyValue),
-            AutoPartyKeyBinding.VirtualKey(selected));
-        _followPauseKeyStatus.Text = OperatingSystem.IsWindows() &&
+        ApplyGameShortcutKeys();
+        _followPauseKeyStatus.Text = _bridge?.IsHybridMode == true &&
+            GameKeyboardShortcutHook.IsHybridVirtualKey(AutoPartyKeyBinding.VirtualKey(selected))
+            ? "暂停键与键鼠操作冲突，本次会话已禁用；仍可使用按钮。"
+            : OperatingSystem.IsWindows() &&
             _gameHotkeys is { IsStarted: false }
             ? "暂停键已保存，但键鼠监听未能启用；仍可使用暂停跟随按钮。"
             : selected == "None"
                 ? "暂停跟随快捷键已关闭。"
                 : $"暂停跟随快捷键：{selected}；仅在已绑定游戏窗口前台生效。";
+    }
+
+    private void ApplyGameShortcutKeys()
+    {
+        var autoPartyKey = AutoPartyKeyBinding.VirtualKey(_autoPartyKeyValue);
+        var followPauseKey = AutoPartyKeyBinding.VirtualKey(_followPauseKeyValue);
+        if (_bridge?.IsHybridMode == true)
+        {
+            if (GameKeyboardShortcutHook.IsHybridVirtualKey(autoPartyKey)) autoPartyKey = 0;
+            if (GameKeyboardShortcutHook.IsHybridVirtualKey(followPauseKey)) followPauseKey = 0;
+        }
+        _gameHotkeys?.SetKeys(autoPartyKey, followPauseKey);
     }
 
     private bool RadarKeyConflicts(RadarHotkeyBinding binding) =>
@@ -1765,7 +1781,8 @@ public sealed class MainWindow : Window
             _selectedTopology, _inviteNames.Take(_selectedTopology.PlayerCount)
                 .Select(box => box?.Text).ToArray(), out _);
         var ready = OperatingSystem.IsWindows() && !_busy && !_inviteBusy && !_autoPartyRunning &&
-            _bridge is not null && !_bridge.IsHybridMode && _pairingSettled &&
+            _bridge is not null && _pairingSettled &&
+            (!_bridge.IsHybridMode || _hybridPairing?.Phase == HybridPairingPhase.Complete) &&
             _selectedTopology is { ClientCount: > 1 } &&
             _launchedClients.Count == _selectedTopology.ClientCount &&
             _inviteTarget.SelectedIndex is >= 0 && namesReady;
@@ -2058,13 +2075,13 @@ public sealed class MainWindow : Window
                     await StopBridgeAsync();
                     _pairingStatus.Text = $"键鼠输入通道已停止：{error.Message}";
                 }));
-            var pauseKey = AutoPartyKeyBinding.VirtualKey(_followPauseKeyValue);
-            if (GameKeyboardShortcutHook.IsHybridVirtualKey(pauseKey))
-            {
-                pauseKey = 0;
-                _followPauseKeyStatus.Text = "暂停键与键鼠模式按键冲突，本次键鼠会话已禁用暂停快捷键；仍可使用按钮。";
-            }
-            _gameHotkeys.SetKeys(0, pauseKey);
+            ApplyGameShortcutKeys();
+            if (GameKeyboardShortcutHook.IsHybridVirtualKey(
+                    AutoPartyKeyBinding.VirtualKey(_autoPartyKeyValue)))
+                _autoPartyKeyStatus.Text = "自动组队快捷键与键鼠操作冲突，本次会话已禁用；仍可使用按钮。";
+            if (GameKeyboardShortcutHook.IsHybridVirtualKey(
+                    AutoPartyKeyBinding.VirtualKey(_followPauseKeyValue)))
+                _followPauseKeyStatus.Text = "暂停键与键鼠操作冲突，本次会话已禁用；仍可使用按钮。";
             _gameHotkeys.SetHybridHandler(HandleHybridKey);
             session.StartReading();
             ShowHybridPairingStep();
@@ -2087,6 +2104,17 @@ public sealed class MainWindow : Window
         var topology = _selectedTopology;
         if (session?.IsHybridMode != true || topology is null ||
             !GameKeyboardShortcutHook.IsHybridVirtualKey(key)) return false;
+        if (Volatile.Read(ref _autoPartyRunning))
+        {
+            if (_hybridPublisher?.TryPublish(key, down) != true)
+                Dispatcher.UIThread.Post(async () =>
+                {
+                    if (!ReferenceEquals(_bridge, session)) return;
+                    await StopBridgeAsync();
+                    _pairingStatus.Text = "自动组队期间键鼠输入队列已满，桥接已停止。";
+                });
+            return gameForeground;
+        }
         var focusPlayer = key is >= 0x70 and <= 0x75 ? key - 0x6F : 0;
         if (focusPlayer > topology.PlayerCount) return false;
         if (down && !gameForeground) return false;
@@ -2446,8 +2474,8 @@ public sealed class MainWindow : Window
         var publisher = _hybridPublisher;
         _hybridPublisher = null;
         if (publisher is not null) await publisher.DisposeAsync();
-        _gameHotkeys?.SetKeys(AutoPartyKeyBinding.VirtualKey(_autoPartyKeyValue),
-            AutoPartyKeyBinding.VirtualKey(_followPauseKeyValue));
+        if (wasHybrid)
+            _autoPartyKeyStatus.Text = $"自动组队快捷键：{_autoPartyKeyValue}；仅在已绑定游戏窗口前台生效。";
         if (wasHybrid)
             _followPauseKeyStatus.Text = $"暂停跟随快捷键：{_followPauseKeyValue}；仅在已绑定游戏窗口前台生效。";
         Volatile.Write(ref _hybridFocusedPlayer, 1);
@@ -2461,6 +2489,7 @@ public sealed class MainWindow : Window
         await StopFollowAsync();
         var session = _bridge;
         _bridge = null;
+        ApplyGameShortcutKeys();
         _pairing = null;
         _hybridPairing = null;
         _pairingHasStarted = false;

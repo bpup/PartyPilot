@@ -368,7 +368,10 @@ internal sealed class BridgeSession : IAsyncDisposable
 
     internal Task PulseAutoPartyAsync(int slot, ushort buttons, int holdMilliseconds, CancellationToken token)
     {
-        if (!_allSlots.Contains(slot) || !ValidAutoPartyPulse(buttons, holdMilliseconds))
+        if (IsHybridMode && _slots.Count == 2 && slot == 3) slot = 2;
+        if (!_allSlots.Contains(slot) ||
+            (IsHybridMode && slot != 1 && (_slots.Count == 2 ? slot != 2 : slot is not (3 or 4))) ||
+            !ValidAutoPartyPulse(buttons, holdMilliseconds))
             throw new ArgumentOutOfRangeException(nameof(slot), "Auto Party requires an assigned menu pad and a target-version pulse.");
         return SendAutoPartyControlAsync("auto_party_pulse", slot, buttons, holdMilliseconds, token);
     }

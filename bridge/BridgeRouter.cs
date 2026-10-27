@@ -95,6 +95,11 @@ internal sealed class BridgeRouter
     public int FocusedSlot => _physicalMode ? _focusedSlot : 0;
     public int LastManualFocusSlot => _physicalMode ? _lastManualFocusSlot : 0;
     public bool AutoPartyActive => _autoPartyActive;
+    public int AutoPartySlot => _autoPartySlot;
+    public bool AutoPartyPulseActive(DateTime nowUtc) => _autoPartyActive &&
+        _autoPartyButtons != 0 && nowUtc.Kind == DateTimeKind.Utc &&
+        nowUtc < _autoPartyButtonsUntilUtc;
+    public bool HybridPairingComplete => _hybridKeyboard?.PairingComplete == true;
     public int HybridFocusedPlayer => _hybridKeyboard?.FocusedPlayer ?? 0;
     public bool HybridFocusRequested => _hybridFocusRequested;
     public bool HybridConfirmReleased => _hybridConfirmReleased;
@@ -159,6 +164,11 @@ internal sealed class BridgeRouter
         if (_hybridKeyboard is null || virtualKey == 0 ||
             (HybridKeyboardInput.FocusForKey(virtualKey) == 0 &&
              HybridKeyboardInput.ActionForKey(virtualKey) == HybridAction.None)) return false;
+        if (_autoPartyActive)
+        {
+            _hybridKeyboard.Handle(virtualKey, down, gameForeground: false);
+            return true;
+        }
         if (_hybridKeyboard.GameForeground && !gameForeground) ClearHybridAutomation();
         var sample = _hybridKeyboard.Handle(virtualKey, down, gameForeground);
         _hybridFocusRequested = sample.FocusRequested;
@@ -334,7 +344,8 @@ internal sealed class BridgeRouter
 
     public bool BeginAutoParty(DateTime nowUtc)
     {
-        if (!_physicalMode || _autoPartyActive || nowUtc.Kind != DateTimeKind.Utc) return false;
+        if ((!_physicalMode && !HybridPairingComplete) || _autoPartyActive ||
+            nowUtc.Kind != DateTimeKind.Utc) return false;
         NeutralAll();
         _autoPartyActive = true;
         _autoPartyExpiresUtc = nowUtc.AddSeconds(10);
@@ -353,6 +364,7 @@ internal sealed class BridgeRouter
             Render(releasedSlot, _routes[releasedSlot]);
         }
         if (!_autoPartyActive || !_routes.ContainsKey(slot) ||
+            (_hybridKeyboard is not null && slot != 1 && !_hybridPlayerPads.Values.Contains(slot)) ||
             nowUtc.Kind != DateTimeKind.Utc || nowUtc >= _autoPartyExpiresUtc ||
             !BridgeProtocol.ValidAutoPartyPulse(buttons, holdMilliseconds) ||
             _autoPartyButtons != 0) return false;
@@ -493,6 +505,12 @@ internal sealed class BridgeRouter
 
     private void Render(int slot, PadRoute route)
     {
+        if (_autoPartyActive)
+        {
+            route.Output.SetReport(slot == _autoPartySlot && _autoPartyButtons != 0
+                ? new PadReport(_autoPartyButtons, 0, 0, 0, 0, 0, 0) : default);
+            return;
+        }
         if (_hybridKeyboard is not null && !_hybridKeyboard.GameForeground)
         {
             route.Output.SetReport(default);
@@ -507,12 +525,6 @@ internal sealed class BridgeRouter
         {
             var focused = _hybridPlayerPads[_hybridKeyboard.FocusedPlayer];
             route.Output.SetReport(slot == focused ? _hybridKeyboard.Snapshot().Report : default);
-            return;
-        }
-        if (_autoPartyActive)
-        {
-            route.Output.SetReport(slot == _autoPartySlot && _autoPartyButtons != 0
-                ? new PadReport(_autoPartyButtons, 0, 0, 0, 0, 0, 0) : default);
             return;
         }
         if (_physicalMode && slot == _focusedSlot)

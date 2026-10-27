@@ -37,7 +37,7 @@ internal static class HybridBridgePipelineSmoke
                 "games=[sys.argv[i+1] for i,arg in enumerate(sys.argv[:-1]) if arg=='--game-exe']\n" +
                 $"if games != [{JsonSerializer.Serialize(gameA)},{JsonSerializer.Serialize(gameB)}]: sys.exit(2)\n" +
                 "print('{\"event\":\"ready\",\"slots\":[1,2],\"physical_mode\":false,\"hybrid_mode\":true,\"hybrid_player_pads\":\"2:2\",\"hybrid_window_map\":\"1:101:201,2:102:202\"}', flush=True)\n" +
-                $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(inputLog)}, 'a') as out: out.write(line)\n    if json.loads(line).get('type') == 'hybrid_pairing_complete': print('{{\"event\":\"hybrid_pairing_complete\"}}', flush=True)\n");
+                $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(inputLog)}, 'a') as out: out.write(line)\n    message=json.loads(line)\n    if message.get('type') == 'hybrid_pairing_complete': print('{{\"event\":\"hybrid_pairing_complete\"}}', flush=True)\n    if message.get('type','').startswith('auto_party_'): print(json.dumps({{'event':'auto_party_control','type':message['type'],'slot':message.get('slot',0),'buttons':message.get('buttons',0)}}), flush=True)\n");
             File.WriteAllText(followExecutable, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '-roster' not in sys.argv or sys.argv[sys.argv.index('-roster')+1] != '1:101,2:102': sys.exit(2)\n" +
                 "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0}}}', flush=True)\n" +
@@ -85,6 +85,15 @@ internal static class HybridBridgePipelineSmoke
                     JsonDocument.Parse(commands[3]).RootElement.GetProperty("slot").GetInt32() != 2)
                     throw new Exception("Live follow did not route P2 movement to the keyboard virtual pad.");
             }
+            await bridge.BeginAutoPartyAsync(CancellationToken.None);
+            await bridge.PulseAutoPartyAsync(1, 0x2000, 60, CancellationToken.None);
+            await bridge.PulseAutoPartyAsync(3, 0x1000, 80, CancellationToken.None);
+            await bridge.EndAutoPartyAsync(CancellationToken.None);
+            if (!File.ReadAllLines(inputLog).Any(line =>
+                    JsonDocument.Parse(line).RootElement.TryGetProperty("type", out var type) &&
+                    type.GetString() == "auto_party_pulse" &&
+                    JsonDocument.Parse(line).RootElement.GetProperty("slot").GetInt32() == 2))
+                throw new Exception("Hybrid Auto Party did not translate the two-player follower pad.");
         }
         finally
         {

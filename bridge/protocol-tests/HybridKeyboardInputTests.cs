@@ -16,6 +16,12 @@ internal static class HybridKeyboardInputTests
             HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:3",
                 "--hybrid-window-map", "1:10:100,2:20:200"], [1, 3], out _))
             throw new Exception("Hybrid player-to-pad or exact window map was accepted ambiguously.");
+        if (!plan.TryGetAutoPartyWindow(1, out var firstWindow) ||
+            firstWindow != new HybridGameWindow(10, 100) ||
+            !plan.TryGetAutoPartyWindow(3, out var followerWindow) ||
+            followerWindow != new HybridGameWindow(20, 200) ||
+            plan.TryGetAutoPartyWindow(2, out _))
+            throw new Exception("Hybrid Auto Party resolved an unassigned or wrong game window.");
         var gameA = Path.GetFullPath("PoE2.exe");
         var gameB = Path.GetFullPath("PoE2B.exe");
         var wrongGame = Path.GetFullPath("Other.exe");
@@ -154,6 +160,7 @@ internal static class HybridKeyboardInputTests
             [1] = neutralP1, [2] = splitFollower
         });
         if (!splitRouter.ConfigureHybridKeyboard(new Dictionary<int, int> { [2] = 2 }) ||
+            splitRouter.BeginAutoParty(now) ||
             splitRouter.ApplyLine("{\"slot\":1,\"state\":\"following\",\"x\":1,\"y\":0}", now) ||
             neutralP1.Report != default)
             throw new Exception("Reserved native P1 virtual pad accepted movement.");
@@ -187,6 +194,24 @@ internal static class HybridKeyboardInputTests
         splitRouter.SetHybridForeground(false);
         if (splitFollower.Report != default || neutralP1.Report != default)
             throw new Exception("Mirror input survived loss of game foreground.");
+        if (!splitRouter.BeginAutoParty(now) || !splitRouter.AutoPartyActive ||
+            !splitRouter.PulseAutoParty(1, 0x2000, 60, now.AddMilliseconds(1)) ||
+            !splitRouter.AutoPartyPulseActive(now.AddMilliseconds(59)) ||
+            splitRouter.AutoPartyPulseActive(now.AddMilliseconds(61)) ||
+            splitRouter.AutoPartySlot != 1 || neutralP1.Report.Buttons != 0x2000 ||
+            splitFollower.Report != default)
+            throw new Exception("Hybrid Auto Party did not temporarily own the native P1 placeholder pad.");
+        splitRouter.ApplyHybridKey(0x45, true, true);
+        if (neutralP1.Report.Buttons != 0x2000 || splitFollower.Report != default ||
+            splitRouter.PulseAutoParty(2, 0x1000, 80, now.AddMilliseconds(2)))
+            throw new Exception("Manual keys overrode a hybrid Auto Party pulse or overlapping pulses were accepted.");
+        splitRouter.ApplyHybridKey(0x45, false, true);
+        if (!splitRouter.PulseAutoParty(2, 0x1000, 80, now.AddMilliseconds(62)) ||
+            neutralP1.Report != default || splitFollower.Report.Buttons != 0x1000)
+            throw new Exception("Hybrid Auto Party did not hand its pulse to the follower pad.");
+        splitRouter.EndAutoParty();
+        if (splitRouter.AutoPartyActive || neutralP1.Report != default || splitFollower.Report != default)
+            throw new Exception("Hybrid Auto Party did not release all pads on stop.");
 
         var neutralClient1 = new FakePad();
         var neutralClient1Second = new FakePad();
@@ -200,6 +225,10 @@ internal static class HybridKeyboardInputTests
         if (!threeRouter.ConfigureHybridKeyboard(new Dictionary<int, int> { [2] = 3, [3] = 4 }) ||
             !threeRouter.EnableHybridMainFollowMirror())
             throw new Exception("Three-player hybrid virtual controller layout was rejected.");
+        if (!threeRouter.BeginAutoParty(now) ||
+            threeRouter.PulseAutoParty(2, 0x1000, 80, now.AddMilliseconds(1)))
+            throw new Exception("Unused Client 1 placeholder accepted an Auto Party pulse.");
+        threeRouter.EndAutoParty();
         threeRouter.SetHybridForeground(true);
         threeRouter.ApplyHybridKey(0x45, true, true);
         if (firstFollower.Report.Buttons != 0x1000 || secondFollower.Report.Buttons != 0x1000 ||

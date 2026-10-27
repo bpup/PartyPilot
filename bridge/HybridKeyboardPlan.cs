@@ -6,6 +6,15 @@ internal sealed record HybridKeyboardPlan(
     IReadOnlyDictionary<int, int> PlayerPads,
     IReadOnlyDictionary<int, HybridGameWindow> PlayerWindows)
 {
+    internal bool TryGetAutoPartyWindow(int pad, out HybridGameWindow window)
+    {
+        if (pad == 1 && PlayerWindows.TryGetValue(1, out window)) return true;
+        foreach (var (player, assignedPad) in PlayerPads)
+            if (assignedPad == pad && PlayerWindows.TryGetValue(player, out window)) return true;
+        window = default;
+        return false;
+    }
+
     internal bool MatchesGameProcesses(IReadOnlyCollection<string> gameExecutables,
         Func<int, string?> executableForPid)
     {
