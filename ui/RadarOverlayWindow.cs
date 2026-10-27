@@ -25,6 +25,8 @@ public sealed class RadarOverlayWindow : Window
     private readonly DispatcherTimer _positionTimer = new() { Interval = TimeSpan.FromMilliseconds(50) };
     private RadarFrame? _frame;
     private WriteableBitmap? _terrainBitmap;
+    private (RadarTerrainCapture Terrain, double GridX, double GridY, int Width, int Height)?
+        _terrainRenderKey;
     public bool TargetIsLost { get; private set; }
     public bool TerrainVisible => _terrainBitmap is not null;
 
@@ -60,7 +62,7 @@ public sealed class RadarOverlayWindow : Window
             }
         };
         Closed += (_, _) => _positionTimer.Stop();
-        Closed += (_, _) => _terrainBitmap?.Dispose();
+        Closed += (_, _) => ReleaseTerrainBitmap();
         NamePrivacy.Changed += OnNamePrivacyChanged;
         Closed += (_, _) => NamePrivacy.Changed -= OnNamePrivacyChanged;
         SizeChanged += (_, _) => Draw();
@@ -108,11 +110,14 @@ public sealed class RadarOverlayWindow : Window
     private void Draw()
     {
         _canvas.Children.Clear();
-        _terrainBitmap?.Dispose();
-        _terrainBitmap = null;
-        if (_frame == null || DateTime.UtcNow - _frame.SeenUtc > TimeSpan.FromSeconds(2)) return;
+        if (_frame == null || DateTime.UtcNow - _frame.SeenUtc > TimeSpan.FromSeconds(2))
+        {
+            ReleaseTerrainBitmap();
+            return;
+        }
         var centerX = Bounds.Width / 2;
         var centerY = Bounds.Height / 2;
+        var terrainDrawn = false;
         if (_terrain?.Matches(_frame) == true &&
             Bounds.Width is >= 1 and <= 4096 && Bounds.Height is >= 1 and <= 4096)
         {
@@ -120,23 +125,30 @@ public sealed class RadarOverlayWindow : Window
             var height = (int)Math.Ceiling(Bounds.Height);
             if ((long)width * height <= 4_194_304)
             {
-                var pixels = RadarTerrainRaster.Render(_terrain, _frame, width, height,
-                    _scale * RadarProjection.WorldUnitsPerGridUnit);
-                var bitmap = new WriteableBitmap(new PixelSize(width, height), new Vector(96, 96),
-                    PixelFormats.Bgra8888, AlphaFormat.Premul);
-                using (var locked = bitmap.Lock())
+                var key = (_terrain, _frame.GridX!.Value, _frame.GridY!.Value, width, height);
+                if (_terrainBitmap is null || _terrainRenderKey != key)
                 {
-                    var rowBytes = width * 4;
-                    for (var row = 0; row < height; row++)
-                        Marshal.Copy(pixels, row * rowBytes,
-                            locked.Address + row * locked.RowBytes, rowBytes);
+                    ReleaseTerrainBitmap();
+                    var pixels = RadarTerrainRaster.Render(_terrain, _frame, width, height,
+                        _scale * RadarProjection.WorldUnitsPerGridUnit);
+                    var bitmap = new WriteableBitmap(new PixelSize(width, height), new Vector(96, 96),
+                        PixelFormats.Bgra8888, AlphaFormat.Premul);
+                    using (var locked = bitmap.Lock())
+                    {
+                        var rowBytes = width * 4;
+                        for (var row = 0; row < height; row++)
+                            Marshal.Copy(pixels, row * rowBytes,
+                                locked.Address + row * locked.RowBytes, rowBytes);
+                    }
+                    _terrainBitmap = bitmap;
+                    _terrainRenderKey = key;
                 }
-                _terrainBitmap = bitmap;
                 _canvas.Children.Add(new Image
                 {
-                    Source = bitmap, Width = Bounds.Width, Height = Bounds.Height,
+                    Source = _terrainBitmap, Width = Bounds.Width, Height = Bounds.Height,
                     Stretch = Stretch.Fill
                 });
+                terrainDrawn = true;
                 foreach (var room in _terrain.Rooms)
                 {
                     var (x, y) = RadarProjection.ProjectGrid(_frame.GridX!.Value,
@@ -159,6 +171,7 @@ public sealed class RadarOverlayWindow : Window
                 }
             }
         }
+        if (!terrainDrawn) ReleaseTerrainBitmap();
         AddDot(centerX, centerY, 12, Brushes.White);
         foreach (var marker in _frame.Markers.Concat(_frame.DormantCandidates))
         {
@@ -184,6 +197,13 @@ public sealed class RadarOverlayWindow : Window
                 _canvas.Children.Add(label);
             }
         }
+    }
+
+    private void ReleaseTerrainBitmap()
+    {
+        _terrainBitmap?.Dispose();
+        _terrainBitmap = null;
+        _terrainRenderKey = null;
     }
 
     private void AddDot(double x, double y, double diameter, IBrush brush)

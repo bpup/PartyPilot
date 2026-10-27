@@ -95,6 +95,28 @@ internal static class RadarTerrainCaptureSmoke
                     $"blocked={projected[(32 * 64 + 26) * 4 + 3]}, " +
                     $"walkable={projected[(27 * 64 + 32) * 4 + 3]}, " +
                     $"outside={projected[(63 * 64) * 4 + 3]}.");
+            var neighbors = new[] { (X: -1, Y: 0), (X: 1, Y: 0),
+                (X: 0, Y: -1), (X: 0, Y: 1) };
+            for (var y = 0; y < 64; y++)
+            for (var x = 0; x < 64; x++)
+            {
+                var (gridX, gridY) = RadarProjection.UnprojectGrid(1, 0,
+                    x + 0.5, y + 0.5, 32, 32, 8);
+                var expected = 0;
+                if (gridX >= 0 && gridY >= 0 && gridX < capture.Width && gridY < capture.Height)
+                {
+                    var cellX = (int)Math.Floor(gridX);
+                    var cellY = (int)Math.Floor(gridY);
+                    if (capture.Renderable(cellX, cellY) &&
+                        neighbors.Any(delta => cellX + delta.X < 0 || cellY + delta.Y < 0 ||
+                                cellX + delta.X >= capture.Width ||
+                                cellY + delta.Y >= capture.Height ||
+                                !capture.Renderable(cellX + delta.X, cellY + delta.Y)))
+                        expected = 224;
+                }
+                if (projected[(y * 64 + x) * 4 + 3] != expected)
+                    throw new Exception($"Incremental radar projection changed pixel ({x},{y}).");
+            }
             var interior = RadarTerrainRaster.Render(capture, matching, 1, 1, 1);
             if (interior[3] != 0)
                 throw new Exception("Radar terrain showed visited-style fill with zero background opacity.");
@@ -130,6 +152,16 @@ internal static class RadarTerrainCaptureSmoke
                     .Any(label => label.Text == "MausoleumBoss_ArenaFloor") ||
                 terrainWindow.CaptureRenderedFrame() is null)
                 throw new Exception("Matching terrain was not drawn behind radar markers.");
+            var firstTerrainImage = terrainWindow.GetLogicalDescendants().OfType<Image>().Single();
+            terrainWindow.Apply(matching with { SeenUtc = matching.SeenUtc.AddMilliseconds(1) },
+                discovered);
+            var repeatedTerrainImage = terrainWindow.GetLogicalDescendants().OfType<Image>().Single();
+            if (!ReferenceEquals(firstTerrainImage.Source, repeatedTerrainImage.Source))
+                throw new Exception("An unchanged player grid regenerated the whole terrain bitmap.");
+            terrainWindow.Apply(matching with { GridX = 4 }, discovered);
+            var movedTerrainImage = terrainWindow.GetLogicalDescendants().OfType<Image>().Single();
+            if (ReferenceEquals(firstTerrainImage.Source, movedTerrainImage.Source))
+                throw new Exception("A moved player reused a stale terrain projection.");
             terrainWindow.Apply(matching with { AreaHash = 43 }, null);
             if (terrainWindow.TerrainVisible ||
                 terrainWindow.GetLogicalDescendants().OfType<Image>().Any())

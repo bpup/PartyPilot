@@ -16,14 +16,25 @@ public static class RadarTerrainRaster
             throw new ArgumentException("Radar terrain needs a matching frame and bounded projection.");
         var pixels = new byte[width * height * 4];
         var boundaryByCell = new Dictionary<long, bool>();
+        var origin = RadarProjection.UnprojectGrid(frame.GridX!.Value, frame.GridY!.Value,
+            0.5, 0.5, width / 2d, height / 2d, pixelsPerGridCell);
+        var right = RadarProjection.UnprojectGrid(frame.GridX.Value, frame.GridY!.Value,
+            1.5, 0.5, width / 2d, height / 2d, pixelsPerGridCell);
+        var down = RadarProjection.UnprojectGrid(frame.GridX.Value, frame.GridY.Value,
+            0.5, 1.5, width / 2d, height / 2d, pixelsPerGridCell);
+        var rightX = right.X - origin.X;
+        var rightY = right.Y - origin.Y;
+        var downX = down.X - origin.X;
+        var downY = down.Y - origin.Y;
         for (var y = 0; y < height; y++)
         {
             boundaryByCell.Clear();
+            var rowX = origin.X + y * downX;
+            var rowY = origin.Y + y * downY;
             for (var x = 0; x < width; x++)
             {
-                var (rawX, rawY) = RadarProjection.UnprojectGrid(frame.GridX!.Value,
-                    frame.GridY!.Value, x + 0.5, y + 0.5, width / 2d, height / 2d,
-                    pixelsPerGridCell);
+                var rawX = rowX + x * rightX;
+                var rawY = rowY + x * rightY;
                 if (!double.IsFinite(rawX) || !double.IsFinite(rawY) ||
                     rawX < 0 || rawY < 0 || rawX >= capture.Width || rawY >= capture.Height)
                     continue;
