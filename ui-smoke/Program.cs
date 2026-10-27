@@ -20,6 +20,7 @@ AutoLoginPreferenceSmoke.Run();
 AutoLoginStartupPlanSmoke.Run();
 LeadershipPreferenceSmoke.Run();
 MenuGuardPreferenceSmoke.Run();
+RightStickDodgePreferenceSmoke.Run();
 FollowerMirrorPreferenceSmoke.Run();
 AutoPartyCoordinatorSmoke.Run();
 AutoPartyHotkeySmoke.Run();
@@ -172,6 +173,9 @@ if (args.Contains("--ui-controls-only"))
     if (window.GetLogicalDescendants().OfType<CheckBox>().Count(box =>
             box.Content?.ToString() == "启用菜单保护") != 1)
         throw new Exception("The desktop did not expose the target-version menu protection choice.");
+    if (window.GetLogicalDescendants().OfType<CheckBox>().Count(box =>
+            box.Content?.ToString() == "右摇杆开始控制跟随角色时闪避一次") != 1)
+        throw new Exception("The desktop did not expose the target-version engagement dodge choice.");
     if (!PartyPilot.Common.HybridBindingConfig.TryCreate(
             PartyPilot.Common.HybridBindingConfig.Definitions.Select(item => item.DefaultKey).ToArray(),
             [new PartyPilot.Common.HybridCustomAction("额外确认", "", 70, 11)],

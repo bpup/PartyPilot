@@ -76,8 +76,12 @@ internal sealed class BridgeSession : IAsyncDisposable
         string deviceInstance, IReadOnlyList<string> gameExecutables, bool rightStickFollowerOverride,
         bool autoFlaskEnabled = false, bool useWgi = false, PrivateClient3Plan? privatePlan = null,
         bool lastFocusedLeads = false, bool menuGuardEnabled = true,
-        FollowerMirrorConfig? followerMirror = null, bool adoptExistingPrivate = false)
+        FollowerMirrorConfig? followerMirror = null, bool adoptExistingPrivate = false,
+        bool engageDodgeEnabled = false, string engageDodgeBinding = "B")
     {
+        if (engageDodgeEnabled && (!rightStickFollowerOverride ||
+            !RightStickDodgePreferenceStore.TryNormalizeBinding(engageDodgeBinding, out engageDodgeBinding)))
+            throw new ArgumentException("Right-stick dodge needs a known button and follower movement enabled.");
         var slots = partySlots.Where(item => item.Client != 3).Select(item => item.RuntimePad).ToArray();
         var privateSlots = partySlots.Where(item => item.Client == 3)
             .Select(item => item.RuntimePad).ToArray();
@@ -141,6 +145,12 @@ internal sealed class BridgeSession : IAsyncDisposable
             if (adoptExistingPrivate) start.ArgumentList.Add("--client3-adopt-existing");
         }
         if (rightStickFollowerOverride) start.ArgumentList.Add("--right-stick-follower-override");
+        if (engageDodgeEnabled)
+        {
+            start.ArgumentList.Add("--right-stick-dodge-on-engage");
+            start.ArgumentList.Add("--right-stick-dodge-button");
+            start.ArgumentList.Add(engageDodgeBinding);
+        }
         if (autoFlaskEnabled) start.ArgumentList.Add("--enable-auto-flask");
         if (!menuGuardEnabled) start.ArgumentList.Add("--disable-menu-guard");
         if (followerMirror is not null)
@@ -162,7 +172,8 @@ internal sealed class BridgeSession : IAsyncDisposable
                 TimeSpan.FromSeconds(privatePlan is null ? 15 : 45));
             if (readyLine is null || !IsExpectedReady(readyLine, slots, focusPadMap,
                 rightStickFollowerOverride, directRightStickSlot, autoFlaskEnabled, useWgi, privatePlan,
-                lastFocusedLeads, menuGuardEnabled, followerMirror, adoptExistingPrivate))
+                lastFocusedLeads, menuGuardEnabled, followerMirror, adoptExistingPrivate,
+                engageDodgeEnabled, engageDodgeBinding))
             {
                 throw new InvalidOperationException("Virtual controller bridge did not confirm the requested pad slots.");
             }
@@ -449,7 +460,8 @@ internal sealed class BridgeSession : IAsyncDisposable
         bool rightStickFollowerOverride, int directRightStickSlot, bool autoFlaskEnabled, bool useWgi,
         PrivateClient3Plan? privatePlan, bool lastFocusedLeads = false,
         bool menuGuardEnabled = true, FollowerMirrorConfig? followerMirror = null,
-        bool adoptExistingPrivate = false)
+        bool adoptExistingPrivate = false, bool engageDodgeEnabled = false,
+        string engageDodgeBinding = "B")
     {
         try
         {
@@ -470,6 +482,11 @@ internal sealed class BridgeSession : IAsyncDisposable
                    dynamicMain.GetBoolean() == lastFocusedLeads &&
                    root.TryGetProperty("right_stick_follower_override", out var rightStick) &&
                    rightStick.GetBoolean() == rightStickFollowerOverride &&
+                   (root.TryGetProperty("right_stick_dodge_on_engage", out var dodge)
+                       ? dodge.GetBoolean() == engageDodgeEnabled : !engageDodgeEnabled) &&
+                   (!engageDodgeEnabled ||
+                    root.TryGetProperty("right_stick_dodge_button", out var dodgeButton) &&
+                    dodgeButton.GetString() == engageDodgeBinding) &&
                    root.TryGetProperty("direct_right_stick_slot", out var directSlot) &&
                    directSlot.GetInt32() == directRightStickSlot &&
                    root.TryGetProperty("focus_pad_map", out var focusMap) &&

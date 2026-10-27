@@ -84,6 +84,11 @@ public sealed class MainWindow : Window
     private readonly TextBox _physicalDevice = new();
     private readonly CheckBox _isolationConfirmed = new();
     private readonly CheckBox _rightStickFollowerOverride = new();
+    private readonly CheckBox _engageDodge = new();
+    private readonly ComboBox _engageDodgeBinding = new();
+    private readonly TextBlock _engageDodgeStatus = new();
+    private readonly RightStickDodgePreferenceStore _engageDodgePreferences = new();
+    private bool _engageDodgePreferenceReady;
     private readonly CheckBox _autoFlask = new();
     private readonly CheckBox _menuGuard = new();
     private readonly TextBlock _menuGuardStatus = new();
@@ -408,7 +413,42 @@ public sealed class MainWindow : Window
         _isolationConfirmed.Content = "我已确认实体手柄对游戏隐藏，仅由桥接读取";
         panel.Children.Add(_isolationConfirmed);
         _rightStickFollowerOverride.Content = "右摇杆暂时控制可活动的跟随角色（主角色不再使用右摇杆瞄准）";
+        _rightStickFollowerOverride.IsCheckedChanged += (_, _) => UpdateBridgeControls();
         panel.Children.Add(_rightStickFollowerOverride);
+        var dodgePreference = _engageDodgePreferences.Load();
+        _engageDodgePreferenceReady = dodgePreference.Success;
+        _engageDodge.Content = "右摇杆开始控制跟随角色时闪避一次";
+        _engageDodge.IsChecked = dodgePreference.Success ? dodgePreference.Enabled : null;
+        _engageDodgeBinding.ItemsSource = RightStickDodgePreferenceStore.Bindings;
+        _engageDodgeBinding.SelectedItem = dodgePreference.Binding;
+        _engageDodgeBinding.Width = 160;
+        _engageDodgeBinding.HorizontalAlignment = HorizontalAlignment.Left;
+        _engageDodgeStatus.Text = dodgePreference.Success
+            ? "目标版默认关闭，按键为 B；更改后下次准备桥接时生效。"
+            : "右摇杆闪避设置无效；请重新选择并保存。";
+        _engageDodgeStatus.Foreground = MutedBrush;
+        void SaveEngageDodge()
+        {
+            if (_engageDodge.IsChecked is not bool enabled ||
+                _engageDodgeBinding.SelectedItem is not string binding)
+            {
+                _engageDodgePreferenceReady = false;
+                _engageDodgeStatus.Text = "请选择右摇杆闪避状态与按键。";
+            }
+            else
+            {
+                _engageDodgePreferenceReady = _engageDodgePreferences.Save(enabled, binding);
+                _engageDodgeStatus.Text = _engageDodgePreferenceReady
+                    ? "右摇杆闪避设置已保存；下次准备桥接时生效。"
+                    : "右摇杆闪避设置保存失败；重新保存前不能准备桥接。";
+            }
+            UpdateBridgeControls();
+        }
+        _engageDodge.IsCheckedChanged += (_, _) => SaveEngageDodge();
+        _engageDodgeBinding.SelectionChanged += (_, _) => SaveEngageDodge();
+        panel.Children.Add(_engageDodge);
+        panel.Children.Add(_engageDodgeBinding);
+        panel.Children.Add(_engageDodgeStatus);
         _autoFlask.Content = "随实时跟随启用自动药剂（双/三客户端各一名角色；生命/魔力须绑定手柄十字键左/右）";
         panel.Children.Add(_autoFlask);
         var menuPreference = _menuGuardPreferences.Load();
@@ -1686,6 +1726,9 @@ public sealed class MainWindow : Window
         _physicalDevice.IsEnabled = !HybridSelected && _bridge is null && !_busy;
         _isolationConfirmed.IsEnabled = !HybridSelected && _bridge is null && !_busy;
         _rightStickFollowerOverride.IsEnabled = !HybridSelected && _bridge is null && !_busy;
+        _engageDodge.IsEnabled = !HybridSelected && _bridge is null && !_busy &&
+            _rightStickFollowerOverride.IsChecked == true;
+        _engageDodgeBinding.IsEnabled = _engageDodge.IsEnabled;
         _lastFocusedLeads.IsEnabled = !HybridSelected && _bridge is null && !_busy;
         _autoFlask.IsEnabled = !HybridSelected && _bridge is null && !_busy &&
             (_selectedTopology?.Id is "2-split" or "3-three-singles");
@@ -2094,9 +2137,11 @@ public sealed class MainWindow : Window
             return;
         }
         if (!_menuGuardPreferenceReady || _menuGuard.IsChecked is not bool ||
-            !_followerMirrorPreferenceReady)
+            !_followerMirrorPreferenceReady || !HybridSelected && !_engageDodgePreferenceReady)
         {
-            _pairingStatus.Text = "先确认并保存菜单保护及跟随按键设置，再准备桥接。";
+            _pairingStatus.Text = HybridSelected
+                ? "先确认并保存菜单保护及跟随按键设置，再准备桥接。"
+                : "先确认并保存菜单保护、跟随按键及右摇杆闪避设置，再准备桥接。";
             return;
         }
         if (HybridSelected)
@@ -2142,7 +2187,10 @@ public sealed class MainWindow : Window
                 _selectedTopology.Id is "2-split" or "3-three-singles" && _autoFlask.IsChecked == true,
                 useWgi, privatePlan, lastFocusedLeads: _lastFocusedLeads.IsChecked == true,
                 menuGuardEnabled: _menuGuard.IsChecked == true, followerMirror: _followerMirror,
-                adoptExistingPrivate: pendingPrivate is not null);
+                adoptExistingPrivate: pendingPrivate is not null,
+                engageDodgeEnabled: _rightStickFollowerOverride.IsChecked == true &&
+                    _engageDodge.IsChecked == true,
+                engageDodgeBinding: (string)_engageDodgeBinding.SelectedItem!);
             ActivateBridge(session, _selectedTopology);
         }
         catch (Exception error)
@@ -2987,9 +3035,9 @@ public sealed class MainWindow : Window
             else if (action == ClientAction.Start)
             {
                 if (!_menuGuardPreferenceReady || _menuGuard.IsChecked is not bool ||
-                    !_followerMirrorPreferenceReady)
+                    !_followerMirrorPreferenceReady || !_engageDodgePreferenceReady)
                 {
-                    _status.Text = "先确认并保存菜单保护及跟随按键设置；游戏尚未启动。";
+                    _status.Text = "先确认并保存菜单保护、跟随按键及右摇杆闪避设置；游戏尚未启动。";
                     return;
                 }
                 if (_isolationConfirmed.IsChecked != true || string.IsNullOrWhiteSpace(_physicalDevice.Text))
@@ -3033,7 +3081,10 @@ public sealed class MainWindow : Window
                             _rightStickFollowerOverride.IsChecked == true,
                             _selectedTopology.Id is "2-split" or "3-three-singles" && _autoFlask.IsChecked == true,
                             useWgi, lastFocusedLeads: _lastFocusedLeads.IsChecked == true,
-                            menuGuardEnabled: _menuGuard.IsChecked == true, followerMirror: _followerMirror);
+                            menuGuardEnabled: _menuGuard.IsChecked == true, followerMirror: _followerMirror,
+                            engageDodgeEnabled: _rightStickFollowerOverride.IsChecked == true &&
+                                _engageDodge.IsChecked == true,
+                            engageDodgeBinding: (string)_engageDodgeBinding.SelectedItem!);
                         ActivateBridge(session, _selectedTopology);
                         prelaunchBridge = session;
                     }

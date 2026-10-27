@@ -239,6 +239,19 @@ var followerMirror = requestedMirror ?? FollowerMirrorConfig.Default;
 var autoFlaskEnabled = args.Contains("--enable-auto-flask");
 var combatEnabled = args.Contains("--enable-combat");
 var rightStickFollowerOverride = args.Contains("--right-stick-follower-override");
+var engageDodgeEnabled = args.Contains("--right-stick-dodge-on-engage");
+var engageDodgePosition = Array.IndexOf(args, "--right-stick-dodge-button");
+var engageDodgeBinding = "B";
+if (args.Count(arg => arg == "--right-stick-dodge-on-engage") > 1 ||
+    engageDodgePosition >= 0 && (args.Count(arg => arg == "--right-stick-dodge-button") != 1 ||
+        engageDodgePosition + 1 >= args.Length ||
+        !RightStickEngageDodge.TryNormalizeBinding(args[engageDodgePosition + 1], out engageDodgeBinding)) ||
+    (engageDodgeEnabled && (!rightStickFollowerOverride || !args.Contains("--pairing-protected"))) ||
+    (!engageDodgeEnabled && engageDodgePosition >= 0))
+{
+    Console.Error.WriteLine("Right-stick engagement dodge requires protected follower override and one known button.");
+    return 2;
+}
 var directSlotPosition = Array.IndexOf(args, "--direct-right-stick-slot");
 var directRightStickSlot = 0;
 if (directSlotPosition >= 0 && (args.Count(arg => arg == "--direct-right-stick-slot") != 1 ||
@@ -467,7 +480,8 @@ try
         }
         var router = new BridgeRouter(outputs, privateClient3 is null ? null : privateOutputs);
         if (physicalMode && !router.ConfigurePhysical(mainSlot, rightStickFollowerOverride, focusPads,
-            directRightStickSlot, lastFocusedLeads, followerMirror))
+            directRightStickSlot, lastFocusedLeads, followerMirror,
+            engageDodgeEnabled, engageDodgeBinding))
             throw new InvalidOperationException("Focus pad mapping does not match the connected virtual controllers.");
         if (hybridPlan is not null && !router.ConfigureHybridKeyboard(hybridPlan.PlayerPads,
             hybridBindings, followerMirror))
@@ -506,6 +520,8 @@ try
             auto_flask_enabled = autoFlaskEnabled,
             menu_guard_enabled = menuGuardEnabled,
             right_stick_follower_override = rightStickFollowerOverride,
+            right_stick_dodge_on_engage = engageDodgeEnabled,
+            right_stick_dodge_button = engageDodgeBinding,
             last_focused_leads = lastFocusedLeads,
             follower_mirror = physicalMode || hybridMode ? followerMirror.Encode() : "",
             direct_right_stick_slot = directRightStickSlot,

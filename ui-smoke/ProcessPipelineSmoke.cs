@@ -112,10 +112,12 @@ internal static class ProcessPipelineSmoke
                 "if focus != {'type':'manual_focus','slot':3}: sys.exit(2)\n" +
                 "print('{\"focused\":3,\"commands\":{\"1\":{\"state\":\"following\",\"x\":1,\"y\":0},\"2\":{\"state\":\"following\",\"x\":0,\"y\":1}}}', flush=True)\n" +
                 "time.sleep(0.3)\n");
-            File.WriteAllText(couchBridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
+            File.WriteAllText(couchBridgeExe, "#!/usr/bin/env python3\nimport sys,json\n" +
                 "if '--focus-pad-map' not in sys.argv or sys.argv[sys.argv.index('--focus-pad-map')+1] != '1:1,2:2': sys.exit(2)\n" +
                 "if '--right-stick-follower-override' not in sys.argv or '--direct-right-stick-slot' not in sys.argv or sys.argv[sys.argv.index('--direct-right-stick-slot')+1] != '2': sys.exit(2)\n" +
-                "print('{\"event\":\"ready\",\"slots\":[1,2],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"menu_guard_enabled\":true,\"last_focused_leads\":false,\"auto_flask_enabled\":false,\"right_stick_follower_override\":true,\"direct_right_stick_slot\":2,\"focus_pad_map\":\"1:1,2:2\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
+                "dodge='--right-stick-dodge-on-engage' in sys.argv\n" +
+                "if dodge and ('--right-stick-dodge-button' not in sys.argv or sys.argv[sys.argv.index('--right-stick-dodge-button')+1] != 'RB'): sys.exit(2)\n" +
+                "print(json.dumps({'event':'ready','slots':[1,2],'physical_mode':True,'pairing_protected':True,'hidhide_preflight':True,'menu_guard_enabled':True,'last_focused_leads':False,'auto_flask_enabled':False,'right_stick_follower_override':True,'right_stick_dodge_on_engage':dodge,'right_stick_dodge_button':'RB' if dodge else 'B','direct_right_stick_slot':2,'focus_pad_map':'1:1,2:2','private_client3_pid':0,'private_client3_window_handle':0,'private_client3_slots':[]}), flush=True)\n" +
                 "for line in sys.stdin: pass\n");
             File.WriteAllText(wgiBridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '--physical-wgi' not in sys.argv or '--physical-index' in sys.argv: sys.exit(2)\n" +
@@ -326,6 +328,13 @@ internal static class ProcessPipelineSmoke
                 @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe"], true))
             {
                 pairedBridge.StartReading();
+            }
+            await using (var dodgeBridge = await BridgeSession.StartAsync(couchBridgeExe, couch.Slots, 0,
+                @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe"], true,
+                engageDodgeEnabled: true, engageDodgeBinding: "RB"))
+            {
+                if (!dodgeBridge.IsRunning)
+                    throw new Exception("Optional right-stick dodge bridge ended during startup.");
             }
             Console.WriteLine("Same-client right-stick bridge startup arguments checked with a local fake executable.");
             var four = PartyTopologies.ForPlayerCount(4).Single();

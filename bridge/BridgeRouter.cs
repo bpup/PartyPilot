@@ -39,6 +39,10 @@ internal sealed class BridgeRouter
     private IReadOnlyDictionary<int, int> _hybridPlayerPads = new Dictionary<int, int>();
     private bool _menuGuardActive;
     private bool _rightStickFollowerOverride;
+    private readonly RightStickEngageDodge _engageDodge = new();
+    private bool _engageDodgeEnabled;
+    private string _engageDodgeBinding = "B";
+    private long _engageDodgeNow;
     private bool _lastFocusedLeads;
     private int _directRightStickSlot;
     private bool _allowDirectRightStick;
@@ -120,9 +124,13 @@ internal sealed class BridgeRouter
 
     public bool ConfigurePhysical(int mainSlot, bool rightStickFollowerOverride = false,
         IReadOnlyDictionary<int, int>? focusPads = null, int directRightStickSlot = 0,
-        bool lastFocusedLeads = false, FollowerMirrorConfig? followerMirror = null)
+        bool lastFocusedLeads = false, FollowerMirrorConfig? followerMirror = null,
+        bool engageDodgeEnabled = false, string engageDodgeBinding = "B")
     {
         if (_hybridKeyboard is not null || !_routes.ContainsKey(mainSlot)) return false;
+        if (engageDodgeEnabled && (!rightStickFollowerOverride ||
+            !RightStickEngageDodge.TryNormalizeBinding(engageDodgeBinding, out engageDodgeBinding)))
+            return false;
         if (directRightStickSlot != 0 && (!rightStickFollowerOverride ||
             directRightStickSlot == mainSlot || !_routes.ContainsKey(directRightStickSlot))) return false;
         var explicitFocusPads = focusPads is not null;
@@ -137,6 +145,8 @@ internal sealed class BridgeRouter
         _followerMirror = followerMirror ?? FollowerMirrorConfig.Default;
         _physicalMode = true;
         _rightStickFollowerOverride = rightStickFollowerOverride;
+        _engageDodgeEnabled = engageDodgeEnabled;
+        _engageDodgeBinding = engageDodgeBinding;
         _lastFocusedLeads = lastFocusedLeads;
         _directRightStickSlot = directRightStickSlot;
         _mainSlot = mainSlot;
@@ -267,6 +277,7 @@ internal sealed class BridgeRouter
         const ushort dpadUp = 0x0001;
         const ushort dpadDown = 0x0002;
         var nowUtc = observedAtUtc ?? DateTime.UtcNow;
+        _engageDodgeNow = nowUtc.Ticks / TimeSpan.TicksPerMillisecond;
         var previousFocus = _focusedSlot;
         var previousIsolation = _isolatedSlot;
         var left = (gamepad.Buttons & leftThumb) != 0;
@@ -332,7 +343,10 @@ internal sealed class BridgeRouter
         }
         _physicalReport = PadReport.FromPhysical(gamepad);
         if (previousFocus != _focusedSlot || previousIsolation != _isolatedSlot)
+        {
             ReleaseCombatAll();
+            _engageDodge.Reset();
+        }
         if (previousFocus != _focusedSlot || previousIsolation != _isolatedSlot ||
             _rightStickFollowerOverride || _followerMirrorEnabled) RenderAll();
         else Render(_focusedSlot, _routes[_focusedSlot]);
@@ -364,6 +378,7 @@ internal sealed class BridgeRouter
         _menuGuardActive = active;
         if (active)
         {
+            _engageDodge.Reset();
             ReleaseCombatAll();
             foreach (var route in _routes.Values)
                 route.LifeUntilUtc = route.ManaUntilUtc = DateTime.MinValue;
@@ -434,6 +449,7 @@ internal sealed class BridgeRouter
 
     public void Tick(DateTime nowUtc)
     {
+        _engageDodgeNow = nowUtc.Ticks / TimeSpan.TicksPerMillisecond;
         if (_autoPartyActive)
         {
             if (nowUtc >= _autoPartyExpiresUtc) { EndAutoParty(); return; }
@@ -481,7 +497,7 @@ internal sealed class BridgeRouter
                 route.EligibleForManualMovement = false;
                 Render(slot, route);
             }
-            else if (expired) Render(slot, route);
+            else if (expired || _engageDodgeEnabled) Render(slot, route);
         }
     }
 
@@ -497,6 +513,7 @@ internal sealed class BridgeRouter
         _autoPartyButtons = 0;
         _autoPartyButtonsUntilUtc = default;
         _menuGuardActive = false;
+        _engageDodge.Reset();
         _physicalConnected = false;
         _followerMirrorEnabled = false;
         _physicalReport = default;
@@ -589,8 +606,8 @@ internal sealed class BridgeRouter
              (_allowDirectRightStick && slot == _directRightStickSlot)) &&
             (Math.Abs((int)_manualX) > 8000 || Math.Abs((int)_manualY) > 8000))
         {
-            route.Output.SetReport(WithFlasks(WithFollowerMirror(
-                PadReport.FromMovement(_manualX, _manualY), slot, route), route));
+            route.Output.SetReport(WithEngageDodge(WithFlasks(WithFollowerMirror(
+                PadReport.FromMovement(_manualX, _manualY), slot, route), route), slot, true));
             return;
         }
         var automation = route.Automation;
@@ -600,7 +617,19 @@ internal sealed class BridgeRouter
                 Buttons = (ushort)(automation.Buttons |
                     (_hybridKeyboard.MainFollowMirrorButtons & _followerMirror.ButtonsForPlayer(hybridPlayer)))
             };
-        route.Output.SetReport(WithFlasks(WithFollowerMirror(automation, slot, route), route));
+        route.Output.SetReport(WithEngageDodge(
+            WithFlasks(WithFollowerMirror(automation, slot, route), route), slot,
+            route.EligibleForManualMovement || _allowDirectRightStick && slot == _directRightStickSlot));
+    }
+
+    private PadReport WithEngageDodge(PadReport report, int slot, bool eligible)
+    {
+        if (!_engageDodgeEnabled || !_playerForPad.TryGetValue(slot, out var player) ||
+            !_playerForPad.TryGetValue(_mainSlot, out var main)) return report;
+        return _engageDodge.Apply(player, main, true,
+            eligible && _physicalConnected && _isolatedSlot == 0 && !_menuGuardActive,
+            _engageDodgeBinding, _manualX, _manualY, report,
+            _engageDodgeNow == 0 ? DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond : _engageDodgeNow);
     }
 
     private PadReport WithFollowerMirror(PadReport automation, int slot, PadRoute route)
