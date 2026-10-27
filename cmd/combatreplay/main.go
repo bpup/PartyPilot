@@ -8,19 +8,25 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"partypilot/internal/combat"
 )
 
 func main() {
 	path := flag.String("replay", "", "JSONL file of explicit synthetic combat worlds")
+	feedPath := flag.String("feed-replay", "", "JSONL file of verified ordered combat feed frames")
 	enabled := flag.Bool("enable-planning", false, "enable read-only default-profile plans")
 	flag.Parse()
-	if *path == "" {
-		fmt.Fprintln(os.Stderr, "usage: PartyPilot-CombatReplay -replay worlds.jsonl [-enable-planning]")
+	if (*path == "") == (*feedPath == "") {
+		fmt.Fprintln(os.Stderr, "usage: PartyPilot-CombatReplay (-replay worlds.jsonl | -feed-replay frames.jsonl) [-enable-planning]")
 		os.Exit(2)
 	}
-	file, err := os.Open(*path)
+	selectedPath := *path
+	if *feedPath != "" {
+		selectedPath = *feedPath
+	}
+	file, err := os.Open(selectedPath)
 	if err != nil {
 		fail(err)
 	}
@@ -41,7 +47,20 @@ func main() {
 		decoder := json.NewDecoder(bytes.NewReader(data))
 		decoder.DisallowUnknownFields()
 		var world combat.World
-		if err := decoder.Decode(&world); err != nil {
+		if *feedPath != "" {
+			var record struct {
+				Now       time.Time            `json:"now"`
+				Frames    []combat.FeedFrame   `json:"frames"`
+				Authority combat.FeedAuthority `json:"authority"`
+			}
+			if err := decoder.Decode(&record); err != nil {
+				fail(fmt.Errorf("line %d: %w", line, err))
+			}
+			world, err = combat.AssembleWorld(record.Frames, record.Authority, record.Now)
+			if err != nil {
+				fail(fmt.Errorf("line %d: %w", line, err))
+			}
+		} else if err := decoder.Decode(&world); err != nil {
 			fail(fmt.Errorf("line %d: %w", line, err))
 		}
 		var extra any
