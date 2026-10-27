@@ -26,6 +26,12 @@ jobs:
           DOTNET_ROLL_FORWARD: Major
       - name: Build Windows input bridge
         run: dotnet build bridge/PartyPilot.Bridge.csproj -c Release
+      - name: Build and exercise private client 3 input runtime
+        shell: pwsh
+        run: |
+          cmake -S native/private-slot-runtime -B "$env:RUNNER_TEMP/private-slots" -G "Visual Studio 17 2022" -A x64
+          cmake --build "$env:RUNNER_TEMP/private-slots" --config Release --parallel
+          ctest --test-dir "$env:RUNNER_TEMP/private-slots" -C Release --output-on-failure
       - name: Desktop client 3 contract
         run: dotnet run --project ui-smoke/PartyPilot.Desktop.Smoke.csproj -c Release -- --client3-plan-only
       - name: Desktop headless checks
