@@ -299,6 +299,17 @@ internal static class TransitionAnchorEvidenceSmoke
         catch (InvalidOperationException) { }
         if (!failing.Calls.SequenceEqual(["begin", "pulse:3", "end"]))
             throw new Exception("Failed entry pulse retained the bridge lease.");
+        var budget = new TransitionInteractionBudget();
+        if (budget.TryReserve(candidate, now) != 1 ||
+            budget.TryReserve(candidate, now.AddSeconds(3)) != 0 ||
+            budget.TryReserve(candidate, now.AddSeconds(4)) != 2 ||
+            budget.TryReserve(candidate, now.AddSeconds(8)) != 3 ||
+            budget.TryReserve(candidate, now.AddSeconds(12)) != 0 ||
+            budget.TryReserve(candidate with { DriverPlayer = 4, DriverPad = 4 },
+                now.AddSeconds(12)) != 0 ||
+            budget.TryReserve(candidate with { SourceChangedUtc = now.AddSeconds(13) },
+                now.AddSeconds(13)) != 1)
+            throw new Exception("Entrance interaction exceeded three attempts or retried before area confirmation.");
         Console.WriteLine("Read-only transition evidence rejected stale, distant and mismatched entrances.");
     }
 

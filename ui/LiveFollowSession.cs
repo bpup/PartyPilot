@@ -31,7 +31,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     private Task _warpTask = Task.CompletedTask;
     private CancellationTokenSource? _entryAttemptCancellation;
     private Task _entryTask = Task.CompletedTask;
-    private readonly Dictionary<int, DateTime> _lastEntryPulseAtUtc = new();
+    private readonly TransitionInteractionBudget _entryBudget = new();
     private FollowHandoffRequest? _attemptedWarp;
     private int _inputSubscriptionActive;
     private readonly SemaphoreSlim _controlSignal = new(0);
@@ -580,18 +580,18 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             _entryAttemptCancellation?.Cancel();
             return;
         }
-        if (!_entryTask.IsCompleted ||
-            _lastEntryPulseAtUtc.TryGetValue(candidate.DestinationClient, out var last) &&
-            nowUtc - last < TimeSpan.FromMilliseconds(650)) return;
-        _lastEntryPulseAtUtc[candidate.DestinationClient] = nowUtc;
+        if (!_entryTask.IsCompleted) return;
+        var attempt = _entryBudget.TryReserve(candidate, nowUtc);
+        if (attempt == 0) return;
         _entryAttemptCancellation?.Dispose();
         _entryAttemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             _warpCancellation.Token);
-        _entryTask = RunTransitionInteractionAsync(candidate,
+        _entryTask = RunTransitionInteractionAsync(candidate, attempt,
             _entryAttemptCancellation.Token);
     }
 
     private async Task RunTransitionInteractionAsync(TransitionInteractionCandidate candidate,
+        int attempt,
         CancellationToken token)
     {
         try
@@ -599,7 +599,9 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             await TransitionInteractionRunner.RunAsync(
                 new BridgeTransitionInteractionPort(_bridge), candidate.DriverPad, token);
             Dispatcher.UIThread.Post(() => WarpStatusChanged?.Invoke(
-                $"已向 P{candidate.DriverPlayer} 发送一次入口 A 短按；等待区域变化确认。"));
+                $"已向 P{candidate.DriverPlayer} 发送入口 A 短按（第 {attempt}/3 次）；" +
+                (attempt == 3 ? "等待区域变化确认，本次入口不再自动重复。" :
+                    "等待区域变化确认。")));
         }
         catch (OperationCanceledException) { }
         catch (Exception error)
