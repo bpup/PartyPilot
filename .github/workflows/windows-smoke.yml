@@ -1,0 +1,29 @@
+name: Windows smoke
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - name: Go tests
+        run: go test ./... -count=1
+      - name: Bridge protocol checks
+        run: dotnet run --project bridge/protocol-tests/ProtocolTests.csproj -c Release
+      - name: Build Windows input bridge
+        run: dotnet build bridge/PartyPilot.Bridge.csproj -c Release
+      - name: Desktop client 3 contract
+        run: dotnet run --project ui-smoke/PartyPilot.Desktop.Smoke.csproj -c Release -- --client3-plan-only
+      - name: Desktop headless checks
+        shell: pwsh
+        run: dotnet run --project ui-smoke/PartyPilot.Desktop.Smoke.csproj -c Release -- "$env:RUNNER_TEMP\PartyPilot-ui-preview.png"
