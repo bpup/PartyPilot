@@ -21,6 +21,7 @@ public static class LocalSlotCandidateScanner
         public int RawPathEntries { get; init; }
         public int VisiblePathEntries { get; init; }
         public RawRenderPositionReader.Position?[]? RawPositions { get; init; }
+        public int? RawPositionOffset { get; init; }
         public DateTime? RawPositionsSeenUtc { get; init; }
         public RawRenderPositionReader.LocalComparison? ObservedLocalPositionComparison { get; init; }
         public RawRenderPositionReader.LocalComparison?[]? VisiblePositionComparisons { get; init; }

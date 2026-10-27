@@ -196,6 +196,18 @@ func TestRawLocalSlotPositionsRemainDiagnostic(t *testing.T) {
 		got.LocalSlotCandidates.RawPositions[0].GridX != 10 {
 		t.Fatalf("raw diagnostic positions lost: %+v, %v", got.LocalSlotCandidates, err)
 	}
+	withOffset := strings.Replace(base, `"RawPositionsSeenUtc":`,
+		`"RawPositionOffset":184,"RawPositionsSeenUtc":`, 1)
+	if candidate, err := Decode([]byte(withOffset)); err != nil ||
+		candidate.LocalSlotCandidates == nil ||
+		candidate.LocalSlotCandidates.RawPositionOffset == nil ||
+		*candidate.LocalSlotCandidates.RawPositionOffset != 184 {
+		t.Fatalf("alternate Render position offset was lost: %+v, %v", candidate.LocalSlotCandidates, err)
+	}
+	if _, err := Decode([]byte(strings.Replace(withOffset,
+		`"RawPositionOffset":184`, `"RawPositionOffset":200`, 1))); err == nil {
+		t.Fatal("unknown Render position offset was accepted")
+	}
 	withVisible := strings.Replace(base, `"GridXYDistance":0}}}`,
 		`"GridXYDistance":0},"VisiblePositionComparisons":[{"ObservedX":10,"ObservedY":20,`+
 			`"ObservedZ":5,"WorldXYDistance":220.69018,"GridXYDistance":0},null]}}`, 1)

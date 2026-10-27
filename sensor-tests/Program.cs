@@ -71,15 +71,18 @@ RawRenderPositionReader.Position? ReadSyntheticPosition(long entity, Func<long, 
     entity == other ? new(secondWorldX, 40, 5, secondWorldX / 10.869565f,
         40 / 10.869565f, "0x600000") : null;
 var motion = LocalSlotMotionSampler.Capture(two, local, paths, visiblePositions, Read,
-    _ => null, () => true, 10, 20, 5, motionSeen, ReadSyntheticPosition, state);
+    _ => null, () => true, 10, 20, 5, motionSeen, ReadSyntheticPosition, state,
+    verifiedPositionOffset: RawRenderPositionReader.DefaultWorldPositionOffset);
 Require(motion?.RawPositions is { Length: 2 } &&
     motion.RawPositions[1]?.WorldX == 30 &&
+    motion.RawPositionOffset == 312 &&
     motion.RawPositionsSeenUtc == motionSeen &&
     motion.ObservedLocalPositionComparison?.WorldXYDistance == 0 &&
     motion.VisiblePositionComparisons?[1]?.WorldXYDistance == 0,
     "A complete revalidated diagnostic position frame was not captured.");
 var mismatchedMotion = LocalSlotMotionSampler.Capture(two, local, paths, visiblePositions, Read,
-    _ => null, () => true, 11, 20, 5, motionSeen, ReadSyntheticPosition, state);
+    _ => null, () => true, 11, 20, 5, motionSeen, ReadSyntheticPosition, state,
+    verifiedPositionOffset: RawRenderPositionReader.DefaultWorldPositionOffset);
 Require(mismatchedMotion?.ObservedLocalPositionComparison?.WorldXYDistance == 1 &&
     FastOrderedCandidateFrame.TryEncodeExperimentalControl(
         101, 42, "TestArea", mismatchedMotion, motionSeen, motionSeen.Ticks) is null,
@@ -128,6 +131,7 @@ foreach (var invalid in new[]
     motion! with { RawPositions = [motion!.RawPositions![0],
         motion.RawPositions[1]! with { WorldX = float.NaN }] },
     motion! with { ObservedLocalPositionComparison = null },
+    motion! with { RawPositionOffset = null },
     motion! with { ObservedLocalPositionComparison =
         motion.ObservedLocalPositionComparison! with { WorldXYDistance = 1 } }
 })
@@ -249,7 +253,8 @@ Require(divergent.Status == "two_slot_candidate" && divergent.StatePointerAreaAd
     "A distinct state-derived area candidate was lost or mislabeled.");
 var divergentMotion = LocalSlotMotionSampler.Capture(divergent, local, paths,
     visiblePositions, Read, _ => null, () => true, 10, 20, 5,
-    motionSeen, ReadSyntheticPosition, state);
+    motionSeen, ReadSyntheticPosition, state,
+    verifiedPositionOffset: RawRenderPositionReader.DefaultWorldPositionOffset);
 Require(divergentMotion is not null &&
     FastOrderedCandidateFrame.TryEncodeExperimentalControl(101, 42, "TestArea",
         divergentMotion, motionSeen, motionSeen.Ticks) is not null,
@@ -406,6 +411,20 @@ void TestRawRenderPositionReader()
         comparison.WorldXYDistance > 200 &&
         RawRenderPositionReader.CompareLocal(position!, float.NaN, 20, 5) == null,
         "Independent local Render position was not compared in both candidate scales.");
+    Require(RawRenderPositionReader.SelectUniqueOffset(entity, ReadRaw,
+        108.69565f, 217.3913f, 5) == 312,
+        "The default Render position offset was not uniquely selected.");
+    raw[render + 184] = BitConverter.GetBytes(10f)
+        .Concat(BitConverter.GetBytes(20f)).Concat(BitConverter.GetBytes(5f)).ToArray();
+    Require(RawRenderPositionReader.SelectUniqueOffset(entity, ReadRaw, 10, 20, 5) == 184 &&
+        RawRenderPositionReader.Read(entity, ReadRaw, 184)?.WorldX == 10,
+        "The alternate static Render offset was not selected by the observed local player.");
+    raw[render + 312] = raw[render + 184];
+    Require(RawRenderPositionReader.SelectUniqueOffset(entity, ReadRaw, 10, 20, 5) == null,
+        "Two matching Render layouts were treated as a unique control source.");
+    raw[render + 312] = BitConverter.GetBytes(108.69565f)
+        .Concat(BitConverter.GetBytes(217.3913f))
+        .Concat(BitConverter.GetBytes(5f)).ToArray();
     raw[render + 8] = BitConverter.GetBytes(entity + 8);
     Require(RawRenderPositionReader.Read(entity, ReadRaw) == null,
         "Render component with a different owner was accepted.");

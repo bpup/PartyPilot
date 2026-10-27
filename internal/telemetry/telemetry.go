@@ -215,6 +215,7 @@ type LocalSlotCandidates struct {
 	VisiblePathEntries              int                   `json:"VisiblePathEntries,omitempty"`
 	ContainsObservedLocal           *bool                 `json:"ContainsObservedLocal,omitempty"`
 	RawPositions                    []*RawSlotPosition    `json:"RawPositions,omitempty"`
+	RawPositionOffset               *int                  `json:"RawPositionOffset,omitempty"`
 	RawPositionsSeenUTC             *time.Time            `json:"RawPositionsSeenUtc,omitempty"`
 	ObservedLocalPositionComparison *RawLocalComparison   `json:"ObservedLocalPositionComparison,omitempty"`
 	VisiblePositionComparisons      []*RawLocalComparison `json:"VisiblePositionComparisons,omitempty"`
@@ -634,6 +635,9 @@ func validLocalSlotCandidates(candidate *LocalSlotCandidates, scanStatus, observ
 		return false
 	}
 	if !validAddress(candidate.VectorHeaderAddress) || !validAddress(candidate.SelectedAreaAddress) ||
+		(candidate.RawPositionOffset != nil &&
+			(*candidate.RawPositionOffset != 312 && *candidate.RawPositionOffset != 184 ||
+				len(candidate.RawPositions) == 0)) ||
 		(want == 0 && candidate.SelectedAreaAddress != "") ||
 		(candidate.SelectedAreaAddress != "" && candidate.VectorHeaderAddress == "") ||
 		(want == 0 && (candidate.VectorHeaderAddress != "" || len(candidate.RawPositions) != 0 ||

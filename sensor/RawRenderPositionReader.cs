@@ -13,6 +13,25 @@ public static class RawRenderPositionReader
 
     private const long MaxPointer = 0x7FFF_FFFF_FFFF;
     private const float WorldToGridRatio = 10.869565f;
+    public const int DefaultWorldPositionOffset = 312;
+    public const int GameHelperWorldPositionOffset = 184;
+
+    // The supplied offset table names both layouts. Only a unique match to
+    // the independently observed local player may select a layout for P2.
+    public static int? SelectUniqueOffset(long localEntity,
+        Func<long, int, byte[]?> read, float observedX, float observedY, float observedZ)
+    {
+        var component = FindRenderComponent(localEntity, read);
+        if (component == 0) return null;
+        var normal = ReadPosition(component, read, DefaultWorldPositionOffset);
+        var helper = ReadPosition(component, read, GameHelperWorldPositionOffset);
+        var normalMatches = normal is not null &&
+            CompareLocal(normal, observedX, observedY, observedZ) is { WorldXYDistance: 0 };
+        var helperMatches = helper is not null &&
+            CompareLocal(helper, observedX, observedY, observedZ) is { WorldXYDistance: 0 };
+        if (normalMatches == helperMatches) return null;
+        return normalMatches ? DefaultWorldPositionOffset : GameHelperWorldPositionOffset;
+    }
 
     public static LocalComparison? CompareLocal(Position raw,
         float observedX, float observedY, float observedZ)
@@ -32,16 +51,27 @@ public static class RawRenderPositionReader
     }
 
     public static Position? Read(long entity, Func<long, int, byte[]?> read)
+        => Read(entity, read, DefaultWorldPositionOffset);
+
+    public static Position? Read(long entity, Func<long, int, byte[]?> read, int positionOffset)
+    {
+        if (positionOffset is not (DefaultWorldPositionOffset or GameHelperWorldPositionOffset))
+            return null;
+        var component = FindRenderComponent(entity, read);
+        return component == 0 ? null : ReadPosition(component, read, positionOffset);
+    }
+
+    private static long FindRenderComponent(long entity, Func<long, int, byte[]?> read)
     {
         if (!Plausible(entity) || !TryPointer(read, entity + 8, out var details) ||
             !TryPointer(read, details + 40, out var lookup) ||
-            !TryVector(read, lookup + 40, 16, out var namesStart, out var nameCount)) return null;
+            !TryVector(read, lookup + 40, 16, out var namesStart, out var nameCount)) return 0;
 
         var renderIndex = -1;
         for (var i = 0; i < nameCount; i++)
         {
             var entry = read(namesStart + i * 16L, 16);
-            if (entry is not { Length: 16 }) return null;
+            if (entry is not { Length: 16 }) return 0;
             var namePointer = BitConverter.ToInt64(entry, 0);
             var index = BitConverter.ToInt32(entry, 8);
             if (!Plausible(namePointer) || index is < 0 or >= 256) continue;
@@ -60,9 +90,14 @@ public static class RawRenderPositionReader
         if (renderIndex < 0 || !TryComponentList(read, entity + 16, out var componentsStart,
                 out var componentCount) || renderIndex >= componentCount ||
             !TryPointer(read, componentsStart + renderIndex * 8L, out var component) ||
-            !TryPointer(read, component + 8, out var owner) || owner != entity) return null;
+            !TryPointer(read, component + 8, out var owner) || owner != entity) return 0;
+        return component;
+    }
 
-        var position = read(component + 312, 12);
+    private static Position? ReadPosition(long component, Func<long, int, byte[]?> read,
+        int positionOffset)
+    {
+        var position = read(component + positionOffset, 12);
         if (position is not { Length: 12 }) return null;
         var x = BitConverter.ToSingle(position, 0);
         var y = BitConverter.ToSingle(position, 4);

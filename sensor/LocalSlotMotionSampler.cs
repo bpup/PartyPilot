@@ -14,13 +14,21 @@ public static class LocalSlotMotionSampler
         Func<bool> sameAreaAndPlayer,
         float observedX, float observedY, float observedZ, DateTime seenUtc,
         Func<long, Func<long, int, byte[]?>, RawRenderPositionReader.Position?>? readPosition = null,
-        long ingameStateAddress = 0)
+        long ingameStateAddress = 0, int? verifiedPositionOffset = null)
     {
         if (seenUtc == default || !sameAreaAndPlayer() ||
             !LocalSlotCandidateScanner.Revalidate(candidate,
                 observedLocalAddress, visiblePaths, read, readMissingPath,
                 ingameStateAddress)) return null;
-        readPosition ??= RawRenderPositionReader.Read;
+        var positionOffset = readPosition is null
+            ? RawRenderPositionReader.SelectUniqueOffset(observedLocalAddress, read,
+                observedX, observedY, observedZ)
+            : verifiedPositionOffset;
+        if (positionOffset is not null and not
+            (RawRenderPositionReader.DefaultWorldPositionOffset or
+                RawRenderPositionReader.GameHelperWorldPositionOffset)) return null;
+        readPosition ??= (entity, reader) => RawRenderPositionReader.Read(entity, reader,
+            positionOffset ?? RawRenderPositionReader.DefaultWorldPositionOffset);
         var positions = new RawRenderPositionReader.Position?[candidate.OrderedAddresses.Length];
         var comparisons = new RawRenderPositionReader.LocalComparison?[positions.Length];
         RawRenderPositionReader.LocalComparison? observedComparison = null;
@@ -46,6 +54,7 @@ public static class LocalSlotMotionSampler
         return candidate with
         {
             RawPositions = positions,
+            RawPositionOffset = positionOffset,
             RawPositionsSeenUtc = seenUtc,
             ObservedLocalPositionComparison = observedComparison,
             VisiblePositionComparisons = comparisons
