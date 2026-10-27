@@ -95,3 +95,71 @@ func TestTargetTrailCollisionRequiresOptInAndMatchingTerrain(t *testing.T) {
 		t.Fatal("disabled collision option altered sprint state")
 	}
 }
+
+func TestTargetTrailCollisionChecksRoutedWaypoint(t *testing.T) {
+	at := time.Unix(104, 0)
+	grid := &navigation.Grid{Area: "instance", CellSize: 1, Width: 60, Height: 40,
+		TargetNavigation: true}
+	for y := 10; y <= 20; y++ {
+		grid.Blocked = append(grid.Blocked, navigation.Cell{X: 16, Y: y})
+	}
+	leader := Position{X: 45.5, Y: 15.5, Area: "instance", Seen: at, Valid: true}
+	follower := Position{X: 5.5, Y: 15.5, Area: "instance", Seen: at, Valid: true}
+	engine, ok := New(Config{StopDistance: 2, ResumeDistance: 5, CatchUpDistance: 10,
+		MaxAge: time.Second, TargetTrail: true, ClassicCollisionDodge: true})
+	if !ok {
+		t.Fatal("invalid terrain follow config")
+	}
+	command := engine.StepWithTerrain(at, leader, follower, grid)
+	if command.State != CatchingUp || len(engine.route) == 0 ||
+		!grid.SprintCollisionImminent(follower.X, follower.Y, leader.X-2, leader.Y) ||
+		grid.SprintCollisionImminent(follower.X, follower.Y,
+			engine.route[0].X, engine.route[0].Y) {
+		t.Fatalf("safe routed waypoint was treated as the blocked direct target: %+v route=%v collision=%v",
+			command, engine.route, engine.sprint.collisionSince)
+	}
+	leader.Seen, follower.Seen = at.Add(100*time.Millisecond), at.Add(100*time.Millisecond)
+	command = engine.StepWithTerrain(leader.Seen, leader, follower, grid)
+	if command.State != CatchingUp || !engine.sprint.collisionSince.IsZero() {
+		t.Fatalf("routed movement started a false collision retry: %+v route=%v collision=%v",
+			command, engine.route, engine.sprint.collisionSince)
+	}
+}
+
+func TestAsyncTargetTrailCollisionChecksRoutedWaypoint(t *testing.T) {
+	at := time.Now()
+	grid := &navigation.Grid{Area: "instance", CellSize: 1, Width: 60, Height: 40,
+		TargetNavigation: true}
+	for y := 10; y <= 20; y++ {
+		grid.Blocked = append(grid.Blocked, navigation.Cell{X: 16, Y: y})
+	}
+	leader := Position{X: 45.5, Y: 15.5, Area: "instance", Seen: at, Valid: true}
+	follower := Position{X: 5.5, Y: 15.5, Area: "instance", Seen: at, Valid: true}
+	engine, ok := New(Config{StopDistance: 2, ResumeDistance: 5, CatchUpDistance: 10,
+		MaxAge: time.Second, TargetTrail: true, AsyncTargetPath: true,
+		ClassicCollisionDodge: true})
+	if !ok {
+		t.Fatal("invalid async terrain follow config")
+	}
+	defer engine.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		command := engine.StepWithTerrain(at, leader, follower, grid)
+		if command.Reason != "Planning route" {
+			if command.State != CatchingUp || len(engine.route) == 0 ||
+				grid.SprintCollisionImminent(follower.X, follower.Y,
+					engine.route[0].X, engine.route[0].Y) {
+				t.Fatalf("async route did not produce a clear waypoint: %+v route=%v", command, engine.route)
+			}
+			leader.Seen, follower.Seen = at.Add(100*time.Millisecond), at.Add(100*time.Millisecond)
+			command = engine.StepWithTerrain(leader.Seen, leader, follower, grid)
+			if command.State != CatchingUp || !engine.sprint.collisionSince.IsZero() {
+				t.Fatalf("async routed movement started a false collision retry: %+v route=%v",
+					command, engine.route)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("async terrain route never completed")
+}

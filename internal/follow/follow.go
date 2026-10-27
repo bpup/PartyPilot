@@ -268,6 +268,7 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 			targetX, targetY = leader.X, leader.Y
 		}
 	}
+	collisionTargetX, collisionTargetY := targetX, targetY
 	if terrain != nil {
 		var ok bool
 		if e.config.TargetTrail && terrain.TargetNavigation {
@@ -289,8 +290,11 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 				dx, dy = recoveryX-follower.X, recoveryY-follower.Y
 				if length := math.Hypot(dx, dy); length > 0 {
 					dx, dy, ok = dx/length, dy/length, true
+					collisionTargetX, collisionTargetY = recoveryX, recoveryY
 					reason = "Obstacle recovery"
 				}
+			} else if len(e.route) > 0 {
+				collisionTargetX, collisionTargetY = e.route[0].X, e.route[0].Y
 			}
 		} else {
 			dx, dy, ok = terrain.NextDirection(follower.X, follower.Y, targetX, targetY)
@@ -329,7 +333,8 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 		}
 		if observedAt.After(e.lastSprintObservation) {
 			collisionImminent := e.config.ClassicCollisionDodge && terrain != nil &&
-				terrain.SprintCollisionImminent(follower.X, follower.Y, targetX, targetY)
+				terrain.SprintCollisionImminent(follower.X, follower.Y,
+					collisionTargetX, collisionTargetY)
 			e.sprintDown = e.sprint.Update(e.catchingUp,
 				distance >= e.config.StopDistance+5, collisionImminent,
 				point{follower.X, follower.Y}, observedAt)
