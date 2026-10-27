@@ -15,5 +15,6 @@
     <Compile Include="../common/FollowerMirrorConfig.cs" Link="FollowerMirrorConfig.cs" />
     <Compile Include="../sensor/GeneratedRoomClassifier.cs" Link="GeneratedRoomClassifier.cs" />
     <Compile Include="../sensor/TerrainPlacementClassifier.cs" Link="TerrainPlacementClassifier.cs" />
+    <Compile Include="../sensor/QuestTileRules.cs" Link="QuestTileRules.cs" />
   </ItemGroup>
 </Project>

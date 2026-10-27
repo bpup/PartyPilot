@@ -14,13 +14,15 @@ internal static class PackedTerrainCapture
 
     internal static string UpdateAnchors(string dataFile, int processId, string areaHash,
         string areaAddress, string anchor, GeneratedRoomProbe.Result? generatedRooms,
-        TerrainPlacementProbe.Result? terrainPlacements, Func<bool> areaStillCurrent)
+        TerrainPlacementProbe.Result? terrainPlacements, QuestTileProbe.Result? questTiles,
+        Func<bool> areaStillCurrent)
     {
         var roomsReady = generatedRooms is { Status: "candidate_rooms_observed",
             AnchorsTruncated: false };
         var placementsReady = terrainPlacements is { Status: "candidate_placements_observed",
             Truncated: false };
-        if (!roomsReady && !placementsReady) return "already_captured";
+        var tilesReady = questTiles is { Status: "candidate_tiles_observed", Truncated: false };
+        if (!roomsReady && !placementsReady && !tilesReady) return "already_captured";
         if (!areaStillCurrent()) return "area_changed_before_update";
         string? temporary = null;
         try
@@ -53,6 +55,15 @@ internal static class PackedTerrainCapture
                 root["TerrainPlacements"] = JsonSerializer.SerializeToNode(terrainPlacements.Anchors);
                 changed = true;
             }
+            if (tilesReady && root["QuestTiles"] is null)
+            {
+                root["QuestTileStatus"] = questTiles!.Status;
+                root["QuestTileAreaId"] = questTiles.AreaId;
+                root["QuestTileAreaAddress"] = areaAddress;
+                root["QuestTileAnchor"] = anchor;
+                root["QuestTiles"] = JsonSerializer.SerializeToNode(questTiles.Anchors);
+                changed = true;
+            }
             if (!changed) return "already_captured";
             temporary = metadataFile + ".tmp-" + Guid.NewGuid().ToString("N");
             File.WriteAllText(temporary, root.ToJsonString());
@@ -79,7 +90,8 @@ internal static class PackedTerrainCapture
         string directory, int processId,
         string areaHash, string areaAddress, string anchor, DateTime seenUtc,
         GeneratedRoomProbe.Result? generatedRooms = null,
-        TerrainPlacementProbe.Result? terrainPlacements = null)
+        TerrainPlacementProbe.Result? terrainPlacements = null,
+        QuestTileProbe.Result? questTiles = null)
     {
         var length = (long)source.BytesPerRow * source.Rows;
         if (source.Start < 0x10000 || source.BytesPerRow <= 0 || source.Rows <= 0 ||
@@ -169,7 +181,13 @@ internal static class PackedTerrainCapture
                 TerrainPlacementAreaAddress = terrainPlacements is null ? null : areaAddress,
                 TerrainPlacementAnchor = terrainPlacements is null ? null : anchor,
                 TerrainPlacements = terrainPlacements is { Status: "candidate_placements_observed", Truncated: false }
-                    ? terrainPlacements.Anchors : null
+                    ? terrainPlacements.Anchors : null,
+                QuestTileStatus = questTiles?.Status,
+                QuestTileAreaId = questTiles?.AreaId,
+                QuestTileAreaAddress = questTiles is null ? null : areaAddress,
+                QuestTileAnchor = questTiles is null ? null : anchor,
+                QuestTiles = questTiles is { Status: "candidate_tiles_observed", Truncated: false }
+                    ? questTiles.Anchors : null
             }));
             if (!areaStillCurrent())
             {

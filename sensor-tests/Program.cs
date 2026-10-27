@@ -221,6 +221,7 @@ TestTerrainDiagnostic();
 TestPackedTerrainProbe();
 TestGeneratedRoomProbe();
 TestTerrainPlacementProbe();
+TestQuestTileProbe();
 TestSkillBindTable();
 SkillBindSourceScannerTests.Run();
 Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
@@ -416,10 +417,15 @@ void TestPackedTerrainProbe()
             16, 1, 1, 1, false,
             [new TerrainPlacementProbe.Anchor("Metadata/MiscellaneousObjects/Checkpoint",
                 "checkpoint", "Checkpoint", 11.5, 11.5, 0, 0)]);
+        var questTiles = new QuestTileProbe.Result("candidate_tiles_observed", "G1_8",
+            16, 1, 1, false,
+            [new QuestTileProbe.Anchor(
+                "Metadata/Terrain/Woods/GraveyardDungeons/Feature/MausoleumBoss_ArenaFloor.tdt",
+                "boss", "Campaign boss arena", 11.5, 11.5, 0, 0)]);
         var capture = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate!,
             capturePosition, 108.69565f, 217.3913f, Read, () => true, captureDirectory,
             123, "test-area", anchored.Candidate!.AreaAddress, anchored.Candidate.Anchor,
-            DateTime.UtcNow, generatedRooms, terrainPlacements);
+            DateTime.UtcNow, generatedRooms, terrainPlacements, questTiles);
         Require(capture.Status == "captured_local" && capture.DataFile != null &&
             File.ReadAllBytes(capture.DataFile).SequenceEqual(packed) &&
             File.Exists(Path.ChangeExtension(capture.DataFile, ".json")),
@@ -430,6 +436,7 @@ void TestPackedTerrainProbe()
             metadata.RootElement.GetProperty("PatchRows").GetArrayLength() == 9 &&
             metadata.RootElement.GetProperty("GeneratedRooms").GetArrayLength() == 1 &&
             metadata.RootElement.GetProperty("TerrainPlacements").GetArrayLength() == 1 &&
+            metadata.RootElement.GetProperty("QuestTiles").GetArrayLength() == 1 &&
             metadata.RootElement.GetProperty("GeneratedRoomAreaAddress").GetString() ==
                 anchored.Candidate.AreaAddress &&
             metadata.RootElement.GetProperty("Sha256").GetString() ==
@@ -440,18 +447,21 @@ void TestPackedTerrainProbe()
             File.ReadAllText(metadataFile))!.AsObject();
         withoutMarkers["GeneratedRooms"] = null;
         withoutMarkers["TerrainPlacements"] = null;
+        withoutMarkers["QuestTiles"] = null;
         File.WriteAllText(metadataFile, withoutMarkers.ToJsonString());
         Require(PackedTerrainCapture.UpdateAnchors(capture.DataFile!, 123, "test-area",
             anchored.Candidate.AreaAddress, anchored.Candidate.Anchor,
-            generatedRooms, terrainPlacements, () => true) == "markers_updated" &&
+            generatedRooms, terrainPlacements, questTiles, () => true) == "markers_updated" &&
             System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(metadataFile))!
                 ["TerrainPlacements"]!.AsArray().Count == 1 &&
+            System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(metadataFile))!
+                ["QuestTiles"]!.AsArray().Count == 1 &&
             PackedTerrainCapture.UpdateAnchors(capture.DataFile!, 123, "test-area",
                 anchored.Candidate.AreaAddress, anchored.Candidate.Anchor,
-                generatedRooms, terrainPlacements, () => true) == "already_captured" &&
+                generatedRooms, terrainPlacements, questTiles, () => true) == "already_captured" &&
             PackedTerrainCapture.UpdateAnchors(capture.DataFile!, 123, "test-area",
                 anchored.Candidate.AreaAddress, anchored.Candidate.Anchor,
-                generatedRooms, terrainPlacements, () => false) == "area_changed_before_update",
+                generatedRooms, terrainPlacements, questTiles, () => false) == "area_changed_before_update",
             "Later-ready room or placement markers did not update the same capture safely.");
         byte[]? ShortRead(long address, int size) =>
             address == packedStart ? new byte[size - 1] : Read(address, size);
@@ -667,6 +677,61 @@ void TestTerrainPlacementProbe()
             new GeneratedRoomClassifier.Marker("league", "Essence") &&
         TerrainPlacementClassifier.Classify("Metadata/MiscellaneousObjects/MiniMonolith") == null,
         "Dormant placement marker rules lost explicit paths or admitted a decorative object.");
+}
+void TestQuestTileProbe()
+{
+    const long state = 0x100000;
+    const long area = 0x200000;
+    const long row = 0x300000;
+    const long areaText = 0x400000;
+    const long tiles = 0x500000;
+    const long asset = 0x600000;
+    const long tileText = 0x700000;
+    const string tilePath = "Metadata/Terrain/Woods/GraveyardDungeons/Feature/MausoleumBoss_ArenaFloor.tdt";
+    var idBytes = new byte[200];
+    System.Text.Encoding.Unicode.GetBytes("G1_8").CopyTo(idBytes, 0);
+    var pathBytes = new byte[512];
+    System.Text.Encoding.Unicode.GetBytes(tilePath).CopyTo(pathBytes, 0);
+    var header = new byte[72];
+    BitConverter.GetBytes(tiles).CopyTo(header, 40);
+    BitConverter.GetBytes(tiles + 16 * 56).CopyTo(header, 48);
+    var records = new byte[16 * 56];
+    BitConverter.GetBytes(asset).CopyTo(records, 8);
+    BitConverter.GetBytes(asset).CopyTo(records, 56 + 8);
+    var assetHeader = new byte[16];
+    BitConverter.GetBytes(tileText).CopyTo(assetHeader, 8);
+    var memory = new Dictionary<long, byte[]>
+    {
+        [state + 656] = BitConverter.GetBytes(area),
+        [area + 152] = BitConverter.GetBytes(row),
+        [row] = BitConverter.GetBytes(areaText),
+        [areaText] = idBytes,
+        [area + 232] = header,
+        [tiles] = records,
+        [asset] = assetHeader,
+        [tileText] = pathBytes
+    };
+    byte[]? Read(long address, int length) =>
+        memory.TryGetValue(address, out var bytes) && bytes.Length == length ? bytes : null;
+    var id = RawAreaIdReader.Read(state, Read);
+    var result = QuestTileProbe.Scan(new PackedTerrainProbe.AreaLayout(area, 232, 4, 4),
+        92, 92, id, Read);
+    Require(id == "G1_8" && result is
+        { Status: "candidate_tiles_observed", TilesChecked: 16, NamedTiles: 2,
+            MatchedTiles: 2, Truncated: false,
+            Anchors: [{ Path: tilePath, Category: "boss", Label: "Campaign boss arena",
+                TileX: 0, TileY: 0, GridX: 11.5, GridY: 11.5 }] },
+        "The area-bound tile name or representative tile position changed.");
+    Require(QuestTileProbe.Scan(new(area, 232, 4, 4), 92, 92, "G1_9", Read).Status ==
+            "no_matches" &&
+        QuestTileProbe.Scan(new(area, 232, 4, 4), 92, 92, null, Read).Status ==
+            "area_id_unknown" &&
+        QuestTileProbe.Scan(new(area, 232, 4, 4), 92, 92, "G1_8",
+            (address, length) => address == tileText ? null : Read(address, length)).Status ==
+            "tile_paths_incomplete" &&
+        RawAreaIdReader.Read(state, (address, length) =>
+            address == areaText ? new byte[length] : Read(address, length)) == null,
+        "Unknown IDs, wrong areas or incomplete tile paths were accepted.");
 }
 var largeLoot = Enumerable.Range(1, 96).Select(index => (object)new
 {

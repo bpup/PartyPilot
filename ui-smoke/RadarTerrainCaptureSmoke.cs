@@ -55,15 +55,26 @@ internal static class RadarTerrainCaptureSmoke
                     new { Path = "Metadata/Terrain/Gallows/Act3/Objects/MachinariumGeneratorButton",
                         Category = "quest", Label = "Soul Core Generator",
                         GridX = 11.5, GridY = 11.5, TileX = 0, TileY = 0 }
+                },
+                QuestTileStatus = "candidate_tiles_observed",
+                QuestTileAreaId = "G1_8",
+                QuestTileAreaAddress = "0xABCDEF",
+                QuestTileAnchor = "ingame_data_address",
+                QuestTiles = new[]
+                {
+                    new { Path = "Metadata/Terrain/Woods/GraveyardDungeons/Feature/MausoleumBoss_ArenaFloor.tdt",
+                        Category = "boss", Label = "Campaign boss arena",
+                        GridX = 11.5, GridY = 11.5, TileX = 0, TileY = 0 }
                 }
             });
             File.WriteAllText(metadataPath, Metadata("01"));
             if (!RadarTerrainCapture.TryLoad(metadataPath, out var capture) || capture is null ||
                 capture.ProcessId != 123 || capture.AreaHash != 42 ||
                 capture.Width != 128 || capture.Height != 64 ||
-                capture.Rooms.Count != 2 ||
+                capture.Rooms.Count != 3 ||
                 capture.Rooms[0] is not { Category: "boss", Label: "Boss arena" } ||
                 capture.Rooms[1] is not { Category: "quest", Label: "Soul Core Generator" } ||
+                capture.Rooms[2] is not { Category: "boss", Label: "Campaign boss arena" } ||
                 capture.Walkable(0, 0) || !capture.Walkable(1, 0))
                 throw new Exception("Radar rejected a valid bounded terrain capture or decoded nibble order incorrectly.");
             var matching = new RadarFrame(123, DateTime.UtcNow, 42, "0xABCDEF", 30, 30, [])
@@ -103,6 +114,8 @@ internal static class RadarTerrainCaptureSmoke
                     .Any(label => label.Text == "Boss arena") ||
                 !terrainWindow.GetLogicalDescendants().OfType<TextBlock>()
                     .Any(label => label.Text == "Soul Core Generator") ||
+                !terrainWindow.GetLogicalDescendants().OfType<TextBlock>()
+                    .Any(label => label.Text == "Campaign boss arena") ||
                 terrainWindow.CaptureRenderedFrame() is null)
                 throw new Exception("Matching terrain was not drawn behind radar markers.");
             terrainWindow.Apply(matching with { AreaHash = 43 }, null);
@@ -128,6 +141,10 @@ internal static class RadarTerrainCaptureSmoke
                 "\"Label\":\"Unknown\""));
             if (RadarTerrainCapture.TryLoad(metadataPath, out _))
                 throw new Exception("Radar accepted a terrain placement label that disagrees with its path.");
+            File.WriteAllText(metadataPath, Metadata("01").Replace("\"QuestTileAreaId\":\"G1_8\"",
+                "\"QuestTileAreaId\":\"G1_9\""));
+            if (RadarTerrainCapture.TryLoad(metadataPath, out _))
+                throw new Exception("Radar accepted a tile landmark from another area.");
             File.WriteAllText(metadataPath, Metadata("10"));
             if (RadarTerrainCapture.TryLoad(metadataPath, out _))
                 throw new Exception("Radar accepted terrain whose observed patch disagrees with packed cells.");

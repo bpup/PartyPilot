@@ -146,9 +146,11 @@ public sealed class RadarTerrainCapture
             if (!TryRooms(root, areaAddress, anchor, width, height, out var rooms)) return false;
             if (!TryPlacements(root, areaAddress, anchor, width, height,
                     out var placements)) return false;
+            if (!TryQuestTiles(root, areaAddress, anchor, width, height,
+                    out var questTiles)) return false;
             capture = new RadarTerrainCapture(data, pid, areaHash, areaAddress, anchor,
                 seenUtc, width, height, bytesPerRow, rawGridX, rawGridY,
-                rooms.Concat(placements).ToArray())
+                rooms.Concat(placements).Concat(questTiles).ToArray())
             {
                 MetadataPath = metadataPath,
                 MetadataWriteUtc = metadataInfo.LastWriteTimeUtc,
@@ -241,6 +243,41 @@ public sealed class RadarTerrainCapture
             parsed.Add(new RadarTerrainRoom(path, category, label, x, y));
         }
         placements = parsed;
+        return true;
+    }
+
+    private static bool TryQuestTiles(JsonElement root, string areaAddress, string anchor,
+        int width, int height, out IReadOnlyList<RadarTerrainRoom> tiles)
+    {
+        tiles = [];
+        if (!root.TryGetProperty("QuestTiles", out var values) ||
+            values.ValueKind == JsonValueKind.Null) return true;
+        if (values.ValueKind != JsonValueKind.Array || values.GetArrayLength() > 64 ||
+            !Text(root, "QuestTileStatus", out var status) || status != "candidate_tiles_observed" ||
+            !Text(root, "QuestTileAreaId", out var areaId) || !QuestTileRules.Supports(areaId) ||
+            !Text(root, "QuestTileAreaAddress", out var sourceAddress) ||
+            !string.Equals(sourceAddress, areaAddress, StringComparison.OrdinalIgnoreCase) ||
+            !Text(root, "QuestTileAnchor", out var sourceAnchor) || sourceAnchor != anchor)
+            return false;
+        var parsed = new List<RadarTerrainRoom>(values.GetArrayLength());
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var value in values.EnumerateArray())
+        {
+            if (value.ValueKind != JsonValueKind.Object ||
+                !Text(value, "Path", out var path) || path.Length > 255 ||
+                !Text(value, "Category", out var category) ||
+                !Text(value, "Label", out var label) ||
+                !Number(value, "TileX", out var tileX) ||
+                !Number(value, "TileY", out var tileY) ||
+                !Finite(value, "GridX", out var x) || !Finite(value, "GridY", out var y) ||
+                tileX < 0 || tileY < 0 || x != tileX * 23d + 11.5 ||
+                y != tileY * 23d + 11.5 || x >= width || y >= height ||
+                QuestTileRules.Classify(areaId, path) is not { } expected ||
+                category != expected.Category || label != expected.Label ||
+                !seen.Add(path)) return false;
+            parsed.Add(new RadarTerrainRoom(path, category, label, x, y));
+        }
+        tiles = parsed;
         return true;
     }
 

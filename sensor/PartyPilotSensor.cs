@@ -42,6 +42,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     private GeneratedRoomProbe.Result? _generatedRoomProbeCached;
     private string? _placementProbeKey;
     private TerrainPlacementProbe.Result? _placementProbeCached;
+    private string? _questTileProbeKey;
+    private QuestTileProbe.Result? _questTileProbeCached;
     private string? _cardModulePath;
     private Task<long>? _cardVtableTask;
 
@@ -442,6 +444,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         string? packedTerrainCaptureStatus = null;
         GeneratedRoomProbe.Result? generatedRoomProbe = null;
         TerrainPlacementProbe.Result? placementProbe = null;
+        QuestTileProbe.Result? questTileProbe = null;
         if (Settings.DiagnoseTerrain.Value)
         {
             try
@@ -456,6 +459,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                     _generatedRoomProbeCached = null;
                     _placementProbeKey = null;
                     _placementProbeCached = null;
+                    _questTileProbeKey = null;
+                    _questTileProbeCached = null;
                     _terrainCaptureEpoch = epoch;
                 }
             }
@@ -467,6 +472,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 _generatedRoomProbeCached = null;
                 _placementProbeKey = null;
                 _placementProbeCached = null;
+                _questTileProbeKey = null;
+                _questTileProbeCached = null;
                 _terrainCaptureEpoch = null;
             }
         }
@@ -558,6 +565,22 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                                 _placementProbeCached = placementResult;
                             }
                         }
+                        var areaId = RawAreaIdReader.Read(stateAddress, ReadTerrain);
+                        var tileKey = $"{captureKey}:{areaId}";
+                        var tileResult = _questTileProbeKey == tileKey &&
+                            _questTileProbeCached is { } cachedTiles
+                            ? cachedTiles : QuestTileProbe.Scan(layout,
+                                observation.Width, observation.Height, areaId, ReadTerrain);
+                        if (AreaStillCurrent())
+                        {
+                            questTileProbe = tileResult;
+                            if (tileResult is { Status: "candidate_tiles_observed" or "no_matches",
+                                    Truncated: false })
+                            {
+                                _questTileProbeKey = tileKey;
+                                _questTileProbeCached = tileResult;
+                            }
+                        }
                     }
                     if (_capturedTerrainKeys.Contains(captureKey))
                     {
@@ -565,7 +588,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                             captureKey, out var existingFile)
                             ? PackedTerrainCapture.UpdateAnchors(existingFile, processId,
                                 areaHash, observation.AreaAddress, observation.Anchor,
-                                generatedRoomProbe, placementProbe, AreaStillCurrent)
+                                generatedRoomProbe, placementProbe, questTileProbe, AreaStillCurrent)
                             : "already_captured";
                     }
                     else
@@ -576,7 +599,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                             positionCandidate!, render.Pos.X, render.Pos.Y, ReadTerrain,
                             AreaStillCurrent, directory,
                             processId, areaHash, observation.AreaAddress, observation.Anchor, now,
-                            generatedRoomProbe, placementProbe);
+                            generatedRoomProbe, placementProbe, questTileProbe);
                         packedTerrainCaptureStatus = capture.Status;
                         if (capture.Status == "captured_local" && capture.DataFile != null)
                         {
@@ -701,6 +724,15 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 placementProbe.ValidPaths,
                 placementProbe.MatchedAnchors,
                 placementProbe.Truncated
+            },
+            QuestTileProbe = questTileProbe is null ? null : new
+            {
+                questTileProbe.Status,
+                questTileProbe.AreaId,
+                questTileProbe.TilesChecked,
+                questTileProbe.NamedTiles,
+                questTileProbe.MatchedTiles,
+                questTileProbe.Truncated
             },
             VisiblePlayers = visiblePlayers,
             VisiblePlayersStatus = visiblePlayersStatus
