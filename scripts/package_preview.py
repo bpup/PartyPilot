@@ -49,6 +49,10 @@ def refresh_binaries() -> None:
          "-r", "win-x64", "--self-contained", "true",
          "-p:PublishSingleFile=true", "-p:IncludeNativeLibrariesForSelfExtract=true",
          "-o", "release/desktop"], cwd=ROOT, check=True)
+    run(["dotnet", "publish", "bridge/PartyPilot.Bridge.csproj", "-c", "Release",
+         "-r", "win-x64", "--self-contained", "true",
+         "-p:PublishSingleFile=true", "-p:IncludeNativeLibrariesForSelfExtract=true",
+         "-o", "release/bridge"], cwd=ROOT, check=True)
     run(["dotnet", "build", "sensor/PartyPilot.Sensor.csproj", "-c", "Release"],
         cwd=ROOT, env={**os.environ, "EXILECORE2_DIR": exilecore}, check=True)
     built = ROOT / "sensor/bin/Release/net8.0-windows"
@@ -70,6 +74,9 @@ def check_binaries_current() -> None:
         ROOT / "release/desktop/PartyPilot.Desktop.exe":
             [*source_files("ui"), *ROOT.glob("common/*.cs"), *shared,
              ROOT / "ui/PartyPilot.Desktop.csproj"],
+        ROOT / "release/bridge/PartyPilot.Bridge.exe":
+            [*source_files("bridge"), *ROOT.glob("common/*.cs"),
+             ROOT / "bridge/PartyPilot.Bridge.csproj"],
         ROOT / "release/PartyPilot.Sensor.dll":
             [*source_files("sensor"), *shared,
              ROOT / "sensor/PartyPilot.Sensor.csproj"]
