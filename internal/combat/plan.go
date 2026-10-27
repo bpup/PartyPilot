@@ -190,7 +190,8 @@ func EvaluateEncounter(profile Profile, world World, encounter *Encounter) ([]Pl
 			} else if encounter.hasTag("rare-present") || encounter.hasTag("dangerous") {
 				behavior = "rare"
 			}
-			plan.Behavior, plan.ComboID = chooseBehavior(role, behavior, world.Monsters, *player.ActiveCombo)
+			plan.Behavior, plan.ComboID, plan.Reason = chooseBehavior(role, behavior,
+				world.Monsters, *player.ActiveCombo, *player.DistanceFromMainM)
 			if plan.ComboID == "" {
 				plan.Status = "waiting_no_eligible_encounter"
 			} else {
@@ -224,7 +225,12 @@ func globalBlock(profile Profile, world World) string {
 	return ""
 }
 
-func chooseBehavior(role Role, preferred string, monsters []Monster, activeCombo bool) (string, string) {
+func chooseBehavior(role Role, preferred string, monsters []Monster, activeCombo bool,
+	distanceFromMain float64) (string, string, string) {
+	if role.Logic.MaximumLeashM > 0 && distanceFromMain > role.Logic.MaximumLeashM {
+		return "", "", fmt.Sprintf("Waiting: too far from MAIN (%.0f of %.0f)",
+			distanceFromMain, role.Logic.MaximumLeashM)
+	}
 	chain := []string{preferred}
 	radius := 60.0
 	minimumPack := 3
@@ -238,18 +244,25 @@ func chooseBehavior(role Role, preferred string, monsters []Monster, activeCombo
 	if preferred == "rare" {
 		chain = []string{"rare", "pack"}
 	}
+	firstReason := ""
 	for _, behavior := range chain {
 		if behavior == "emergency" {
 			// The supplied resolver bypasses enemy eligibility for an enabled
 			// emergency behaviour once an encounter exists.
-			return behavior, role.Behaviors[behavior]
+			return behavior, role.Behaviors[behavior], ""
 		}
 		pack, rare, unique := 0, 0, 0
+		inRange, healthEligible := 0, 0
 		for _, monster := range monsters {
 			distance, ok := monster.DistanceByPlayer[role.Player]
-			if !*monster.Alive || !ok || distance > radius {
+			if !*monster.Alive || !ok || distance > radius || !role.Logic.Allows(monster.Rarity) {
 				continue
 			}
+			inRange++
+			if *monster.HealthPercent > float64(role.Logic.StartHelpingAtHealthPercent) {
+				continue
+			}
+			healthEligible++
 			switch monster.Rarity {
 			case "normal", "magic":
 				pack++
@@ -261,19 +274,56 @@ func chooseBehavior(role Role, preferred string, monsters []Monster, activeCombo
 		}
 		if behavior == "boss" && unique > 0 || behavior == "rare" && rare > 0 ||
 			behavior == "pack" && pack >= minimumPack {
-			return behavior, role.Behaviors[behavior]
+			return behavior, role.Behaviors[behavior], ""
+		}
+		reason := ""
+		if inRange == 0 {
+			reason = "Waiting: no enemies in range"
+		} else if healthEligible == 0 {
+			reason = fmt.Sprintf("Waiting: enemy above %d%%",
+				role.Logic.StartHelpingAtHealthPercent)
+		} else if behavior == "pack" {
+			reason = fmt.Sprintf("Waiting: pack too small (%d of %d)", pack, minimumPack)
+		} else if behavior == "rare" {
+			reason = "Waiting: no Rare in range"
+		} else if behavior == "boss" {
+			reason = "Waiting: no Unique in range"
+		}
+		if firstReason == "" {
+			firstReason = reason
 		}
 	}
-	return "", ""
+	if firstReason == "" {
+		firstReason = "Waiting: no enemies in range"
+	}
+	return "", "", firstReason
 }
 
 func validateProfile(profile Profile) error {
 	expected := DefaultProfile()
 	expected.Enabled = profile.Enabled
+	if len(profile.Roles) != len(expected.Roles) {
+		return errors.New("unsupported combat role count")
+	}
+	for index, role := range profile.Roles {
+		if role.Logic.StartHelpingAtHealthPercent < 1 ||
+			role.Logic.StartHelpingAtHealthPercent > 100 ||
+			role.Logic.FullAggressionAtHealthPercent != 10 ||
+			role.Logic.FullAggressionAtHealthPercent > role.Logic.StartHelpingAtHealthPercent ||
+			!finite(role.Logic.MaximumLeashM) || role.Logic.MaximumLeashM < 0 ||
+			role.Logic.MaximumLeashM > 400 {
+			return fmt.Errorf("invalid role logic for P%d", role.Player)
+		}
+		expected.Roles[index].Logic = role.Logic
+	}
 	if !reflect.DeepEqual(profile, expected) {
-		return errors.New("unsupported combat profile; only supplied 0.6.17 default is implemented")
+		return errors.New("unsupported combat profile; only supplied 0.6.17 defaults and role eligibility are implemented")
 	}
 	return nil
 }
+
+// ValidateProfile accepts only the supplied default profile plus the role
+// eligibility fields implemented by this read-only planner.
+func ValidateProfile(profile Profile) error { return validateProfile(profile) }
 
 func finite(value float64) bool { return !math.IsNaN(value) && !math.IsInf(value, 0) }

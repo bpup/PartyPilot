@@ -16,10 +16,11 @@ import (
 func main() {
 	path := flag.String("replay", "", "JSONL file of explicit synthetic combat worlds")
 	feedPath := flag.String("feed-replay", "", "JSONL file of verified ordered combat feed frames")
+	profilePath := flag.String("profile", "", "JSON file with supported combat role eligibility settings")
 	enabled := flag.Bool("enable-planning", false, "enable read-only default-profile plans")
 	flag.Parse()
 	if (*path == "") == (*feedPath == "") {
-		fmt.Fprintln(os.Stderr, "usage: PartyPilot-CombatReplay (-replay worlds.jsonl | -feed-replay frames.jsonl) [-enable-planning]")
+		fmt.Fprintln(os.Stderr, "usage: PartyPilot-CombatReplay (-replay worlds.jsonl | -feed-replay frames.jsonl) [-profile profile.json] [-enable-planning]")
 		os.Exit(2)
 	}
 	selectedPath := *path
@@ -31,7 +32,10 @@ func main() {
 		fail(err)
 	}
 	defer file.Close()
-	profile := combat.DefaultProfile()
+	profile, err := loadProfile(*profilePath)
+	if err != nil {
+		fail(err)
+	}
 	profile.Enabled = *enabled
 	var encounters combat.EncounterTracker
 	var targets combat.TargetCoordinator
@@ -90,6 +94,30 @@ func main() {
 	if err := scanner.Err(); err != nil {
 		fail(err)
 	}
+}
+
+func loadProfile(path string) (combat.Profile, error) {
+	if path == "" {
+		return combat.DefaultProfile(), nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return combat.Profile{}, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var profile combat.Profile
+	if err := decoder.Decode(&profile); err != nil {
+		return combat.Profile{}, err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return combat.Profile{}, fmt.Errorf("profile has an extra JSON value or invalid trailing data")
+	}
+	if err := combat.ValidateProfile(profile); err != nil {
+		return combat.Profile{}, err
+	}
+	return profile, nil
 }
 
 func fail(err error) {
