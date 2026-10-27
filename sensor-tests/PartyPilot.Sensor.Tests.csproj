@@ -25,6 +25,9 @@
     <Compile Include="../sensor/PackedTerrainProbe.cs" Link="PackedTerrainProbe.cs" />
     <Compile Include="../sensor/GeneratedRoomProbe.cs" Link="GeneratedRoomProbe.cs" />
     <Compile Include="../sensor/GeneratedRoomClassifier.cs" Link="GeneratedRoomClassifier.cs" />
+    <Compile Include="../sensor/RawMetadataPathReader.cs" Link="RawMetadataPathReader.cs" />
+    <Compile Include="../sensor/TerrainPlacementClassifier.cs" Link="TerrainPlacementClassifier.cs" />
+    <Compile Include="../sensor/TerrainPlacementProbe.cs" Link="TerrainPlacementProbe.cs" />
     <Compile Include="../sensor/PackedTerrainCapture.cs" Link="PackedTerrainCapture.cs" />
     <Compile Include="../sensor/SkillBindTable.cs" Link="SkillBindTable.cs" />
     <Compile Include="../sensor/SkillBindSourceScanner.cs" Link="SkillBindSourceScanner.cs" />

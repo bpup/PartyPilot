@@ -23,7 +23,8 @@ public sealed class RadarTerrainCatalog
 
     public RadarTerrainCapture? FindMatching(RadarFrame frame, DateTime nowUtc)
     {
-        if (_current.TryGetValue(frame.ProcessId, out var current) && current.Matches(frame))
+        if (_current.TryGetValue(frame.ProcessId, out var current) &&
+            current.Matches(frame) && current.MetadataUnchanged())
             return current;
         _current.Remove(frame.ProcessId);
         if (_nextScanUtc.TryGetValue(frame.ProcessId, out var next) && nowUtc < next)

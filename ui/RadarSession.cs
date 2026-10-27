@@ -13,7 +13,7 @@ internal sealed class RadarSession : IAsyncDisposable
     private readonly Dictionary<int, RadarLandmarkCache> _landmarks = new();
     private readonly Dictionary<int, nint> _gameHandles;
     private readonly RadarVisibility _visibility;
-    private readonly IReadOnlyDictionary<int, RadarTerrainCapture>? _manualTerrains;
+    private readonly Dictionary<int, RadarTerrainCapture>? _manualTerrains;
     private readonly RadarTerrainCatalog? _terrainCatalog;
     private readonly DispatcherTimer _hotkeyTimer = new() { Interval = TimeSpan.FromMilliseconds(25) };
     private RadarHotkeyBinding _hotkey;
@@ -34,7 +34,7 @@ internal sealed class RadarSession : IAsyncDisposable
         _gameHandles = gameHandles;
         _hotkey = hotkey;
         _visibility = visibility;
-        _manualTerrains = manualTerrains;
+        _manualTerrains = manualTerrains is null ? null : new(manualTerrains);
         _terrainCatalog = terrainCatalog;
         foreach (var window in windows.Values) window.TargetLost += OnTargetLost;
         _hotkeyTimer.Tick += OnHotkeyTimer;
@@ -116,7 +116,16 @@ internal sealed class RadarSession : IAsyncDisposable
                         continue;
                     RadarTerrainCapture? terrain = null;
                     if (_manualTerrains is not null && _manualTerrains.TryGetValue(pid, out var manual) &&
-                        manual.Matches(frame)) terrain = manual;
+                        manual.Matches(frame))
+                    {
+                        if (manual.MetadataUnchanged()) terrain = manual;
+                        else if (RadarTerrainCapture.TryLoad(manual.MetadataPath, out var refreshed) &&
+                                 refreshed?.Matches(frame) == true)
+                        {
+                            _manualTerrains[pid] = refreshed;
+                            terrain = refreshed;
+                        }
+                    }
                     terrain ??= _terrainCatalog?.FindMatching(frame, DateTime.UtcNow);
                     Dispatcher.UIThread.Post(() =>
                     {

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace PartyPilot.Sensor;
 
@@ -11,13 +12,74 @@ internal static class PackedTerrainCapture
 
     internal sealed record Outcome(string Status, string? DataFile = null);
 
+    internal static string UpdateAnchors(string dataFile, int processId, string areaHash,
+        string areaAddress, string anchor, GeneratedRoomProbe.Result? generatedRooms,
+        TerrainPlacementProbe.Result? terrainPlacements, Func<bool> areaStillCurrent)
+    {
+        var roomsReady = generatedRooms is { Status: "candidate_rooms_observed",
+            AnchorsTruncated: false };
+        var placementsReady = terrainPlacements is { Status: "candidate_placements_observed",
+            Truncated: false };
+        if (!roomsReady && !placementsReady) return "already_captured";
+        if (!areaStillCurrent()) return "area_changed_before_update";
+        string? temporary = null;
+        try
+        {
+            var metadataFile = Path.ChangeExtension(dataFile, ".json");
+            var info = new FileInfo(metadataFile);
+            if (!info.Exists || info.Length is < 1 or > 65536) return "metadata_unavailable";
+            if (JsonNode.Parse(File.ReadAllText(metadataFile)) is not JsonObject root ||
+                root["Status"]?.GetValue<string>() != "candidate_capture_only" ||
+                root["ProcessId"]?.GetValue<int>() != processId ||
+                root["AreaHash"]?.GetValue<string>() != areaHash ||
+                root["AreaAddress"]?.GetValue<string>() != areaAddress ||
+                root["Anchor"]?.GetValue<string>() != anchor ||
+                root["DataFile"]?.GetValue<string>() != Path.GetFileName(dataFile))
+                return "metadata_mismatch";
+            var changed = false;
+            if (roomsReady && root["GeneratedRooms"] is null)
+            {
+                root["GeneratedRoomStatus"] = generatedRooms!.Status;
+                root["GeneratedRoomAreaAddress"] = areaAddress;
+                root["GeneratedRoomAnchor"] = anchor;
+                root["GeneratedRooms"] = JsonSerializer.SerializeToNode(generatedRooms.Anchors);
+                changed = true;
+            }
+            if (placementsReady && root["TerrainPlacements"] is null)
+            {
+                root["TerrainPlacementStatus"] = terrainPlacements!.Status;
+                root["TerrainPlacementAreaAddress"] = areaAddress;
+                root["TerrainPlacementAnchor"] = anchor;
+                root["TerrainPlacements"] = JsonSerializer.SerializeToNode(terrainPlacements.Anchors);
+                changed = true;
+            }
+            if (!changed) return "already_captured";
+            temporary = metadataFile + ".tmp-" + Guid.NewGuid().ToString("N");
+            File.WriteAllText(temporary, root.ToJsonString());
+            if (new FileInfo(temporary).Length > 65536) return "metadata_too_large";
+            if (!areaStillCurrent()) return "area_changed_during_update";
+            File.Move(temporary, metadataFile, overwrite: true);
+            temporary = null;
+            return "markers_updated";
+        }
+        catch
+        {
+            return "marker_update_failed";
+        }
+        finally
+        {
+            if (temporary != null) TryDelete(temporary);
+        }
+    }
+
     internal static Outcome Save(PackedTerrainProbe.PackedSource source,
         PackedTerrainProbe.Observation observation,
         RawRenderPositionReader.Position position, float observedWorldX, float observedWorldY,
         Func<long, int, byte[]?> read, Func<bool> areaStillCurrent,
         string directory, int processId,
         string areaHash, string areaAddress, string anchor, DateTime seenUtc,
-        GeneratedRoomProbe.Result? generatedRooms = null)
+        GeneratedRoomProbe.Result? generatedRooms = null,
+        TerrainPlacementProbe.Result? terrainPlacements = null)
     {
         var length = (long)source.BytesPerRow * source.Rows;
         if (source.Start < 0x10000 || source.BytesPerRow <= 0 || source.Rows <= 0 ||
@@ -102,7 +164,12 @@ internal static class PackedTerrainCapture
                 GeneratedRoomAreaAddress = generatedRooms is null ? null : areaAddress,
                 GeneratedRoomAnchor = generatedRooms is null ? null : anchor,
                 GeneratedRooms = generatedRooms is { Status: "candidate_rooms_observed", AnchorsTruncated: false }
-                    ? generatedRooms.Anchors : null
+                    ? generatedRooms.Anchors : null,
+                TerrainPlacementStatus = terrainPlacements?.Status,
+                TerrainPlacementAreaAddress = terrainPlacements is null ? null : areaAddress,
+                TerrainPlacementAnchor = terrainPlacements is null ? null : anchor,
+                TerrainPlacements = terrainPlacements is { Status: "candidate_placements_observed", Truncated: false }
+                    ? terrainPlacements.Anchors : null
             }));
             if (!areaStillCurrent())
             {

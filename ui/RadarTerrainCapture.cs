@@ -26,6 +26,23 @@ public sealed class RadarTerrainCapture
     public double RawGridX { get; }
     public double RawGridY { get; }
     public IReadOnlyList<RadarTerrainRoom> Rooms { get; }
+    public string MetadataPath { get; private init; } = "";
+    public DateTime MetadataWriteUtc { get; private init; }
+    public long MetadataLength { get; private init; }
+
+    public bool MetadataUnchanged()
+    {
+        try
+        {
+            var info = new FileInfo(MetadataPath);
+            return info.Exists && info.LastWriteTimeUtc == MetadataWriteUtc &&
+                info.Length == MetadataLength;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
 
     private RadarTerrainCapture(byte[] data, int processId, uint areaHash, string areaAddress,
         string anchor, DateTime seenUtc, int width, int height, int bytesPerRow,
@@ -127,8 +144,16 @@ public sealed class RadarTerrainCapture
                 rowNumber++;
             }
             if (!TryRooms(root, areaAddress, anchor, width, height, out var rooms)) return false;
+            if (!TryPlacements(root, areaAddress, anchor, width, height,
+                    out var placements)) return false;
             capture = new RadarTerrainCapture(data, pid, areaHash, areaAddress, anchor,
-                seenUtc, width, height, bytesPerRow, rawGridX, rawGridY, rooms);
+                seenUtc, width, height, bytesPerRow, rawGridX, rawGridY,
+                rooms.Concat(placements).ToArray())
+            {
+                MetadataPath = metadataPath,
+                MetadataWriteUtc = metadataInfo.LastWriteTimeUtc,
+                MetadataLength = metadataInfo.Length
+            };
             return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
@@ -180,6 +205,42 @@ public sealed class RadarTerrainCapture
             parsed.Add(new RadarTerrainRoom(path, category, label, x, y));
         }
         rooms = parsed;
+        return true;
+    }
+
+    private static bool TryPlacements(JsonElement root, string areaAddress, string anchor,
+        int width, int height, out IReadOnlyList<RadarTerrainRoom> placements)
+    {
+        placements = [];
+        if (!root.TryGetProperty("TerrainPlacements", out var values) ||
+            values.ValueKind == JsonValueKind.Null) return true;
+        if (values.ValueKind != JsonValueKind.Array || values.GetArrayLength() > 64 ||
+            !Text(root, "TerrainPlacementStatus", out var status) ||
+            status != "candidate_placements_observed" ||
+            !Text(root, "TerrainPlacementAreaAddress", out var sourceAddress) ||
+            !string.Equals(sourceAddress, areaAddress, StringComparison.OrdinalIgnoreCase) ||
+            !Text(root, "TerrainPlacementAnchor", out var sourceAnchor) || sourceAnchor != anchor)
+            return false;
+        var parsed = new List<RadarTerrainRoom>(values.GetArrayLength());
+        var seen = new HashSet<(string Path, int X, int Y)>();
+        foreach (var value in values.EnumerateArray())
+        {
+            if (value.ValueKind != JsonValueKind.Object ||
+                !Text(value, "Path", out var path) || path.Length > 255 ||
+                !Text(value, "Category", out var category) ||
+                !Text(value, "Label", out var label) ||
+                !Number(value, "TileX", out var tileX) ||
+                !Number(value, "TileY", out var tileY) ||
+                !Finite(value, "GridX", out var x) ||
+                !Finite(value, "GridY", out var y) ||
+                tileX < 0 || tileY < 0 || x != tileX * 23d + 11.5 ||
+                y != tileY * 23d + 11.5 || x >= width || y >= height ||
+                TerrainPlacementClassifier.Classify(path) is not { } expected ||
+                category != expected.Category || label != expected.Label ||
+                !seen.Add((path, tileX, tileY))) return false;
+            parsed.Add(new RadarTerrainRoom(path, category, label, x, y));
+        }
+        placements = parsed;
         return true;
     }
 

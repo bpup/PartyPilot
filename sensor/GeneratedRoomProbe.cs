@@ -109,7 +109,7 @@ internal static class GeneratedRoomProbe
         path = Encoding.Unicode.GetString(bytes, 0, end).Replace('\\', '/');
         return path.StartsWith("Metadata/Terrain/", StringComparison.OrdinalIgnoreCase) &&
             path.EndsWith(".arm", StringComparison.OrdinalIgnoreCase) && path.Length <= 255 &&
-            !path.Any(char.IsControl);
+            !path.Any(c => c < ' ' || c > '~');
     }
 
     private static bool Vector(long start, long end, long capacity, int recordSize, int maxRecords) =>

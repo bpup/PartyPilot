@@ -17,9 +17,11 @@ internal static class PackedTerrainProbe
         public string Anchor { get; init; } = "";
     }
     internal sealed record PackedSource(long Start, int BytesPerRow, int Rows);
+    internal sealed record AreaLayout(long Area, int TerrainOffset, int TilesX, int TilesY);
     internal sealed record Result(string Status, Observation? Candidate)
     {
         public PackedSource? Source { get; init; }
+        public AreaLayout? Layout { get; init; }
     }
     internal sealed record AreaCandidate(string Anchor, long Address);
 
@@ -28,6 +30,7 @@ internal static class PackedTerrainProbe
     {
         Observation? selected = null;
         PackedSource? selectedSource = null;
+        AreaLayout? selectedLayout = null;
         var attempted = false;
         var unreadable = false;
         var seen = new HashSet<long>();
@@ -45,10 +48,12 @@ internal static class PackedTerrainProbe
                 AreaAddress = $"0x{anchor.Address:X}", Anchor = anchor.Anchor
             };
             selectedSource = result.Source;
+            selectedLayout = result.Layout;
         }
         if (selected != null) return new Result("candidate_patch_observed", selected)
         {
-            Source = selectedSource
+            Source = selectedSource,
+            Layout = selectedLayout
         };
         if (!attempted || !float.IsFinite(gridX) || !float.IsFinite(gridY))
             return new Result("missing_anchor_or_grid", null);
@@ -96,7 +101,7 @@ internal static class PackedTerrainProbe
                 }
                 if (inRange * 5 < sample.Length * 8) continue; // at least 80% of nibbles
                 var candidate = new Candidate(start, bytesPerRow, (int)height,
-                    sample.Length * 2, inRange);
+                    sample.Length * 2, inRange, offset - 24, (int)tilesX, (int)tilesY);
                 if (selected != null && selected != candidate) ambiguous = true;
                 else selected = candidate;
                 break;
@@ -132,10 +137,14 @@ internal static class PackedTerrainProbe
             left, top, patchRows.ToArray(), selected.SampledNibbles,
             selected.InRangeNibbles))
         {
-            Source = new PackedSource(selected.Start, selected.BytesPerRow, selected.Rows)
+            Source = new PackedSource(selected.Start, selected.BytesPerRow, selected.Rows),
+            Layout = selected.TerrainOffset >= 0
+                ? new AreaLayout(area, selected.TerrainOffset, selected.TilesX, selected.TilesY)
+                : null
         };
     }
 
     private sealed record Candidate(long Start, int BytesPerRow, int Rows,
-        int SampledNibbles, int InRangeNibbles);
+        int SampledNibbles, int InRangeNibbles,
+        int TerrainOffset, int TilesX, int TilesY);
 }

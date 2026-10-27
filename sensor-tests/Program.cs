@@ -220,6 +220,7 @@ TestRawRenderPositionReader();
 TestTerrainDiagnostic();
 TestPackedTerrainProbe();
 TestGeneratedRoomProbe();
+TestTerrainPlacementProbe();
 TestSkillBindTable();
 SkillBindSourceScannerTests.Run();
 Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
@@ -400,6 +401,8 @@ void TestPackedTerrainProbe()
         "A unique area anchor was not identified.");
     Require(anchored.Source is { Start: packedStart, BytesPerRow: bytesPerRow, Rows: rows },
         "The unique candidate lost its packed memory range.");
+    Require(anchored.Layout is { Area: area, TerrainOffset: tuple - 24, TilesX: 4, TilesY: 4 },
+        "The unique candidate lost its placement tile layout.");
     var captureDirectory = Path.Combine(Path.GetTempPath(), "partypilot-terrain-test-" + Guid.NewGuid());
     var capturePosition = new RawRenderPositionReader.Position(108.69565f, 217.3913f,
         5, 10, 20, "0x123456");
@@ -409,10 +412,14 @@ void TestPackedTerrainProbe()
             1, false, [], 1, false,
             [new GeneratedRoomProbe.Anchor("Metadata/Terrain/Gallows/Act1/1_6/Rooms/boss_1.arm",
                 "boss", "Boss arena", 11.5, 11.5, 0, 0, 1, 1)]);
+        var terrainPlacements = new TerrainPlacementProbe.Result("candidate_placements_observed",
+            16, 1, 1, 1, false,
+            [new TerrainPlacementProbe.Anchor("Metadata/MiscellaneousObjects/Checkpoint",
+                "checkpoint", "Checkpoint", 11.5, 11.5, 0, 0)]);
         var capture = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate!,
             capturePosition, 108.69565f, 217.3913f, Read, () => true, captureDirectory,
             123, "test-area", anchored.Candidate!.AreaAddress, anchored.Candidate.Anchor,
-            DateTime.UtcNow, generatedRooms);
+            DateTime.UtcNow, generatedRooms, terrainPlacements);
         Require(capture.Status == "captured_local" && capture.DataFile != null &&
             File.ReadAllBytes(capture.DataFile).SequenceEqual(packed) &&
             File.Exists(Path.ChangeExtension(capture.DataFile, ".json")),
@@ -422,11 +429,30 @@ void TestPackedTerrainProbe()
         Require(metadata.RootElement.GetProperty("RawGridX").GetSingle() == 10 &&
             metadata.RootElement.GetProperty("PatchRows").GetArrayLength() == 9 &&
             metadata.RootElement.GetProperty("GeneratedRooms").GetArrayLength() == 1 &&
+            metadata.RootElement.GetProperty("TerrainPlacements").GetArrayLength() == 1 &&
             metadata.RootElement.GetProperty("GeneratedRoomAreaAddress").GetString() ==
                 anchored.Candidate.AreaAddress &&
             metadata.RootElement.GetProperty("Sha256").GetString() ==
                 Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(packed)).ToLowerInvariant(),
             "The capture lost position, patch or file integrity evidence.");
+        var metadataFile = Path.ChangeExtension(capture.DataFile!, ".json");
+        var withoutMarkers = System.Text.Json.Nodes.JsonNode.Parse(
+            File.ReadAllText(metadataFile))!.AsObject();
+        withoutMarkers["GeneratedRooms"] = null;
+        withoutMarkers["TerrainPlacements"] = null;
+        File.WriteAllText(metadataFile, withoutMarkers.ToJsonString());
+        Require(PackedTerrainCapture.UpdateAnchors(capture.DataFile!, 123, "test-area",
+            anchored.Candidate.AreaAddress, anchored.Candidate.Anchor,
+            generatedRooms, terrainPlacements, () => true) == "markers_updated" &&
+            System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(metadataFile))!
+                ["TerrainPlacements"]!.AsArray().Count == 1 &&
+            PackedTerrainCapture.UpdateAnchors(capture.DataFile!, 123, "test-area",
+                anchored.Candidate.AreaAddress, anchored.Candidate.Anchor,
+                generatedRooms, terrainPlacements, () => true) == "already_captured" &&
+            PackedTerrainCapture.UpdateAnchors(capture.DataFile!, 123, "test-area",
+                anchored.Candidate.AreaAddress, anchored.Candidate.Anchor,
+                generatedRooms, terrainPlacements, () => false) == "area_changed_before_update",
+            "Later-ready room or placement markers did not update the same capture safely.");
         byte[]? ShortRead(long address, int size) =>
             address == packedStart ? new byte[size - 1] : Read(address, size);
         var failed = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate,
@@ -576,6 +602,71 @@ void TestGeneratedRoomProbe()
         GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act1/1_15/Rooms/Fill/stairs_decorative_1.arm") == null &&
         GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act1/1_6/Rooms/crossroads_1.arm") == null,
         "Generated-room marker rules admitted an unsupported room or lost a named anchor.");
+}
+void TestTerrainPlacementProbe()
+{
+    const long area = 0x100000;
+    const long tilesAddress = 0x200000;
+    const long placementsAddress = 0x300000;
+    const long wrapperAddress = 0x400000;
+    const long entityAddress = 0x500000;
+    const long detailsAddress = 0x600000;
+    const long textAddress = 0x700000;
+    const string path = "Metadata/MiscellaneousObjects/Checkpoint";
+    var header = new byte[72];
+    BitConverter.GetBytes(tilesAddress).CopyTo(header, 40);
+    BitConverter.GetBytes(tilesAddress + 16 * 56).CopyTo(header, 48);
+    var records = new byte[16 * 56];
+    BitConverter.GetBytes(placementsAddress).CopyTo(records, 16);
+    BitConverter.GetBytes(placementsAddress + 16).CopyTo(records, 24);
+    var placements = new byte[16];
+    BitConverter.GetBytes(wrapperAddress).CopyTo(placements, 0);
+    var wrapper = new byte[16];
+    BitConverter.GetBytes(entityAddress).CopyTo(wrapper, 8);
+    var details = new byte[32];
+    BitConverter.GetBytes(textAddress).CopyTo(details, 0);
+    BitConverter.GetBytes((long)path.Length).CopyTo(details, 16);
+    BitConverter.GetBytes((long)path.Length).CopyTo(details, 24);
+    var memory = new Dictionary<long, byte[]>
+    {
+        [area + 232] = header, [tilesAddress] = records,
+        [placementsAddress] = placements, [wrapperAddress] = wrapper,
+        [entityAddress + 8] = BitConverter.GetBytes(detailsAddress),
+        [detailsAddress + 8] = details,
+        [textAddress] = System.Text.Encoding.Unicode.GetBytes(path)
+    };
+    byte[]? Read(long address, int length) => memory.TryGetValue(address, out var bytes) &&
+        bytes.Length == length ? bytes : null;
+    var layout = new PackedTerrainProbe.AreaLayout(area, 232, 4, 4);
+    var result = TerrainPlacementProbe.Scan(layout, 92, 92, Read);
+    Require(result.Status == "candidate_placements_observed" && !result.Truncated &&
+        result.TilesChecked == 16 && result.ReferencesChecked == 1 &&
+        result.ValidPaths == 1 && result.MatchedAnchors == 1 &&
+        result.Anchors is [{ Category: "checkpoint", Label: "Checkpoint",
+            GridX: 11.5, GridY: 11.5, TileX: 0, TileY: 0 }],
+        "Dormant placement path or tile center changed.");
+    Require(TerrainPlacementProbe.Scan(layout, 92, 92, (_, _) => null).Status ==
+        "header_unreadable" &&
+        TerrainPlacementProbe.Scan(layout with { TilesX = 513 }, 92, 92, Read).Status ==
+        "invalid_layout", "An unreadable or oversized placement layout was accepted.");
+    Require(TerrainPlacementClassifier.Classify(
+            "Metadata/Monsters/HyenaMonster/Objects/BossRoomMinimapIcon") ==
+            new GeneratedRoomClassifier.Marker("boss", "Rathbreaker") &&
+        TerrainPlacementClassifier.Classify(
+            "Metadata/Terrain/Gallows/Act3/Objects/MachinariumGeneratorButton") ==
+            new GeneratedRoomClassifier.Marker("quest", "Soul Core Generator") &&
+        TerrainPlacementClassifier.Classify("Metadata/Terrain/Gallows/Act3/Objects/VaalKeyGemMedium2") ==
+            new GeneratedRoomClassifier.Marker("quest", "Medium Soul Core") &&
+        TerrainPlacementClassifier.Classify("Metadata/League/Breach/BreachInitiator") ==
+            new GeneratedRoomClassifier.Marker("league", "Breach") &&
+        TerrainPlacementClassifier.Classify("Metadata/League/Abyss/AbyssStartNode") ==
+            new GeneratedRoomClassifier.Marker("league", "Abyss") &&
+        TerrainPlacementClassifier.Classify("Metadata/Terrain/Gallows/Leagues/StoneCircle/Objects/RuneRock_Controller") ==
+            new GeneratedRoomClassifier.Marker("league", "Runed Monolith") &&
+        TerrainPlacementClassifier.Classify("Metadata/MiscellaneousObjects/Monolith") ==
+            new GeneratedRoomClassifier.Marker("league", "Essence") &&
+        TerrainPlacementClassifier.Classify("Metadata/MiscellaneousObjects/MiniMonolith") == null,
+        "Dormant placement marker rules lost explicit paths or admitted a decorative object.");
 }
 var largeLoot = Enumerable.Range(1, 96).Select(index => (object)new
 {

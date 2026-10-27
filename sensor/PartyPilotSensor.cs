@@ -36,7 +36,12 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     private DateTime _lastCardSentUtc;
     private DateTime _lastTerrainSentUtc;
     private readonly HashSet<string> _capturedTerrainKeys = new();
+    private readonly Dictionary<string, string> _capturedTerrainFiles = new();
     private string? _terrainCaptureEpoch;
+    private string? _generatedRoomProbeKey;
+    private GeneratedRoomProbe.Result? _generatedRoomProbeCached;
+    private string? _placementProbeKey;
+    private TerrainPlacementProbe.Result? _placementProbeCached;
     private string? _cardModulePath;
     private Task<long>? _cardVtableTask;
 
@@ -436,6 +441,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         string? packedTerrainStatus = null;
         string? packedTerrainCaptureStatus = null;
         GeneratedRoomProbe.Result? generatedRoomProbe = null;
+        TerrainPlacementProbe.Result? placementProbe = null;
         if (Settings.DiagnoseTerrain.Value)
         {
             try
@@ -445,12 +451,22 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 if (_terrainCaptureEpoch != epoch)
                 {
                     _capturedTerrainKeys.Clear();
+                    _capturedTerrainFiles.Clear();
+                    _generatedRoomProbeKey = null;
+                    _generatedRoomProbeCached = null;
+                    _placementProbeKey = null;
+                    _placementProbeCached = null;
                     _terrainCaptureEpoch = epoch;
                 }
             }
             catch
             {
                 _capturedTerrainKeys.Clear();
+                _capturedTerrainFiles.Clear();
+                _generatedRoomProbeKey = null;
+                _generatedRoomProbeCached = null;
+                _placementProbeKey = null;
+                _placementProbeCached = null;
                 _terrainCaptureEpoch = null;
             }
         }
@@ -513,12 +529,45 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                             System.Globalization.NumberStyles.HexNumber,
                             System.Globalization.CultureInfo.InvariantCulture, out var roomArea))
                     {
-                        var roomResult = GeneratedRoomProbe.Scan(roomArea, observation.Width,
-                            observation.Height, ReadTerrain);
-                        if (AreaStillCurrent()) generatedRoomProbe = roomResult;
+                        var roomResult = _generatedRoomProbeKey == captureKey &&
+                            _generatedRoomProbeCached is { } cachedRooms
+                            ? cachedRooms : GeneratedRoomProbe.Scan(roomArea, observation.Width,
+                                observation.Height, ReadTerrain);
+                        if (AreaStillCurrent())
+                        {
+                            generatedRoomProbe = roomResult;
+                            if (roomResult is { Status: "candidate_rooms_observed", AnchorsTruncated: false })
+                            {
+                                _generatedRoomProbeKey = captureKey;
+                                _generatedRoomProbeCached = roomResult;
+                            }
+                        }
+                    }
+                    if (AreaStillCurrent() && result.Layout is { } layout)
+                    {
+                        var placementResult = _placementProbeKey == captureKey &&
+                            _placementProbeCached is { } cachedPlacements
+                            ? cachedPlacements : TerrainPlacementProbe.Scan(layout,
+                                observation.Width, observation.Height, ReadTerrain);
+                        if (AreaStillCurrent())
+                        {
+                            placementProbe = placementResult;
+                            if (placementResult is { Status: "candidate_placements_observed", Truncated: false })
+                            {
+                                _placementProbeKey = captureKey;
+                                _placementProbeCached = placementResult;
+                            }
+                        }
                     }
                     if (_capturedTerrainKeys.Contains(captureKey))
-                        packedTerrainCaptureStatus = "already_captured";
+                    {
+                        packedTerrainCaptureStatus = _capturedTerrainFiles.TryGetValue(
+                            captureKey, out var existingFile)
+                            ? PackedTerrainCapture.UpdateAnchors(existingFile, processId,
+                                areaHash, observation.AreaAddress, observation.Anchor,
+                                generatedRoomProbe, placementProbe, AreaStillCurrent)
+                            : "already_captured";
+                    }
                     else
                     {
                         var directory = Path.Combine(Environment.GetFolderPath(
@@ -527,9 +576,13 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                             positionCandidate!, render.Pos.X, render.Pos.Y, ReadTerrain,
                             AreaStillCurrent, directory,
                             processId, areaHash, observation.AreaAddress, observation.Anchor, now,
-                            generatedRoomProbe);
+                            generatedRoomProbe, placementProbe);
                         packedTerrainCaptureStatus = capture.Status;
-                        if (capture.Status == "captured_local") _capturedTerrainKeys.Add(captureKey);
+                        if (capture.Status == "captured_local" && capture.DataFile != null)
+                        {
+                            _capturedTerrainKeys.Add(captureKey);
+                            _capturedTerrainFiles[captureKey] = capture.DataFile;
+                        }
                     }
                 }
             }
@@ -639,6 +692,15 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 generatedRoomProbe.AnchorsTruncated,
                 AnchorsOmitted = Math.Max(0, generatedRoomProbe.Anchors.Length - 8),
                 Anchors = generatedRoomProbe.Anchors.Take(8)
+            },
+            TerrainPlacementProbe = placementProbe is null ? null : new
+            {
+                placementProbe.Status,
+                placementProbe.TilesChecked,
+                placementProbe.ReferencesChecked,
+                placementProbe.ValidPaths,
+                placementProbe.MatchedAnchors,
+                placementProbe.Truncated
             },
             VisiblePlayers = visiblePlayers,
             VisiblePlayersStatus = visiblePlayersStatus
