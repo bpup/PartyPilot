@@ -1807,7 +1807,7 @@ public sealed class MainWindow : Window
     private async Task EditFollowerMirrorAsync()
     {
         if (_bridge is not null || _busy) return;
-        var selected = await new FollowerMirrorDialog(_followerMirror)
+        var selected = await new FollowerMirrorDialog(_followerMirror, _selectedTopology?.PlayerCount ?? 2)
             .ShowDialog<FollowerMirrorConfig?>(this);
         if (selected is null) return;
         _followerMirrorPreferenceReady = _followerMirrorPreferences.Save(selected);

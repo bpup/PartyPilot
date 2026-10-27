@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
+using Avalonia.Interactivity;
 using Avalonia.LogicalTree;
 using Avalonia.Themes.Fluent;
 using Avalonia.Threading;
@@ -72,6 +73,30 @@ var stopPreferenceStore = new FollowStopPreferenceStore(Path.Combine(
 var window = new MainWindow(followPreferenceStore, stopPreferenceStore);
 window.Show();
 window.UpdateLayout();
+var mirrorDialog = new FollowerMirrorDialog(PartyPilot.Common.FollowerMirrorConfig.Default, 3);
+var mirrorResult = mirrorDialog.ShowDialog<PartyPilot.Common.FollowerMirrorConfig?>(window);
+var mirrorPlayer = mirrorDialog.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(box => box.ItemsSource?.OfType<int>().SequenceEqual([1, 2, 3]) == true);
+var mirrorActions = mirrorDialog.GetLogicalDescendants().OfType<Avalonia.Controls.Primitives.ToggleButton>()
+    .Where(button => button.Content is string).ToArray();
+if (mirrorActions.Length != 12) throw new Exception("Follower buttons did not show one selected player's actions.");
+mirrorActions.Single(button => button.Content?.ToString() == "A").IsChecked = false;
+mirrorPlayer.SelectedItem = 2;
+mirrorActions.Single(button => button.Content?.ToString() == "B").IsChecked = false;
+mirrorPlayer.SelectedItem = 1;
+if (mirrorActions.Single(button => button.Content?.ToString() == "A").IsChecked != false)
+    throw new Exception("Follower A choice was lost when switching player profiles.");
+mirrorPlayer.SelectedItem = 2;
+if (mirrorActions.Single(button => button.Content?.ToString() == "B").IsChecked != false)
+    throw new Exception("Follower B choice was lost when switching player profiles.");
+mirrorDialog.GetLogicalDescendants().OfType<Button>()
+    .Single(button => button.Content?.ToString() == "保存")
+    .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+var chosenMirror = await mirrorResult;
+if (chosenMirror is null || chosenMirror.ForPlayer(1) != (PartyPilot.Common.FollowerMirrorConfig.All & ~2) ||
+    chosenMirror.ForPlayer(2) != (PartyPilot.Common.FollowerMirrorConfig.All & ~4) ||
+    chosenMirror.ForPlayer(3) != PartyPilot.Common.FollowerMirrorConfig.All)
+    throw new Exception("Follower profile editor changed another player or lost the selected setting.");
 var inputMode = window.GetLogicalDescendants().OfType<ComboBox>()
     .SingleOrDefault(box => box.ItemsSource?.OfType<string>()
         .Contains("Keyboard and mouse · 键鼠") == true);
