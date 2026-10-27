@@ -167,7 +167,9 @@ if (!BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_begin\"}", out var
     !BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_end\"}", out _) ||
     BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":7,\"buttons\":4096,\"hold_ms\":80}", out _) ||
     BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":2,\"buttons\":4096,\"hold_ms\":1000}", out _) ||
-    BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":2,\"buttons\":4096,\"hold_ms\":60}", out _) ||
+    !BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":2,\"buttons\":4096,\"hold_ms\":60}", out _) ||
+    !BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":2,\"buttons\":2,\"hold_ms\":80}", out _) ||
+    BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":2,\"buttons\":4096,\"hold_ms\":100}", out _) ||
     BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":2,\"buttons\":16384,\"hold_ms\":80}", out _))
     throw new Exception("Auto Party menu command validation failed.");
 if (!BridgeSlots.TryParse(["--slots", "3,2"], out var slots) ||
@@ -662,6 +664,23 @@ if (!partyRouter.BeginAutoParty(now.AddSeconds(21)) ||
     partyRouter.ApplyLine("{\"type\":\"auto_party_pulse\",\"slot\":2,\"buttons\":16384,\"hold_ms\":80}", now.AddSeconds(21)) ||
     partyRouter.AutoPartyActive || partyPad2.Report != default)
     throw new Exception("Malformed input survived Auto Party exclusive ownership.");
+var thirdMenuPad = new FakePad();
+var thirdMenuRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
+{
+    [1] = new FakePad(), [3] = new FakePad(), [4] = new FakePad(),
+    [5] = thirdMenuPad, [6] = new FakePad()
+});
+if (!thirdMenuRouter.ConfigurePhysical(1) || !thirdMenuRouter.BeginAutoParty(now) ||
+    !thirdMenuRouter.PulseAutoParty(5, 0x0002, 80, now.AddMilliseconds(1)) ||
+    thirdMenuPad.Report.Buttons != 0x0002)
+    throw new Exception("Client 3 menu navigation did not reach the private P5 output.");
+thirdMenuRouter.Tick(now.AddMilliseconds(82));
+if (!thirdMenuRouter.PulseAutoParty(5, 0x1000, 60, now.AddMilliseconds(83)) ||
+    thirdMenuPad.Report.Buttons != 0x1000)
+    throw new Exception("Client 3 warp confirmation did not reach the private P5 output.");
+thirdMenuRouter.EndAutoParty();
+if (thirdMenuPad.Report != default)
+    throw new Exception("Client 3 menu input remained held after controller ownership ended.");
 var pairingSignals = new PairingSignalTracker();
 if (pairingSignals.Observe(false, 2) != 0 ||
     pairingSignals.Observe(true, 2) != 0 ||

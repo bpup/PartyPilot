@@ -190,7 +190,9 @@ internal static class BridgeProtocol
     internal static bool ValidAutoPartyPulse(ushort buttons, int duration) => buttons switch
     {
         0x0010 => duration is 80 or 100,
-        0x0004 or 0x1000 => duration == 80,
+        0x0004 => duration == 80,
+        0x0002 => duration == 80,
+        0x1000 => duration is 60 or 80,
         0x2000 => duration == 60,
         _ => false
     };

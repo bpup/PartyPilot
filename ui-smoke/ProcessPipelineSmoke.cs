@@ -31,6 +31,60 @@ internal static class ProcessPipelineSmoke
                 { Handoffs = [new FollowHandoffRequest(2, 3, 2),
                     new FollowHandoffRequest(1, 1, 4)] }, paired) is not null)
             throw new Exception("Paired warp routes accepted an incomplete or ambiguous destination.");
+        var warpSixTopology = PartyTopologies.ForPlayerCount(6).Single(item => item.Id == "6-balanced");
+        var thirdClientWarp = new FollowBridgeFrame("{}", "waiting", null)
+        {
+            Handoffs = [new FollowHandoffRequest(3, 5, 1)],
+            PadCommands = [Waiting(2), Waiting(3), Waiting(4), Waiting(5), Waiting(6)]
+        };
+        var thirdRoute = PartyWarpControllerPlan.FromFrame(thirdClientWarp, warpSixTopology);
+        var twoSourceWarp = thirdClientWarp with
+        {
+            Handoffs = [new FollowHandoffRequest(2, 3, 1),
+                new FollowHandoffRequest(3, 5, 1)]
+        };
+        if (thirdRoute is null || thirdRoute.DriverPad != 5 || thirdRoute.RosterIndex != 0 ||
+            PartyWarpControllerPlan.FromFrame(twoSourceWarp, warpSixTopology)?.DriverPad != 3 ||
+            PartyWarpControllerPlan.FromFrame(twoSourceWarp with
+                { PadCommands = [Waiting(2), Waiting(3) with { Status = "following" },
+                    Waiting(4), Waiting(5), Waiting(6)] }, warpSixTopology)?.DriverPad != 5 ||
+            PartyWarpControllerPlan.FromFrame(twoSourceWarp with
+                { Handoffs = [new FollowHandoffRequest(2, 3, 1),
+                    new FollowHandoffRequest(3, 5, 3)] }, warpSixTopology) is not null ||
+            PartyWarpControllerPlan.FromFrame(thirdClientWarp with
+                { PadCommands = [Waiting(2), Waiting(3), Waiting(4), Waiting(5)] }, warpSixTopology) is not null)
+            throw new Exception("Client 3 warp routing did not require both local roles to wait.");
+        var controllerPort = new FakePartyWarpControllerPort();
+        await PartyWarpControllerRunner.RunAsync(controllerPort, thirdRoute,
+            CancellationToken.None, (_, _) => Task.CompletedTask);
+        if (controllerPort.Begins != 1 || controllerPort.Ends != 1 ||
+            controllerPort.Pulses.Count != 6 ||
+            controllerPort.Pulses.Any(pulse => pulse.Pad != 5) ||
+            controllerPort.Pulses[^1].Buttons != 0x2000)
+            throw new Exception("Client 3 controller warp did not route and release the bound pad.");
+        var lostForeground = new FakePartyWarpControllerPort { Foreground = false };
+        try
+        {
+            await PartyWarpControllerRunner.RunAsync(lostForeground, thirdRoute,
+                CancellationToken.None, (_, _) => Task.CompletedTask);
+            throw new Exception("Controller warp ran without exact foreground.");
+        }
+        catch (InvalidOperationException) when (lostForeground.Ends == 1 &&
+            lostForeground.Pulses.Count == 0) { }
+        using var warpCancellation = new CancellationTokenSource();
+        var interrupted = new FakePartyWarpControllerPort();
+        try
+        {
+            await PartyWarpControllerRunner.RunAsync(interrupted, thirdRoute,
+                warpCancellation.Token, (_, token) =>
+                {
+                    warpCancellation.Cancel();
+                    return Task.FromCanceled(token);
+                });
+            throw new Exception("Cancelled controller warp continued after the first pulse.");
+        }
+        catch (OperationCanceledException) when (interrupted.Ends == 1 &&
+            interrupted.Pulses.Count == 1) { }
         const int visionWidth = 1280;
         const int visionHeight = 720;
         var portraitPixels = new byte[visionWidth * visionHeight * 4];
@@ -453,11 +507,14 @@ internal static class ProcessPipelineSmoke
                 "if dodge and ('--right-stick-dodge-button' not in sys.argv or sys.argv[sys.argv.index('--right-stick-dodge-button')+1] != 'RB'): sys.exit(2)\n" +
                 "print(json.dumps({'event':'ready','slots':[1,2],'physical_mode':True,'pairing_protected':True,'hidhide_preflight':True,'menu_guard_enabled':True,'last_focused_leads':False,'auto_flask_enabled':False,'right_stick_follower_override':True,'right_stick_dodge_on_engage':dodge,'right_stick_dodge_button':'RB' if dodge else 'B','direct_right_stick_slot':2,'focus_pad_map':'1:1,2:2','private_client3_pid':0,'private_client3_window_handle':0,'private_client3_slots':[]}), flush=True)\n" +
                 "for line in sys.stdin: pass\n");
-            File.WriteAllText(wgiBridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
+            File.WriteAllText(wgiBridgeExe, "#!/usr/bin/env python3\nimport sys,json\n" +
                 "if '--physical-wgi' not in sys.argv or '--physical-index' in sys.argv: sys.exit(2)\n" +
                 "if '--focus-pad-map' not in sys.argv or sys.argv[sys.argv.index('--focus-pad-map')+1] != '1:1,2:2,3:3,4:4': sys.exit(2)\n" +
                 "print('{\"event\":\"ready\",\"slots\":[1,2,3,4],\"physical_mode\":true,\"physical_wgi\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"menu_guard_enabled\":true,\"last_focused_leads\":false,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:2,3:3,4:4\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
-                "for line in sys.stdin: pass\n");
+                "for line in sys.stdin:\n" +
+                "    command=json.loads(line)\n" +
+                "    if command.get('type','').startswith('auto_party_'):\n" +
+                "        print(json.dumps({'event':'auto_party_control','type':command['type'],'slot':command.get('slot',0),'buttons':command.get('buttons',0)}),flush=True)\n");
             File.WriteAllText(client3BridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "def value(flag):\n    return sys.argv[sys.argv.index(flag)+1] if flag in sys.argv else None\n" +
                 "if value('--slots') != '1,3,4' or value('--focus-pad-map') != '1:1,2:3,3:4,4:5,5:6': sys.exit(2)\n" +
@@ -823,6 +880,17 @@ internal static class ProcessPipelineSmoke
                 false, useWgi: true))
             {
                 wgiBridge.StartReading();
+                await wgiBridge.BeginAutoPartyAsync(CancellationToken.None);
+                try
+                {
+                    await wgiBridge.BeginAutoPartyAsync(CancellationToken.None);
+                    throw new Exception("Two menu automations acquired the same bridge.");
+                }
+                catch (InvalidOperationException) { }
+                await wgiBridge.PulseAutoPartyAsync(3, 0x0002, 80, CancellationToken.None);
+                await wgiBridge.EndAutoPartyAsync(CancellationToken.None);
+                await wgiBridge.BeginAutoPartyAsync(CancellationToken.None);
+                await wgiBridge.EndAutoPartyAsync(CancellationToken.None);
             }
             Console.WriteLine("Four public pads and WGI startup arguments checked with a local fake executable.");
             var five = PartyTopologies.ForPlayerCount(5).Single(item => item.Id == "5-main-solo");
@@ -865,5 +933,20 @@ internal static class ProcessPipelineSmoke
         public bool Click(int screenX, int screenY)
         { LeftClicks.Add((screenX, screenY)); return true; }
         public void RestoreCursor((int X, int Y) cursor) => RestoredCursor = cursor;
+    }
+
+    private sealed class FakePartyWarpControllerPort : IPartyWarpControllerPort
+    {
+        internal int Begins;
+        internal int Ends;
+        internal bool Foreground = true;
+        internal readonly List<(int Pad, ushort Buttons)> Pulses = [];
+        public Task BeginAsync(CancellationToken token) { Begins++; return Task.CompletedTask; }
+        public Task RenewAsync(CancellationToken token) => Task.CompletedTask;
+        public Task EndAsync(CancellationToken token) { Ends++; return Task.CompletedTask; }
+        public Task<bool> FocusAsync(CancellationToken token) => Task.FromResult(Foreground);
+        public bool HasExactForeground() => Foreground;
+        public Task PulseAsync(int pad, ushort buttons, int holdMs, CancellationToken token)
+        { Pulses.Add((pad, buttons)); return Task.CompletedTask; }
     }
 }

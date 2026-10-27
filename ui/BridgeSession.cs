@@ -18,6 +18,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     private readonly IReadOnlyDictionary<int, int> _hybridOutputForRuntime;
     private readonly SemaphoreSlim _inputGate = new(1, 1);
     private readonly SemaphoreSlim _partyGate = new(1, 1);
+    private int _autoPartySessionActive;
     private readonly SemaphoreSlim _combatGate = new(1, 1);
     private AutoPartyPending? _pendingAutoParty;
     private CombatPending? _pendingCombat;
@@ -623,8 +624,17 @@ internal sealed class BridgeSession : IAsyncDisposable
         await WriteCommandAsync(JsonSerializer.Serialize(new { type = "auto_cast", slot, input }));
     }
 
-    internal Task BeginAutoPartyAsync(CancellationToken token) =>
-        SendAutoPartyControlAsync("auto_party_begin", 0, 0, 0, token);
+    internal async Task BeginAutoPartyAsync(CancellationToken token)
+    {
+        if (Interlocked.CompareExchange(ref _autoPartySessionActive, 1, 0) != 0)
+            throw new InvalidOperationException("Another menu automation owns the controller bridge.");
+        try { await SendAutoPartyControlAsync("auto_party_begin", 0, 0, 0, token); }
+        catch
+        {
+            Volatile.Write(ref _autoPartySessionActive, 0);
+            throw;
+        }
+    }
 
     internal Task RenewAutoPartyAsync(CancellationToken token) =>
         SendAutoPartyControlAsync("auto_party_renew", 0, 0, 0, token);
@@ -640,13 +650,19 @@ internal sealed class BridgeSession : IAsyncDisposable
         return SendAutoPartyControlAsync("auto_party_pulse", slot, buttons, holdMilliseconds, token);
     }
 
-    internal Task EndAutoPartyAsync(CancellationToken token) =>
-        SendAutoPartyControlAsync("auto_party_end", 0, 0, 0, token);
+    internal async Task EndAutoPartyAsync(CancellationToken token)
+    {
+        if (Volatile.Read(ref _autoPartySessionActive) == 0) return;
+        await SendAutoPartyControlAsync("auto_party_end", 0, 0, 0, token);
+        Volatile.Write(ref _autoPartySessionActive, 0);
+    }
 
     internal static bool ValidAutoPartyPulse(ushort buttons, int duration) => buttons switch
     {
         0x0010 => duration is 80 or 100,
-        0x0004 or 0x1000 => duration == 80,
+        0x0004 => duration == 80,
+        0x0002 => duration == 80,
+        0x1000 => duration is 60 or 80,
         0x2000 => duration == 60,
         _ => false
     };

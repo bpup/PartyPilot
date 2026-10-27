@@ -1046,7 +1046,7 @@ public sealed class MainWindow : Window
         _followPauseKeyStatus.Foreground = MutedBrush;
         _followPauseKeyStatus.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(_followPauseKeyStatus);
-        _experimentalWarpClick.Content = "实验：双客户端跨区时识别队伍头像和菜单并尝试传送";
+        _experimentalWarpClick.Content = "实验：跨区传送（双客户端头像菜单 / 三客户端手柄队伍名单）";
         _experimentalWarpClick.IsChecked = false;
         panel.Children.Add(_experimentalWarpClick);
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
@@ -2443,7 +2443,8 @@ public sealed class MainWindow : Window
             _selectedTopology?.Id is ("2-split" or "3-three-singles") &&
             _classicSprintCatchUp.IsChecked == true;
         _experimentalWarpClick.IsEnabled = _follow is null && !_busy &&
-            _selectedTopology?.Id == "4-balanced" && OperatingSystem.IsWindows();
+            _selectedTopology?.Id is ("4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced") &&
+            OperatingSystem.IsWindows();
         var valid = LiveFollowPlan.TryCreate(_followStop.Text, _followCatchup.Text,
             _followMaxAge.Text, _followLogAge.Text, _followLeaderName.Text, out _);
         if (_aggressiveBlinkCatchUp.IsChecked == true)
@@ -3201,6 +3202,9 @@ public sealed class MainWindow : Window
             _closeRangeMirror.IsChecked == true;
         var enableAttackMirror = _selectedTopology.Id is ("2-split" or "3-three-singles") &&
             !_bridge.IsHybridMode && _mirrorAttackDirection.IsChecked == true;
+        var enableExperimentalWarp = _selectedTopology.Id is
+            ("4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced") &&
+            OperatingSystem.IsWindows() && _experimentalWarpClick.IsChecked == true;
         if (enableCloseMirror && (!int.TryParse(_closeMirrorDuration.Text, NumberStyles.None,
                 CultureInfo.InvariantCulture, out var mirrorDuration) || mirrorDuration is < 50 or > 5000))
         {
@@ -3264,7 +3268,7 @@ public sealed class MainWindow : Window
                 flaskSupportFile: _bridge.AutoFlaskEnabled ? flaskSupport.RuntimeFile : null,
                 flaskRulesFile: _bridge.AutoFlaskEnabled ? flaskRules.RuntimeFile : null,
                 flaskCustomFile: flaskCustom?.RuntimeFile,
-                experimentalWarpClick: _experimentalWarpClick.IsChecked == true);
+                experimentalWarpClick: enableExperimentalWarp);
             session.StatusChanged += FollowStatusChanged;
             session.WarpStatusChanged += FollowWarpStatusChanged;
             session.Ended += FollowEnded;
@@ -3297,9 +3301,10 @@ public sealed class MainWindow : Window
             var warpState = _experimentalWarpClick.IsChecked != true
                 ? "自动传送未开启"
                 : _selectedTopology is not null &&
-                  PartyWarpRoutes.FromFrame(frame, _selectedTopology) is not null
-                    ? "正在尝试实验性视觉传送"
-                    : "当前跨区请求不支持视觉传送";
+                  (PartyWarpRoutes.FromFrame(frame, _selectedTopology) is not null ||
+                   PartyWarpControllerPlan.FromFrame(frame, _selectedTopology) is not null)
+                    ? "正在尝试实验性传送"
+                    : "当前跨区请求不支持自动传送";
             _followStatus.Text = $"检测到跨区：{requests}；{warpState}，跨区自动方向已停止。";
             return;
         }
@@ -3341,7 +3346,7 @@ public sealed class MainWindow : Window
     }
 
     private void FollowWarpStatusChanged(string detail) =>
-        _followStatus.Text = $"跨区视觉传送：{detail}";
+        _followStatus.Text = $"跨区传送：{detail}";
 
     private async void FollowEnded(string reason)
     {

@@ -195,8 +195,10 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         string? flaskCustomFile = null,
         bool experimentalWarpClick = false)
     {
-        if (experimentalWarpClick && (topology.Id != "4-balanced" || clients.Count != 2))
-            throw new ArgumentException("Visual warp currently requires two paired clients with P1/P2 and P3/P4.");
+        if (experimentalWarpClick &&
+            (topology.Id is not ("4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced") ||
+             clients.Count != topology.ClientCount))
+            throw new ArgumentException("Experimental warp requires a paired four-to-six-player layout.");
         if (aggressiveBlinkCatchUp && classicSprintCatchUp)
             throw new ArgumentException("Classic and aggressive sprint modes cannot be combined.");
         if (aggressiveBlinkCatchUp && aggressiveSprintRetryDelay is < 500 or > 1500)
@@ -523,31 +525,47 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     private void QueueVisualWarp(FollowBridgeFrame frame)
     {
         if (!_experimentalWarpClick || _stopping) return;
-        var route = PartyWarpRoutes.FromFrame(frame, _topology);
-        if (route is null || Paused)
+        var visualRoute = PartyWarpRoutes.FromFrame(frame, _topology);
+        var controllerRoute = PartyWarpControllerPlan.FromFrame(frame, _topology);
+        var request = visualRoute?.Request ?? controllerRoute?.Request;
+        if (request is null || Paused)
         {
             _warpAttemptCancellation?.Cancel();
             _attemptedWarp = null;
             return;
         }
-        if (_attemptedWarp == route.Request || !_warpTask.IsCompleted) return;
-        _attemptedWarp = route.Request;
+        if (_attemptedWarp == request || !_warpTask.IsCompleted) return;
+        _attemptedWarp = request;
         _warpAttemptCancellation?.Dispose();
         _warpAttemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             _warpCancellation.Token);
-        _warpTask = RunVisualWarpAsync(route, _warpAttemptCancellation.Token);
+        _warpTask = RunCrossAreaWarpAsync(request, visualRoute, controllerRoute,
+            _warpAttemptCancellation.Token);
     }
 
-    private async Task RunVisualWarpAsync(PartyWarpRoute route,
+    private async Task RunCrossAreaWarpAsync(FollowHandoffRequest request,
+        PartyWarpRoute? visualRoute, PartyWarpControllerRoute? controllerRoute,
         CancellationToken token)
     {
         var original = _clients.FirstOrDefault(PoeChatInviteService.IsExactForeground);
-        var destination = _clients[route.Request.DestinationClient - 1];
+        var destination = _clients[request.DestinationClient - 1];
         try
         {
-            var result = await new PartyWarpClickService(new WindowsLoginInputPort(destination))
-                .TryClickAsync(route.RemotePortraitIndex, token);
-            Dispatcher.UIThread.Post(() => WarpStatusChanged?.Invoke(result.Detail));
+            string detail;
+            if (visualRoute is not null)
+            {
+                var result = await new PartyWarpClickService(new WindowsLoginInputPort(destination))
+                    .TryClickAsync(visualRoute.RemotePortraitIndex, token);
+                detail = result.Detail;
+            }
+            else if (controllerRoute is not null)
+            {
+                await PartyWarpControllerRunner.RunAsync(
+                    new BridgePartyWarpControllerPort(_bridge, destination), controllerRoute, token);
+                detail = "已发送手柄队伍名单传送序列；仍需区域日志确认是否传送成功。";
+            }
+            else return;
+            Dispatcher.UIThread.Post(() => WarpStatusChanged?.Invoke(detail));
         }
         catch (OperationCanceledException) { }
         catch (Exception error)

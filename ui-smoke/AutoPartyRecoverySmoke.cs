@@ -15,9 +15,21 @@ internal static class AutoPartyRecoverySmoke
             expected.Any(step => !BridgeSession.ValidAutoPartyPulse(step.Buttons, step.HoldMilliseconds)) ||
             !BridgeSession.ValidAutoPartyPulse(0x2000, 60) ||
             !BridgeSession.ValidAutoPartyPulse(0x0010, 80) ||
-            BridgeSession.ValidAutoPartyPulse(0x1000, 60) ||
+            !BridgeSession.ValidAutoPartyPulse(0x0002, 80) ||
+            !BridgeSession.ValidAutoPartyPulse(0x1000, 60) ||
+            BridgeSession.ValidAutoPartyPulse(0x1000, 100) ||
             BridgeSession.ValidAutoPartyPulse(0x2000, 80))
             throw new Exception("The target-version invite acceptance or roster menu sequence changed.");
+
+        var firstRosterMember = PartyWarpControllerPlan.ForTopologyRosterIndex(0, 6);
+        var lastRosterMember = PartyWarpControllerPlan.ForTopologyRosterIndex(5, 6);
+        if (firstRosterMember.Count != 7 || lastRosterMember.Count != 12 ||
+            firstRosterMember[0] != new PartyWarpControllerStep(0x0010, 100, 180) ||
+            lastRosterMember.Count(step => step.Buttons == 0x0002) != 5 ||
+            lastRosterMember[^1] != new PartyWarpControllerStep(0x2000, 60, 0) ||
+            lastRosterMember.Where(step => step.Buttons != 0)
+                .Any(step => !BridgeSession.ValidAutoPartyPulse(step.Buttons, step.HoldMs)))
+            throw new Exception("The observed-index controller warp sequence cannot pass the bridge.");
 
         var topology = PartyTopologies.DefaultFor(5);
         if (AutoPartyInviterSelection.DefaultLeaderPlayer(topology, 5, true) != 5 ||
