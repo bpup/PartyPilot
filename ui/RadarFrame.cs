@@ -219,7 +219,7 @@ public static class RadarProjection
 public sealed class RadarVisibility
 {
     private bool _keyWasDown;
-    public bool Enabled { get; private set; } = true;
+    public bool Enabled { get; private set; }
 
     public void Observe(bool gameForeground, bool keyDown)
     {

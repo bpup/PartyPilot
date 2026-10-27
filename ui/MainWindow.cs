@@ -245,7 +245,7 @@ public sealed class MainWindow : Window
         _flaskSupportPreferences = flaskSupportPreferences ?? new FlaskSupportPreferenceStore();
         _flaskRulePreferences = flaskRulePreferences ?? new FlaskRulePreferenceStore();
         _flaskCustomPreferences = flaskCustomPreferences ?? new FlaskCustomPreferenceStore();
-        Title = "PartyPilot · Play";
+        Title = "PartyPilot · 多角色跟随";
         Width = 1120;
         Height = 800;
         MinWidth = 760;
@@ -259,10 +259,10 @@ public sealed class MainWindow : Window
         shell.Children.Add(sidebar);
 
         var content = new StackPanel { Spacing = 18, Margin = new Thickness(34, 28, 34, 36) };
-        content.Children.Add(Label("PLAY", 12, AccentBrush, FontWeight.Bold));
+        content.Children.Add(Label("开始使用", 12, AccentBrush, FontWeight.Bold));
         var heading = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 16 };
-        heading.Children.Add(Label("Connect. Choose. Start playing.", 29, Brushes.White, FontWeight.Bold));
-        _hideNames.Content = "Hide names";
+        heading.Children.Add(Label("连接客户端，设置跟随与地图", 29, Brushes.White, FontWeight.Bold));
+        _hideNames.Content = "隐藏姓名";
         _hideNames.Click += (_, _) => NamePrivacy.Enabled = !NamePrivacy.Enabled;
         heading.Children.Add(_hideNames);
         content.Children.Add(heading);
@@ -383,7 +383,7 @@ public sealed class MainWindow : Window
 
     private void UpdateNamePrivacy()
     {
-        _hideNames.Content = NamePrivacy.Enabled ? "Names hidden" : "Hide names";
+        _hideNames.Content = NamePrivacy.Enabled ? "姓名已隐藏" : "隐藏姓名";
         _followLeaderName.PasswordChar = NamePrivacy.Enabled ? '•' : '\0';
     }
 
@@ -420,10 +420,10 @@ public sealed class MainWindow : Window
     private static Border BuildSidebar()
     {
         var navigation = new StackPanel { Width = 194, Spacing = 18, Margin = new Thickness(20, 26) };
-        navigation.Children.Add(Label("PARTYPILOT", 17, AccentBrush, FontWeight.Bold));
+        navigation.Children.Add(Label("PartyPilot", 17, AccentBrush, FontWeight.Bold));
         navigation.Children.Add(Label("独立 PoE2 组队工具", 11, MutedBrush));
         navigation.Children.Add(new Border { Height = 1, Background = EdgeBrush, Margin = new Thickness(0, 14) });
-        navigation.Children.Add(Label("PLAY  ·  游戏窗口", 13, Brushes.White, FontWeight.Bold));
+        navigation.Children.Add(Label("游戏窗口与角色", 13, Brushes.White, FontWeight.Bold));
         navigation.Children.Add(Label("自动跟随 · 集成待验证", 12, MutedBrush));
         navigation.Children.Add(Label("战斗与拾取 · 未接入", 12, MutedBrush));
         navigation.Children.Add(Label("设置与支持 · 未接入", 12, MutedBrush));
@@ -439,8 +439,8 @@ public sealed class MainWindow : Window
 
     private Border BuildInputStep()
     {
-        var panel = Step("1", "CHOOSE INPUT · 选择输入", "选择实体手柄，或让 P1 使用原生键鼠并为其他角色创建虚拟手柄。");
-        _inputMode.ItemsSource = new[] { "Controller · 实体手柄", "Keyboard and mouse · 键鼠" };
+        var panel = Step("1", "选择输入", "选择实体手柄，或让 P1 使用原生键鼠并为其他角色创建虚拟手柄。");
+        _inputMode.ItemsSource = new[] { "实体手柄", "键盘与鼠标" };
         _inputMode.SelectedIndex = 0;
         _inputMode.MinWidth = 260;
         _inputMode.HorizontalAlignment = HorizontalAlignment.Left;
@@ -619,7 +619,7 @@ public sealed class MainWindow : Window
 
     private Border BuildClientStep()
     {
-        var panel = Step("2", "HOW MANY CHARACTERS? · 选择人数", "按目标版本的布局列出 1–6 人及其所需客户端；仅部分布局支持上方的手柄配对引导。");
+        var panel = Step("2", "选择人数与客户端", "按目标版本的布局列出 1–6 人及其所需客户端；仅部分布局支持上方的手柄配对引导。");
         _playerCount.PlaceholderText = "选择 1–6 人";
         _playerCount.ItemsSource = Enumerable.Range(1, 6).Select(count => $"{count} 人").ToArray();
         _playerCount.Width = 190;
@@ -662,7 +662,7 @@ public sealed class MainWindow : Window
 
     private Border BuildAccountStep()
     {
-        var panel = Step("2A", "ACCOUNTS · 账号资料",
+        var panel = Step("2A", "账号资料",
             "按客户端保存独立 PoE 账号；密码只写入当前 Windows 用户保护的本地资料。每端一名角色时可启用启动后自动填入；须先确认邮箱和密码字段。");
         for (var index = 0; index < 3; index++)
         {
@@ -784,7 +784,7 @@ public sealed class MainWindow : Window
 
     private Border BuildLaunchStep()
     {
-        var panel = Step("3", "PREPARE & START · 准备并开始", "检查配置后可启动或绑定游戏窗口；已启用的独立客户端会尝试填入账号。此步骤不提交登录或执行角色配对。");
+        var panel = Step("3", "准备并开始", "检查配置后可启动或绑定游戏窗口；已启用的独立客户端会尝试填入账号。此步骤不提交登录或执行角色配对。");
         _applyLayout.Content = "对游戏窗口应用布局";
         panel.Children.Add(_applyLayout);
         _layoutMode.ItemsSource = new[] { "stacked", "tiled", "multiple" };
@@ -833,7 +833,7 @@ public sealed class MainWindow : Window
 
     private Border BuildAutoPartyStep()
     {
-        var panel = Step("3A", "AUTO PARTY · 组队邀请", "按角色填写游戏中的准确名称。已绑定游戏窗口前台时按所选快捷键可运行或取消自动组队。自动恢复向其他客户端发出全新邀请，按目标版菜单顺序接受，并检查 Current Party 画面候选人数。Windows 游戏内效果待验证。");
+        var panel = Step("3A", "组队邀请", "按角色填写游戏中的准确名称。已绑定游戏窗口前台时按所选快捷键可运行或取消自动组队。自动恢复向其他客户端发出全新邀请，按目标版菜单顺序接受，并检查游戏内队伍画面候选人数。Windows 游戏内效果待验证。");
         panel.Children.Add(Label("自动组队快捷键（目标版默认 F8；None 关闭）", 12, MutedBrush));
         _autoPartyKey.ItemsSource = AutoPartyKeyBinding.Options;
         _autoPartyKey.Width = 190;
@@ -887,7 +887,7 @@ public sealed class MainWindow : Window
 
     private Border BuildFollowStep()
     {
-        var panel = Step("4", "FOLLOW · 跟随", "实时输入支持双客户端 2P 或三个客户端 3P，均须每端一名角色；请先完成配对，并在每个客户端启用只读位置传感器。距离与时效需要按实际游戏校准。");
+        var panel = Step("4", "自动跟随与追赶", "本次 Beta 可测试双客户端 2 人或三客户端 3 人，均须每端一名角色；先完成配对，并在每个客户端启用只读位置传感器。4–6 人跟随仍需实机验证双角色数据。距离与时效需要按实际游戏校准。");
         var fields = new (TextBox Box, string Label)[]
         {
             (_followStop, "停止距离"), (_followCatchup, "追赶距离"),
@@ -1038,7 +1038,7 @@ public sealed class MainWindow : Window
 
     private Border BuildRadarStep()
     {
-        var panel = Step("5", "RADAR · 雷达", "在已绑定游戏窗口上显示只读实体标记和可选候选地形；请在对应 ExileCore2 实例中启用雷达诊断，绘制地形还需开启地形诊断。坐标方向与比例仍需游戏内校准。");
+        var panel = Step("5", "Tab 地图覆盖层", "按 Tab 在已绑定游戏窗口上显示可见标记和可选候选地形；请在对应 ExileCore2 实例中启用雷达诊断，绘制地形还需开启地形诊断。无迷雾效果、坐标方向与比例仍需游戏内验证。");
         panel.Children.Add(Label("雷达显隐快捷键（如 Tab、Ctrl+R、Shift+F9）", 12, MutedBrush));
         var hotkeyRow = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
         _radarHotkeyText.Width = 190;
@@ -1079,9 +1079,9 @@ public sealed class MainWindow : Window
             panel.Children.Add(path);
         }
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
-        _startRadar.Content = "显示雷达";
+        _startRadar.Content = "启动地图覆盖层";
         _startRadar.Click += (_, _) => StartRadar();
-        _stopRadar.Content = "关闭雷达";
+        _stopRadar.Content = "关闭地图覆盖层";
         _stopRadar.Click += async (_, _) => await StopRadarAsync();
         actions.Children.Add(_startRadar);
         actions.Children.Add(_stopRadar);
@@ -1095,7 +1095,7 @@ public sealed class MainWindow : Window
 
     private Border BuildPrivacyStep()
     {
-        var panel = Step("6", "PRIVACY · 游戏画面遮挡",
+        var panel = Step("6", "游戏画面遮挡",
             "在已绑定游戏窗口的指定区域显示模糊遮挡；窗口画面无法捕获时保留黑色遮挡。仅当前游戏窗口在前台时显示，暂不自动识别姓名牌。");
         panel.Children.Add(Label("每行：客户端编号, 左边距%, 上边距%, 宽%, 高%；最多 16 行，例如 1,10,5,20,6。", 12, MutedBrush));
         _privacyAutoNames.Content = "自动识别并遮挡游戏画面中的姓名牌（需启用各客户端传感器）";
@@ -1123,7 +1123,7 @@ public sealed class MainWindow : Window
 
     private Border BuildFpsStep()
     {
-        var panel = Step("6", "PERFORMANCE · FPS", "按客户端分别预览前台与后台帧率配置。仅修改明确指定的 PoE2 配置文件；应用前需关闭所有游戏窗口。");
+        var panel = Step("6", "帧率设置", "按客户端分别预览前台与后台帧率配置。仅修改明确指定的 PoE2 配置文件；应用前需关闭所有游戏窗口。");
         _fpsGamesClosed.Content = "应用前已关闭所有 PoE2 游戏客户端";
         _fpsGamesClosed.IsCheckedChanged += (_, _) => UpdateFpsControls();
         panel.Children.Add(_fpsGamesClosed);
@@ -1175,7 +1175,7 @@ public sealed class MainWindow : Window
 
     private Border BuildResourceStep()
     {
-        var panel = Step("7", "PERFORMANCE · RESOURCES",
+        var panel = Step("7", "资源设置",
             "按已绑定客户端预览并显式启用后台资源策略；切回前台时恢复。0 表示不设置该项。");
         for (var index = 0; index < 3; index++)
         {
@@ -3727,6 +3727,9 @@ public sealed class MainWindow : Window
                 await Task.Delay(900, cancellation.Token);
             }
             if (items.Count == 0 && manualCount == 0) return null;
+            if (items.Count > 0 && !PoeChatInviteService.IsExactForeground(clients[0]) &&
+                !await PoeChatInviteService.FocusExactWindowAsync(clients[0], cancellation.Token))
+                return $"已为 {items.Count} 个独立客户端填入账号；主客户端未能恢复前台，请手动聚焦后再配对。";
             return $"已为 {items.Count} 个独立客户端填入账号；{manualCount} 个窗口本次手动登录。配对时将重新核验已填入的登录画面。";
         }
         catch (OperationCanceledException)

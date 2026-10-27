@@ -65,7 +65,7 @@ internal sealed class FollowTargetPreferenceStore
     }
 
     private static FollowTargetPreferenceResult Default() =>
-        new(true, new int[6], "使用目标版默认跟随目标：Current MAIN。");
+        new(true, new int[6], "使用目标版默认跟随目标：当前主控。");
 
     private static FollowTargetPreferenceResult Invalid() =>
         new(false, new int[6], "跟随目标设置无效；请为当前布局重新选择每个目标。");

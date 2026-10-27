@@ -203,7 +203,7 @@ if (chosenCustom is not { Length: 2 } || chosenCustom[0].Threshold != 45 ||
     throw new Exception("Custom recovery editor did not keep independent ordered rules.");
 var inputMode = window.GetLogicalDescendants().OfType<ComboBox>()
     .SingleOrDefault(box => box.ItemsSource?.OfType<string>()
-        .Contains("Keyboard and mouse · 键鼠") == true);
+        .Contains("键盘与鼠标") == true);
 if (inputMode is null || inputMode.SelectedIndex != 0)
     throw new Exception("The desktop did not offer the observed keyboard and mouse input mode.");
 inputMode.SelectedIndex = 1;
@@ -391,7 +391,7 @@ var questRadarText = radarText.Replace(
     "\"Category\":\"quest\",\"Path\":\"Metadata/Effects/QuestMarker\",\"Label\":\"Quest marker\"");
 if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(questRadarText), 123, DateTime.UtcNow, out var questRadarFrame) ||
     questRadarFrame?.Markers[1].Category != "quest" ||
-    RadarOverlayWindow.DisplayLabel(questRadarFrame.Markers[1]) != "Quest marker" ||
+    RadarOverlayWindow.DisplayLabel(questRadarFrame.Markers[1]) != "任务线索 · Quest marker" ||
     RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
         questRadarText.Replace("\"Label\":\"Quest marker\"", "\"Label\":null")), 123, DateTime.UtcNow, out _))
     throw new Exception("Radar quest marker parsing or display failed.");
@@ -400,7 +400,7 @@ var bossRadarText = radarText.Replace(
     "\"Category\":\"boss\",\"Path\":\"Metadata/Monsters/HyenaMonster/Objects/BossRoomMinimapIcon\",\"Label\":\"Rathbreaker\"");
 if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(bossRadarText), 123, DateTime.UtcNow, out var bossRadarFrame) ||
     bossRadarFrame?.Markers[1].Category != "boss" ||
-    RadarOverlayWindow.DisplayLabel(bossRadarFrame.Markers[1]) != "Rathbreaker" ||
+    RadarOverlayWindow.DisplayLabel(bossRadarFrame.Markers[1]) != "首领地点 · Rathbreaker" ||
     RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
         bossRadarText.Replace("\"Label\":\"Rathbreaker\"", "\"Label\":\"Unknown\"")),
         123, DateTime.UtcNow, out _))
@@ -410,7 +410,7 @@ var bossWindow = new RadarOverlayWindow(new LaunchedClient(123, 1, "C:/Game.exe"
 bossWindow.Show();
 bossWindow.Apply(bossRadarFrame);
 bossWindow.UpdateLayout();
-if (!bossWindow.GetLogicalDescendants().OfType<TextBlock>().Any(label => label.Text == "Rathbreaker"))
+if (!bossWindow.GetLogicalDescendants().OfType<TextBlock>().Any(label => label.Text == "首领地点 · Rathbreaker"))
     throw new Exception("Radar did not draw the named boss room marker.");
 bossWindow.Close();
 var questCache = new RadarLandmarkCache();
@@ -422,15 +422,16 @@ var projected = RadarProjection.Project(radarFrame.PlayerX, radarFrame.PlayerY,
     radarFrame.Markers[0], 400, 300, radarScale);
 if (projected != (406d, 296d)) throw new Exception("Radar marker projection changed unexpectedly.");
 var radarVisibility = new RadarVisibility();
+if (radarVisibility.Enabled) throw new Exception("Radar was visible before Tab was pressed.");
 radarVisibility.Observe(true, true);
 radarVisibility.Observe(true, true);
-if (radarVisibility.Enabled) throw new Exception("A held Tab key toggled radar more than once.");
+if (!radarVisibility.Enabled) throw new Exception("Tab did not open radar or repeated while held.");
 radarVisibility.Observe(true, false);
 radarVisibility.Observe(true, true);
-if (!radarVisibility.Enabled) throw new Exception("A second Tab press did not restore radar.");
+if (radarVisibility.Enabled) throw new Exception("A second Tab press did not hide radar.");
 radarVisibility.Observe(false, false);
 radarVisibility.Observe(false, true);
-if (!radarVisibility.Enabled) throw new Exception("Tab outside the game changed radar visibility.");
+if (radarVisibility.Enabled) throw new Exception("Tab outside the game changed radar visibility.");
 var radarWindow = new RadarOverlayWindow(new LaunchedClient(123, 1, "C:/Game.exe"), radarScale,
     radarVisibility, renderOnly: true);
 radarWindow.Show();
@@ -441,7 +442,7 @@ var lootMarker = radarFrame.Markers.Single(marker => marker.Category == "loot");
 var leaderField = window.GetLogicalDescendants().OfType<TextBox>()
     .Single(field => field.Watermark?.ToString() == "角色名");
 var hideNamesButton = window.GetLogicalDescendants().OfType<Button>()
-    .Single(button => button.Content?.ToString() == "Hide names");
+    .Single(button => button.Content?.ToString() == "隐藏姓名");
 leaderField.Text = "Leader";
 NamePrivacy.Enabled = true;
 Dispatcher.UIThread.RunJobs();
@@ -451,7 +452,7 @@ if (NamePrivacy.Mask("Teammate") != "hidden" || NamePrivacy.Mask("  ") != "" ||
     RadarOverlayWindow.DisplayLabel(playerMarker) != "hidden" ||
     RadarOverlayWindow.DisplayLabel(lootMarker) != "Scroll of Wisdom" ||
     leaderField.PasswordChar != '•' || leaderField.Text != "Leader" ||
-    hideNamesButton.Content?.ToString() != "Names hidden" ||
+    hideNamesButton.Content?.ToString() != "姓名已隐藏" ||
     !radarWindow.GetLogicalDescendants().OfType<TextBlock>().Any(label => label.Text == "hidden"))
     throw new Exception("Name privacy changed identity data or failed to mask a displayed character name.");
 var hiddenRadarOutput = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(args.FirstOrDefault() ?? "../PartyPilot-ui-preview.png"))!,
@@ -461,7 +462,7 @@ NamePrivacy.Enabled = false;
 Dispatcher.UIThread.RunJobs();
 if (RadarOverlayWindow.DisplayLabel(playerMarker) != "Teammate" ||
     leaderField.PasswordChar != '\0' || leaderField.Text != "Leader" ||
-    hideNamesButton.Content?.ToString() != "Hide names")
+    hideNamesButton.Content?.ToString() != "隐藏姓名")
     throw new Exception("Showing names did not restore the visible label without changing the real input.");
 var radarScreenshot = radarWindow.CaptureRenderedFrame() ?? throw new Exception("Radar overlay did not render.");
 var radarOutput = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(args.FirstOrDefault() ?? "../PartyPilot-ui-preview.png"))!,
@@ -559,12 +560,12 @@ if (!PrivacyGameplayFrames.TryParse(privacyPulse, 123, DateTime.UtcNow, out var 
         123, DateTime.UtcNow, out _))
     throw new Exception("Privacy gameplay evidence accepted a stale or unrelated process sample.");
 var labels = window.GetLogicalDescendants().OfType<TextBlock>().Select(item => item.Text).ToArray();
-if (!labels.Contains("PLAY") || !labels.Any(item => item?.Contains("HOW MANY CHARACTERS") == true) ||
-    !labels.Any(item => item?.Contains("PREPARE & START") == true) ||
-    !labels.Any(item => item?.Contains("FOLLOW · 跟随") == true) ||
-    !labels.Any(item => item?.Contains("RADAR · 雷达") == true) ||
-    !labels.Any(item => item?.Contains("PERFORMANCE · FPS") == true) ||
-    !labels.Any(item => item?.Contains("PRIVACY · 游戏画面遮挡") == true) ||
+if (!labels.Contains("开始使用") || !labels.Any(item => item?.Contains("选择人数与客户端") == true) ||
+    !labels.Any(item => item?.Contains("准备并开始") == true) ||
+    !labels.Any(item => item?.Contains("自动跟随与追赶") == true) ||
+    !labels.Any(item => item?.Contains("Tab 地图覆盖层") == true) ||
+    !labels.Any(item => item?.Contains("帧率设置") == true) ||
+    !labels.Any(item => item?.Contains("游戏画面遮挡") == true) ||
     labels.Contains("恢复距离"))
 {
     throw new Exception("The launcher steps were not created in the window tree.");
@@ -825,7 +826,7 @@ Dispatcher.UIThread.RunJobs();
 var p2Target = window.GetLogicalDescendants().OfType<ComboBox>()
     .Single(item => item.Name == "follow-target-2");
 if (!p2Target.IsEffectivelyVisible ||
-    !p2Target.ItemsSource!.Cast<string>().SequenceEqual(["Current MAIN", "P1", "P3"]))
+    !p2Target.ItemsSource!.Cast<string>().SequenceEqual(["当前主控", "P1", "P3"]))
     throw new Exception("Three independent clients did not expose P2's active follow targets.");
 if (!terrainPaths.All(box => box.IsEffectivelyVisible))
     throw new Exception("Three independent clients did not expose three terrain bindings.");

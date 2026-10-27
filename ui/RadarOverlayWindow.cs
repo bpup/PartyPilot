@@ -77,8 +77,12 @@ public sealed class RadarOverlayWindow : Window
     {
         "player" => NamePrivacy.Mask(marker.Label),
         "loot" => marker.Label ?? string.Empty,
-        "quest" => marker.Label ?? string.Empty,
-        "boss" => marker.Label ?? string.Empty,
+        "quest" => "任务线索 · " + marker.Label,
+        "boss" => "首领地点 · " + marker.Label,
+        "waypoint" => "传送点",
+        "checkpoint" => "检查点",
+        "portal" => "传送门",
+        "transition" => "区域入口",
         _ => marker.Path.Split('/').Last()
     };
 
