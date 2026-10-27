@@ -18,6 +18,7 @@ AutoLoginPreferenceSmoke.Run();
 AutoLoginStartupPlanSmoke.Run();
 LeadershipPreferenceSmoke.Run();
 AutoPartyCoordinatorSmoke.Run();
+AutoPartyHotkeySmoke.Run();
 AutoPartyInviteSmoke.Run();
 AutoPartyRecoverySmoke.Run();
 await AutoPartyRecoverySchedulerSmoke.RunAsync();

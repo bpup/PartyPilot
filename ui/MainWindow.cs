@@ -146,6 +146,7 @@ public sealed class MainWindow : Window
     private CancellationTokenSource? _autoLoginFillCancellation;
     private PartyLeaveLogMonitor? _partyLogMonitor;
     private bool _autoPartyRunning;
+    private AutoPartyKeyboardHook? _autoPartyHotkey;
     private bool _closing;
     private string _loginStatus = "waiting";
     private bool _busy;
@@ -199,10 +200,25 @@ public sealed class MainWindow : Window
         _isolationConfirmed.IsCheckedChanged += (_, _) => UpdateBridgeControls();
         _physicalIndex.SelectionChanged += (_, _) => UpdateBridgeControls();
         _physicalDevice.TextChanged += (_, _) => UpdateBridgeControls();
+        Opened += (_, _) =>
+        {
+            if (!OperatingSystem.IsWindows()) return;
+            _autoPartyHotkey ??= new AutoPartyKeyboardHook(
+                () => _launchedClients.Any(PoeChatInviteService.IsExactForeground),
+                () => Dispatcher.UIThread.Post(() =>
+                {
+                    if (_closing) return;
+                    if (_autoPartyRunning) _autoPartyCancellation?.Cancel();
+                    else if (_runAutoParty.IsEnabled) _ = RunAutoPartyAsync();
+                }));
+            if (!_autoPartyHotkey.Start())
+                _autoPartyStatus.Text = "F8 快捷键未能启用；仍可使用自动组队按钮。";
+        };
         Closed += async (_, _) =>
         {
             NamePrivacy.Changed -= UpdateNamePrivacy;
             _closing = true;
+            _autoPartyHotkey?.Dispose();
             await StopAllResourcesAsync();
             await StopRadarAsync();
             StopPrivacy();
@@ -551,7 +567,7 @@ public sealed class MainWindow : Window
 
     private Border BuildAutoPartyStep()
     {
-        var panel = Step("3A", "AUTO PARTY · 组队邀请", "按角色填写游戏中的准确名称。自动恢复向其他客户端发出全新邀请，按目标版菜单顺序接受，并检查 Current Party 画面候选人数。Windows 游戏内效果待验证。");
+        var panel = Step("3A", "AUTO PARTY · 组队邀请", "按角色填写游戏中的准确名称。游戏窗口前台时按 F8 可运行或取消自动组队。自动恢复向其他客户端发出全新邀请，按目标版菜单顺序接受，并检查 Current Party 画面候选人数。Windows 游戏内效果待验证。");
         for (var player = 1; player <= 6; player++)
         {
             var row = new StackPanel { Spacing = 4 };
