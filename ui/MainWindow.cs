@@ -76,6 +76,7 @@ public sealed class MainWindow : Window
     private readonly TextBlock _autoPartyStatus = new();
     private readonly TextBlock _status = new();
     private readonly ComboBox _inputMode = new();
+    private readonly TextBlock _focusGuide = new();
     private readonly Button _hybridBindingsButton = new();
     private readonly TextBlock _hybridBindingsStatus = new();
     private readonly HybridBindingPreferenceStore _hybridBindingPreferences = new();
@@ -446,12 +447,20 @@ public sealed class MainWindow : Window
         _inputMode.HorizontalAlignment = HorizontalAlignment.Left;
         _inputMode.SelectionChanged += (_, _) =>
         {
+            _focusGuide.Text = HybridSelected
+                ? "键鼠默认操作：F1 返回 P1，F2–F6 切换其他角色；返回 P1 后，其他角色恢复自动跟随。聚焦键可在上方按键映射中修改。"
+                : "手柄操作：按下左摇杆 L3 控制 P1，按下右摇杆 R3 控制 P2；LT+L3/R3 切换 P3/P4，LT+方向键上/下切换 P5/P6。松开后间隔至少 350 毫秒再次按当前角色聚焦键，可返回共同控制，其余角色恢复自动跟随。";
             _pairingStatus.Text = HybridSelected
                 ? "键鼠模式要求客户端 1 仅有 P1。启动游戏前会先建立虚拟手柄；绑定现有窗口后也可手动准备。"
                 : "实体手柄模式需要确认 HidHide 隔离与输入设备。";
             UpdateBridgeControls();
         };
         panel.Children.Add(_inputMode);
+        _focusGuide.Name = "focus-help";
+        _focusGuide.Text = "手柄操作：按下左摇杆 L3 控制 P1，按下右摇杆 R3 控制 P2；LT+L3/R3 切换 P3/P4，LT+方向键上/下切换 P5/P6。松开后间隔至少 350 毫秒再次按当前角色聚焦键，可返回共同控制，其余角色恢复自动跟随。";
+        _focusGuide.Foreground = MutedBrush;
+        _focusGuide.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_focusGuide);
         _hybridBindingsButton.Content = "设置键鼠按键映射";
         _hybridBindingsButton.HorizontalAlignment = HorizontalAlignment.Left;
         _hybridBindingsButton.Click += async (_, _) => await EditHybridBindingsAsync();
@@ -592,6 +601,7 @@ public sealed class MainWindow : Window
             UpdateBridgeControls();
         };
         panel.Children.Add(_lastFocusedLeads);
+        panel.Children.Add(Label("若希望 P1 始终带路，关闭上方选项；默认规则会让最近手动聚焦的角色成为主控。", 12, MutedBrush));
         panel.Children.Add(_leadershipPreferenceStatus);
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12, LineSpacing = 8 };
         _prepareBridge.Content = "准备虚拟手柄";

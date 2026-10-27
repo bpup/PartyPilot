@@ -206,7 +206,14 @@ var inputMode = window.GetLogicalDescendants().OfType<ComboBox>()
         .Contains("键盘与鼠标") == true);
 if (inputMode is null || inputMode.SelectedIndex != 0)
     throw new Exception("The desktop did not offer the observed keyboard and mouse input mode.");
+var focusHelp = window.GetLogicalDescendants().OfType<TextBlock>()
+    .Single(label => label.Name == "focus-help");
+if (focusHelp.Text?.Contains("L3") != true || focusHelp.Text.Contains("R3") != true ||
+    focusHelp.Text.Contains("350 毫秒") != true)
+    throw new Exception("Controller focus and return guidance was not shown.");
 inputMode.SelectedIndex = 1;
+if (focusHelp.Text?.Contains("F1") != true || focusHelp.Text.Contains("F2–F6") != true)
+    throw new Exception("Keyboard focus guidance did not follow the selected input mode.");
 if (window.GetLogicalDescendants().OfType<Button>()
         .Single(button => button.Content?.ToString() == "准备键鼠虚拟手柄").IsEnabled)
     throw new Exception("Keyboard virtual pads became available without bound game windows.");
