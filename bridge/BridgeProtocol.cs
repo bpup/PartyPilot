@@ -289,14 +289,34 @@ internal static class BridgeProtocol
                 sprintDown = sprintValue.GetBoolean();
             }
             if (sprintDown && state != "catching_up") return false;
+            var mirrorMovement = false;
+            if (root.TryGetProperty("mirror_movement", out var mirrorValue))
+            {
+                if (mirrorValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return false;
+                mirrorMovement = mirrorValue.GetBoolean();
+            }
+            if (mirrorMovement && state != "holding") return false;
             if (state is "waiting" or "holding")
             {
                 if (state == "waiting" && manualEligible) return false;
+                if (mirrorMovement) return TryParseMovement(root, slot, manualEligible, false, out command);
                 command = new BridgeCommand(slot, 0, 0, false, manualEligible, false);
                 return true;
             }
-            if (state is not ("following" or "catching_up") ||
-                !root.TryGetProperty("x", out var xElement) ||
+            if (state is not ("following" or "catching_up")) return false;
+            return TryParseMovement(root, slot, manualEligible, sprintDown, out command);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryParseMovement(JsonElement root, int slot, bool manualEligible,
+        bool sprintDown, out BridgeCommand command)
+    {
+        command = default;
+        if (!root.TryGetProperty("x", out var xElement) ||
                 !root.TryGetProperty("y", out var yElement) ||
                 !xElement.TryGetDouble(out var x) ||
                 !yElement.TryGetDouble(out var y) ||
@@ -313,10 +333,5 @@ internal static class BridgeProtocol
                 (short)Math.Clamp(Math.Round(y * 32767), short.MinValue, short.MaxValue),
                 true, manualEligible, sprintDown);
             return true;
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
     }
 }

@@ -145,6 +145,7 @@ func (m *CloseMirror) Apply(input CloseMirrorInput) Command {
 	if follow.State == Holding {
 		follow.X, follow.Y = normalizedMirror(input.LeftX, input.LeftY)
 		follow.Reason = "Close-range mirror"
+		follow.MirrorMovement = true
 	}
 	return follow
 }

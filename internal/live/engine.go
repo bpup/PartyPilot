@@ -19,29 +19,32 @@ import (
 // Engine joins one read-only sensor and one independent log per game client.
 // Its output is a movement decision; it does not establish game input mapping.
 type Engine struct {
-	coordinator      *party.Coordinator
-	leader           int
-	baseLeader       int
-	lastFocusedLeads bool
-	logAge           time.Duration
-	sampleAge        time.Duration
-	pidToSlot        map[int]int
-	pidToRoles       map[int][]RoleBinding
-	slotToPID        map[int]int
-	slots            []int
-	samples          map[int]telemetry.Sample
-	vitals           map[int]telemetry.Sample
-	strictVitals     map[int]bool
-	areas            map[int]arealog.Signal
-	terrains         map[int]boundTerrain
-	terrainStable    map[int]terrainStability
-	leaderName       string
-	memberNames      map[int]string
-	stopped          string
-	followPaused     bool
-	mainInput        MainInput
-	mainInputValid   bool
-	acceptMainInput  bool
+	coordinator         *party.Coordinator
+	leader              int
+	baseLeader          int
+	lastFocusedLeads    bool
+	logAge              time.Duration
+	sampleAge           time.Duration
+	pidToSlot           map[int]int
+	pidToRoles          map[int][]RoleBinding
+	slotToPID           map[int]int
+	slots               []int
+	samples             map[int]telemetry.Sample
+	vitals              map[int]telemetry.Sample
+	strictVitals        map[int]bool
+	areas               map[int]arealog.Signal
+	terrains            map[int]boundTerrain
+	terrainStable       map[int]terrainStability
+	leaderName          string
+	memberNames         map[int]string
+	stopped             string
+	followPaused        bool
+	mainInput           MainInput
+	mainInputValid      bool
+	acceptMainInput     bool
+	closeMirrorEnabled  bool
+	closeMirrorDuration time.Duration
+	closeMirrors        map[int]*follow.CloseMirror
 }
 
 // SetFollowPaused temporarily releases movement without discarding process,
@@ -50,6 +53,7 @@ func (e *Engine) SetFollowPaused(paused bool) {
 	e.followPaused = paused
 	if paused {
 		e.mainInputValid = false
+		e.resetCloseMirrors()
 	}
 }
 func (e *Engine) FollowPaused() bool { return e.followPaused }
@@ -111,6 +115,7 @@ func (e *Engine) ObserveManualFocus(slot int) error {
 	e.leader = slot
 	e.leaderName = e.memberNames[slot]
 	e.mainInputValid = false
+	e.resetCloseMirrors()
 	return nil
 }
 
@@ -121,6 +126,7 @@ func (e *Engine) Stop(reason string) {
 	e.coordinator.ResetFollow()
 	e.terrainStable = make(map[int]terrainStability)
 	e.mainInputValid = false
+	e.resetCloseMirrors()
 }
 
 // ObserveParty latches a stop. A later position or area update cannot resume
@@ -468,6 +474,7 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 	commands := e.coordinator.StepWithTerrainsAndHolds(now, positions, terrains, holds)
 	for slot, command := range commands {
 		if deadFollowers[slot] {
+			e.resetCloseMirror(slot)
 			commands[slot] = follow.Command{State: follow.Waiting, Reason: "dead follower"}
 			continue
 		}
@@ -477,6 +484,7 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 		if life := lives[slot]; life != nil && *life > 0 && command.State != follow.Waiting {
 			command.ManualOverrideEligible = true
 		}
+		command = e.applyCloseMirror(slot, command, now, positions)
 		commands[slot] = command
 	}
 	return commands

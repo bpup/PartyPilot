@@ -116,6 +116,8 @@ public sealed class MainWindow : Window
     private readonly TextBox[] _terrainBindingPaths = new TextBox[3];
     private readonly StackPanel[] _terrainBindingRows = new StackPanel[3];
     private readonly CheckBox _classicSprintCatchUp = new();
+    private readonly CheckBox _closeRangeMirror = new();
+    private readonly TextBox _closeMirrorDuration = new();
     private readonly CheckBox _classicCollisionDodge = new();
     private readonly TextBlock _terrainBindingStatus = new();
     private readonly TextBox _followLeaderName = new();
@@ -836,6 +838,15 @@ public sealed class MainWindow : Window
             UpdateFollowControls();
         };
         panel.Children.Add(_classicSprintCatchUp);
+        _closeRangeMirror.Content = "近距离镜像跟随（实体手柄；目标版默认关闭）";
+        _closeRangeMirror.IsCheckedChanged += (_, _) => UpdateFollowControls();
+        panel.Children.Add(_closeRangeMirror);
+        panel.Children.Add(Label("镜像时长（毫秒，50–5000；目标版默认 400）", 12, MutedBrush));
+        _closeMirrorDuration.Text = "400";
+        _closeMirrorDuration.Width = 190;
+        _closeMirrorDuration.HorizontalAlignment = HorizontalAlignment.Left;
+        _closeMirrorDuration.TextChanged += (_, _) => UpdateFollowControls();
+        panel.Children.Add(_closeMirrorDuration);
         panel.Children.Add(Label("候选地形绑定（可选；每个客户端都须使用已核对的独立文件）", 12, MutedBrush));
         for (var index = 0; index < _terrainBindingPaths.Length; index++)
         {
@@ -2152,11 +2163,17 @@ public sealed class MainWindow : Window
             if (binding is not null) binding.IsEnabled = _follow is null && !_busy;
         _classicSprintCatchUp.IsEnabled = _follow is null && !_busy &&
             _selectedTopology?.Id is ("2-split" or "3-three-singles");
+        _closeRangeMirror.IsEnabled = _follow is null && !_busy &&
+            _selectedTopology?.Id == "2-split" && _bridge is { IsHybridMode: false };
+        _closeMirrorDuration.IsEnabled = _closeRangeMirror.IsEnabled && _closeRangeMirror.IsChecked == true;
         _classicCollisionDodge.IsEnabled = _follow is null && !_busy &&
             _selectedTopology?.Id is ("2-split" or "3-three-singles") &&
             _classicSprintCatchUp.IsChecked == true;
         var valid = LiveFollowPlan.TryCreate(_followStop.Text, _followCatchup.Text,
             _followMaxAge.Text, _followLogAge.Text, _followLeaderName.Text, out _);
+        if (_closeRangeMirror.IsEnabled && _closeRangeMirror.IsChecked == true)
+            valid &= int.TryParse(_closeMirrorDuration.Text, NumberStyles.None,
+                CultureInfo.InvariantCulture, out var duration) && duration is >= 50 and <= 5000;
         if (_selectedTopology?.Id is "2-split" or "3-three-singles")
         {
             valid &= _selectedTopology.Slots.All(slot =>
@@ -2813,6 +2830,14 @@ public sealed class MainWindow : Window
             _followStatus.Text = "找不到 PartyPilot-LiveFollow.exe；请使用完整发布目录。";
             return;
         }
+        var enableCloseMirror = _selectedTopology.Id == "2-split" && !_bridge.IsHybridMode &&
+            _closeRangeMirror.IsChecked == true;
+        if (enableCloseMirror && (!int.TryParse(_closeMirrorDuration.Text, NumberStyles.None,
+                CultureInfo.InvariantCulture, out var mirrorDuration) || mirrorDuration is < 50 or > 5000))
+        {
+            _followStatus.Text = "镜像时长必须为 50–5000 毫秒。";
+            return;
+        }
         _busy = true;
         UpdateFollowControls();
         _followStatus.Text = "正在核对进程、日志与传感器输入…";
@@ -2849,7 +2874,10 @@ public sealed class MainWindow : Window
             var session = await LiveFollowSession.StartAsync(executable, _selectedTopology,
                 _launchedClients, _bridge, plan, memberNames, followTargets, playerStops,
                 terrain, _classicCollisionDodge.IsChecked == true,
-                _classicSprintCatchUp.IsChecked == true);
+                _classicSprintCatchUp.IsChecked == true,
+                relayMainInput: enableCloseMirror,
+                closeRangeMirror: enableCloseMirror,
+                closeMirrorDuration: int.Parse(_closeMirrorDuration.Text!, CultureInfo.InvariantCulture));
             session.StatusChanged += FollowStatusChanged;
             session.Ended += FollowEnded;
             _follow = session;
@@ -2896,6 +2924,7 @@ public sealed class MainWindow : Window
         {
             ("following", _) => "已输出跟随方向；游戏内移动效果待验证。",
             ("catching_up", _) => "已输出追赶方向；游戏内移动效果待验证。",
+            ("holding", "Close-range mirror") => "近距离镜像方向已输出；游戏内移动效果待验证。",
             ("holding", _) => "跟随者已停靠，自动方向已停止。",
             ("waiting", "missing position") => "缺少角色位置样本；请检查两端传感器与进程绑定。自动方向已停止。",
             ("waiting", "different or unknown instance") => "两端尚无可用的同一区域实例证据；自动方向已停止。",

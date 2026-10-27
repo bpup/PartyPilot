@@ -22,6 +22,7 @@ func (e *Engine) SetAcceptMainInput(enabled bool) {
 	e.acceptMainInput = enabled
 	if !enabled {
 		e.mainInputValid = false
+		e.resetCloseMirrors()
 	}
 }
 

@@ -105,6 +105,12 @@ if (!BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"catching_up\",\"x\":1,\"y\
     BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"catching_up\",\"x\":1,\"y\":0,\"sprint_down\":1}", out _))
     throw new Exception("Sprint bridge command was not limited to catch-up movement.");
 Expect("{\"slot\":3,\"state\":\"holding\"}", true, 3, false);
+if (!BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"holding\",\"x\":1,\"y\":0,\"manual_override_eligible\":true,\"mirror_movement\":true}", out var closeMirror) ||
+    !closeMirror.Active || closeMirror.X != 32767 || closeMirror.Y != 0 ||
+    !BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"holding\",\"x\":1,\"y\":0,\"mirror_movement\":true}", out _) ||
+    BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0,\"mirror_movement\":true}", out _) ||
+    BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"holding\",\"x\":0,\"y\":0,\"manual_override_eligible\":true,\"mirror_movement\":true}", out _))
+    throw new Exception("Close-range mirror movement was not isolated from ordinary holding.");
 Expect("{\"slot\":2,\"state\":\"waiting\"}", true, 2, false);
 if (!BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"holding\",\"manual_override_eligible\":true}", out var manualHolding) ||
     !manualHolding.EligibleForManualMovement || manualHolding.Active ||

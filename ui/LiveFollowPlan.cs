@@ -89,6 +89,15 @@ public static class LiveFollowFrame
         }
         if (sprintDown && state != "catching_up")
             throw new InvalidDataException("Sprint requires active catch-up.");
+        var mirrorMovement = false;
+        if (follower.TryGetProperty("mirror_movement", out var mirrorValue))
+        {
+            if (mirrorValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                throw new InvalidDataException("Live follow returned an invalid mirror flag.");
+            mirrorMovement = mirrorValue.GetBoolean();
+        }
+        if (mirrorMovement && state != "holding")
+            throw new InvalidDataException("Mirror movement requires a holding follower.");
         var flasks = new List<FlaskBridgeRequest>();
         if (root.TryGetProperty("flasks", out var flaskValue))
         {
@@ -118,6 +127,22 @@ public static class LiveFollowFrame
         {
             if (state == "waiting" && manualEligible)
                 throw new InvalidDataException("Waiting follower cannot receive manual movement.");
+            if (mirrorMovement)
+            {
+                if (!follower.TryGetProperty("x", out var mirrorXValue) || !mirrorXValue.TryGetDouble(out var mirrorX) ||
+                    !follower.TryGetProperty("y", out var mirrorYValue) || !mirrorYValue.TryGetDouble(out var mirrorY) ||
+                    !double.IsFinite(mirrorX) || !double.IsFinite(mirrorY) ||
+                    Math.Sqrt(mirrorX * mirrorX + mirrorY * mirrorY) is < 0.001 or > 1.001)
+                    throw new InvalidDataException("Live follow returned an invalid mirror direction.");
+                var mirrored = manualEligible
+                    ? JsonSerializer.Serialize(new { slot = followerPad, state, x = mirrorX, y = mirrorY,
+                        manual_override_eligible = true, mirror_movement = true })
+                    : JsonSerializer.Serialize(new { slot = followerPad, state, x = mirrorX, y = mirrorY,
+                        mirror_movement = true });
+                return new FollowBridgeFrame(mirrored, state, reason)
+                    { Flasks = flasks, FocusedPlayer = expectedLeader, FollowerPad = followerPad,
+                        PadCommands = [new FollowPadCommand(followerPartyPlayer, followerPad, mirrored, state, reason)] };
+            }
             var command = manualEligible
                 ? JsonSerializer.Serialize(new { slot = followerPad, state, manual_override_eligible = true })
                 : JsonSerializer.Serialize(new { slot = followerPad, state });

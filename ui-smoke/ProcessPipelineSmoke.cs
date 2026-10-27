@@ -72,7 +72,8 @@ internal static class ProcessPipelineSmoke
                 "        print('{\"event\":\"main_input\",\"slot\":1,\"left_x\":40000,\"left_y\":0,\"b_down\":true,\"blocked\":false}', flush=True)\n" +
                 "        print('{\"event\":\"main_input\",\"slot\":1,\"left_x\":1234,\"left_y\":-2345,\"b_down\":true,\"blocked\":false}', flush=True)\n");
             File.WriteAllText(mainInputFollowExe, "#!/usr/bin/env python3\nimport sys,json,time\n" +
-                "if '-accept-main-input' not in sys.argv: sys.exit(2)\n" +
+                "if '-accept-main-input' not in sys.argv or '-close-range-mirror' not in sys.argv: sys.exit(2)\n" +
+                "if '-close-mirror-duration' not in sys.argv or sys.argv[sys.argv.index('-close-mirror-duration')+1] != '650ms': sys.exit(2)\n" +
                 "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}}}', flush=True)\n" +
                 "for line in sys.stdin:\n" +
                 "    control=json.loads(line)\n" +
@@ -214,7 +215,8 @@ internal static class ProcessPipelineSmoke
             {
                 inputBridge.StartReading();
                 await using var inputFollow = await LiveFollowSession.StartAsync(mainInputFollowExe,
-                    topology, clients, inputBridge, plan, relayMainInput: true);
+                    topology, clients, inputBridge, plan, relayMainInput: true,
+                    closeRangeMirror: true, closeMirrorDuration: 650);
                 inputFollow.StartReading();
                 var inputDeadline = DateTime.UtcNow.AddSeconds(3);
                 while (!File.Exists(mainInputLog) && DateTime.UtcNow < inputDeadline)

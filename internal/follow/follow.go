@@ -33,6 +33,7 @@ type Command struct {
 	Reason                 string  `json:"reason,omitempty"`
 	ManualOverrideEligible bool    `json:"manual_override_eligible,omitempty"`
 	SprintDown             bool    `json:"sprint_down,omitempty"`
+	MirrorMovement         bool    `json:"mirror_movement,omitempty"`
 }
 
 type Config struct {

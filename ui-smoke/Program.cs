@@ -479,6 +479,8 @@ var waiting = LiveFollowFrame.Parse(
 var stopped = LiveFollowFrame.Waiting(3);
 var manual = LiveFollowFrame.Parse(
     "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"holding\",\"manual_override_eligible\":true}}}", 2, 3);
+var mirrored = LiveFollowFrame.Parse(
+    "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"holding\",\"x\":1,\"y\":0,\"manual_override_eligible\":true,\"mirror_movement\":true}}}", 2, 3);
 var potion = LiveFollowFrame.Parse(
     "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}},\"flasks\":[{\"player\":2,\"resource\":\"life\",\"percent\":30,\"reason\":\"threshold\"}]}", 2, 3);
 if (!movement.Command.Contains("\"slot\":3") || movement.Status != "following" ||
@@ -486,6 +488,7 @@ if (!movement.Command.Contains("\"slot\":3") || movement.Status != "following" |
     !waiting.Command.Contains("\"slot\":3") || waiting.Status != "waiting" ||
     waiting.Reason != "party disbanded" ||
     stopped.Command != waiting.Command || !manual.Command.Contains("\"manual_override_eligible\":true") ||
+    !mirrored.Command.Contains("\"mirror_movement\":true") || !mirrored.Command.Contains("\"slot\":3") ||
     potion.Flasks.Count != 1 || potion.Flasks[0] != new FlaskBridgeRequest(2, "life"))
     throw new Exception("Live follow did not map P2 to the second client's system pad.");
 var splitTopology = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-split");
@@ -508,6 +511,7 @@ foreach (var invalidFrame in new[]
     "{\"focused\":2,\"commands\":{\"2\":{\"state\":\"waiting\"}}}",
     "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"manual_override_eligible\":true}}}",
     "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"holding\",\"manual_override_eligible\":1}}}",
+    "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"holding\",\"x\":0,\"y\":0,\"manual_override_eligible\":true,\"mirror_movement\":true}}}",
     "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0,\"sprint_down\":true}}}",
     "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"sprint_down\":true}}}",
     "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0,\"sprint_down\":1}}}",

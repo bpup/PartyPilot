@@ -112,8 +112,14 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         IReadOnlyDictionary<int, string>? terrainBindings = null,
         bool classicCollisionDodge = false,
         bool classicSprintCatchUp = false,
-        bool relayMainInput = false)
+        bool relayMainInput = false,
+        bool closeRangeMirror = false,
+        int closeMirrorDuration = 400)
     {
+        if (closeRangeMirror && !relayMainInput)
+            throw new ArgumentException("Close-range mirror requires main-controller input.");
+        if (closeRangeMirror && closeMirrorDuration is < 50 or > 5000)
+            throw new ArgumentOutOfRangeException(nameof(closeMirrorDuration));
         if (topology.Id is not ("2-split" or "3-three-singles") ||
             clients.Count != topology.ClientCount ||
             topology.Slots.Count != topology.ClientCount ||
@@ -195,6 +201,12 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         }
         if (classicSprintCatchUp) start.ArgumentList.Add("-classic-sprint-catchup");
         if (relayMainInput) start.ArgumentList.Add("-accept-main-input");
+        if (closeRangeMirror) start.ArgumentList.Add("-close-range-mirror");
+        if (closeRangeMirror)
+        {
+            start.ArgumentList.Add("-close-mirror-duration");
+            start.ArgumentList.Add($"{closeMirrorDuration}ms");
+        }
         if (classicCollisionDodge) start.ArgumentList.Add("-classic-collision-dodge");
         if (bridge.AutoFlaskEnabled) start.ArgumentList.Add("-auto-flask");
         if (bridge.LastFocusedLeadsEnabled) start.ArgumentList.Add("-last-focused-leads");

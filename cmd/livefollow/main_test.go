@@ -238,7 +238,10 @@ func TestMainInputControlRequiresOptInAndCurrentLeader(t *testing.T) {
 	}
 	control.Slot = 2
 	input <- control
-	if err := applyMenuInput(nil, engine, input, false); err == nil {
-		t.Fatal("follower sample was accepted as main input")
+	if err := applyMenuInput(nil, engine, input, false); err != nil {
+		t.Fatalf("late sample from another role stopped following: %v", err)
+	}
+	if got, ok := engine.CurrentMainInput(time.Now().UTC()); !ok || got.Slot != 1 {
+		t.Fatalf("other role replaced the main sample: %+v %v", got, ok)
 	}
 }

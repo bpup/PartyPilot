@@ -269,11 +269,21 @@ func applyMenuInput(session *live.FlaskSession, engine *live.Engine, input <-cha
 			}
 			switch command.Type {
 			case "main_input":
-				if command.ObservedAtMS <= 0 || !engine.ObserveMainInput(live.MainInput{
+				if command.ObservedAtMS <= 0 {
+					return errors.New("invalid main input control")
+				}
+				observedAt := time.UnixMilli(command.ObservedAtMS).UTC()
+				now := time.Now().UTC()
+				// A queued sample from the previous MAIN or an expired sample is
+				// harmless; the engine has already released it on the role change.
+				if command.Slot != engine.Leader() || now.Sub(observedAt) > 500*time.Millisecond {
+					continue
+				}
+				if !engine.ObserveMainInput(live.MainInput{
 					Slot: command.Slot, LeftX: command.LeftX, LeftY: command.LeftY,
 					BDown: command.BDown, Blocked: command.Blocked,
-					ObservedAt: time.UnixMilli(command.ObservedAtMS).UTC(),
-				}, time.Now().UTC()) {
+					ObservedAt: observedAt,
+				}, now) {
 					return errors.New("invalid main input control")
 				}
 			case "menu_guard":
@@ -418,6 +428,8 @@ func main() {
 	autoFlask := flag.Bool("auto-flask", false, "enable life and mana flask decisions for explicitly bound clients")
 	allowFollowPause := flag.Bool("allow-follow-pause", false, "accept explicit pause/resume controls on stdin")
 	acceptMainInput := flag.Bool("accept-main-input", false, "accept bound main-controller samples without enabling mirror output")
+	closeRangeMirror := flag.Bool("close-range-mirror", false, "enable optional two-player close-range stick mirror")
+	closeMirrorDuration := flag.Duration("close-mirror-duration", 400*time.Millisecond, "close-range stick burst duration")
 	address := flag.String("listen", "127.0.0.1:47617", "loopback sensor address")
 	var logs, exes, terrainBindings sources
 	var names memberNames
@@ -501,6 +513,13 @@ func main() {
 	}
 	engine.SetLastFocusedLeads(*lastFocusedLeads)
 	engine.SetAcceptMainInput(*acceptMainInput)
+	if *closeRangeMirror {
+		if !*acceptMainInput {
+			fmt.Fprintln(os.Stderr, "close-range mirror requires main input")
+			os.Exit(2)
+		}
+		engine.SetCloseRangeMirror(true, *closeMirrorDuration)
+	}
 	for slot, target := range targets {
 		if err := engine.SetFollowTarget(slot, target); err != nil {
 			fmt.Fprintln(os.Stderr, err)
