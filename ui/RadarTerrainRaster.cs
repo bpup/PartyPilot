@@ -15,32 +15,53 @@ public static class RadarTerrainRaster
         var columns = new int[width];
         for (var x = 0; x < width; x++)
             columns[x] = (int)Math.Floor(frame.GridX!.Value + (x - width / 2d) / pixelsPerGridCell);
+        var boundaryByColumn = new Dictionary<int, bool>();
+        var previousGridY = int.MinValue;
         for (var y = 0; y < height; y++)
         {
             var gridY = (int)Math.Floor(frame.GridY!.Value + (y - height / 2d) / pixelsPerGridCell);
+            if (gridY != previousGridY)
+            {
+                boundaryByColumn.Clear();
+                previousGridY = gridY;
+            }
             if (gridY < 0 || gridY >= capture.Height) continue;
             for (var x = 0; x < width; x++)
             {
                 var gridX = columns[x];
                 if (gridX < 0 || gridX >= capture.Width) continue;
                 var offset = (y * width + x) * 4;
-                if (capture.Walkable(gridX, gridY))
+                if (!boundaryByColumn.TryGetValue(gridX, out var boundary))
                 {
-                    // BGRA, premultiplied alpha.
-                    pixels[offset] = 34;
-                    pixels[offset + 1] = 43;
-                    pixels[offset + 2] = 15;
-                    pixels[offset + 3] = 72;
+                    boundary = capture.Walkable(gridX, gridY) &&
+                        IsBoundary(capture, gridX, gridY);
+                    boundaryByColumn.Add(gridX, boundary);
                 }
-                else
-                {
-                    pixels[offset] = 17;
-                    pixels[offset + 1] = 19;
-                    pixels[offset + 2] = 12;
-                    pixels[offset + 3] = 108;
-                }
+                if (!boundary)
+                    continue;
+                // The full area outline is visible; blocked and interior cells remain
+                // transparent so they cannot become a dark fog layer. BGRA premultiplied.
+                pixels[offset] = 174;
+                pixels[offset + 1] = 184;
+                pixels[offset + 2] = 184;
+                pixels[offset + 3] = 224;
             }
         }
         return pixels;
+    }
+
+    private static bool IsBoundary(RadarTerrainCapture capture, int x, int y)
+    {
+        for (var offsetY = -1; offsetY <= 1; offsetY++)
+        for (var offsetX = -1; offsetX <= 1; offsetX++)
+        {
+            if (offsetX == 0 && offsetY == 0) continue;
+            var neighborX = x + offsetX;
+            var neighborY = y + offsetY;
+            if (neighborX < 0 || neighborX >= capture.Width ||
+                neighborY < 0 || neighborY >= capture.Height ||
+                !capture.Walkable(neighborX, neighborY)) return true;
+        }
+        return false;
     }
 }
