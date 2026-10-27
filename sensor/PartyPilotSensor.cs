@@ -541,6 +541,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             TickMs = sourceTickMs,
             AreaName = observedAreaName,
             AreaHash = frameAreaHash,
+            RadarAreaAddress = radarSeenUtc.HasValue ? FormatAddress(frameDataAddress) : null,
             AreaSafety = areaSafety,
             AreaSafetyStatus = areaSafetyStatus,
             AreaSafetySeenUtc = now,

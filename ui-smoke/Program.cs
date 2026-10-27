@@ -317,7 +317,7 @@ if (args.Contains("--ui-controls-only"))
     return;
 }
 var radarPayload = System.Text.Encoding.UTF8.GetBytes(
-    "{\"ProcessId\":123,\"RadarStatus\":\"ok\",\"RadarSeenUtc\":\"" + DateTime.UtcNow.ToString("O") +
+    "{\"ProcessId\":123,\"AreaHash\":42,\"RadarAreaAddress\":\"0xABCDEF\",\"RadarStatus\":\"ok\",\"RadarSeenUtc\":\"" + DateTime.UtcNow.ToString("O") +
     "\",\"X\":100,\"Y\":200,\"RadarEntities\":[" +
     "{\"EntityId\":7,\"Category\":\"monster\",\"Path\":\"Metadata/Monsters/Beast\",\"X\":103,\"Y\":198}," +
     "{\"EntityId\":8,\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\",\"X\":95,\"Y\":205}," +
@@ -332,6 +332,27 @@ if (!RadarFrames.TryParse(radarPayload, 123, DateTime.UtcNow, out var radarFrame
     RadarProjection.TryScale("0", out _) || !RadarProjection.TryScale("2", out var radarScale))
     throw new Exception("Radar frame identity, freshness, or explicit scale validation failed.");
 var radarText = System.Text.Encoding.UTF8.GetString(radarPayload);
+var landmarkCache = new RadarLandmarkCache();
+var retained = landmarkCache.Apply(radarFrame);
+retained = landmarkCache.Apply(retained with { SeenUtc = retained.SeenUtc.AddMilliseconds(1), Markers = [] });
+if (retained.Markers.Count != 1 || retained.Markers[0].Category != "waypoint" ||
+    landmarkCache.Apply(retained with { AreaHash = 43, SeenUtc = retained.SeenUtc.AddMilliseconds(1), Markers = [] }).Markers.Count != 0)
+    throw new Exception("Radar retained transient markers or landmarks after an area change.");
+var sameHashNewAddress = new RadarLandmarkCache();
+sameHashNewAddress.Apply(radarFrame);
+if (sameHashNewAddress.Apply(radarFrame with
+    { AreaAddress = "0xABCD00", SeenUtc = radarFrame.SeenUtc.AddMilliseconds(1), Markers = [] }).Markers.Count != 0 ||
+    sameHashNewAddress.Apply(radarFrame with
+    { SeenUtc = radarFrame.SeenUtc, Markers = [] }).Markers.Count != 0)
+    throw new Exception("Radar reused landmarks across an area address change or older frame.");
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        radarText.Replace("\"AreaHash\":42", "\"AreaHash\":0")), 123, DateTime.UtcNow, out var unknownArea) ||
+    unknownArea is null || landmarkCache.Apply(unknownArea with
+        { SeenUtc = retained.SeenUtc.AddMilliseconds(2) }).Markers.Count != 5 ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        radarText.Replace("\"RadarAreaAddress\":\"0xABCDEF\"", "\"RadarAreaAddress\":\"bad\"")),
+        123, DateTime.UtcNow, out _))
+    throw new Exception("Radar area identity gate lost visible markers or accepted an invalid address.");
 if (RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
         radarText.Replace("\"EntityId\":8", "\"EntityId\":7")), 123, DateTime.UtcNow, out _) ||
     RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
@@ -365,6 +386,11 @@ if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(questRadarText), 12
     RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
         questRadarText.Replace("\"Label\":\"Quest marker\"", "\"Label\":null")), 123, DateTime.UtcNow, out _))
     throw new Exception("Radar quest marker parsing or display failed.");
+var questCache = new RadarLandmarkCache();
+questCache.Apply(questRadarFrame);
+if (questCache.Apply(questRadarFrame with
+    { SeenUtc = questRadarFrame.SeenUtc.AddMilliseconds(1), Markers = [] }).Markers.Count != 0)
+    throw new Exception("Radar retained a quest marker without current quest-state evidence.");
 var projected = RadarProjection.Project(radarFrame.PlayerX, radarFrame.PlayerY,
     radarFrame.Markers[0], 400, 300, radarScale);
 if (projected != (406d, 296d)) throw new Exception("Radar marker projection changed unexpectedly.");

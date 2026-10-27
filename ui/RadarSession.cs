@@ -10,6 +10,7 @@ internal sealed class RadarSession : IAsyncDisposable
     private readonly UdpClient _receiver;
     private readonly CancellationTokenSource _cancellation = new();
     private readonly Dictionary<int, RadarOverlayWindow> _windows;
+    private readonly Dictionary<int, RadarLandmarkCache> _landmarks = new();
     private readonly Dictionary<int, nint> _gameHandles;
     private readonly RadarVisibility _visibility;
     private readonly DispatcherTimer _hotkeyTimer = new() { Interval = TimeSpan.FromMilliseconds(25) };
@@ -25,6 +26,7 @@ internal sealed class RadarSession : IAsyncDisposable
     {
         _receiver = receiver;
         _windows = windows;
+        foreach (var pid in windows.Keys) _landmarks.Add(pid, new RadarLandmarkCache());
         _gameHandles = gameHandles;
         _hotkey = hotkey;
         _visibility = visibility;
@@ -106,8 +108,9 @@ internal sealed class RadarSession : IAsyncDisposable
                     Dispatcher.UIThread.Post(() =>
                     {
                         if (_disposed) return;
-                        window.Apply(frame);
-                        FrameReceived?.Invoke(pid, frame.Markers.Count);
+                        var enriched = _landmarks[pid].Apply(frame);
+                        window.Apply(enriched);
+                        FrameReceived?.Invoke(pid, enriched.Markers.Count);
                     });
                     break;
                 }

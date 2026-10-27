@@ -7,7 +7,8 @@ namespace PartyPilot.Desktop;
 public sealed record RadarMarker(uint Id, string Category, string Path, string? Label,
     string? ItemPath, int? Stack, string? Rarity, double X, double Y);
 
-public sealed record RadarFrame(int ProcessId, DateTime SeenUtc, double PlayerX, double PlayerY,
+public sealed record RadarFrame(int ProcessId, DateTime SeenUtc, uint AreaHash, string? AreaAddress,
+    double PlayerX, double PlayerY,
     IReadOnlyList<RadarMarker> Markers);
 
 public static class RadarFrames
@@ -27,6 +28,11 @@ public static class RadarFrames
                 !seenValue.TryGetDateTime(out var seenUtc) ||
                 seenUtc.Kind != DateTimeKind.Utc ||
                 nowUtc - seenUtc < TimeSpan.Zero || nowUtc - seenUtc > TimeSpan.FromSeconds(2) ||
+                !root.TryGetProperty("AreaHash", out var areaValue) || !areaValue.TryGetUInt32(out var areaHash) ||
+                !root.TryGetProperty("RadarAreaAddress", out var addressValue) ||
+                addressValue.ValueKind is not (JsonValueKind.String or JsonValueKind.Null) ||
+                (addressValue.ValueKind == JsonValueKind.String &&
+                 (addressValue.GetString() is not { } address || !ValidAddress(address))) ||
                 !TryFinite(root, "X", out var playerX) || !TryFinite(root, "Y", out var playerY) ||
                 !root.TryGetProperty("RadarEntities", out var entities) ||
                 entities.ValueKind != JsonValueKind.Array || entities.GetArrayLength() > 96)
@@ -88,7 +94,7 @@ public static class RadarFrames
                     (label != null || itemPath != null || stack != null || rarity != null)) return false;
                 markers.Add(new RadarMarker(id, category, path, label, itemPath, stack, rarity, x, y));
             }
-            frame = new RadarFrame(pid, seenUtc, playerX, playerY, markers);
+            frame = new RadarFrame(pid, seenUtc, areaHash, addressValue.GetString(), playerX, playerY, markers);
             return true;
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException)
@@ -103,6 +109,12 @@ public static class RadarFrames
         return element.TryGetProperty(name, out var field) && field.TryGetDouble(out value) && double.IsFinite(value);
     }
 
+    private static bool ValidAddress(string value) => value.Length is >= 4 and <= 18 &&
+        value.StartsWith("0x", StringComparison.Ordinal) &&
+        value.AsSpan(2).IndexOfAnyExcept("0123456789ABCDEFabcdef") < 0 &&
+        ulong.TryParse(value.AsSpan(2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var address) &&
+        address > 0;
+
     private static bool KnownCategory(string value) => value is
         "monster" or "checkpoint" or "waypoint" or "portal" or "transition" or "npc" or "chest" or "shrine" or "player" or "league" or "loot" or "quest";
 
@@ -112,6 +124,50 @@ public static class RadarFrames
         var suffix = name.IndexOf('@');
         if (suffix >= 0) name = name[..suffix];
         return name.Equals("WorldItem", StringComparison.OrdinalIgnoreCase);
+    }
+}
+
+public sealed class RadarLandmarkCache
+{
+    private const int MaximumLandmarks = 256;
+    private readonly Dictionary<uint, RadarMarker> _landmarks = new();
+    private uint _areaHash;
+    private string? _areaAddress;
+    private DateTime _lastSeenUtc;
+
+    public RadarFrame Apply(RadarFrame frame)
+    {
+        if (_lastSeenUtc != default && frame.SeenUtc < _lastSeenUtc)
+            return frame with { Markers = [] };
+        if (frame.AreaHash == 0 || frame.AreaAddress == null)
+        {
+            _landmarks.Clear();
+            _areaHash = 0;
+            _areaAddress = null;
+            _lastSeenUtc = frame.SeenUtc;
+            return frame;
+        }
+        if (_areaHash != frame.AreaHash || !string.Equals(_areaAddress, frame.AreaAddress, StringComparison.Ordinal))
+        {
+            _landmarks.Clear();
+            _areaHash = frame.AreaHash;
+            _areaAddress = frame.AreaAddress;
+        }
+        _lastSeenUtc = frame.SeenUtc;
+        foreach (var marker in frame.Markers)
+        {
+            if (marker.Category is not ("waypoint" or "checkpoint" or "transition"))
+            {
+                _landmarks.Remove(marker.Id);
+                continue;
+            }
+            if (!_landmarks.ContainsKey(marker.Id) && _landmarks.Count >= MaximumLandmarks)
+                _landmarks.Remove(_landmarks.Keys.First());
+            _landmarks[marker.Id] = marker;
+        }
+        var visibleIds = frame.Markers.Select(marker => marker.Id).ToHashSet();
+        return frame with { Markers = frame.Markers.Concat(_landmarks.Values.Where(marker =>
+            !visibleIds.Contains(marker.Id))).ToArray() };
     }
 }
 
