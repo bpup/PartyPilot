@@ -14,7 +14,8 @@ internal static class FlaskRulePreferenceSmoke
                 original.Players[1] != FlaskRulePreferenceStore.DefaultFor(2))
                 throw new Exception("New flask rules did not use the target reset profiles.");
             var selected = original.Players.ToArray();
-            selected[1] = selected[1] with { LifeTrigger = 60, LifeCooldownMs = 500 };
+            selected[1] = selected[1] with
+                { LifeTrigger = 60, LifeCooldownMs = 500, ChaosInoculation = false, CombinedDefence = true };
             var saved = store.Save(2, selected);
             if (!saved.Success || saved.RuntimeFile is null ||
                 store.Load(2).Players[1] != selected[1])

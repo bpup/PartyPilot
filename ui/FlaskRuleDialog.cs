@@ -13,6 +13,8 @@ internal sealed class FlaskRuleDialog : Window
     private readonly CheckBox _lifeEnabled = new() { Content = "启用生命药剂" };
     private readonly CheckBox _skipRecovering = new() { Content = "恢复中跳过生命药剂" };
     private readonly CheckBox _manaEnabled = new() { Content = "启用魔力药剂" };
+    private readonly CheckBox _chaosInoculation = new() { Content = "一血构筑：护盾替代生命值" };
+    private readonly CheckBox _combinedDefence = new() { Content = "合并生命与能量护盾计算触发比例" };
     private readonly TextBox _lifeTrigger = Field("life-trigger");
     private readonly TextBox _lifeCooldown = Field("life-cooldown");
     private readonly TextBox _emergency = Field("life-emergency");
@@ -62,6 +64,10 @@ internal sealed class FlaskRuleDialog : Window
         AddNumber(rows, "魔力触发阈值（1–95%）", _manaTrigger);
         AddNumber(rows, "魔力冷却（100–60000 毫秒）", _manaCooldown);
         AddNumber(rows, "魔力最低缺口（0–10000）", _manaMinMissing);
+        rows.Children.Add(_chaosInoculation);
+        rows.Children.Add(_combinedDefence);
+        rows.Children.Add(new TextBlock { Text = "护盾读数来自只读传感器；实际数值与药剂效果尚待游戏内验证。",
+            TextWrapping = Avalonia.Media.TextWrapping.Wrap });
         rows.Children.Add(_status);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10,
             HorizontalAlignment = HorizontalAlignment.Right };
@@ -115,6 +121,8 @@ internal sealed class FlaskRuleDialog : Window
         _manaTrigger.Text = rule.ManaTrigger.ToString("R", CultureInfo.InvariantCulture);
         _manaCooldown.Text = rule.ManaCooldownMs.ToString(CultureInfo.InvariantCulture);
         _manaMinMissing.Text = rule.ManaMinMissing.ToString(CultureInfo.InvariantCulture);
+        _chaosInoculation.IsChecked = rule.ChaosInoculation;
+        _combinedDefence.IsChecked = rule.CombinedDefence;
         _status.Text = "";
     }
 
@@ -137,7 +145,8 @@ internal sealed class FlaskRuleDialog : Window
         }
         _editing[_shownPlayer] = new FlaskPlayerRule(_shownPlayer, _lifeEnabled.IsChecked == true,
             lifeTrigger, lifeCooldown, emergency, lifeMinMissing, _skipRecovering.IsChecked == true,
-            _manaEnabled.IsChecked == true, manaTrigger, manaCooldown, manaMinMissing);
+            _manaEnabled.IsChecked == true, manaTrigger, manaCooldown, manaMinMissing,
+            _chaosInoculation.IsChecked == true, _combinedDefence.IsChecked == true);
         _status.Text = "";
         return true;
     }

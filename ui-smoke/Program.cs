@@ -167,6 +167,9 @@ var rulePlayer = flaskRuleDialog.GetLogicalDescendants().OfType<ComboBox>()
 rulePlayer.SelectedItem = 2;
 flaskRuleDialog.GetLogicalDescendants().OfType<TextBox>()
     .Single(box => box.Name == "life-trigger").Text = "60";
+flaskRuleDialog.GetLogicalDescendants().OfType<CheckBox>()
+    .Single(box => box.Content?.ToString()?.StartsWith("合并生命与能量护盾", StringComparison.Ordinal) == true)
+    .IsChecked = true;
 rulePlayer.SelectedItem = 1;
 rulePlayer.SelectedItem = 2;
 if (flaskRuleDialog.GetLogicalDescendants().OfType<TextBox>()
@@ -176,7 +179,8 @@ flaskRuleDialog.GetLogicalDescendants().OfType<Button>()
     .Single(button => button.Content?.ToString() == "保存")
     .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
 var chosenRules = await flaskRuleResult;
-if (chosenRules is null || chosenRules[0].LifeTrigger != 70 || chosenRules[1].LifeTrigger != 60)
+if (chosenRules is null || chosenRules[0].LifeTrigger != 70 || chosenRules[1].LifeTrigger != 60 ||
+    !chosenRules[1].CombinedDefence || chosenRules[0].CombinedDefence)
     throw new Exception("Flask rule editor changed another player or lost its setting.");
 var inputMode = window.GetLogicalDescendants().OfType<ComboBox>()
     .SingleOrDefault(box => box.ItemsSource?.OfType<string>()

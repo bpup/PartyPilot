@@ -77,7 +77,8 @@ func loadFlaskRuleBindings(path string) ([]live.FlaskRuleBinding, error) {
 	}
 	fields := []string{"player", "life_enabled", "life_trigger", "life_cooldown_ms",
 		"emergency", "life_min_missing", "skip_recovering", "mana_enabled",
-		"mana_trigger", "mana_cooldown_ms", "mana_min_missing"}
+		"mana_trigger", "mana_cooldown_ms", "mana_min_missing",
+		"chaos_inoculation", "combined_defence"}
 	for _, entry := range entries {
 		if len(entry) != len(fields) {
 			return nil, errors.New("flask rule entry has missing or unknown fields")

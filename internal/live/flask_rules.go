@@ -8,20 +8,22 @@ import (
 	"partypilot/internal/flask"
 )
 
-// FlaskRuleBinding contains the target's per-player life and mana controls
-// whose resources are available in the current live sensor path.
+// FlaskRuleBinding contains the target's per-player life, mana and available
+// Energy Shield controls for the current live sensor path.
 type FlaskRuleBinding struct {
-	Player         int     `json:"player"`
-	LifeEnabled    bool    `json:"life_enabled"`
-	LifeTrigger    float64 `json:"life_trigger"`
-	LifeCooldownMS int     `json:"life_cooldown_ms"`
-	Emergency      float64 `json:"emergency"`
-	LifeMinMissing int     `json:"life_min_missing"`
-	SkipRecovering bool    `json:"skip_recovering"`
-	ManaEnabled    bool    `json:"mana_enabled"`
-	ManaTrigger    float64 `json:"mana_trigger"`
-	ManaCooldownMS int     `json:"mana_cooldown_ms"`
-	ManaMinMissing int     `json:"mana_min_missing"`
+	Player           int     `json:"player"`
+	LifeEnabled      bool    `json:"life_enabled"`
+	LifeTrigger      float64 `json:"life_trigger"`
+	LifeCooldownMS   int     `json:"life_cooldown_ms"`
+	Emergency        float64 `json:"emergency"`
+	LifeMinMissing   int     `json:"life_min_missing"`
+	SkipRecovering   bool    `json:"skip_recovering"`
+	ManaEnabled      bool    `json:"mana_enabled"`
+	ManaTrigger      float64 `json:"mana_trigger"`
+	ManaCooldownMS   int     `json:"mana_cooldown_ms"`
+	ManaMinMissing   int     `json:"mana_min_missing"`
+	ChaosInoculation bool    `json:"chaos_inoculation"`
+	CombinedDefence  bool    `json:"combined_defence"`
 }
 
 func (session *FlaskSession) ConfigureRules(bindings []FlaskRuleBinding) error {
@@ -58,6 +60,8 @@ func (session *FlaskSession) ConfigureRules(bindings []FlaskRuleBinding) error {
 		rules.Mana.Trigger = binding.ManaTrigger
 		rules.Mana.Cooldown = time.Duration(binding.ManaCooldownMS) * time.Millisecond
 		rules.Mana.MinMissing = float64(binding.ManaMinMissing)
+		rules.ChaosInoculation = binding.ChaosInoculation
+		rules.CombinedDefence = binding.CombinedDefence
 		configured[binding.Player] = rules
 	}
 	session.ownRules = configured

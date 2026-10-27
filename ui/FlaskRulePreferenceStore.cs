@@ -14,7 +14,9 @@ internal sealed record FlaskPlayerRule(
     [property: JsonPropertyName("mana_enabled")] bool ManaEnabled,
     [property: JsonPropertyName("mana_trigger")] double ManaTrigger,
     [property: JsonPropertyName("mana_cooldown_ms")] int ManaCooldownMs,
-    [property: JsonPropertyName("mana_min_missing")] int ManaMinMissing);
+    [property: JsonPropertyName("mana_min_missing")] int ManaMinMissing,
+    [property: JsonPropertyName("chaos_inoculation")] bool ChaosInoculation,
+    [property: JsonPropertyName("combined_defence")] bool CombinedDefence);
 
 internal sealed record FlaskRuleDocument([property: JsonPropertyName("players")] FlaskPlayerRule[] Players);
 
@@ -31,7 +33,7 @@ internal sealed class FlaskRulePreferenceStore
     private static readonly string[] Fields =
         ["player", "life_enabled", "life_trigger", "life_cooldown_ms", "emergency",
             "life_min_missing", "skip_recovering", "mana_enabled", "mana_trigger",
-            "mana_cooldown_ms", "mana_min_missing"];
+            "mana_cooldown_ms", "mana_min_missing", "chaos_inoculation", "combined_defence"];
 
     internal FlaskRulePreferenceStore(string? directory = null)
     {
@@ -90,9 +92,9 @@ internal sealed class FlaskRulePreferenceStore
     }
 
     internal static FlaskPlayerRule DefaultFor(int player) => player % 2 == 1
-        ? new(player, true, 70, 200, 25, 0, true, true, 45, 800, 0)
+        ? new(player, true, 70, 200, 25, 0, true, true, 45, 800, 0, true, false)
         : new(player, true, player == 2 ? 45 : 70, 400, 20, 25,
-            true, true, 45, 800, 20);
+            true, true, 45, 800, 20, true, false);
 
     internal static bool Valid(IReadOnlyList<FlaskPlayerRule> players, int playerCount) =>
         playerCount is 2 or 3 && players.Count == playerCount &&

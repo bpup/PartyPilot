@@ -125,7 +125,7 @@ internal static class ProcessPipelineSmoke
                 "if support['bindings'][0]['drinker_player'] != 2 or support['bindings'][0]['monitor']['target_player'] != 1: sys.exit(2)\n" +
                 "if '-flask-rules-file' not in sys.argv: sys.exit(2)\n" +
                 "rules=json.load(open(sys.argv[sys.argv.index('-flask-rules-file')+1]))\n" +
-                "if len(rules['players']) != 2 or rules['players'][1]['life_trigger'] != 60: sys.exit(2)\n" +
+                "if len(rules['players']) != 2 or rules['players'][1]['life_trigger'] != 60 or not rules['players'][1]['combined_defence']: sys.exit(2)\n" +
                 "if '-classic-sprint-catchup' in sys.argv: sys.exit(2)\n" +
                 "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"reason\":\"missing position\"}}}', flush=True)\n" +
                 "states = [json.loads(sys.stdin.readline()) for _ in range(2)]\n" +
@@ -340,7 +340,7 @@ internal static class ProcessPipelineSmoke
                 }]).RuntimeFile ?? throw new Exception("Drinker test file was not saved.");
             var ruleFile = new FlaskRulePreferenceStore(directory).Save(2,
                 [FlaskRulePreferenceStore.DefaultFor(1),
-                    FlaskRulePreferenceStore.DefaultFor(2) with { LifeTrigger = 60 }])
+                    FlaskRulePreferenceStore.DefaultFor(2) with { LifeTrigger = 60, CombinedDefence = true }])
                 .RuntimeFile ?? throw new Exception("Player flask rule test file was not saved.");
             await using (var follow = await LiveFollowSession.StartAsync(followExe, topology, clients, bridge, plan,
                 flaskSupportFile: supportFile, flaskRulesFile: ruleFile))
