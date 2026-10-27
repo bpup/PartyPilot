@@ -47,6 +47,15 @@ public sealed class RadarTerrainCapture
         return ((x & 1) == 0 ? value & 15 : value >> 4) > 0;
     }
 
+    public bool Matches(RadarFrame frame)
+    {
+        var address = Anchor == "ingame_data_address" ? frame.AreaAddress : frame.StateAreaAddress;
+        return frame.ProcessId == ProcessId && frame.AreaHash == AreaHash &&
+            string.Equals(address, AreaAddress, StringComparison.OrdinalIgnoreCase) &&
+            frame.SeenUtc >= SeenUtc && frame.GridX is { } x && frame.GridY is { } y &&
+            x >= 0 && y >= 0 && x < Width && y < Height;
+    }
+
     public static bool TryLoad(string metadataPath, out RadarTerrainCapture? capture)
     {
         capture = null;

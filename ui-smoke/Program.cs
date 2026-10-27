@@ -333,6 +333,14 @@ if (!RadarFrames.TryParse(radarPayload, 123, DateTime.UtcNow, out var radarFrame
     RadarProjection.TryScale("0", out _) || !RadarProjection.TryScale("2", out var radarScale))
     throw new Exception("Radar frame identity, freshness, or explicit scale validation failed.");
 var radarText = System.Text.Encoding.UTF8.GetString(radarPayload);
+var gridRadarText = radarText.Replace("\"AreaHash\":42,",
+    "\"AreaHash\":42,\"RadarStateAreaAddress\":\"0x123456\",\"RadarGridX\":3,\"RadarGridY\":4,");
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(gridRadarText), 123, DateTime.UtcNow, out var gridRadarFrame) ||
+    gridRadarFrame?.GridX != 3 || gridRadarFrame.GridY != 4 ||
+    gridRadarFrame.StateAreaAddress != "0x123456" ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        gridRadarText.Replace("\"RadarGridY\":4,", "\"RadarGridY\":null,")), 123, DateTime.UtcNow, out _))
+    throw new Exception("Radar terrain grid observation was malformed or accepted a partial pair.");
 var landmarkCache = new RadarLandmarkCache();
 var retained = landmarkCache.Apply(radarFrame);
 retained = landmarkCache.Apply(retained with { SeenUtc = retained.SeenUtc.AddMilliseconds(1), Markers = [] });

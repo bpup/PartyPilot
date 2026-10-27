@@ -157,6 +157,7 @@ public sealed class MainWindow : Window
     private readonly Button _stopFollow = new();
     private readonly TextBlock _followStatus = new();
     private readonly TextBox _radarScale = new();
+    private readonly TextBox[] _radarTerrainPaths = new TextBox[3];
     private readonly TextBox _radarHotkeyText = new();
     private readonly TextBlock _radarHotkeyStatus = new();
     private readonly RadarHotkeyPreferenceStore _radarHotkeyPreferences = new();
@@ -1036,7 +1037,7 @@ public sealed class MainWindow : Window
 
     private Border BuildRadarStep()
     {
-        var panel = Step("5", "RADAR · 雷达", "在已绑定游戏窗口上显示只读实体标记；请在对应 ExileCore2 实例中启用传感器的雷达诊断。坐标方向与比例仍需游戏内校准。");
+        var panel = Step("5", "RADAR · 雷达", "在已绑定游戏窗口上显示只读实体标记和可选候选地形；请在对应 ExileCore2 实例中启用雷达诊断，绘制地形还需开启地形诊断。坐标方向与比例仍需游戏内校准。");
         panel.Children.Add(Label("雷达显隐快捷键（如 Tab、Ctrl+R、Shift+F9）", 12, MutedBrush));
         var hotkeyRow = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
         _radarHotkeyText.Width = 190;
@@ -1064,6 +1065,15 @@ public sealed class MainWindow : Window
         _radarScale.HorizontalAlignment = HorizontalAlignment.Left;
         _radarScale.TextChanged += (_, _) => UpdateRadarControls();
         panel.Children.Add(_radarScale);
+        panel.Children.Add(Label("候选地形采集文件（可选；需在游戏中核对区域与地图方向）", 12, MutedBrush));
+        for (var index = 0; index < _radarTerrainPaths.Length; index++)
+        {
+            panel.Children.Add(Label($"客户端 {index + 1} 的采集 JSON 绝对路径", 12, MutedBrush));
+            var path = new TextBox { Watermark = "留空则只显示标记", MinWidth = 310,
+                HorizontalAlignment = HorizontalAlignment.Left };
+            _radarTerrainPaths[index] = path;
+            panel.Children.Add(path);
+        }
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
         _startRadar.Content = "显示雷达";
         _startRadar.Click += (_, _) => StartRadar();
@@ -1755,11 +1765,23 @@ public sealed class MainWindow : Window
         }
         try
         {
-            var session = RadarSession.Start(_launchedClients, scale, _radarHotkey);
+            var captures = new Dictionary<int, RadarTerrainCapture>();
+            for (var index = 0; index < _launchedClients.Count; index++)
+            {
+                var path = _radarTerrainPaths[index].Text?.Trim();
+                if (string.IsNullOrEmpty(path)) continue;
+                if (!RadarTerrainCapture.TryLoad(path, out var capture) || capture is null ||
+                    capture.ProcessId != _launchedClients[index].Pid)
+                    throw new InvalidDataException($"客户端 {index + 1} 的候选地形文件或进程身份无效。");
+                captures.Add(capture.ProcessId, capture);
+            }
+            var session = RadarSession.Start(_launchedClients, scale, _radarHotkey, captures);
             session.Ended += RadarEnded;
             session.FrameReceived += RadarFrameReceived;
             _radar = session;
-            _radarStatus.Text = "雷达已打开；等待各游戏进程的只读标记。失焦或样本过期会隐藏标记。";
+            _radarStatus.Text = captures.Count == 0
+                ? "雷达已打开；等待各游戏进程的只读标记。失焦或样本过期会隐藏标记。"
+                : "雷达已打开；候选地形仅在进程、区域与角色格坐标均匹配时显示，游戏内地图方向待核对。";
         }
         catch (Exception exception)
         {
@@ -1774,9 +1796,11 @@ public sealed class MainWindow : Window
         _radarStatus.Text = $"雷达已停止：{reason}";
     }
 
-    private void RadarFrameReceived(int pid, int count)
+    private void RadarFrameReceived(int pid, int count, bool terrainVisible)
     {
-        _radarStatus.Text = $"已收到游戏进程 {pid} 的 {count} 个可见实体标记；仅当前游戏窗口在前台时显示。";
+        _radarStatus.Text = $"已收到游戏进程 {pid} 的 {count} 个实体标记；" +
+            (terrainVisible ? "候选地形已绘制，游戏内地图方向待核对。" :
+                "候选地形未匹配或未填写；仅当前游戏窗口在前台时显示标记。");
     }
 
     private async Task StopRadarAsync()

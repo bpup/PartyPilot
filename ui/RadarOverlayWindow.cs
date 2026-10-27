@@ -3,6 +3,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 using Avalonia.Threading;
 
 namespace PartyPilot.Desktop;
@@ -17,20 +19,25 @@ public sealed class RadarOverlayWindow : Window
     private readonly LaunchedClient _client;
     private readonly double _scale;
     private readonly RadarVisibility _visibility;
+    private readonly RadarTerrainCapture? _terrain;
     private readonly bool _renderOnly;
     private readonly Canvas _canvas = new();
     private readonly DispatcherTimer _positionTimer = new() { Interval = TimeSpan.FromMilliseconds(50) };
     private RadarFrame? _frame;
+    private WriteableBitmap? _terrainBitmap;
     public bool TargetIsLost { get; private set; }
+    public bool TerrainVisible => _terrainBitmap is not null;
 
     public event Action? TargetLost;
 
     public RadarOverlayWindow(LaunchedClient client, double scale, RadarVisibility visibility,
+        RadarTerrainCapture? terrain = null,
         bool renderOnly = false)
     {
         _client = client;
         _scale = scale;
         _visibility = visibility;
+        _terrain = terrain;
         _renderOnly = renderOnly;
         Title = $"PartyPilot Radar · {client.Pid}";
         SystemDecorations = SystemDecorations.None;
@@ -53,6 +60,7 @@ public sealed class RadarOverlayWindow : Window
             }
         };
         Closed += (_, _) => _positionTimer.Stop();
+        Closed += (_, _) => _terrainBitmap?.Dispose();
         NamePrivacy.Changed += OnNamePrivacyChanged;
         Closed += (_, _) => NamePrivacy.Changed -= OnNamePrivacyChanged;
         SizeChanged += (_, _) => Draw();
@@ -83,9 +91,37 @@ public sealed class RadarOverlayWindow : Window
     private void Draw()
     {
         _canvas.Children.Clear();
+        _terrainBitmap?.Dispose();
+        _terrainBitmap = null;
         if (_frame == null || DateTime.UtcNow - _frame.SeenUtc > TimeSpan.FromSeconds(2)) return;
         var centerX = Bounds.Width / 2;
         var centerY = Bounds.Height / 2;
+        if (_terrain?.Matches(_frame) == true &&
+            Bounds.Width is >= 1 and <= 4096 && Bounds.Height is >= 1 and <= 4096)
+        {
+            var width = (int)Math.Ceiling(Bounds.Width);
+            var height = (int)Math.Ceiling(Bounds.Height);
+            if ((long)width * height <= 4_194_304)
+            {
+                var pixels = RadarTerrainRaster.Render(_terrain, _frame, width, height,
+                    _scale * 10.869565);
+                var bitmap = new WriteableBitmap(new PixelSize(width, height), new Vector(96, 96),
+                    PixelFormats.Bgra8888, AlphaFormat.Premul);
+                using (var locked = bitmap.Lock())
+                {
+                    var rowBytes = width * 4;
+                    for (var row = 0; row < height; row++)
+                        Marshal.Copy(pixels, row * rowBytes,
+                            locked.Address + row * locked.RowBytes, rowBytes);
+                }
+                _terrainBitmap = bitmap;
+                _canvas.Children.Add(new Image
+                {
+                    Source = bitmap, Width = Bounds.Width, Height = Bounds.Height,
+                    Stretch = Stretch.Fill
+                });
+            }
+        }
         AddDot(centerX, centerY, 12, Brushes.White);
         foreach (var marker in _frame.Markers)
         {

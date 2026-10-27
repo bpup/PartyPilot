@@ -9,7 +9,12 @@ public sealed record RadarMarker(uint Id, string Category, string Path, string? 
 
 public sealed record RadarFrame(int ProcessId, DateTime SeenUtc, uint AreaHash, string? AreaAddress,
     double PlayerX, double PlayerY,
-    IReadOnlyList<RadarMarker> Markers);
+    IReadOnlyList<RadarMarker> Markers)
+{
+    public string? StateAreaAddress { get; init; }
+    public double? GridX { get; init; }
+    public double? GridY { get; init; }
+}
 
 public static class RadarFrames
 {
@@ -38,6 +43,29 @@ public static class RadarFrames
                 entities.ValueKind != JsonValueKind.Array || entities.GetArrayLength() > 96)
                 return false;
             var markers = new List<RadarMarker>(entities.GetArrayLength());
+            string? stateAreaAddress = null;
+            if (root.TryGetProperty("RadarStateAreaAddress", out var stateAreaValue) &&
+                stateAreaValue.ValueKind != JsonValueKind.Null)
+            {
+                if (stateAreaValue.ValueKind != JsonValueKind.String ||
+                    stateAreaValue.GetString() is not { } parsedStateAddress || !ValidAddress(parsedStateAddress)) return false;
+                stateAreaAddress = parsedStateAddress;
+            }
+            double? gridX = null;
+            double? gridY = null;
+            if (root.TryGetProperty("RadarGridX", out var gridXValue) &&
+                gridXValue.ValueKind != JsonValueKind.Null)
+            {
+                if (!gridXValue.TryGetDouble(out var value) || !double.IsFinite(value)) return false;
+                gridX = value;
+            }
+            if (root.TryGetProperty("RadarGridY", out var gridYValue) &&
+                gridYValue.ValueKind != JsonValueKind.Null)
+            {
+                if (!gridYValue.TryGetDouble(out var value) || !double.IsFinite(value)) return false;
+                gridY = value;
+            }
+            if (gridX.HasValue != gridY.HasValue) return false;
             var ids = new HashSet<uint>();
             foreach (var item in entities.EnumerateArray())
             {
@@ -94,7 +122,8 @@ public static class RadarFrames
                     (label != null || itemPath != null || stack != null || rarity != null)) return false;
                 markers.Add(new RadarMarker(id, category, path, label, itemPath, stack, rarity, x, y));
             }
-            frame = new RadarFrame(pid, seenUtc, areaHash, addressValue.GetString(), playerX, playerY, markers);
+            frame = new RadarFrame(pid, seenUtc, areaHash, addressValue.GetString(), playerX, playerY, markers)
+            { StateAreaAddress = stateAreaAddress, GridX = gridX, GridY = gridY };
             return true;
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException)

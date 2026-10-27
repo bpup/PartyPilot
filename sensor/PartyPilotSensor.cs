@@ -256,6 +256,9 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         object[]? radarEntities = null;
         string? radarStatus = null;
         DateTime? radarSeenUtc = null;
+        string? radarStateAreaAddress = null;
+        float? radarGridX = null;
+        float? radarGridY = null;
         object? uiObservation = null;
         string? uiObservationStatus = null;
         DateTime? uiObservationSeenUtc = null;
@@ -279,6 +282,32 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                     _monsterTrackerAreaHash = areaHash;
                 }
                 radarEntities = ReadRadarEntities(player!.Id, render.Pos.X, render.Pos.Y);
+                if (Settings.DiagnoseTerrain.Value)
+                {
+                    try
+                    {
+                        byte[]? ReadRadarTerrain(long address, int size)
+                        {
+                            try { return GameController.IngameState.Data.M.ReadMem(address, size); }
+                            catch { return null; }
+                        }
+                        var raw = RawRenderPositionReader.Read(frameLocalAddress, ReadRadarTerrain);
+                        if (raw is not null)
+                        {
+                            radarGridX = raw.GridX;
+                            radarGridY = raw.GridY;
+                        }
+                        var pointer = ReadRadarTerrain(frameStateAddress + 656, 8);
+                        if (pointer is { Length: 8 })
+                            radarStateAreaAddress = FormatAddress(BitConverter.ToInt64(pointer));
+                    }
+                    catch
+                    {
+                        radarGridX = null;
+                        radarGridY = null;
+                        radarStateAreaAddress = null;
+                    }
+                }
                 radarStatus = "ok";
             }
             catch
@@ -542,6 +571,9 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             AreaName = observedAreaName,
             AreaHash = frameAreaHash,
             RadarAreaAddress = radarSeenUtc.HasValue ? FormatAddress(frameDataAddress) : null,
+            RadarStateAreaAddress = radarStateAreaAddress,
+            RadarGridX = radarGridX,
+            RadarGridY = radarGridY,
             AreaSafety = areaSafety,
             AreaSafetyStatus = areaSafetyStatus,
             AreaSafetySeenUtc = now,

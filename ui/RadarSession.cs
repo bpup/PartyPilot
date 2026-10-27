@@ -19,7 +19,7 @@ internal sealed class RadarSession : IAsyncDisposable
     private bool _disposed;
 
     public event Action<string>? Ended;
-    public event Action<int, int>? FrameReceived;
+    public event Action<int, int, bool>? FrameReceived;
 
     private RadarSession(UdpClient receiver, Dictionary<int, RadarOverlayWindow> windows,
         Dictionary<int, nint> gameHandles, RadarHotkeyBinding hotkey, RadarVisibility visibility)
@@ -54,7 +54,7 @@ internal sealed class RadarSession : IAsyncDisposable
     }
 
     public static RadarSession Start(IReadOnlyList<LaunchedClient> clients, double scale,
-        RadarHotkeyBinding hotkey)
+        RadarHotkeyBinding hotkey, IReadOnlyDictionary<int, RadarTerrainCapture>? terrains = null)
     {
         if (!OperatingSystem.IsWindows() || clients.Count is < 1 or > 3 ||
             clients.Any(client => client.Pid <= 0 || client.WindowHandle == 0) ||
@@ -70,7 +70,9 @@ internal sealed class RadarSession : IAsyncDisposable
         {
             foreach (var client in clients)
             {
-                var window = new RadarOverlayWindow(client, scale, visibility);
+                RadarTerrainCapture? terrain = null;
+                if (terrains is not null) terrains.TryGetValue(client.Pid, out terrain);
+                var window = new RadarOverlayWindow(client, scale, visibility, terrain);
                 windows.Add(client.Pid, window);
             }
             session = new RadarSession(receiver, windows,
@@ -110,7 +112,7 @@ internal sealed class RadarSession : IAsyncDisposable
                         if (_disposed) return;
                         var enriched = _landmarks[pid].Apply(frame);
                         window.Apply(enriched);
-                        FrameReceived?.Invoke(pid, enriched.Markers.Count);
+                        FrameReceived?.Invoke(pid, enriched.Markers.Count, window.TerrainVisible);
                     });
                     break;
                 }
