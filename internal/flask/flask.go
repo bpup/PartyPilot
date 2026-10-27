@@ -304,7 +304,7 @@ func validRule(rule Rule) bool {
 		return false
 	}
 	return rule.Emergency == nil || !math.IsNaN(*rule.Emergency) && !math.IsInf(*rule.Emergency, 0) &&
-		*rule.Emergency >= 0 && *rule.Emergency <= rule.Trigger
+		*rule.Emergency >= 0 && *rule.Emergency <= 100
 }
 
 func validPool(pool Pool) bool {

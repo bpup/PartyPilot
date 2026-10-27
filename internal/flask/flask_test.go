@@ -94,6 +94,21 @@ func TestDrinkerGlobalOptionsAlsoControlOwnFlasks(t *testing.T) {
 	}
 }
 
+func TestEmergencyControlCanExceedNormalTrigger(t *testing.T) {
+	rules, err := ResetProfiles(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules.Life.Trigger = 30
+	emergency := 50.0
+	rules.Life.Emergency = &emergency
+	rules.Mana.Enabled = false
+	got, err := New().Step(1, time.Unix(100, 0), vitals(25, 100), rules, false, false)
+	if err != nil || len(got) != 1 || got[0].Reason != "emergency" {
+		t.Fatalf("independent emergency control was rejected: %+v %v", got, err)
+	}
+}
+
 func TestCompanionMinimumDeficitAndSeparatePlayerState(t *testing.T) {
 	rules, _ := ResetProfiles(2)
 	rules.Mana.Enabled = false

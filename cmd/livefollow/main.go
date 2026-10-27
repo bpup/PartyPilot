@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -56,6 +57,46 @@ func loadFlaskSupportBindings(path string) ([]live.FlaskSupportBinding, error) {
 		return nil, errors.New("support file needs at least one binding")
 	}
 	return document.Bindings, nil
+}
+
+func loadFlaskRuleBindings(path string) ([]live.FlaskRuleBinding, error) {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(contents, &raw); err != nil {
+		return nil, err
+	}
+	if len(raw) != 1 || raw["players"] == nil {
+		return nil, errors.New("flask rule file requires only players")
+	}
+	var entries []map[string]json.RawMessage
+	if err := json.Unmarshal(raw["players"], &entries); err != nil || len(entries) == 0 {
+		return nil, errors.New("flask rule file needs player entries")
+	}
+	fields := []string{"player", "life_enabled", "life_trigger", "life_cooldown_ms",
+		"emergency", "life_min_missing", "skip_recovering", "mana_enabled",
+		"mana_trigger", "mana_cooldown_ms", "mana_min_missing"}
+	for _, entry := range entries {
+		if len(entry) != len(fields) {
+			return nil, errors.New("flask rule entry has missing or unknown fields")
+		}
+		for _, field := range fields {
+			if entry[field] == nil {
+				return nil, errors.New("flask rule entry has missing fields")
+			}
+		}
+	}
+	var document struct {
+		Players []live.FlaskRuleBinding `json:"players"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(contents))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&document); err != nil {
+		return nil, err
+	}
+	return document.Players, nil
 }
 
 func parseMirrorBPlayers(value string, roster map[int]int) (map[int]bool, error) {
@@ -483,6 +524,7 @@ func main() {
 		"opt into terrain-backed classic sprint collision recovery")
 	autoFlask := flag.Bool("auto-flask", false, "enable life and mana flask decisions for explicitly bound clients")
 	flaskSupportFile := flag.String("flask-support-file", "", "explicit Drinker support rules in a JSON file; requires -auto-flask")
+	flaskRulesFile := flag.String("flask-rules-file", "", "explicit per-player life and mana rules in a JSON file; requires -auto-flask")
 	allowFollowPause := flag.Bool("allow-follow-pause", false, "accept explicit pause/resume controls on stdin")
 	acceptMainInput := flag.Bool("accept-main-input", false, "accept bound main-controller samples without enabling mirror output")
 	mirrorAttackDirection := flag.Bool("mirror-attack-direction", false,
@@ -508,6 +550,10 @@ func main() {
 	flag.Parse()
 	if *flaskSupportFile != "" && !*autoFlask {
 		fmt.Fprintln(os.Stderr, "flask support requires -auto-flask")
+		os.Exit(2)
+	}
+	if *flaskRulesFile != "" && !*autoFlask {
+		fmt.Fprintln(os.Stderr, "flask rules require -auto-flask")
 		os.Exit(2)
 	}
 	if *mirrorAttackDirection && !*acceptMainInput {
@@ -642,6 +688,17 @@ func main() {
 				os.Exit(2)
 			}
 			if err := flaskSession.ConfigureSupport(bindingRules); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+		}
+		if *flaskRulesFile != "" {
+			ownRules, readErr := loadFlaskRuleBindings(*flaskRulesFile)
+			if readErr != nil {
+				fmt.Fprintln(os.Stderr, readErr)
+				os.Exit(2)
+			}
+			if err := flaskSession.ConfigureRules(ownRules); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(2)
 			}

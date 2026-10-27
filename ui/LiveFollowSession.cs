@@ -125,7 +125,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         bool closeRangeMirror = false,
         int closeMirrorDuration = 400,
         FollowerMirrorConfig? followerMirror = null,
-        string? flaskSupportFile = null)
+        string? flaskSupportFile = null,
+        string? flaskRulesFile = null)
     {
         if (aggressiveBlinkCatchUp && classicSprintCatchUp)
             throw new ArgumentException("Classic and aggressive sprint modes cannot be combined.");
@@ -139,6 +140,10 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             (!bridge.AutoFlaskEnabled || !Path.IsPathFullyQualified(flaskSupportFile) ||
              !File.Exists(flaskSupportFile)))
             throw new ArgumentException("Drinker support needs enabled flasks and an existing settings file.");
+        if (flaskRulesFile is not null &&
+            (!bridge.AutoFlaskEnabled || !Path.IsPathFullyQualified(flaskRulesFile) ||
+             !File.Exists(flaskRulesFile)))
+            throw new ArgumentException("Player flask rules need enabled flasks and an existing settings file.");
         if (closeRangeMirror && closeMirrorDuration is < 50 or > 5000)
             throw new ArgumentOutOfRangeException(nameof(closeMirrorDuration));
         if (topology.Id is not ("2-split" or "3-three-singles") ||
@@ -250,6 +255,11 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         {
             start.ArgumentList.Add("-flask-support-file");
             start.ArgumentList.Add(flaskSupportFile);
+        }
+        if (flaskRulesFile is not null)
+        {
+            start.ArgumentList.Add("-flask-rules-file");
+            start.ArgumentList.Add(flaskRulesFile);
         }
         if (bridge.LastFocusedLeadsEnabled) start.ArgumentList.Add("-last-focused-leads");
         start.ArgumentList.Add("-allow-follow-pause");

@@ -26,6 +26,7 @@ MenuGuardPreferenceSmoke.Run();
 RightStickDodgePreferenceSmoke.Run();
 FollowerMirrorPreferenceSmoke.Run();
 FlaskSupportPreferenceSmoke.Run();
+FlaskRulePreferenceSmoke.Run();
 AutoPartyCoordinatorSmoke.Run();
 AutoPartyHotkeySmoke.Run();
 AutoPartyKeyPreferenceSmoke.Run();
@@ -158,6 +159,25 @@ if (watched is not { SupportBuild: true,
         Monitor: { Enabled: true, MonitorResource: "Life AND Mana", TriggerPercent: 45,
             FlaskResource: "Both" } })
     throw new Exception("Drinker editor did not retain selected player monitoring rules.");
+var flaskRuleDialog = new FlaskRuleDialog(2,
+    [FlaskRulePreferenceStore.DefaultFor(1), FlaskRulePreferenceStore.DefaultFor(2)]);
+var flaskRuleResult = flaskRuleDialog.ShowDialog<FlaskPlayerRule[]?>(window);
+var rulePlayer = flaskRuleDialog.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(box => box.ItemsSource?.OfType<int>().SequenceEqual([1, 2]) == true);
+rulePlayer.SelectedItem = 2;
+flaskRuleDialog.GetLogicalDescendants().OfType<TextBox>()
+    .Single(box => box.Name == "life-trigger").Text = "60";
+rulePlayer.SelectedItem = 1;
+rulePlayer.SelectedItem = 2;
+if (flaskRuleDialog.GetLogicalDescendants().OfType<TextBox>()
+        .Single(box => box.Name == "life-trigger").Text != "60")
+    throw new Exception("Flask rule editor lost the selected player's input.");
+flaskRuleDialog.GetLogicalDescendants().OfType<Button>()
+    .Single(button => button.Content?.ToString() == "保存")
+    .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+var chosenRules = await flaskRuleResult;
+if (chosenRules is null || chosenRules[0].LifeTrigger != 70 || chosenRules[1].LifeTrigger != 60)
+    throw new Exception("Flask rule editor changed another player or lost its setting.");
 var inputMode = window.GetLogicalDescendants().OfType<ComboBox>()
     .SingleOrDefault(box => box.ItemsSource?.OfType<string>()
         .Contains("Keyboard and mouse · 键鼠") == true);

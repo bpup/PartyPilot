@@ -90,6 +90,9 @@ public sealed class MainWindow : Window
     private readonly RightStickDodgePreferenceStore _engageDodgePreferences = new();
     private bool _engageDodgePreferenceReady;
     private readonly CheckBox _autoFlask = new();
+    private readonly Button _flaskRulesButton = new();
+    private readonly TextBlock _flaskRulesStatus = new();
+    private readonly FlaskRulePreferenceStore _flaskRulePreferences;
     private readonly Button _flaskSupportButton = new();
     private readonly TextBlock _flaskSupportStatus = new();
     private readonly FlaskSupportPreferenceStore _flaskSupportPreferences;
@@ -227,12 +230,14 @@ public sealed class MainWindow : Window
     internal MainWindow(FollowTargetPreferenceStore followTargetPreferences,
         FollowStopPreferenceStore? followStopPreferences = null,
         FollowInputPreferenceStore? followInputPreferences = null,
-        FlaskSupportPreferenceStore? flaskSupportPreferences = null)
+        FlaskSupportPreferenceStore? flaskSupportPreferences = null,
+        FlaskRulePreferenceStore? flaskRulePreferences = null)
     {
         _followTargetPreferences = followTargetPreferences;
         _followStopPreferences = followStopPreferences ?? new FollowStopPreferenceStore();
         _followInputPreferences = followInputPreferences ?? new FollowInputPreferenceStore();
         _flaskSupportPreferences = flaskSupportPreferences ?? new FlaskSupportPreferenceStore();
+        _flaskRulePreferences = flaskRulePreferences ?? new FlaskRulePreferenceStore();
         Title = "PartyPilot · Play";
         Width = 1120;
         Height = 800;
@@ -496,6 +501,13 @@ public sealed class MainWindow : Window
         panel.Children.Add(_engageDodgeStatus);
         _autoFlask.Content = "随实时跟随启用自动药剂（双/三客户端各一名角色；生命/魔力须绑定手柄十字键左/右）";
         panel.Children.Add(_autoFlask);
+        _flaskRulesButton.Content = "设置逐角色生命/魔力药剂";
+        _flaskRulesButton.HorizontalAlignment = HorizontalAlignment.Left;
+        _flaskRulesButton.Click += async (_, _) => await EditFlaskRulesAsync();
+        panel.Children.Add(_flaskRulesButton);
+        _flaskRulesStatus.Foreground = MutedBrush;
+        _flaskRulesStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_flaskRulesStatus);
         _flaskSupportButton.Content = "设置共享药剂 · Drinker";
         _flaskSupportButton.HorizontalAlignment = HorizontalAlignment.Left;
         _flaskSupportButton.Click += async (_, _) => await EditFlaskSupportAsync();
@@ -1202,6 +1214,10 @@ public sealed class MainWindow : Window
             _ = StopAllResourcesAsync();
         }
         _selectedTopology = selection;
+        if (topologyChanged)
+            _flaskRulesStatus.Text = selection?.Id is "2-split" or "3-three-singles"
+                ? _flaskRulePreferences.Load(selection.PlayerCount).Message
+                : "当前布局尚不能发送实时逐角色药剂请求。";
         if (topologyChanged)
             _flaskSupportStatus.Text = selection?.Id is "2-split" or "3-three-singles"
                 ? _flaskSupportPreferences.Load(selection.PlayerCount).Message
@@ -2265,6 +2281,8 @@ public sealed class MainWindow : Window
 
     private void UpdateFollowControls()
     {
+        _flaskRulesButton.IsEnabled = _follow is null && !_busy &&
+            _selectedTopology?.Id is ("2-split" or "3-three-singles");
         _flaskSupportButton.IsEnabled = _follow is null && !_busy &&
             _selectedTopology?.Id is ("2-split" or "3-three-singles");
         foreach (var choice in _followTargets)
@@ -2321,7 +2339,8 @@ public sealed class MainWindow : Window
             (_selectedTopology?.Id is "2-split" or "3-three-singles") &&
             _launchedClients.Count == _selectedTopology.ClientCount && valid &&
             (_bridge.AutoFlaskEnabled != true ||
-             _flaskSupportPreferences.Load(_selectedTopology.PlayerCount).Success);
+             _flaskSupportPreferences.Load(_selectedTopology.PlayerCount).Success &&
+             _flaskRulePreferences.Load(_selectedTopology.PlayerCount).Success);
         _stopFollow.IsEnabled = _follow is not null;
         _pauseFollow.IsEnabled = _follow is not null && !_followStopping;
         _pauseFollow.Content = _follow?.Paused == true ? "恢复跟随" : "暂停跟随";
@@ -2984,6 +3003,19 @@ public sealed class MainWindow : Window
         }
     }
 
+    private async Task EditFlaskRulesAsync()
+    {
+        if (_selectedTopology?.Id is not ("2-split" or "3-three-singles") ||
+            _follow is not null || _busy) return;
+        var current = _flaskRulePreferences.Load(_selectedTopology.PlayerCount);
+        var dialog = new FlaskRuleDialog(_selectedTopology.PlayerCount, current.Players);
+        var edited = await dialog.ShowDialog<FlaskPlayerRule[]?>(this);
+        if (edited is null) return;
+        var saved = _flaskRulePreferences.Save(_selectedTopology.PlayerCount, edited);
+        _flaskRulesStatus.Text = saved.Message;
+        UpdateFollowControls();
+    }
+
     private async Task EditFlaskSupportAsync()
     {
         if (_selectedTopology?.Id is not ("2-split" or "3-three-singles") ||
@@ -3030,6 +3062,9 @@ public sealed class MainWindow : Window
             var flaskSupport = _flaskSupportPreferences.Load(_selectedTopology.PlayerCount);
             if (_bridge.AutoFlaskEnabled && !flaskSupport.Success)
                 throw new InvalidOperationException(flaskSupport.Message);
+            var flaskRules = _flaskRulePreferences.Load(_selectedTopology.PlayerCount);
+            if (_bridge.AutoFlaskEnabled && !flaskRules.Success)
+                throw new InvalidOperationException(flaskRules.Message);
             if (!LiveTerrainSelection.TryCreate(_selectedTopology,
                     _terrainBindingPaths.Select(box => box?.Text).ToArray(),
                     _classicCollisionDodge.IsChecked == true && _sprintCatchUp.IsChecked == true,
@@ -3073,7 +3108,8 @@ public sealed class MainWindow : Window
                 closeRangeMirror: enableCloseMirror,
                 closeMirrorDuration: int.Parse(_closeMirrorDuration.Text!, CultureInfo.InvariantCulture),
                 followerMirror: _followerMirror,
-                flaskSupportFile: _bridge.AutoFlaskEnabled ? flaskSupport.RuntimeFile : null);
+                flaskSupportFile: _bridge.AutoFlaskEnabled ? flaskSupport.RuntimeFile : null,
+                flaskRulesFile: _bridge.AutoFlaskEnabled ? flaskRules.RuntimeFile : null);
             session.StatusChanged += FollowStatusChanged;
             session.Ended += FollowEnded;
             _follow = session;

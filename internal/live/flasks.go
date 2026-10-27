@@ -21,6 +21,7 @@ type FlaskSession struct {
 	maxAge         time.Duration
 	support        []FlaskSupportBinding
 	supportOptions map[int]FlaskSupportBinding
+	ownRules       map[int]flask.Settings
 }
 
 type FlaskSupportBinding struct {
@@ -68,9 +69,13 @@ func (session *FlaskSession) ConfigureSupport(bindings []FlaskSupportBinding) er
 }
 
 func (session *FlaskSession) rulesFor(slot int) (flask.Settings, error) {
-	rules, err := flask.ResetProfiles(slot)
-	if err != nil {
-		return flask.Settings{}, err
+	rules, exists := session.ownRules[slot]
+	if !exists {
+		var err error
+		rules, err = flask.ResetProfiles(slot)
+		if err != nil {
+			return flask.Settings{}, err
+		}
 	}
 	if option, exists := session.supportOptions[slot]; exists {
 		rules.SupportBuild = option.SupportBuild

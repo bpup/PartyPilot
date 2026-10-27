@@ -60,6 +60,25 @@ func TestFlaskSupportFileNeedsExplicitBinding(t *testing.T) {
 	}
 }
 
+func TestFlaskRulesFileRequiresEveryExplicitField(t *testing.T) {
+	bindings, err := loadFlaskRuleBindings("../../testdata/flask-rules-live.json")
+	if err != nil || len(bindings) != 2 || bindings[0].LifeCooldownMS != 200 ||
+		bindings[1].LifeMinMissing != 25 {
+		t.Fatalf("flask rule fixture did not load: %+v %v", bindings, err)
+	}
+	path := filepath.Join(t.TempDir(), "rules.json")
+	for _, contents := range []string{"{}", "{\"players\":[]}",
+		"{\"players\":[{\"player\":1}]}",
+		"{\"players\":[{\"player\":1}],\"unknown\":true}"} {
+		if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadFlaskRuleBindings(path); err == nil {
+			t.Fatalf("incomplete flask rules accepted: %s", contents)
+		}
+	}
+}
+
 func TestClassicCollisionDodgeRequiresAllBoundTerrain(t *testing.T) {
 	roster := map[int]int{1: 101, 2: 202}
 	if err := validateClassicCollisionBindings(false, roster, nil); err != nil {
