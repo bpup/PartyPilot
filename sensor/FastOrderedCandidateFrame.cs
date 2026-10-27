@@ -26,7 +26,7 @@ public static class FastOrderedCandidateFrame
             candidate.CandidateAreaAddresses.Length != 1 ||
             candidate.CandidateAreaAddresses[0] != candidate.SelectedAreaAddress ||
             candidate.VectorHeaderAddress is null ||
-            candidate.ObservedLocalPositionComparison is null ||
+            candidate.ObservedLocalPositionComparison is not { WorldXYDistance: 0 } ||
             candidate.RawPositionsSeenUtc != seenUtc ||
             positions.Any(position => position is null ||
                 !float.IsFinite(position.WorldX) || !float.IsFinite(position.WorldY) ||

@@ -78,6 +78,12 @@ Require(motion?.RawPositions is { Length: 2 } &&
     motion.ObservedLocalPositionComparison?.WorldXYDistance == 0 &&
     motion.VisiblePositionComparisons?[1]?.WorldXYDistance == 0,
     "A complete revalidated diagnostic position frame was not captured.");
+var mismatchedMotion = LocalSlotMotionSampler.Capture(two, local, paths, visiblePositions, Read,
+    _ => null, () => true, 11, 20, 5, motionSeen, ReadSyntheticPosition, state);
+Require(mismatchedMotion?.ObservedLocalPositionComparison?.WorldXYDistance == 1 &&
+    FastOrderedCandidateFrame.TryEncodeExperimentalControl(
+        101, 42, "TestArea", mismatchedMotion, motionSeen, motionSeen.Ticks) is null,
+    "A diagnostic with a mismatched observed local position reached experimental follow.");
 RawRenderPositionReader.Position? SwitchPointerDuringRead(long entity,
     Func<long, int, byte[]?> read)
 {
@@ -121,7 +127,9 @@ foreach (var invalid in new[]
     motion! with { RawPositions = [motion!.RawPositions![0], null] },
     motion! with { RawPositions = [motion!.RawPositions![0],
         motion.RawPositions[1]! with { WorldX = float.NaN }] },
-    motion! with { ObservedLocalPositionComparison = null }
+    motion! with { ObservedLocalPositionComparison = null },
+    motion! with { ObservedLocalPositionComparison =
+        motion.ObservedLocalPositionComparison! with { WorldXYDistance = 1 } }
 })
     Require(FastOrderedCandidateFrame.TryEncodeExperimentalControl(
         101, 42, "TestArea", invalid, motionSeen, motionSeen.Ticks) is null,
