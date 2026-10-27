@@ -29,6 +29,14 @@ set_target_properties(PartyPilotPrivateSlotsSmoke PROPERTIES
   OUTPUT_NAME "PartyPilot.PrivateSlots.Smoke"
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin")
 
+# A separate process with a PoE2-shaped executable name. It contains no game
+# code; the managed smoke attaches to it through the real Client 3 path.
+add_executable(PartyPilotRemoteAttachTarget remote_attach_target.c)
+set_target_properties(PartyPilotRemoteAttachTarget PROPERTIES
+  OUTPUT_NAME "PathOfExile_x64"
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin")
+target_link_libraries(PartyPilotRemoteAttachTarget PRIVATE user32)
+
 enable_testing()
 add_test(NAME private_slot_runtime
   COMMAND $<TARGET_FILE:PartyPilotPrivateSlotsSmoke>)

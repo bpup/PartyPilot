@@ -35,6 +35,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ctest --test-dir "$env:RUNNER_TEMP/private-slots" -C Release --output-on-failure
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Exercise Client 3 remote input attach
+        shell: pwsh
+        run: |
+          dotnet run --project bridge/protocol-tests/ProtocolTests.csproj -c Release -- --remote-attach-smoke "$env:RUNNER_TEMP/private-slots/bin/Release/PathOfExile_x64.exe" "$env:RUNNER_TEMP/private-slots/bin/Release/PartyPilot.PrivateSlots.dll"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build and exercise multi-instance runtime
         shell: pwsh
         run: |

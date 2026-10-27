@@ -33,6 +33,8 @@ LLVM_MINGW_ROOT=/absolute/path/to/llvm-mingw sh native/private-slot-runtime/buil
 
 Windows CI 现用 `native/private-slot-runtime/CMakeLists.txt` 从同一源码以 MSVC C11 构建 DLL 与自检程序，再以 CTest 在 Windows 2022 runner 同进程运行。PR 检查 `40469982944` 的 `private_slot_runtime` 为 1/1 通过；该检查使用 CI 当场构建的 DLL，预览包中的 llvm-mingw 构建 DLL 未由此项逐字节验证。
 
+Windows CI 另构建一个只含窗口与 XInput 轮询的独立测试进程 `PathOfExile_x64.exe`，由真实 `Client3RuntimeAttach.AttachAsync` 路径加载私有 DLL，并检查 P5/P6 两槽按键、回中与停止断连。测试进程只借用被允许的可执行文件名以覆盖绑定检查，不含游戏代码；CI 成功前此跨进程检查仍为待验证。
+
 ## 待确认
 
 本机已完成协议测试和无窗口桌面检查，Windows CI 已通过原生 DLL 同进程自检；**独立附加入口与组合入口仍未在真实第三客户端进程中运行，也没有在 PoE2 中加载 DLL**。实验入口的 P5/P6 方向命令通过了匿名映射模拟；组合入口的焦点与双槽成组提交通过模拟输出测试。桌面侧已按第三客户端身份接入组合启动和配对引导，但未实际启动三客户端游戏，不能声称可在游戏中控制角色。游戏实际加载的 XInput 模块、是否接受进程内钩子、0/1 索引在游戏中的对应、配对和焦点输入所有权都需要 Windows/PoE2 实测。

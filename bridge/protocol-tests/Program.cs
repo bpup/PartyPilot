@@ -2,6 +2,12 @@ using PartyPilot.Bridge;
 using PartyPilot.Common;
 using System.Runtime.InteropServices;
 
+if (args.Length == 3 && args[0] == "--remote-attach-smoke")
+{
+    await RemoteAttachSmoke.Run(args[1], args[2]);
+    return;
+}
+
 if (!ControllerStartupCheckRequest.TryParse(["--check-startup", "--device", "HID\\DEVICE",
         "--physical-index", "2", "--game-exe", "C:\\Game\\PathOfExile.exe"], out var startup) ||
     startup?.XInputIndex != 2 || startup.UseWgi || startup.GameExecutables.Length != 1 ||
