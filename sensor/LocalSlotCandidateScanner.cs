@@ -5,7 +5,7 @@ namespace PartyPilot.Sensor;
 public static class LocalSlotCandidateScanner
 {
     private sealed record VectorMatch(long HeaderAddress, long[] Ordered, int Delta,
-        int StructOffset, int RawPathEntries, int VisiblePathEntries);
+        int StructOffset, int RawPathEntries, int VisiblePathEntries, bool ContainsObservedLocal);
     private static readonly int[] ReferenceStructOffsets = [1408, 2552];
     private const int ReferenceAreaPointerOffset = 656;
     private const int ReferenceVectorOffset = 72;
@@ -23,6 +23,7 @@ public static class LocalSlotCandidateScanner
         public DateTime? RawPositionsSeenUtc { get; init; }
         public RawRenderPositionReader.LocalComparison? ObservedLocalPositionComparison { get; init; }
         public RawRenderPositionReader.LocalComparison?[]? VisiblePositionComparisons { get; init; }
+        public bool? ContainsObservedLocal { get; init; }
     }
 
     public static Result Scan(long ingameStateAddress, long dataAddress, long observedLocalAddress,
@@ -44,8 +45,7 @@ public static class LocalSlotCandidateScanner
         var statePointerText = statePointerAreaAddress == 0 ? null : $"0x{statePointerAreaAddress:X}";
         bool? pointerMatchesData = statePointerAreaAddress == 0 || !Plausible(dataAddress)
             ? null : statePointerAreaAddress == dataAddress;
-        if (!Plausible(observedLocalAddress) ||
-            (statePointerAreaAddress == 0 && !Plausible(dataAddress)))
+        if (statePointerAreaAddress == 0 && !Plausible(dataAddress))
             return new Result("missing_anchor_or_local", anchor, profile, [], 0,
                 statePointerText, pointerMatchesData, []);
 
@@ -65,12 +65,13 @@ public static class LocalSlotCandidateScanner
                     if (vectorOffset < 0) continue;
                     var headerAddress = areaAddress + structOffset + vectorOffset;
                     if (!TryReadOrder(headerAddress, observedLocalAddress, visiblePaths, read,
-                            readMissingPath, out var order, out var rawPaths, out var visiblePathsCount))
+                            readMissingPath, out var order, out var rawPaths, out var visiblePathsCount,
+                            out var containsObservedLocal))
                         continue;
                     matchingHeaders++;
                     matchedAreas.Add(areaAddress);
                     matches.Add(new VectorMatch(headerAddress, order, delta, structOffset,
-                        rawPaths, visiblePathsCount));
+                        rawPaths, visiblePathsCount, containsObservedLocal));
                 }
             }
         }
@@ -93,7 +94,8 @@ public static class LocalSlotCandidateScanner
             SelectedStructOffset = selected.StructOffset,
             SelectedVectorOffset = ReferenceVectorOffset + selected.Delta,
             RawPathEntries = selected.RawPathEntries,
-            VisiblePathEntries = selected.VisiblePathEntries
+            VisiblePathEntries = selected.VisiblePathEntries,
+            ContainsObservedLocal = selected.ContainsObservedLocal
         };
     }
 
@@ -110,7 +112,7 @@ public static class LocalSlotCandidateScanner
                 System.Globalization.CultureInfo.InvariantCulture, out var headerAddress) ||
             !Plausible(headerAddress) ||
             !TryReadOrder(headerAddress, observedLocalAddress, visiblePaths, read,
-                readMissingPath, out var ordered, out _, out _)) return false;
+                readMissingPath, out var ordered, out _, out _, out _)) return false;
         return ordered.Select(value => $"0x{value:X}").SequenceEqual(candidate.OrderedAddresses);
     }
 
@@ -127,9 +129,10 @@ public static class LocalSlotCandidateScanner
     private static bool TryReadOrder(long headerAddress, long observedLocalAddress,
         IReadOnlyDictionary<long, string> visiblePaths, Func<long, int, byte[]?> read,
         Func<long, string?>? readMissingPath, out long[] order,
-        out int rawPathEntries, out int visiblePathEntries)
+        out int rawPathEntries, out int visiblePathEntries, out bool containsObservedLocal)
     {
         order = [];
+        containsObservedLocal = false;
         rawPathEntries = visiblePathEntries = 0;
         var header = read(headerAddress, 24);
         if (header is not { Length: 24 }) return false;
@@ -146,7 +149,6 @@ public static class LocalSlotCandidateScanner
         if (entries == null || entries.Length != count * 8) return false;
         var found = new long[(int)count];
         var seen = new HashSet<long>();
-        var hasLocal = false;
         for (var index = 0; index < count; index++)
         {
             var address = BitConverter.ToInt64(entries, index * 8);
@@ -161,9 +163,8 @@ public static class LocalSlotCandidateScanner
                 rawPathEntries++;
             }
             found[index] = address;
-            hasLocal |= address == observedLocalAddress;
+            containsObservedLocal |= address == observedLocalAddress;
         }
-        if (!hasLocal) return false;
         order = found;
         return true;
     }

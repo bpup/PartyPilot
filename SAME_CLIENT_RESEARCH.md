@@ -16,6 +16,8 @@
 
 候选扫描已有对可见集合外角色读取原始路径的回退。现在连可见集合中的路径无效时也会尝试原始路径，并记录选中向量的结构/字段偏移，以及由可见路径或原始路径验证的槽位数量。`PartyPilot-SlotAudit` 的 `rawPathFrames` 统计完整帧中使用了原始路径的次数。目标探针的 `EntityPathCache` 实际通过 `ServerInventoryReader.ReadEntityPath` 读取路径，并按实体 ID 缓存；独立版尚未复制其完整区域实体列表和缓存生命周期，也没有实机证据证明偏移及路径一致。
 
+目标探针的 `PlayerSlotVectorResolver` 不要求当前观察到的本地角色指针出现在已验证向量中。诊断扫描现也保留这种全员路径均为角色的 1–2 项向量，并输出 `ContainsObservedLocal=false`；接收端核对这个标记与实际地址关系。它可能反映两个读取源的实体地址语义不同，也可能是错误的实验基址，因此仍只输出未验证候选；缺少本地指针时不会产生当前角色位置比对，更不会升级为可靠顺序或自动跟随输入。
+
 进一步反查目标 `NoddPilot.Offsets.Reading.AreaEntityListReader.TryResolveAreaInstance`，可见其先在游戏状态对象加上 `InGameStateAreaInstanceOffset` 读取指针；该偏移的公开静态默认值是 656。诊断现在也从 ExileCore2 的 `IngameState.Address + 656` 只读取得第二个实验区域基址，与 `IngameState.Data.Address` 分别扫描、去重并比较。输出包含状态指针解析出的区域地址、两种基址是否相等、实际产生候选的区域地址；两种基址若给出相互冲突的角色顺序，结果为 `conflicting_candidates`。目标运行时可能启用了不同偏移，当前没有 PoE2 实机证据证明两种基址任何一个等于目标的真实 `areaInstance`；即便候选相同，也不会自动绑定 P2。
 
 原始物品卡片诊断在两项开关同时开启时，可把 owner 与上面的**新鲜有序候选**精确比对，并仅输出 `unverified_vector_order_candidate` 的本地 1/2 槽位编号。还要求 owner 同时等于唯一可见玩家实体地址；关闭候选扫描、状态地址变化、候选冲突或地址不符时不输出。所提供版本的 `PlayerSlotVectorResolver` 会从区域实体列表逐一读取角色路径，并记录向量头地址供后续重验；独立版现在也记录所选候选向量头，物品卡片关联前重读向量头、顺序和角色路径，变化时丢弃缓存候选。这里仍使用 ExileCore2 当前可见实体及静态默认的原始路径读取，尚未取得等价的完整区域实体列表，故候选不能升级为可靠槽位或驱动输入。

@@ -196,6 +196,7 @@ type LocalSlotCandidates struct {
 	SelectedVectorOffset            *int                  `json:"SelectedVectorOffset,omitempty"`
 	RawPathEntries                  int                   `json:"RawPathEntries,omitempty"`
 	VisiblePathEntries              int                   `json:"VisiblePathEntries,omitempty"`
+	ContainsObservedLocal           *bool                 `json:"ContainsObservedLocal,omitempty"`
 	RawPositions                    []*RawSlotPosition    `json:"RawPositions,omitempty"`
 	RawPositionsSeenUTC             *time.Time            `json:"RawPositionsSeenUtc,omitempty"`
 	ObservedLocalPositionComparison *RawLocalComparison   `json:"ObservedLocalPositionComparison,omitempty"`
@@ -692,7 +693,10 @@ func validLocalSlotCandidates(candidate *LocalSlotCandidates, scanStatus, observ
 		seen[address] = true
 		localSeen = localSeen || address == observed
 	}
-	return want == 0 || observed == "" || localSeen
+	if candidate.ContainsObservedLocal == nil {
+		return want == 0 || observed == "" || localSeen
+	}
+	return want > 0 && *candidate.ContainsObservedLocal == localSeen
 }
 
 func consistentDistance(reported, computed float64) bool {

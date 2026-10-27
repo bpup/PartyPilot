@@ -38,9 +38,21 @@ Require(two.StatePointerAreaAddress == "0x100000" && two.StatePointerMatchesData
 Require(two.CandidateAreaAddresses.SequenceEqual(["0x100000"]),
     "The candidate area address was not reported.");
 Require(two.VectorHeaderAddress == "0x1005C8" &&
+    two.ContainsObservedLocal == true &&
     LocalSlotCandidateScanner.Revalidate(two, local, paths, Read),
     "The selected vector header was not revalidated.");
 var vectorStart = BitConverter.ToInt64(memory[data + 1408 + 72], 0);
+var third = 0x700000L;
+paths[third] = "Metadata/Characters/Player";
+memory[vectorStart] = new[] { other, third }.SelectMany(BitConverter.GetBytes).ToArray();
+var noObservedAlias = LocalSlotCandidateScanner.Scan(state, data, local, paths, Read);
+Require(noObservedAlias.Status == "two_slot_candidate" &&
+    noObservedAlias.ContainsObservedLocal == false &&
+    noObservedAlias.OrderedAddresses.SequenceEqual(["0x300000", "0x700000"]) &&
+    LocalSlotCandidateScanner.Revalidate(noObservedAlias, local, paths, Read),
+    "A target-style path-validated vector without the observed local alias was lost.");
+memory[vectorStart] = new[] { local, other }.SelectMany(BitConverter.GetBytes).ToArray();
+paths.Remove(third);
 var motionSeen = DateTime.UtcNow;
 var visiblePositions = new Dictionary<long, (float X, float Y, float Z)>
 {

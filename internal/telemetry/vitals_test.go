@@ -122,12 +122,27 @@ func TestLocalSlotCandidateDiagnosticCannotAssertUnobservedOrder(t *testing.T) {
 		*detailed.LocalSlotCandidates.SelectedVectorOffset != 72 {
 		t.Fatalf("path evidence lost: %+v, %v", detailed.LocalSlotCandidates, err)
 	}
+	withoutObservedAlias := strings.Replace(base, `"0x200000","0x300000"`,
+		`"0x300000","0x400000"`, 1)
+	withoutObservedAlias = strings.Replace(withoutObservedAlias, `"MatchingHeaders":1,`,
+		`"MatchingHeaders":1,"ContainsObservedLocal":false,`, 1)
+	if candidate, err := Decode([]byte(withoutObservedAlias)); err != nil ||
+		candidate.LocalSlotCandidates == nil ||
+		candidate.LocalSlotCandidates.ContainsObservedLocal == nil ||
+		*candidate.LocalSlotCandidates.ContainsObservedLocal {
+		t.Fatalf("path-validated vector without the observed alias was rejected: %+v, %v", candidate, err)
+	}
+	if _, err := Decode([]byte(strings.Replace(withoutObservedAlias,
+		`"ContainsObservedLocal":false,`, "", 1))); err == nil {
+		t.Fatal("legacy candidate without an observed alias or an explicit marker was accepted")
+	}
 	badPathCount := strings.Replace(withPathEvidence, `"RawPathEntries":1`, `"RawPathEntries":2`, 1)
 	if _, err := Decode([]byte(badPathCount)); err == nil {
 		t.Fatal("path evidence count exceeding local slots accepted")
 	}
 	for _, changed := range []string{
-		strings.Replace(base, `"0x200000","0x300000"`, `"0x300000","0x400000"`, 1),
+		strings.Replace(withoutObservedAlias, `"ContainsObservedLocal":false`,
+			`"ContainsObservedLocal":true`, 1),
 		strings.Replace(base, `"0x200000","0x300000"`, `"0x200000","0x200000"`, 1),
 		strings.Replace(base, `"LocalSlotCandidateStatus":"ok"`, `"LocalSlotCandidateStatus":"scan_failed"`, 1),
 		strings.Replace(base, `"Status":"two_slot_candidate"`, `"Status":"reliable"`, 1),
