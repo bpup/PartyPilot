@@ -21,6 +21,53 @@ internal static class TransitionAnchorEvidenceSmoke
         if (matched is null || matched.SourceClient != 1 || matched.DestinationClient != 2 ||
             matched.DestinationX != 205 || matched.DestinationY != 201)
             throw new Exception("Fresh matching transition was not recognized across clients.");
+        var approach = TransitionApproachPlan.Build(matched with { DestinationX = 400 },
+            topology, now);
+        if (approach is null || approach.DriverPlayer != 3 || approach.DriverPad != 3 ||
+            approach.DistanceGrid <= 7 ||
+            TransitionApproachPlan.Build(matched, topology, now) is not null ||
+            TransitionApproachPlan.Build(matched with { DestinationX = 400 },
+                topology, now.AddSeconds(1)) is not null)
+            throw new Exception("Transition approach did not stop for close or stale position.");
+        using (var command = System.Text.Json.JsonDocument.Parse(approach.Command))
+        {
+            var input = command.RootElement;
+            if (input.GetProperty("slot").GetInt32() != 3 ||
+                input.GetProperty("state").GetString() != "following" ||
+                input.GetProperty("x").GetDouble() <= 0 ||
+                input.GetProperty("y").GetDouble() <= 0)
+                throw new Exception("Transition approach routed movement to the wrong pad or direction.");
+        }
+        var moving = new TransitionAnchorEvidence();
+        moving.Observe(1, Frame(101, now.AddMilliseconds(-400), 41, 100, 100, entrance));
+        moving.Observe(2, Frame(202, now.AddMilliseconds(-300), 42, 200, 200,
+            entrance with { Id = 20, X = 400, Y = 201 }));
+        moving.Observe(1, Frame(101, now.AddMilliseconds(-100), 43, 300, 300));
+        var waiting = "{\"slot\":3,\"state\":\"waiting\"}";
+        var live = new FollowBridgeFrame(waiting, "waiting", null)
+        {
+            FocusedPlayer = 1,
+            PadCommands =
+            [
+                new FollowPadCommand(3, 3, waiting, "waiting", "different or unknown instance"),
+                new FollowPadCommand(4, 4, "{\"slot\":4,\"state\":\"waiting\"}",
+                    "waiting", "different or unknown instance")
+            ]
+        };
+        var routed = TransitionApproachPlan.Apply(live, topology, moving, true, false, now);
+        if (routed.PadCommands[0].Status != "approaching_transition" ||
+            routed.PadCommands[1].Status != "waiting" ||
+            TransitionApproachPlan.Apply(live, topology, moving, false, false, now) != live ||
+            TransitionApproachPlan.Apply(live, topology, moving, true, true, now) != live ||
+            TransitionApproachPlan.Apply(live with
+            {
+                Handoffs = [handoff]
+            }, topology, moving, true, false, now).PadCommands[0].Status != "waiting" ||
+            TransitionApproachPlan.Apply(live with
+            {
+                FocusedPlayer = 2
+            }, topology, moving, true, false, now).PadCommands[0].Status != "waiting")
+            throw new Exception("Transition routing escaped its opt-in, area or local-role guard.");
         if (evidence.Match(handoff, topology, now.AddSeconds(13)) is not null)
             throw new Exception("Expired transition remained eligible.");
         evidence.Observe(2, Frame(202, now, 42, 200, 200,

@@ -59,6 +59,10 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     internal TransitionAnchorMatch? MatchTransitionAnchor(FollowHandoffRequest request) =>
         _transitionAnchors.Match(request, _topology, DateTime.UtcNow);
 
+    internal FollowBridgeFrame ApplyTransitionApproach(FollowBridgeFrame frame, DateTime nowUtc)
+        => TransitionApproachPlan.Apply(frame, _topology, _transitionAnchors,
+            _experimentalWarpClick, Paused || _stopping, nowUtc);
+
     private LiveFollowSession(Process process, BridgeSession bridge, PartyTopology topology,
         Task<string> readError, FollowBridgeFrame initialFrame, bool relayMainInput,
         bool catchUpPriority, int customRuleCount, IReadOnlyList<LaunchedClient> clients,
@@ -482,6 +486,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 var frame = ParseFrame(line, _topology, _bridge.LastFocusedLeadsEnabled,
                     _customRuleCount);
                 frame = LiveFollowFrame.ApplyCatchUpPriority(frame, _catchUpPriority);
+                frame = ApplyTransitionApproach(frame, DateTime.UtcNow);
                 if (_stopping) break;
                 var nextPads = frame.PadCommands.Select(command => command.Pad).ToHashSet();
                 foreach (var oldPad in _followerPads.Except(nextPads))

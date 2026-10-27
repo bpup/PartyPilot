@@ -1046,7 +1046,7 @@ public sealed class MainWindow : Window
         _followPauseKeyStatus.Foreground = MutedBrush;
         _followPauseKeyStatus.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(_followPauseKeyStatus);
-        _experimentalWarpClick.Content = "实验：跨区传送（双客户端头像菜单 / 三客户端手柄队伍名单）";
+        _experimentalWarpClick.Content = "实验：跨区追赶（P1 带路时可靠近同入口；队伍传送；入口交互待验证）";
         _experimentalWarpClick.IsChecked = false;
         panel.Children.Add(_experimentalWarpClick);
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
@@ -3325,6 +3325,7 @@ public sealed class MainWindow : Window
                 {
                     "following" => "跟随",
                     "catching_up" => "追赶",
+                    "approaching_transition" => "靠近入口（实验性）",
                     "holding" => "停靠",
                     _ when command.Reason == "dead follower" => "等待（角色死亡）",
                     _ when command.Reason == "missing position" => "等待（缺少位置）",

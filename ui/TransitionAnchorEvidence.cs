@@ -1,7 +1,8 @@
 namespace PartyPilot.Desktop;
 
 internal sealed record TransitionAnchorMatch(int SourceClient, int DestinationClient,
-    string Identity, double DestinationX, double DestinationY, DateTime SourceChangedUtc);
+    string Identity, double DestinationX, double DestinationY, double PlayerX, double PlayerY,
+    DateTime DestinationSeenUtc, DateTime SourceChangedUtc);
 
 // Read-only evidence from visible radar entities. A matching path and label
 // does not establish that the object is currently interactable.
@@ -38,13 +39,19 @@ internal sealed class TransitionAnchorEvidence
     {
         var source = topology.Slots.FirstOrDefault(slot =>
             slot.PartyPlayer == request.TargetPlayer)?.Client ?? 0;
-        if (source == 0 || source == request.DestinationClient ||
+        return Match(source, request.DestinationClient, nowUtc);
+    }
+
+    internal TransitionAnchorMatch? Match(int source, int destinationClient, DateTime nowUtc)
+    {
+        if (source is < 1 or > 3 || destinationClient is < 1 or > 3 ||
+            source == destinationClient ||
             nowUtc.Kind != DateTimeKind.Utc) return null;
         lock (_gate)
         {
             if (!_used.TryGetValue(source, out var used) ||
                 nowUtc < used.ChangedUtc || nowUtc - used.ChangedUtc > TimeSpan.FromSeconds(12) ||
-                !_latest.TryGetValue(request.DestinationClient, out var destination) ||
+                !_latest.TryGetValue(destinationClient, out var destination) ||
                 nowUtc < destination.SeenUtc ||
                 nowUtc - destination.SeenUtc > TimeSpan.FromSeconds(2)) return null;
             var matches = destination.Markers.Where(marker =>
@@ -54,8 +61,9 @@ internal sealed class TransitionAnchorEvidence
                 .ToArray();
             if (matches.Length == 0) return null;
             var nearest = matches[0];
-            return new TransitionAnchorMatch(source, request.DestinationClient,
-                used.Identity, nearest.X, nearest.Y, used.ChangedUtc);
+            return new TransitionAnchorMatch(source, destinationClient,
+                used.Identity, nearest.X, nearest.Y, destination.PlayerX, destination.PlayerY,
+                destination.SeenUtc, used.ChangedUtc);
         }
     }
 
