@@ -466,6 +466,17 @@ try
                     }
                     continue;
                 }
+                if (hybridPlan is not null && BridgeProtocol.IsHybridPairingComplete(line))
+                {
+                    if (!router.EnableHybridMainFollowMirror())
+                    {
+                        router.NeutralAll();
+                        Console.Error.WriteLine("Keyboard pairing completion was repeated or invalid; controllers stopped.");
+                        return 1;
+                    }
+                    Console.WriteLine(JsonSerializer.Serialize(new { @event = "hybrid_pairing_complete" }));
+                    continue;
+                }
                 if (pairingGate is not null && BridgeProtocol.TryParsePairingControl(line, out var control))
                 {
                     if (control.Type == "arm_pairing" && outputs.ContainsKey(control.Slot) &&

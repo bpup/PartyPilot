@@ -17,6 +17,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     private readonly SemaphoreSlim _inputGate = new(1, 1);
     private readonly SemaphoreSlim _partyGate = new(1, 1);
     private AutoPartyPending? _pendingAutoParty;
+    private TaskCompletionSource? _pendingHybridPairingComplete;
     private int _lastFocusedSlot;
     private int _lastManualFocusedSlot;
     private bool _stopping;
@@ -335,6 +336,20 @@ internal sealed class BridgeSession : IAsyncDisposable
         }));
     }
 
+    internal async Task EnableHybridMainFollowMirrorAsync()
+    {
+        if (!IsHybridMode || _stopping || _process.HasExited || _pendingHybridPairingComplete is not null)
+            throw new InvalidOperationException("Keyboard bridge is not ready to complete pairing.");
+        var pending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Volatile.Write(ref _pendingHybridPairingComplete, pending);
+        try
+        {
+            await WriteCommandAsync(JsonSerializer.Serialize(new { type = "hybrid_pairing_complete" }));
+            await pending.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        }
+        finally { Volatile.Write(ref _pendingHybridPairingComplete, null); }
+    }
+
     internal string GetMenuGuardState(int slot) => _menuStates.TryGetValue(slot, out var state) ? state : "clear";
 
     internal async Task SendFlaskAsync(int slot, string resource)
@@ -493,6 +508,8 @@ internal sealed class BridgeSession : IAsyncDisposable
                             ackSlot == pending.Slot && ackButtons == pending.Buttons)
                             pending.Completion.TrySetResult();
                     }
+                    else if (kind.GetString() == "hybrid_pairing_complete" && IsHybridMode)
+                        Volatile.Read(ref _pendingHybridPairingComplete)?.TrySetResult();
                     else if (kind.GetString() == "auto_party_expired")
                     {
                         Volatile.Read(ref _pendingAutoParty)?.Completion.TrySetException(
@@ -511,6 +528,8 @@ internal sealed class BridgeSession : IAsyncDisposable
         {
             Volatile.Read(ref _pendingAutoParty)?.Completion.TrySetException(
                 new InvalidOperationException("Virtual controller bridge exited."));
+            Volatile.Read(ref _pendingHybridPairingComplete)?.TrySetException(
+                new InvalidOperationException("Keyboard bridge exited before pairing completion."));
             if (!_stopping)
             {
                 Dispatcher.UIThread.Post(() => Ended?.Invoke(failure ?? "Virtual controller bridge exited."));

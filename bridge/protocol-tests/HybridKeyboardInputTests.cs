@@ -30,6 +30,10 @@ internal static class HybridKeyboardInputTests
             BridgeProtocol.TryParseHybridKey("{\"type\":\"hybrid_key\",\"key\":87,\"down\":1}", out _) ||
             BridgeProtocol.TryParseHybridKey("{\"type\":\"hybrid_key\",\"key\":86,\"down\":true}", out _))
             throw new Exception("Hybrid key protocol accepted malformed or unmapped input.");
+        if (!BridgeProtocol.IsHybridPairingComplete("{\"type\":\"hybrid_pairing_complete\"}") ||
+            BridgeProtocol.IsHybridPairingComplete("{\"type\":\"hybrid_pairing_complete\",\"player\":2}") ||
+            BridgeProtocol.IsHybridPairingComplete("{\"type\":\"finish_pairing\"}"))
+            throw new Exception("Hybrid pairing completion accepted an ambiguous control message.");
         if (HybridKeyboardInput.FocusForKey(0x70) != 1 ||
             HybridKeyboardInput.FocusForKey(0x75) != 6 ||
             HybridKeyboardInput.FocusForKey(0x76) != 0 ||
@@ -105,7 +109,12 @@ internal static class HybridKeyboardInputTests
             router.ConfigurePhysical(2) ||
             router.ApplyHybridKey(0x76, true, true))
             throw new Exception("Hybrid router accepted conflicting or unmapped input.");
+        router.SetHybridForeground(true);
         var now = DateTime.UtcNow;
+        if (router.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", now) ||
+            !router.EnableHybridMainFollowMirror())
+            throw new Exception("Hybrid follow accepted automation before pairing completion.");
+        router.SetHybridForeground(true);
         if (!router.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", now) ||
             pad2.X != 32767)
             throw new Exception("Hybrid P1 focus did not preserve ordinary follower automation.");
@@ -128,8 +137,11 @@ internal static class HybridKeyboardInputTests
             throw new Exception("Hybrid output was not neutralized after game focus loss.");
         router.ApplyHybridKey(0x57, false, true);
         router.ApplyHybridKey(0x70, true, true);
-        if (router.HybridFocusedPlayer != 1 || !router.HybridFocusRequested || pad2.X != 32767)
-            throw new Exception("F1 did not restore normal follower automation.");
+        if (router.HybridFocusedPlayer != 1 || !router.HybridFocusRequested || pad2.Report != default)
+            throw new Exception("F1 resumed stale follower automation after game focus loss.");
+        if (!router.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", now) ||
+            pad2.X != 32767)
+            throw new Exception("A fresh follow command did not resume after F1.");
         router.ApplyHybridKey(0x70, false, true);
         router.ApplyHybridKey(0x70, true, true);
         if (!router.HybridFocusRequested)
@@ -145,8 +157,53 @@ internal static class HybridKeyboardInputTests
             splitRouter.ApplyLine("{\"slot\":1,\"state\":\"following\",\"x\":1,\"y\":0}", now) ||
             neutralP1.Report != default)
             throw new Exception("Reserved native P1 virtual pad accepted movement.");
+        splitRouter.SetHybridForeground(true);
+        splitRouter.ApplyHybridKey(0x45, true, true);
+        if (splitFollower.Report.Buttons != 0 || !splitRouter.EnableHybridMainFollowMirror() ||
+            splitRouter.EnableHybridMainFollowMirror() || splitFollower.Report.Buttons != 0)
+            throw new Exception("P1 input mirrored before pairing or while the confirm key was held.");
+        splitRouter.ApplyHybridKey(0x45, false, true);
         if (!splitRouter.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", now) ||
             splitFollower.X != 32767 || neutralP1.Report != default)
             throw new Exception("Split follower or reserved neutral pad routed incorrectly.");
+        splitRouter.ApplyHybridKey(0x45, true, true);
+        if (splitFollower.Report.Buttons != 0x1000 || neutralP1.Report != default)
+            throw new Exception("P1 confirm did not mirror only to the active follower.");
+        splitRouter.ApplyHybridKey(0x45, false, true);
+        splitRouter.ApplyHybridKey(0x51, true, true);
+        if (splitFollower.Report.Buttons != 0x2000)
+            throw new Exception("P1 cancel did not mirror as virtual B.");
+        splitRouter.ApplyHybridKey(0x51, false, true);
+        splitRouter.ApplyHybridKey(0x70, true, true);
+        splitRouter.ApplyHybridKey(0x45, true, true);
+        if (splitFollower.Report.Buttons != 0)
+            throw new Exception("Explicit F1 focus did not suppress ordinary MAIN mirroring.");
+        splitRouter.ApplyHybridKey(0x45, false, true);
+        splitRouter.ApplyHybridKey(0x70, false, true);
+        splitRouter.ApplyHybridKey(0x70, true, true);
+        splitRouter.ApplyHybridKey(0x45, true, true);
+        if (splitFollower.Report.Buttons != 0x1000)
+            throw new Exception("Returning F1 to ordinary MAIN did not resume mirroring.");
+        splitRouter.SetHybridForeground(false);
+        if (splitFollower.Report != default || neutralP1.Report != default)
+            throw new Exception("Mirror input survived loss of game foreground.");
+
+        var neutralClient1 = new FakePad();
+        var neutralClient1Second = new FakePad();
+        var firstFollower = new FakePad();
+        var secondFollower = new FakePad();
+        var threeRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
+        {
+            [1] = neutralClient1, [2] = neutralClient1Second,
+            [3] = firstFollower, [4] = secondFollower
+        });
+        if (!threeRouter.ConfigureHybridKeyboard(new Dictionary<int, int> { [2] = 3, [3] = 4 }) ||
+            !threeRouter.EnableHybridMainFollowMirror())
+            throw new Exception("Three-player hybrid virtual controller layout was rejected.");
+        threeRouter.SetHybridForeground(true);
+        threeRouter.ApplyHybridKey(0x45, true, true);
+        if (firstFollower.Report.Buttons != 0x1000 || secondFollower.Report.Buttons != 0x1000 ||
+            neutralClient1.Report != default || neutralClient1Second.Report != default)
+            throw new Exception("Native P1 confirm did not mirror to both followers with neutral placeholders.");
     }
 }

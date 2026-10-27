@@ -2358,7 +2358,7 @@ public sealed class MainWindow : Window
     {
         if (_bridge?.IsHybridMode == true)
         {
-            ConfirmHybridRole();
+            await ConfirmHybridRoleAsync();
             return;
         }
         if (_bridge is null || _pairing?.AReleased != true) return;
@@ -2381,7 +2381,7 @@ public sealed class MainWindow : Window
         UpdateBridgeControls();
     }
 
-    private void ConfirmHybridRole()
+    private async Task ConfirmHybridRoleAsync()
     {
         var guide = _hybridPairing;
         if (_bridge?.IsHybridMode != true || guide is null) return;
@@ -2393,6 +2393,24 @@ public sealed class MainWindow : Window
         };
         if (!advanced) return;
         _pairingHasStarted = true;
+        if (guide.Phase == HybridPairingPhase.Complete)
+        {
+            _busy = true;
+            UpdateBridgeControls();
+            try { await _bridge.EnableHybridMainFollowMirrorAsync(); }
+            catch (Exception error)
+            {
+                await StopBridgeAsync();
+                _pairingStatus.Text = $"键鼠配对完成信号未被桥接确认：{error.Message}";
+                return;
+            }
+            finally
+            {
+                _busy = false;
+                UpdateBridgeControls();
+                UpdateFollowControls();
+            }
+        }
         _pairingSettled = guide.Phase == HybridPairingPhase.Complete;
         ShowHybridPairingStep();
         UpdateClientRows();

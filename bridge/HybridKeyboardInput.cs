@@ -79,7 +79,10 @@ internal sealed class HybridKeyboardState
     private readonly HashSet<int> _availablePlayers;
     private readonly HashSet<int> _pressed = [];
     private readonly HashSet<int> _blockedUntilRelease = [];
+    private readonly HashSet<int> _mainMirrorBlockedUntilRelease = [];
     private bool _gameForeground;
+    private bool _mainMirrorEnabled;
+    private bool _mainExplicitFocus;
 
     internal HybridKeyboardState(IEnumerable<int> availablePlayers)
     {
@@ -88,6 +91,28 @@ internal sealed class HybridKeyboardState
 
     internal int FocusedPlayer { get; private set; } = 1;
     internal bool GameForeground => _gameForeground;
+    internal bool PairingComplete => _mainMirrorEnabled;
+    internal ushort MainFollowMirrorButtons
+    {
+        get
+        {
+            if (!_mainMirrorEnabled || !_gameForeground || FocusedPlayer != 1 || _mainExplicitFocus)
+                return 0;
+            var actions = HybridAction.None;
+            foreach (var key in _pressed)
+                if (!_blockedUntilRelease.Contains(key) && !_mainMirrorBlockedUntilRelease.Contains(key))
+                    actions |= HybridKeyboardInput.ActionForKey(key);
+            return HybridKeyboardInput.MapMainFollowMirror(actions, true, false).Buttons;
+        }
+    }
+
+    internal bool EnableMainFollowMirror()
+    {
+        if (_mainMirrorEnabled) return false;
+        _mainMirrorEnabled = true;
+        BlockHeldMainActions();
+        return true;
+    }
 
     internal HybridKeyboardSnapshot Handle(int virtualKey, bool down, bool gameForeground)
     {
@@ -99,12 +124,14 @@ internal sealed class HybridKeyboardState
                 HybridKeyboardInput.ActionForKey(virtualKey) == HybridAction.Confirm;
             _pressed.Remove(virtualKey);
             _blockedUntilRelease.Remove(virtualKey);
+            _mainMirrorBlockedUntilRelease.Remove(virtualKey);
             return Snapshot() with { ConfirmReleased = confirmReleased };
         }
         if (!_gameForeground)
         {
             _pressed.Add(virtualKey);
             _blockedUntilRelease.Add(virtualKey);
+            if (IsMainMirrorAction(virtualKey)) _mainMirrorBlockedUntilRelease.Add(virtualKey);
             return Snapshot();
         }
         if (!_pressed.Add(virtualKey)) return Snapshot();
@@ -112,16 +139,25 @@ internal sealed class HybridKeyboardState
         var focus = HybridKeyboardInput.FocusForKey(virtualKey);
         if (focus != 0 && (focus == 1 || _availablePlayers.Contains(focus)))
         {
+            _mainExplicitFocus = focus == 1 && (FocusedPlayer != 1 || !_mainExplicitFocus);
             FocusedPlayer = focus;
             _blockedUntilRelease.UnionWith(_pressed);
+            BlockHeldMainActions();
             return Snapshot() with { FocusRequested = true };
         }
+        if (IsMainMirrorAction(virtualKey) &&
+            (!_mainMirrorEnabled || FocusedPlayer != 1 || _mainExplicitFocus))
+            _mainMirrorBlockedUntilRelease.Add(virtualKey);
         return Snapshot();
     }
 
     internal HybridKeyboardSnapshot SetForeground(bool foreground)
     {
-        if (_gameForeground && !foreground) _blockedUntilRelease.UnionWith(_pressed);
+        if (_gameForeground && !foreground)
+        {
+            _blockedUntilRelease.UnionWith(_pressed);
+            BlockHeldMainActions();
+        }
         _gameForeground = foreground;
         return Snapshot();
     }
@@ -134,4 +170,13 @@ internal sealed class HybridKeyboardState
             if (!_blockedUntilRelease.Contains(key)) actions |= HybridKeyboardInput.ActionForKey(key);
         return new(FocusedPlayer, HybridKeyboardInput.Map(actions));
     }
+
+    private void BlockHeldMainActions()
+    {
+        foreach (var key in _pressed)
+            if (IsMainMirrorAction(key)) _mainMirrorBlockedUntilRelease.Add(key);
+    }
+
+    private static bool IsMainMirrorAction(int key) =>
+        HybridKeyboardInput.ActionForKey(key) is HybridAction.Confirm or HybridAction.Cancel;
 }

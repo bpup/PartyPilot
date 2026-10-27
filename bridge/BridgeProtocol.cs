@@ -12,6 +12,21 @@ internal readonly record struct HybridKeyControl(int VirtualKey, bool Down);
 
 internal static class BridgeProtocol
 {
+    public static bool IsHybridPairingComplete(string line)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            var root = document.RootElement;
+            return root.ValueKind == JsonValueKind.Object &&
+                root.EnumerateObject().Count() == 1 &&
+                root.TryGetProperty("type", out var type) &&
+                type.ValueKind == JsonValueKind.String &&
+                type.GetString() == "hybrid_pairing_complete";
+        }
+        catch (JsonException) { return false; }
+    }
+
     public static bool TryParseHybridKey(string line, out HybridKeyControl command)
     {
         command = default;

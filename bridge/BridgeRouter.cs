@@ -145,6 +145,13 @@ internal sealed class BridgeRouter
         return true;
     }
 
+    public bool EnableHybridMainFollowMirror()
+    {
+        if (_hybridKeyboard?.EnableMainFollowMirror() != true) return false;
+        RenderAll();
+        return true;
+    }
+
     public bool ApplyHybridKey(int virtualKey, bool down, bool gameForeground)
     {
         _hybridFocusRequested = false;
@@ -152,6 +159,7 @@ internal sealed class BridgeRouter
         if (_hybridKeyboard is null || virtualKey == 0 ||
             (HybridKeyboardInput.FocusForKey(virtualKey) == 0 &&
              HybridKeyboardInput.ActionForKey(virtualKey) == HybridAction.None)) return false;
+        if (_hybridKeyboard.GameForeground && !gameForeground) ClearHybridAutomation();
         var sample = _hybridKeyboard.Handle(virtualKey, down, gameForeground);
         _hybridFocusRequested = sample.FocusRequested;
         _hybridConfirmReleased = sample.ConfirmReleased;
@@ -162,8 +170,19 @@ internal sealed class BridgeRouter
     public void SetHybridForeground(bool gameForeground)
     {
         if (_hybridKeyboard is null || _hybridKeyboard.GameForeground == gameForeground) return;
+        if (!gameForeground) ClearHybridAutomation();
         _hybridKeyboard.SetForeground(gameForeground);
         RenderAll();
+    }
+
+    private void ClearHybridAutomation()
+    {
+        foreach (var route in _routes.Values)
+        {
+            route.Automation = default;
+            route.Active = false;
+            route.EligibleForManualMovement = false;
+        }
     }
 
     public bool ApplyLine(string line, DateTime nowUtc)
@@ -192,7 +211,8 @@ internal sealed class BridgeRouter
         }
         if (!BridgeProtocol.TryParse(line, out var command) ||
             !_routes.TryGetValue(command.Slot, out var route) ||
-            (_hybridKeyboard is not null && !_hybridPlayerPads.Values.Contains(command.Slot)))
+            (_hybridKeyboard is not null &&
+             (!_hybridKeyboard.PairingComplete || !_hybridPlayerPads.Values.Contains(command.Slot))))
         {
             NeutralAll();
             return false;
@@ -473,6 +493,11 @@ internal sealed class BridgeRouter
 
     private void Render(int slot, PadRoute route)
     {
+        if (_hybridKeyboard is not null && !_hybridKeyboard.GameForeground)
+        {
+            route.Output.SetReport(default);
+            return;
+        }
         if (_hybridKeyboard is not null && !_hybridPlayerPads.Values.Contains(slot))
         {
             route.Output.SetReport(default);
@@ -518,7 +543,13 @@ internal sealed class BridgeRouter
             route.Output.SetReport(WithFlasks(PadReport.FromMovement(_manualX, _manualY), route));
             return;
         }
-        route.Output.SetReport(WithFlasks(route.Automation, route));
+        var automation = route.Automation;
+        if (_hybridKeyboard is not null)
+            automation = automation with
+            {
+                Buttons = (ushort)(automation.Buttons | _hybridKeyboard.MainFollowMirrorButtons)
+            };
+        route.Output.SetReport(WithFlasks(automation, route));
     }
 
     private PadReport WithFlasks(PadReport report, PadRoute route)

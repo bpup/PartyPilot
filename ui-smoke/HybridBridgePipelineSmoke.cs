@@ -37,7 +37,7 @@ internal static class HybridBridgePipelineSmoke
                 "games=[sys.argv[i+1] for i,arg in enumerate(sys.argv[:-1]) if arg=='--game-exe']\n" +
                 $"if games != [{JsonSerializer.Serialize(gameA)},{JsonSerializer.Serialize(gameB)}]: sys.exit(2)\n" +
                 "print('{\"event\":\"ready\",\"slots\":[1,2],\"physical_mode\":false,\"hybrid_mode\":true,\"hybrid_player_pads\":\"2:2\",\"hybrid_window_map\":\"1:101:201,2:102:202\"}', flush=True)\n" +
-                $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(inputLog)}, 'a') as out: out.write(line)\n");
+                $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(inputLog)}, 'a') as out: out.write(line)\n    if json.loads(line).get('type') == 'hybrid_pairing_complete': print('{{\"event\":\"hybrid_pairing_complete\"}}', flush=True)\n");
             File.WriteAllText(followExecutable, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '-roster' not in sys.argv or sys.argv[sys.argv.index('-roster')+1] != '1:101,2:102': sys.exit(2)\n" +
                 "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0}}}', flush=True)\n" +
@@ -53,6 +53,7 @@ internal static class HybridBridgePipelineSmoke
             await using var bridge = await BridgeSession.StartHybridAsync(executable, topology.Slots, clients);
             if (!bridge.IsHybridMode || !bridge.IsRunning)
                 throw new Exception("Desktop rejected a ready keyboard bridge.");
+            bridge.StartReading();
             Exception? sendError = null;
             await using var input = new HybridKeyEventPublisher(bridge.SendHybridKeyAsync,
                 error => sendError = error);
@@ -65,6 +66,11 @@ internal static class HybridBridgePipelineSmoke
                 File.ReadAllLines(inputLog).Select(line => JsonDocument.Parse(line).RootElement.GetProperty("down").GetBoolean())
                     .SequenceEqual([true, false]) == false)
                 throw new Exception("Keyboard bridge did not receive ordered key down/up events.");
+            await bridge.EnableHybridMainFollowMirrorAsync();
+            if (!File.ReadAllLines(inputLog).Any(line =>
+                    JsonDocument.Parse(line).RootElement.TryGetProperty("type", out var type) &&
+                    type.GetString() == "hybrid_pairing_complete"))
+                throw new Exception("Desktop did not wait for the bridge pairing completion acknowledgement.");
             if (!LiveFollowPlan.TryCreate("2", "10", "750ms", "30m", null, out var plan) || plan is null)
                 throw new Exception("Keyboard follow plan was invalid.");
             await using (var follow = await LiveFollowSession.StartAsync(followExecutable,
@@ -72,11 +78,11 @@ internal static class HybridBridgePipelineSmoke
             {
                 if (follow.Current.FollowerPad != 3 || follow.Current.Status != "following")
                     throw new Exception("Keyboard bridge did not accept a live follower decision.");
-                while (DateTime.UtcNow < deadline && File.ReadAllLines(inputLog).Length < 3)
+                while (DateTime.UtcNow < deadline && File.ReadAllLines(inputLog).Length < 4)
                     await Task.Delay(20);
                 var commands = File.ReadAllLines(inputLog);
-                if (commands.Length < 3 ||
-                    JsonDocument.Parse(commands[2]).RootElement.GetProperty("slot").GetInt32() != 2)
+                if (commands.Length < 4 ||
+                    JsonDocument.Parse(commands[3]).RootElement.GetProperty("slot").GetInt32() != 2)
                     throw new Exception("Live follow did not route P2 movement to the keyboard virtual pad.");
             }
         }
