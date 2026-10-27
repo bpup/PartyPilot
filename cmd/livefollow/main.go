@@ -452,7 +452,7 @@ func main() {
 	autoFlask := flag.Bool("auto-flask", false, "enable life and mana flask decisions for explicitly bound clients")
 	allowFollowPause := flag.Bool("allow-follow-pause", false, "accept explicit pause/resume controls on stdin")
 	acceptMainInput := flag.Bool("accept-main-input", false, "accept bound main-controller samples without enabling mirror output")
-	closeRangeMirror := flag.Bool("close-range-mirror", false, "enable optional two-player close-range stick mirror")
+	closeRangeMirror := flag.Bool("close-range-mirror", false, "enable optional per-follower close-range stick mirror")
 	closeMirrorDuration := flag.Duration("close-mirror-duration", 400*time.Millisecond, "close-range stick burst duration")
 	mirrorBPlayers := flag.String("mirror-b-players", "all", "roster slots allowed to mirror B; all, none, or comma-separated slots")
 	address := flag.String("listen", "127.0.0.1:47617", "loopback sensor address")

@@ -2164,7 +2164,8 @@ public sealed class MainWindow : Window
         _classicSprintCatchUp.IsEnabled = _follow is null && !_busy &&
             _selectedTopology?.Id is ("2-split" or "3-three-singles");
         _closeRangeMirror.IsEnabled = _follow is null && !_busy &&
-            _selectedTopology?.Id == "2-split" && _bridge is { IsHybridMode: false };
+            _selectedTopology?.Id is ("2-split" or "3-three-singles") &&
+            _bridge is { IsHybridMode: false };
         _closeMirrorDuration.IsEnabled = _closeRangeMirror.IsEnabled && _closeRangeMirror.IsChecked == true;
         _classicCollisionDodge.IsEnabled = _follow is null && !_busy &&
             _selectedTopology?.Id is ("2-split" or "3-three-singles") &&
@@ -2830,7 +2831,8 @@ public sealed class MainWindow : Window
             _followStatus.Text = "找不到 PartyPilot-LiveFollow.exe；请使用完整发布目录。";
             return;
         }
-        var enableCloseMirror = _selectedTopology.Id == "2-split" && !_bridge.IsHybridMode &&
+        var enableCloseMirror = _selectedTopology.Id is ("2-split" or "3-three-singles") &&
+            !_bridge.IsHybridMode &&
             _closeRangeMirror.IsChecked == true;
         if (enableCloseMirror && (!int.TryParse(_closeMirrorDuration.Text, NumberStyles.None,
                 CultureInfo.InvariantCulture, out var mirrorDuration) || mirrorDuration is < 50 or > 5000))

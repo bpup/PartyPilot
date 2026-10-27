@@ -165,3 +165,51 @@ func TestLiveCloseMirrorReleasesConfiguredBAtEight(t *testing.T) {
 		t.Fatalf("physical B release kept suppression latched: %+v", got)
 	}
 }
+
+func TestLiveCloseMirrorTracksThreeClientFollowersSeparately(t *testing.T) {
+	at := time.Unix(2400, 0).UTC()
+	engine, err := New(map[int]int{1: 101, 2: 202, 3: 303}, 1,
+		follow.Config{StopDistance: 10, ResumeDistance: 13, CatchUpDistance: 90,
+			MaxAge: time.Second}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	for _, slot := range []int{1, 2, 3} {
+		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
+			ObservedAt: at, Origin: "live"})
+	}
+	start := at.Add(time.Millisecond)
+	for _, sample := range []telemetry.Sample{
+		{ProcessID: 101, SeenUTC: start, X: 9},
+		{ProcessID: 202, SeenUTC: start},
+		{ProcessID: 303, SeenUTC: start},
+	} {
+		if !observeGridSample(engine, sample) {
+			t.Fatal("initial position rejected")
+		}
+	}
+	engine.SetAcceptMainInput(true)
+	engine.SetCloseRangeMirror(true, 400*time.Millisecond)
+	if err := engine.SetCloseMirrorBAllowed(2, true); err != nil {
+		t.Fatal(err)
+	}
+	if !engine.ObserveMainInput(MainInput{Slot: 1, LeftX: 1, ObservedAt: start}, start) {
+		t.Fatal("main-controller input rejected")
+	}
+	commands := engine.Step(start)
+	for _, slot := range []int{2, 3} {
+		if got := commands[slot]; !got.MirrorMovement || got.X != 1 || got.Y != 0 {
+			t.Fatalf("P%d did not independently mirror MAIN: %+v", slot, got)
+		}
+	}
+	pressed := start.Add(50 * time.Millisecond)
+	engine.ObserveMainInput(MainInput{Slot: 1, LeftX: 1, BDown: true, ObservedAt: pressed}, pressed)
+	commands = engine.Step(pressed)
+	if got := commands[2]; !got.MirrorMovement || got.Reason != "Mirrored dodge / sprint" {
+		t.Fatalf("P2 configured B did not start mirrored dodge: %+v", got)
+	}
+	if got := commands[3]; got.MirrorMovement || got.SuppressMirroredB {
+		t.Fatalf("P3 unconfigured B did not independently stop mirroring: %+v", got)
+	}
+}

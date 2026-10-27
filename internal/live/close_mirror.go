@@ -23,7 +23,7 @@ func (e *Engine) SetCloseMirrorBAllowed(slot int, allowed bool) error {
 	return nil
 }
 
-// SetCloseRangeMirror enables the supplied build's optional two-player stick
+// SetCloseRangeMirror enables the supplied build's optional per-follower stick
 // burst. A trusted main-input subscription must be enabled separately.
 func (e *Engine) SetCloseRangeMirror(enabled bool, duration time.Duration) {
 	e.closeMirrorEnabled = enabled
@@ -47,7 +47,7 @@ func (e *Engine) resetCloseMirrors() {
 
 func (e *Engine) applyCloseMirror(slot int, command follow.Command, now time.Time,
 	positions map[int]follow.Position, terrains map[int]*navigation.Grid) follow.Command {
-	if !e.closeMirrorEnabled || len(e.slots) != 2 ||
+	if !e.closeMirrorEnabled ||
 		e.coordinator.ResolvedTargets()[slot] != e.leader ||
 		command.State == follow.Waiting || command.Reason == "manual control" {
 		e.resetCloseMirror(slot)
