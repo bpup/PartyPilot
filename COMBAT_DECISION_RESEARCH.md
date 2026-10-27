@@ -37,6 +37,8 @@ PartyPilot-CombatReplay.exe -feed-replay testdata/combat-feed-example.jsonl -ena
 
 `-profile profile.json` 可为只读回放加载完整的默认结构，并修改上文列出的角色资格字段；解析时拒绝未知字段、额外 JSON 值与尚未实现的其他配置改动。`-enable-planning` 仍需显式传入。此选项不连接实时手柄。
 
+先运行 `PartyPilot-CombatReplay.exe -print-default-profile > profile.json` 可得到当前受支持的完整默认结构，再编辑角色的 `logic` 字段用于回放。目标版 `ShouldHoldLockedTarget` 位于 `CombatDirectorComboRuntime`，只在已有连招执行对象且下一决策仍为同一槽位、同一连招、非紧急状态时判断当前目标是否存活；当前只读回放没有这个执行对象，因此不会把目标锁定伪装成目标分配结果。
+
 第二种模式参照目标版 `CombatDirectorWorldSnapshotAdapter`，从显式提供的客户端有序帧组装 P1–P6 快照。它要求每个预期客户端在场、声明角色顺序可靠、区域语义相符、各本地槽位连续且无重复，并要求主客户端明确提供怪物扫描、全部界面安全字段、主控安全区与紧急状态；每名角色的连招活动状态也须显式提供。主客户端的存活怪物会按各角色坐标计算距离，采集时间用于计算数据年龄，交给规划安全门禁判断。缺字段或冲突不会被补成“安全”；`testdata/combat-feed-example.jsonl` 是合成帧，现有传感器**不会**发布这种可靠有序战斗帧。
 
 两个示例都是合成怪群，不代表游戏采集数据。命令仅输出规划 JSON，不向手柄桥接发送任何消息。目标锁定判断仍未进入本次规划。角色技能槽位、武器切换、目标的游戏内操作、连招计时、重复/冷却、跨客户端协调和手动接管仍未接入实时执行。当前传感器有候选技能绑定、有限的可见雷达实体和怪物组件原始生命诊断，但只有未实机验证的怪物稀有度与实体存活观察值，虽加入未经游戏验证的跨帧存活候选，仍缺可用于战斗的存活确认、完整玩家顺序与战斗 UI 状态，不能构成目标版要求的可靠战斗世界快照；因此规划层仍为 **implementation-aligned / integration-pending**。

@@ -17,8 +17,17 @@ func main() {
 	path := flag.String("replay", "", "JSONL file of explicit synthetic combat worlds")
 	feedPath := flag.String("feed-replay", "", "JSONL file of verified ordered combat feed frames")
 	profilePath := flag.String("profile", "", "JSON file with supported combat role eligibility settings")
+	printProfile := flag.Bool("print-default-profile", false, "print the supported default profile JSON")
 	enabled := flag.Bool("enable-planning", false, "enable read-only default-profile plans")
 	flag.Parse()
+	if *printProfile {
+		data, err := json.MarshalIndent(combat.DefaultProfile(), "", "  ")
+		if err != nil {
+			fail(err)
+		}
+		fmt.Println(string(data))
+		return
+	}
 	if (*path == "") == (*feedPath == "") {
 		fmt.Fprintln(os.Stderr, "usage: PartyPilot-CombatReplay (-replay worlds.jsonl | -feed-replay frames.jsonl) [-profile profile.json] [-enable-planning]")
 		os.Exit(2)
