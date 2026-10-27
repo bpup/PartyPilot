@@ -17,6 +17,9 @@ add_library(PartyPilotPrivateSlots SHARED
   "${MINHOOK}/src/hde/hde64.c")
 target_include_directories(PartyPilotPrivateSlots PRIVATE
   "${MINHOOK}/include" "${MINHOOK}/src" "${MINHOOK}/src/hde")
+if(MSVC)
+  target_compile_options(PartyPilotPrivateSlots PRIVATE /experimental:c11atomics)
+endif()
 set_target_properties(PartyPilotPrivateSlots PROPERTIES
   PREFIX "" OUTPUT_NAME "PartyPilot.PrivateSlots"
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin")
