@@ -90,11 +90,19 @@ internal static class RadarTerrainCaptureSmoke
                 matching with { GridX = 1, GridY = 0 }, 64, 64, 8);
             if (projected[(32 * 64 + 26) * 4 + 3] != 0 ||
                 projected[(27 * 64 + 32) * 4 + 3] != 224 ||
-                projected[3] != 0)
-                throw new Exception("Radar terrain preview lost blocked, walkable, or outside-map pixels.");
+                projected[(63 * 64) * 4 + 3] != 0)
+                throw new Exception($"Radar terrain preview lost blocked, walkable, or outside-map pixels: " +
+                    $"blocked={projected[(32 * 64 + 26) * 4 + 3]}, " +
+                    $"walkable={projected[(27 * 64 + 32) * 4 + 3]}, " +
+                    $"outside={projected[(63 * 64) * 4 + 3]}.");
             var interior = RadarTerrainRaster.Render(capture, matching, 1, 1, 1);
-            if (interior[3] != 0)
-                throw new Exception("Radar terrain darkened a walkable interior as a fog layer.");
+            if (interior[0] != 9 || interior[1] != 7 ||
+                interior[2] != 5 || interior[3] != 38)
+                throw new Exception("Radar terrain lost its faint walkable fill.");
+            var diagonal = RadarTerrainRaster.Render(capture,
+                matching with { GridX = 1, GridY = 1 }, 1, 1, 1);
+            if (diagonal[3] != 38)
+                throw new Exception("A diagonal blocked cell incorrectly became a wall edge.");
             var autoDirectory = Path.Combine(directory, "auto");
             Directory.CreateDirectory(autoDirectory);
             var catalog = new RadarTerrainCatalog(autoDirectory);
