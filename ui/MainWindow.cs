@@ -1076,8 +1076,8 @@ public sealed class MainWindow : Window
         _radarScale.HorizontalAlignment = HorizontalAlignment.Left;
         _radarScale.TextChanged += (_, _) => UpdateRadarControls();
         panel.Children.Add(_radarScale);
-        _radarAutoTerrain.Content = "自动查找本次传感器的候选地形采集（实验性）";
-        _radarAutoTerrain.IsChecked = false;
+        _radarAutoTerrain.Content = "自动查找当前进程与区域的候选地形（实验性）";
+        _radarAutoTerrain.IsChecked = true;
         panel.Children.Add(_radarAutoTerrain);
         panel.Children.Add(Label("候选地形采集文件（可选；需在游戏中核对区域与地图方向）", 12, MutedBrush));
         for (var index = 0; index < _radarTerrainPaths.Length; index++)
