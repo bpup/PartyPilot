@@ -23,5 +23,17 @@ internal static class HybridPairingGuideSmoke
             !guide.ConfirmFollowerJoined() || guide.Phase != HybridPairingPhase.Complete ||
             guide.ConfirmFollowerJoined())
             throw new Exception("Hybrid staged pairing accepted an unobserved or wrong player transition.");
+        var five = new HybridPairingGuide(PartyTopologies.ForPlayerCount(5)
+            .Single(item => item.Id == "5-main-solo"));
+        if (!five.ConfirmNativeMain())
+            throw new Exception("Five-player native P1 pairing did not start.");
+        for (var player = 2; player <= 5; player++)
+        {
+            if (five.CurrentPlayer != player || !five.ObserveFocus(player) ||
+                !five.ObserveConfirmRelease(player) || !five.ConfirmFollowerJoined())
+                throw new Exception($"Five-player keyboard pairing stopped before P{player}.");
+        }
+        if (five.Phase != HybridPairingPhase.Complete)
+            throw new Exception("Client 3 followers did not complete keyboard pairing.");
     }
 }

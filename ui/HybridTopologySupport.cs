@@ -7,7 +7,6 @@ internal static class HybridTopologySupport
         topology.Clients[0].SequenceEqual([1]);
 
     internal static bool CanBridge(PartyTopology topology) =>
-        topology.PlayerCount is >= 2 and <= 4 && topology.ClientCount == 2 &&
-        HasNativeP1(topology) &&
-        topology.Slots.Skip(1).All(slot => slot.Client == 2 && slot.RuntimePad is >= 1 and <= 4);
+        HasNativeP1(topology) && topology.Id is
+            "2-split" or "3-main-solo" or "3-three-singles" or "5-main-solo";
 }

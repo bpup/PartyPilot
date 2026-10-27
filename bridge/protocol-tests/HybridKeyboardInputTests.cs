@@ -23,6 +23,31 @@ internal static class HybridKeyboardInputTests
             followerWindow != new HybridGameWindow(20, 200) ||
             plan.TryGetAutoPartyWindow(2, out _))
             throw new Exception("Hybrid Auto Party resolved an unassigned or wrong game window.");
+        if (!HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:3,3:5",
+                "--hybrid-window-map", "1:10:100,2:20:200,3:30:300"],
+                [1, 2, 3, 4], out var threeClient) ||
+            !threeClient!.TryGetAutoPartyWindow(5, out var thirdWindow) ||
+            thirdWindow != new HybridGameWindow(30, 300) ||
+            !HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:3,3:4,4:5,5:6",
+                "--hybrid-window-map", "1:10:100,2:20:200,3:20:200,4:30:300,5:30:300"],
+                [1, 2, 3, 4], out var fiveClient) ||
+            !fiveClient!.TryGetAutoPartyWindow(6, out var fifthWindow) ||
+            fifthWindow != new HybridGameWindow(30, 300) ||
+            HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:3,3:5",
+                "--hybrid-window-map", "1:10:100,2:20:200,3:10:100"],
+                [1, 2, 3, 4], out _))
+            throw new Exception("Hybrid Client 3 private players or windows were mapped incorrectly.");
+        var onePrivate = new CompositeClient3Options(30, 300, Path.GetFullPath("PathOfExile.exe"), false);
+        var twoPrivate = onePrivate with { IncludeP6 = true };
+        if (!threeClient.MatchesPrivateClient3(onePrivate) ||
+            threeClient.MatchesPrivateClient3(twoPrivate) ||
+            threeClient.MatchesPrivateClient3(null) ||
+            !fiveClient.MatchesPrivateClient3(twoPrivate) ||
+            fiveClient.MatchesPrivateClient3(onePrivate) ||
+            plan.MatchesPrivateClient3(onePrivate) ||
+            !plan.MatchesPrivateClient3(null) ||
+            fiveClient.MatchesPrivateClient3(twoPrivate with { Pid = 20 }))
+            throw new Exception("Hybrid private P5/P6 configuration accepted a wrong Client 3 binding.");
         var gameA = Path.GetFullPath("PoE2.exe");
         var gameB = Path.GetFullPath("PoE2B.exe");
         var wrongGame = Path.GetFullPath("Other.exe");
@@ -314,6 +339,19 @@ internal static class HybridKeyboardInputTests
         filteredRouter.ApplyHybridKey(0x51, true, true);
         if (filteredP2.Report.Buttons != 0x2000 || filteredP3.Report.Buttons != 0)
             throw new Exception("Hybrid MAIN B ignored P2/P3 follower settings.");
+        var privateP5 = new FakePad();
+        var privateP6 = new FakePad();
+        var privateRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
+            { [1] = new FakePad(), [2] = new FakePad(), [3] = new FakePad(),
+                [4] = new FakePad(), [5] = privateP5, [6] = privateP6 });
+        if (!privateRouter.ConfigureHybridKeyboard(new Dictionary<int, int>
+                { [2] = 3, [3] = 4, [4] = 5, [5] = 6 }) ||
+            !privateRouter.EnableHybridMainFollowMirror())
+            throw new Exception("Five-player keyboard routing rejected private Client 3 pads.");
+        privateRouter.SetHybridForeground(true);
+        privateRouter.ApplyHybridKey(0x45, true, true);
+        if (privateP5.Report.Buttons != 0x1000 || privateP6.Report.Buttons != 0x1000)
+            throw new Exception("Normal MAIN input did not reach both Client 3 followers.");
 
         var menuState = new HybridKeyboardState([2]);
         menuState.Handle(0x71, true, true);

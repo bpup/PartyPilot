@@ -56,6 +56,7 @@ if (args.Contains("--pipeline-only"))
 if (args.Contains("--hybrid-pipeline-only"))
 {
     await HybridBridgePipelineSmoke.RunAsync();
+    await HybridClient3PipelineSmoke.RunAsync();
     Console.WriteLine("Keyboard bridge process pipeline checked.");
     return;
 }

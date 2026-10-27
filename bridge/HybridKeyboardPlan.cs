@@ -6,6 +6,17 @@ internal sealed record HybridKeyboardPlan(
     IReadOnlyDictionary<int, int> PlayerPads,
     IReadOnlyDictionary<int, HybridGameWindow> PlayerWindows)
 {
+    internal bool MatchesPrivateClient3(CompositeClient3Options? options)
+    {
+        var pads = PlayerPads.Values.Where(pad => pad >= 5).Order().ToArray();
+        if (pads.Length == 0) return options is null;
+        if (options is not { } privatePlan || !pads.SequenceEqual(privatePlan.PrivateSlots))
+            return false;
+        return PlayerPads.Where(entry => entry.Value >= 5).All(entry =>
+            PlayerWindows.TryGetValue(entry.Key, out var window) &&
+            window.Pid == privatePlan.Pid && window.Handle == privatePlan.WindowHandle);
+    }
+
     internal bool TryGetAutoPartyWindow(int pad, out HybridGameWindow window)
     {
         if (pad == 1 && PlayerWindows.TryGetValue(1, out window)) return true;
@@ -49,18 +60,21 @@ internal sealed record HybridKeyboardPlan(
             var values = entry.Split(':');
             if (values.Length != 2 || !int.TryParse(values[0], out var player) ||
                 !int.TryParse(values[1], out var slot) || player is < 2 or > 6 ||
-                !slots.Contains(slot) || !pads.TryAdd(player, slot)) return false;
+                (!slots.Contains(slot) && slot is not (5 or 6)) ||
+                !pads.TryAdd(player, slot)) return false;
         }
-        var expectedSlots = pads.Count switch
+        var expectedSlots = pads.Count == 1 ? new[] { 1, 2 } : new[] { 1, 2, 3, 4 };
+        var expectedFollowers = pads.Count switch
         {
-            1 => new[] { 1, 2 },
-            2 => new[] { 1, 2, 3, 4 },
+            1 => new[] { 2 },
+            2 when pads.TryGetValue(3, out var last) && last == 5 => new[] { 3, 5 },
+            2 => new[] { 3, 4 },
+            4 => new[] { 3, 4, 5, 6 },
             _ => []
         };
-        var expectedFollowerSlots = pads.Count == 1 ? new[] { 2 } : new[] { 3, 4 };
-        if (!slots.Order().SequenceEqual(expectedSlots) ||
+        if (expectedFollowers.Length == 0 || !slots.Order().SequenceEqual(expectedSlots) ||
             !pads.Keys.Order().SequenceEqual(Enumerable.Range(2, pads.Count)) ||
-            !pads.Values.Order().SequenceEqual(expectedFollowerSlots))
+            !pads.Values.Order().SequenceEqual(expectedFollowers))
             return false;
         var windows = new Dictionary<int, HybridGameWindow>();
         foreach (var entry in args[windowIndex + 1].Split(','))
@@ -72,6 +86,9 @@ internal sealed record HybridKeyboardPlan(
                 !windows.TryAdd(player, new HybridGameWindow(pid, handle))) return false;
         }
         if (windows.Count != pads.Count + 1 || !windows.ContainsKey(1)) return false;
+        if (windows[1].Pid == windows[2].Pid ||
+            (pads.Values.Contains(5) && (!windows.TryGetValue(pads.Single(entry => entry.Value == 5).Key,
+                out var privateWindow) || privateWindow.Pid == windows[1].Pid))) return false;
         plan = new HybridKeyboardPlan(pads, windows);
         return true;
     }

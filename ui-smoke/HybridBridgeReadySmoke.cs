@@ -46,6 +46,22 @@ internal static class HybridBridgeReadySmoke
             BridgeSession.IsExpectedHybridReady(configured, [1, 2, 3, 4], "2:3,3:4",
                 "1:10:100,2:20:200,3:20:200", followerMirror: FollowerMirrorConfig.Default))
             throw new Exception("Desktop did not require the exact Hybrid follower mirror setting.");
+        var client3 = new PrivateClient3Plan(30, 300, Path.GetFullPath("Game3.exe"), false);
+        const string privateReady = "{\"event\":\"ready\",\"slots\":[1,2,3,4]," +
+            "\"physical_mode\":false,\"hybrid_mode\":true,\"menu_guard_enabled\":true," +
+            "\"hybrid_player_pads\":\"2:3,3:5\"," +
+            "\"hybrid_window_map\":\"1:10:100,2:20:200,3:30:300\"," +
+            "\"private_client3_pid\":30,\"private_client3_window_handle\":300," +
+            "\"private_client3_slots\":[5]}";
+        if (!BridgeSession.IsExpectedHybridReady(privateReady, [1, 2, 3, 4], "2:3,3:5",
+                "1:10:100,2:20:200,3:30:300", privatePlan: client3) ||
+            BridgeSession.IsExpectedHybridReady(privateReady.Replace("\"private_client3_pid\":30",
+                "\"private_client3_pid\":20"), [1, 2, 3, 4], "2:3,3:5",
+                "1:10:100,2:20:200,3:30:300", privatePlan: client3) ||
+            BridgeSession.IsExpectedHybridReady(privateReady.Replace("\"private_client3_slots\":[5]",
+                "\"private_client3_slots\":[5,6]"), [1, 2, 3, 4], "2:3,3:5",
+                "1:10:100,2:20:200,3:30:300", privatePlan: client3))
+            throw new Exception("Hybrid Client 3 receipt did not bind the private process and pad set.");
         var path = Path.Combine(Path.GetTempPath(), $"partypilot-hybrid-{Guid.NewGuid():N}.json");
         try
         {

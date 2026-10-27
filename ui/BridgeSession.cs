@@ -15,6 +15,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     private readonly ConcurrentDictionary<int, string> _menuStates = new();
     private readonly HashSet<int> _slots;
     private readonly HashSet<int> _allSlots;
+    private readonly IReadOnlyDictionary<int, int> _hybridOutputForRuntime;
     private readonly SemaphoreSlim _inputGate = new(1, 1);
     private readonly SemaphoreSlim _partyGate = new(1, 1);
     private AutoPartyPending? _pendingAutoParty;
@@ -53,7 +54,8 @@ internal sealed class BridgeSession : IAsyncDisposable
 
     private BridgeSession(Process process, Task<string> readError, bool autoFlaskEnabled,
         bool lastFocusedLeads,
-        int[] slots, int[] allSlots, bool hybridMode = false)
+        int[] slots, int[] allSlots, bool hybridMode = false,
+        IReadOnlyDictionary<int, int>? hybridOutputForRuntime = null)
     {
         _process = process;
         _readError = readError;
@@ -62,6 +64,7 @@ internal sealed class BridgeSession : IAsyncDisposable
         LastFocusedLeadsEnabled = lastFocusedLeads;
         _slots = slots.ToHashSet();
         _allSlots = allSlots.ToHashSet();
+        _hybridOutputForRuntime = hybridOutputForRuntime ?? new Dictionary<int, int>();
         _lastFocusedSlot = slots[0];
         _lastManualFocusedSlot = slots[0];
     }
@@ -184,16 +187,27 @@ internal sealed class BridgeSession : IAsyncDisposable
         HybridBindingConfig? bindings = null, bool menuGuardEnabled = true,
         FollowerMirrorConfig? followerMirror = null)
     {
-        if (partySlots.Count is < 2 or > 3 || clients.Count != 2 ||
+        var runtimePads = partySlots.Select(slot => slot.RuntimePad).ToArray();
+        var supportedLayout = runtimePads.SequenceEqual([1, 3]) ||
+            runtimePads.SequenceEqual([1, 3, 4]) ||
+            runtimePads.SequenceEqual([1, 3, 5]) ||
+            runtimePads.SequenceEqual([1, 3, 4, 5, 6]);
+        if (!supportedLayout || clients.Count != (runtimePads.Max() >= 5 ? 3 : 2) ||
             !partySlots.Select(slot => slot.PartyPlayer).SequenceEqual(Enumerable.Range(1, partySlots.Count)) ||
-            partySlots[0].Client != 1 || partySlots.Skip(1).Any(slot => slot.Client != 2) ||
+            partySlots.Any(slot => slot.Client != (slot.RuntimePad - 1) / 2 + 1 ||
+                slot.LocalPlayer != (slot.RuntimePad - 1) % 2 + 1) ||
             clients.Any(client => client.Pid <= 0 || client.WindowHandle <= 0 ||
                 string.IsNullOrWhiteSpace(client.Executable) || !Path.IsPathFullyQualified(client.Executable)))
             throw new ArgumentException("Keyboard bridge requires bound game windows for P1 and every follower.");
         var followers = partySlots.Skip(1).ToArray();
         var slots = followers.Length == 1 ? new[] { 1, 2 } : new[] { 1, 2, 3, 4 };
-        var playerPads = string.Join(',', followers.Select((slot, index) =>
-            $"{slot.PartyPlayer}:{(followers.Length == 1 ? 2 : index + 3)}"));
+        var outputForRuntime = followers.ToDictionary(slot => slot.RuntimePad,
+            slot => followers.Length == 1 ? 2 : slot.RuntimePad);
+        var playerPads = string.Join(',', followers.Select(slot =>
+            $"{slot.PartyPlayer}:{outputForRuntime[slot.RuntimePad]}"));
+        var privatePlan = clients.Count == 3 ? new PrivateClient3Plan(clients[2].Pid,
+            clients[2].WindowHandle, Path.GetFullPath(clients[2].Executable),
+            runtimePads.Contains(6)) : null;
         var windowMap = string.Join(',', partySlots.Select(slot =>
             $"{slot.PartyPlayer}:{clients[slot.Client - 1].Pid}:{clients[slot.Client - 1].WindowHandle}"));
         var start = new ProcessStartInfo(executable)
@@ -221,6 +235,16 @@ internal sealed class BridgeSession : IAsyncDisposable
             start.ArgumentList.Add("--follower-mirror");
             start.ArgumentList.Add(followerMirror.Encode());
         }
+        if (privatePlan is not null)
+        {
+            foreach (var argument in new[]
+            {
+                "--client3-pid", privatePlan.Pid.ToString(),
+                "--client3-window-handle", privatePlan.WindowHandle.ToString(),
+                "--client3-game-exe", privatePlan.Executable,
+                "--client3-players", privatePlan.IncludePad6 ? "5,6" : "5"
+            }) start.ArgumentList.Add(argument);
+        }
         foreach (var client in clients)
         {
             start.ArgumentList.Add("--game-exe");
@@ -231,11 +255,14 @@ internal sealed class BridgeSession : IAsyncDisposable
         var readError = process.StandardError.ReadToEndAsync();
         try
         {
-            var readyLine = await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            var readyLine = await process.StandardOutput.ReadLineAsync().WaitAsync(
+                TimeSpan.FromSeconds(privatePlan is null ? 15 : 45));
             if (readyLine is null || !IsExpectedHybridReady(readyLine, slots, playerPads,
-                    windowMap, bindings?.Encode(), menuGuardEnabled, followerMirror))
+                    windowMap, bindings?.Encode(), menuGuardEnabled, followerMirror, privatePlan))
                 throw new InvalidOperationException("Keyboard bridge did not confirm its pad and window binding.");
-            return new BridgeSession(process, readError, false, false, slots, slots, hybridMode: true);
+            return new BridgeSession(process, readError, false, false, slots,
+                [1, ..outputForRuntime.Values], hybridMode: true,
+                hybridOutputForRuntime: outputForRuntime);
         }
         catch (Exception error)
         {
@@ -250,7 +277,8 @@ internal sealed class BridgeSession : IAsyncDisposable
 
     internal static bool IsExpectedHybridReady(string line, int[] slots,
         string playerPads, string windowMap, string? bindingKeys = null,
-        bool menuGuardEnabled = true, FollowerMirrorConfig? followerMirror = null)
+        bool menuGuardEnabled = true, FollowerMirrorConfig? followerMirror = null,
+        PrivateClient3Plan? privatePlan = null)
     {
         try
         {
@@ -263,6 +291,14 @@ internal sealed class BridgeSession : IAsyncDisposable
                 menuGuard.GetBoolean() == menuGuardEnabled &&
                 (followerMirror is null || root.TryGetProperty("follower_mirror", out var mirror) &&
                  mirror.GetString() == followerMirror.Encode()) &&
+                (privatePlan is null ||
+                 root.TryGetProperty("private_client3_pid", out var privatePid) &&
+                 privatePid.GetInt32() == privatePlan.Pid &&
+                 root.TryGetProperty("private_client3_window_handle", out var privateWindow) &&
+                 privateWindow.GetInt64() == privatePlan.WindowHandle &&
+                 root.TryGetProperty("private_client3_slots", out var privatePads) &&
+                 privatePads.EnumerateArray().Select(value => value.GetInt32())
+                     .SequenceEqual(privatePlan.IncludePad6 ? [5, 6] : [5])) &&
                 root.TryGetProperty("slots", out var selected) &&
                 selected.EnumerateArray().Select(value => value.GetInt32()).SequenceEqual(slots.Order()) &&
                 root.TryGetProperty("hybrid_player_pads", out var pads) && pads.GetString() == playerPads &&
@@ -348,12 +384,14 @@ internal sealed class BridgeSession : IAsyncDisposable
     {
         if (_stopping || _process.HasExited)
             throw new InvalidOperationException("Virtual controller bridge is no longer running.");
-        if (IsHybridMode && _slots.Count == 2)
+        if (IsHybridMode)
         {
             var message = JsonNode.Parse(command)?.AsObject();
-            if (message is not null && message["slot"]?.GetValue<int>() == 3)
+            if (message is not null && message["slot"]?.GetValue<int>() is int runtimeSlot &&
+                _hybridOutputForRuntime.TryGetValue(runtimeSlot, out var outputSlot) &&
+                runtimeSlot != outputSlot)
             {
-                message["slot"] = 2;
+                message["slot"] = outputSlot;
                 command = message.ToJsonString();
             }
         }
@@ -402,9 +440,10 @@ internal sealed class BridgeSession : IAsyncDisposable
 
     internal Task PulseAutoPartyAsync(int slot, ushort buttons, int holdMilliseconds, CancellationToken token)
     {
-        if (IsHybridMode && _slots.Count == 2 && slot == 3) slot = 2;
+        if (IsHybridMode && _hybridOutputForRuntime.TryGetValue(slot, out var outputSlot))
+            slot = outputSlot;
         if (!_allSlots.Contains(slot) ||
-            (IsHybridMode && slot != 1 && (_slots.Count == 2 ? slot != 2 : slot is not (3 or 4))) ||
+            (IsHybridMode && slot != 1 && !_hybridOutputForRuntime.Values.Contains(slot)) ||
             !ValidAutoPartyPulse(buttons, holdMilliseconds))
             throw new ArgumentOutOfRangeException(nameof(slot), "Auto Party requires an assigned menu pad and a target-version pulse.");
         return SendAutoPartyControlAsync("auto_party_pulse", slot, buttons, holdMilliseconds, token);

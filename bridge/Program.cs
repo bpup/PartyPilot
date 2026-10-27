@@ -192,15 +192,15 @@ if (args.Length == 4 && args[0] == "--probe-xinput" && args[2] == "--samples" &&
     return 0;
 }
 
+var hybridMode = args.Contains("--hybrid-keyboard");
 if (!args.Contains("--enable-controller") || !BridgeSlots.TryParse(args, out var slots) ||
     !CompositeClient3Options.TryParse(args, out var client3Options) ||
     !FocusPadMap.TryParse(args, slots, client3Options?.PrivateSlots ?? [], out var focusPads) ||
-    (client3Options is not null && focusPads is null))
+    (client3Options is not null && focusPads is null && !hybridMode))
 {
     Console.Error.WriteLine("Usage: PartyPilot.Bridge --enable-controller --slots 1,2 [--focus-pad-map 1:1,2:2] [--physical-index 0 --main-slot 1 --physical-hidden-confirmed --device-instance HID\\... --game-exe C:\\Game\\PathOfExile.exe [--pairing-protected] [--enable-combat] [--client3-pid PID --client3-window-handle HANDLE --client3-game-exe PATH --client3-players 5[,6]] [--right-stick-follower-override --direct-right-stick-slot 2]]");
     return 2;
 }
-var hybridMode = args.Contains("--hybrid-keyboard");
 var hybridKeysPosition = Array.IndexOf(args, "--hybrid-binding-keys");
 HybridBindingConfig? configuredBindings = null;
 if (hybridKeysPosition >= 0 && (!hybridMode ||
@@ -242,7 +242,7 @@ if (directSlotPosition >= 0 && (args.Count(arg => arg == "--direct-right-stick-s
 }
 var protectedPairing = args.Contains("--pairing-protected");
 if (hybridMode && (physicalMode || protectedPairing || autoFlaskEnabled || combatEnabled ||
-    rightStickFollowerOverride || client3Options is not null || focusPads is not null ||
+    rightStickFollowerOverride || focusPads is not null ||
     !HybridKeyboardPlan.TryParse(args, slots, out _)))
 {
     Console.Error.WriteLine("Keyboard and mouse mode requires an exact player pad and game window map, without physical controller options.");
@@ -274,10 +274,16 @@ if (hybridMode && (!HybridKeyboardPlan.TryParse(args, slots, out hybridPlan) ||
     Console.Error.WriteLine("Keyboard and mouse mode requires existing game executables and exact player/window bindings.");
     return 2;
 }
-if (client3Options is { } privatePlan &&
-    (!physicalMode || !protectedPairing || !privatePlan.MatchesThirdGamePath(gamePaths)))
+if (hybridPlan is not null && !hybridPlan.MatchesPrivateClient3(client3Options))
 {
-    Console.Error.WriteLine("Client 3 requires protected physical mode and a matching third game executable.");
+    Console.Error.WriteLine("Keyboard Client 3 private pads do not match its bound game window.");
+    return 2;
+}
+if (client3Options is { } privatePlan &&
+    (!((physicalMode && protectedPairing) || hybridMode) ||
+     !privatePlan.MatchesThirdGamePath(gamePaths)))
+{
+    Console.Error.WriteLine("Client 3 requires protected physical or keyboard mode and a matching third game executable.");
     return 2;
 }
 uint physicalIndex = 0;
