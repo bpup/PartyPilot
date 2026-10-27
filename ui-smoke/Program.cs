@@ -499,7 +499,21 @@ if (questCache.Apply(questRadarFrame with
     throw new Exception("Radar retained a quest marker without current quest-state evidence.");
 var projected = RadarProjection.Project(radarFrame.PlayerX, radarFrame.PlayerY,
     radarFrame.Markers[0], 400, 300, radarScale);
-if (projected != (406d, 296d)) throw new Exception("Radar marker projection changed unexpectedly.");
+var sameGrid = RadarProjection.ProjectGrid(radarFrame.PlayerX / RadarProjection.WorldUnitsPerGridUnit,
+    radarFrame.PlayerY / RadarProjection.WorldUnitsPerGridUnit,
+    radarFrame.Markers[0].X / RadarProjection.WorldUnitsPerGridUnit,
+    radarFrame.Markers[0].Y / RadarProjection.WorldUnitsPerGridUnit,
+    400, 300, radarScale * RadarProjection.WorldUnitsPerGridUnit);
+var roundTrip = RadarProjection.UnprojectGrid(
+    radarFrame.PlayerX / RadarProjection.WorldUnitsPerGridUnit,
+    radarFrame.PlayerY / RadarProjection.WorldUnitsPerGridUnit,
+    sameGrid.X, sameGrid.Y, 400, 300, radarScale * RadarProjection.WorldUnitsPerGridUnit);
+if (Math.Abs(projected.X - sameGrid.X) > 0.000001 ||
+    Math.Abs(projected.Y - sameGrid.Y) > 0.000001 ||
+    projected.X < 405 || projected.Y > 300 ||
+    Math.Abs(roundTrip.X - radarFrame.Markers[0].X / RadarProjection.WorldUnitsPerGridUnit) > 0.000001 ||
+    Math.Abs(roundTrip.Y - radarFrame.Markers[0].Y / RadarProjection.WorldUnitsPerGridUnit) > 0.000001)
+    throw new Exception("Radar markers and grid terrain use different projections.");
 var radarVisibility = new RadarVisibility();
 if (radarVisibility.Enabled) throw new Exception("Radar was visible before Tab was pressed.");
 radarVisibility.Observe(true, true);

@@ -12,30 +12,27 @@ public static class RadarTerrainRaster
             pixelsPerGridCell <= 0)
             throw new ArgumentException("Radar terrain needs a matching frame and bounded projection.");
         var pixels = new byte[width * height * 4];
-        var columns = new int[width];
-        for (var x = 0; x < width; x++)
-            columns[x] = (int)Math.Floor(frame.GridX!.Value + (x - width / 2d) / pixelsPerGridCell);
-        var boundaryByColumn = new Dictionary<int, bool>();
-        var previousGridY = int.MinValue;
+        var boundaryByCell = new Dictionary<long, bool>();
         for (var y = 0; y < height; y++)
         {
-            var gridY = (int)Math.Floor(frame.GridY!.Value + (y - height / 2d) / pixelsPerGridCell);
-            if (gridY != previousGridY)
-            {
-                boundaryByColumn.Clear();
-                previousGridY = gridY;
-            }
-            if (gridY < 0 || gridY >= capture.Height) continue;
+            boundaryByCell.Clear();
             for (var x = 0; x < width; x++)
             {
-                var gridX = columns[x];
-                if (gridX < 0 || gridX >= capture.Width) continue;
+                var (rawX, rawY) = RadarProjection.UnprojectGrid(frame.GridX!.Value,
+                    frame.GridY!.Value, x + 0.5, y + 0.5, width / 2d, height / 2d,
+                    pixelsPerGridCell);
+                if (!double.IsFinite(rawX) || !double.IsFinite(rawY) ||
+                    rawX < 0 || rawY < 0 || rawX >= capture.Width || rawY >= capture.Height)
+                    continue;
+                var gridX = (int)Math.Floor(rawX);
+                var gridY = (int)Math.Floor(rawY);
                 var offset = (y * width + x) * 4;
-                if (!boundaryByColumn.TryGetValue(gridX, out var boundary))
+                var key = ((long)gridY << 32) | (uint)gridX;
+                if (!boundaryByCell.TryGetValue(key, out var boundary))
                 {
                     boundary = capture.Walkable(gridX, gridY) &&
                         IsBoundary(capture, gridX, gridY);
-                    boundaryByColumn.Add(gridX, boundary);
+                    boundaryByCell.Add(key, boundary);
                 }
                 if (!boundary)
                     continue;

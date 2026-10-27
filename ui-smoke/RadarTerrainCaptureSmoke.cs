@@ -87,10 +87,10 @@ internal static class RadarTerrainCaptureSmoke
                 capture.Matches(matching with { SeenUtc = capture.SeenUtc.AddSeconds(-1) }))
                 throw new Exception("Radar terrain accepted a different area, stale frame, or invalid grid coordinate.");
             var projected = RadarTerrainRaster.Render(capture,
-                matching with { GridX = 1, GridY = 0 }, 4, 2, 1);
-            if (projected[(1 * 4 + 1) * 4 + 3] != 0 ||
-                projected[(1 * 4 + 2) * 4 + 3] != 224 ||
-                projected[(1 * 4 + 0) * 4 + 3] != 0)
+                matching with { GridX = 1, GridY = 0 }, 64, 64, 8);
+            if (projected[(32 * 64 + 26) * 4 + 3] != 0 ||
+                projected[(27 * 64 + 32) * 4 + 3] != 224 ||
+                projected[3] != 0)
                 throw new Exception("Radar terrain preview lost blocked, walkable, or outside-map pixels.");
             var interior = RadarTerrainRaster.Render(capture, matching, 1, 1, 1);
             if (interior[3] != 0)

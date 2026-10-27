@@ -121,7 +121,7 @@ public sealed class RadarOverlayWindow : Window
             if ((long)width * height <= 4_194_304)
             {
                 var pixels = RadarTerrainRaster.Render(_terrain, _frame, width, height,
-                    _scale * 10.869565);
+                    _scale * RadarProjection.WorldUnitsPerGridUnit);
                 var bitmap = new WriteableBitmap(new PixelSize(width, height), new Vector(96, 96),
                     PixelFormats.Bgra8888, AlphaFormat.Premul);
                 using (var locked = bitmap.Lock())
@@ -139,8 +139,9 @@ public sealed class RadarOverlayWindow : Window
                 });
                 foreach (var room in _terrain.Rooms)
                 {
-                    var x = centerX + (room.GridX - _frame.GridX!.Value) * _scale * 10.869565;
-                    var y = centerY + (room.GridY - _frame.GridY!.Value) * _scale * 10.869565;
+                    var (x, y) = RadarProjection.ProjectGrid(_frame.GridX!.Value,
+                        _frame.GridY!.Value, room.GridX, room.GridY, centerX, centerY,
+                        _scale * RadarProjection.WorldUnitsPerGridUnit);
                     if (!double.IsFinite(x) || !double.IsFinite(y) ||
                         x < 8 || y < 8 || x > Bounds.Width - 8 || y > Bounds.Height - 8) continue;
                     AddDot(x, y, 10, MarkerBrush(room.Category));

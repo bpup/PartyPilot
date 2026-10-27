@@ -291,14 +291,38 @@ public sealed class RadarLandmarkCache
 
 public static class RadarProjection
 {
+    public const double WorldUnitsPerGridUnit = 10.869565;
+    private const double ViewAngle = 0.6754424205218056;
+    private static readonly double Horizontal = Math.Cos(ViewAngle);
+    private static readonly double Vertical = Math.Sin(ViewAngle);
+
     public static bool TryScale(string? text, out double scale) =>
         double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out scale) &&
         double.IsFinite(scale) && scale > 0;
 
+    public static (double X, double Y) ProjectGrid(double playerX, double playerY,
+        double gridX, double gridY, double centerX, double centerY, double pixelsPerGridUnit)
+    {
+        var dx = gridX - playerX;
+        var dy = gridY - playerY;
+        return (centerX + (dx - dy) * Horizontal * pixelsPerGridUnit,
+            centerY - (dx + dy) * Vertical * pixelsPerGridUnit);
+    }
+
+    public static (double X, double Y) UnprojectGrid(double playerX, double playerY,
+        double screenX, double screenY, double centerX, double centerY, double pixelsPerGridUnit)
+    {
+        var difference = (screenX - centerX) / (Horizontal * pixelsPerGridUnit);
+        var sum = -(screenY - centerY) / (Vertical * pixelsPerGridUnit);
+        return (playerX + (sum + difference) / 2,
+            playerY + (sum - difference) / 2);
+    }
+
     public static (double X, double Y) Project(double playerX, double playerY,
         RadarMarker marker, double centerX, double centerY, double pixelsPerUnit) =>
-        (centerX + (marker.X - playerX) * pixelsPerUnit,
-         centerY + (marker.Y - playerY) * pixelsPerUnit);
+        ProjectGrid(playerX / WorldUnitsPerGridUnit, playerY / WorldUnitsPerGridUnit,
+            marker.X / WorldUnitsPerGridUnit, marker.Y / WorldUnitsPerGridUnit,
+            centerX, centerY, pixelsPerUnit * WorldUnitsPerGridUnit);
 }
 
 public sealed class RadarVisibility
