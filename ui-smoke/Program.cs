@@ -631,6 +631,27 @@ var radarScreenshot = radarWindow.CaptureRenderedFrame() ?? throw new Exception(
 var radarOutput = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(args.FirstOrDefault() ?? "../PartyPilot-ui-preview.png"))!,
     "PartyPilot-radar-preview.png");
 radarScreenshot.Save(radarOutput);
+var edgeGrid = RadarProjection.UnprojectGrid(
+    radarFrame.PlayerX / RadarProjection.WorldUnitsPerGridUnit,
+    radarFrame.PlayerY / RadarProjection.WorldUnitsPerGridUnit,
+    radarWindow.Bounds.Width - 10, radarWindow.Bounds.Height - 10,
+    radarWindow.Bounds.Width / 2, radarWindow.Bounds.Height / 2,
+    radarScale * RadarProjection.WorldUnitsPerGridUnit);
+radarWindow.Apply(radarFrame with
+{
+    SeenUtc = DateTime.UtcNow,
+    Markers = [new RadarMarker(777, "transition", "Metadata/MiscellaneousObjects/AreaTransition",
+        "Example Destination Near Window Edge", null, null, null,
+        edgeGrid.X * RadarProjection.WorldUnitsPerGridUnit,
+        edgeGrid.Y * RadarProjection.WorldUnitsPerGridUnit)]
+});
+radarWindow.UpdateLayout();
+var edgeLabel = radarWindow.GetLogicalDescendants().OfType<TextBlock>()
+    .Single(label => label.Text?.StartsWith("区域入口 · Example Destination", StringComparison.Ordinal) == true);
+if (Canvas.GetLeft(edgeLabel) < 0 || Canvas.GetTop(edgeLabel) < 0 ||
+    Canvas.GetLeft(edgeLabel) + edgeLabel.Bounds.Width > radarWindow.Bounds.Width ||
+    Canvas.GetTop(edgeLabel) + edgeLabel.Bounds.Height > radarWindow.Bounds.Height)
+    throw new Exception("A map marker near the game window edge clipped its destination label.");
 radarWindow.Close();
 if (!PrivacyMaskPlan.TryParse("1,10,5,20,6\n2,70,80,15,10", 2, out var privacyBoxes))
     throw new Exception("Valid privacy box plan did not parse.");

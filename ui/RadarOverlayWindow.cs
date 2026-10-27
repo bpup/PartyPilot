@@ -275,9 +275,7 @@ public sealed class RadarOverlayWindow : Window
                         Background = new SolidColorBrush(Color.FromArgb(190, 8, 12, 20)),
                         FontSize = 12
                     };
-                    Canvas.SetLeft(label, x + 9);
-                    Canvas.SetTop(label, y - 8);
-                    _terrainLayer.Children.Add(label);
+                    AddLabel(_terrainLayer, label, x, y);
                 }
             }
         }
@@ -303,9 +301,7 @@ public sealed class RadarOverlayWindow : Window
                     Background = new SolidColorBrush(Color.FromArgb(190, 8, 12, 20)),
                     FontSize = 12
                 };
-                Canvas.SetLeft(label, x + 9);
-                Canvas.SetTop(label, y - 8);
-                _markerLayer.Children.Add(label);
+                AddLabel(_markerLayer, label, x, y);
             }
         }
     }
@@ -330,6 +326,23 @@ public sealed class RadarOverlayWindow : Window
         Canvas.SetLeft(circle, x - diameter / 2);
         Canvas.SetTop(circle, y - diameter / 2);
         layer.Children.Add(circle);
+    }
+
+    private void AddLabel(Canvas layer, TextBlock label, double x, double y)
+    {
+        const double margin = 4;
+        label.MaxWidth = Math.Max(1, Bounds.Width - margin * 2);
+        label.TextWrapping = TextWrapping.Wrap;
+        label.Measure(new Size(label.MaxWidth, double.PositiveInfinity));
+        var width = label.DesiredSize.Width;
+        var height = label.DesiredSize.Height;
+        var left = x + 9;
+        if (left + width > Bounds.Width - margin) left = x - width - 9;
+        Canvas.SetLeft(label, Math.Clamp(left, margin,
+            Math.Max(margin, Bounds.Width - width - margin)));
+        Canvas.SetTop(label, Math.Clamp(y - 8, margin,
+            Math.Max(margin, Bounds.Height - height - margin)));
+        layer.Children.Add(label);
     }
 
     private static IBrush MarkerBrush(string category) => category switch
