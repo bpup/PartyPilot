@@ -49,7 +49,7 @@ internal static class Program
             var hit = NativeMethods.WindowFromPoint(point);
             if (NativeMethods.GetAncestor(hit, 2) != gameHandle)
                 throw new Exception($"Native radar intercepted the target center point: 0x{hit:X}.");
-            Console.WriteLine("Native radar window opened on the bound process with click-through styles.");
+            Console.WriteLine("Native radar pointer hit reached the bound target beneath the overlay.");
         }
         finally
         {
