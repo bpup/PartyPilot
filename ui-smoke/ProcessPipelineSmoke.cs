@@ -45,6 +45,31 @@ internal static class ProcessPipelineSmoke
             throw new Exception("Three-client live follow accepted an unknown role.");
         }
         catch (InvalidDataException) { }
+        var six = PartyTopologies.ForPlayerCount(6).Single(item => item.Id == "6-balanced");
+        var sixFrame = LiveFollowFrame.ParseDynamic(
+            "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0,\"sprint_down\":true}," +
+            "\"3\":{\"state\":\"following\",\"x\":0,\"y\":1},\"4\":{\"state\":\"waiting\"}," +
+            "\"5\":{\"state\":\"waiting\"},\"6\":{\"state\":\"following\",\"x\":0,\"y\":-1}}}", six);
+        var sixPriority = LiveFollowFrame.ApplyCatchUpPriority(sixFrame, enabled: true);
+        var sixSwitched = LiveFollowFrame.ParseDynamic(
+            "{\"focused\":6,\"commands\":{\"1\":{\"state\":\"waiting\"},\"2\":{\"state\":\"waiting\"}," +
+            "\"3\":{\"state\":\"waiting\"},\"4\":{\"state\":\"waiting\"},\"5\":{\"state\":\"waiting\"}}}", six);
+        if (!sixFrame.PadCommands.Select(command => command.Pad).SequenceEqual([2, 3, 4, 5, 6]) ||
+            sixFrame.PadCommands[0].Status != "catching_up" ||
+            sixFrame.PadCommands[4].Status != "following" ||
+            !sixFrame.PadCommands[4].Command.Contains("\"slot\":6", StringComparison.Ordinal) ||
+            !sixPriority.PadCommands[0].Command.Contains("\"catch_up_priority\":true", StringComparison.Ordinal) ||
+            sixPriority.PadCommands.Skip(1).Any(command => command.Command.Contains("catch_up_priority", StringComparison.Ordinal)) ||
+            !sixSwitched.PadCommands.Select(command => command.Pad).SequenceEqual([1, 2, 3, 4, 5]))
+            throw new Exception("Six-player follow frames lost a role, pad, or catch-up state.");
+        try
+        {
+            LiveFollowFrame.ParseDynamic(
+                "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"},\"3\":{\"state\":\"waiting\"}," +
+                "\"4\":{\"state\":\"waiting\"},\"5\":{\"state\":\"waiting\"}}}", six);
+            throw new Exception("Six-player follow accepted a missing P6 command.");
+        }
+        catch (InvalidDataException) { }
         if (OperatingSystem.IsWindows()) return; // The local fake executables use a Unix shebang.
         var directory = Path.Combine(Path.GetTempPath(), "partypilot-pipeline-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
