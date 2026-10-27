@@ -1075,8 +1075,9 @@ public sealed class MainWindow : Window
         _radarHotkeyStatus.Foreground = MutedBrush;
         _radarHotkeyStatus.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(_radarHotkeyStatus);
-        panel.Children.Add(Label("每个游戏坐标单位对应的屏幕像素（需明确填写）", 12, MutedBrush));
-        _radarScale.Watermark = "像素/坐标单位";
+        panel.Children.Add(Label("每个地图格对应的屏幕像素（0.6.17 默认 0.66；可调整）", 12, MutedBrush));
+        _radarScale.Text = "0.66";
+        _radarScale.Watermark = "像素/地图格";
         _radarScale.Width = 190;
         _radarScale.HorizontalAlignment = HorizontalAlignment.Left;
         _radarScale.TextChanged += (_, _) => UpdateRadarControls();
@@ -1101,7 +1102,7 @@ public sealed class MainWindow : Window
         actions.Children.Add(_startRadar);
         actions.Children.Add(_stopRadar);
         panel.Children.Add(actions);
-        _radarStatus.Text = "等待已绑定的游戏窗口与明确的比例。";
+        _radarStatus.Text = "等待已绑定的游戏窗口；地图比例仍需游戏内核对。";
         _radarStatus.Foreground = MutedBrush;
         _radarStatus.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(_radarStatus);
@@ -1776,7 +1777,7 @@ public sealed class MainWindow : Window
     {
         if (_radar is not null || _busy || _radarStopping || !OperatingSystem.IsWindows() ||
             _selectedTopology is null || _launchedClients.Count != _selectedTopology.ClientCount ||
-            !RadarProjection.TryScale(_radarScale.Text, out var scale)) return;
+            !RadarProjection.TryScale(_radarScale.Text, out var gridScale)) return;
         if (RadarKeyConflicts(_radarHotkey))
         {
             _radarHotkeyStatus.Text = "雷达快捷键与自动组队或暂停跟随冲突；请重新设置。";
@@ -1796,7 +1797,9 @@ public sealed class MainWindow : Window
             }
             var catalog = _radarAutoTerrain.IsChecked == true
                 ? new RadarTerrainCatalog(RadarTerrainCatalog.SensorDirectory) : null;
-            var session = RadarSession.Start(_launchedClients, scale, _radarHotkey, captures, catalog);
+            var worldScale = gridScale / RadarProjection.WorldUnitsPerGridUnit;
+            var session = RadarSession.Start(_launchedClients, worldScale, _radarHotkey,
+                captures, catalog);
             session.Ended += RadarEnded;
             session.FrameReceived += RadarFrameReceived;
             _radar = session;

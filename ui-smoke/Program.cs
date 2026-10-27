@@ -537,6 +537,19 @@ if (questCache.Apply(questRadarFrame with
     throw new Exception("Radar retained a quest marker without current quest-state evidence.");
 var projected = RadarProjection.Project(radarFrame.PlayerX, radarFrame.PlayerY,
     radarFrame.Markers[0], 400, 300, radarScale);
+var targetGridScale = 0.66;
+var targetWorldScale = targetGridScale / RadarProjection.WorldUnitsPerGridUnit;
+var targetWorldProjection = RadarProjection.Project(radarFrame.PlayerX, radarFrame.PlayerY,
+    radarFrame.Markers[0], 400, 300, targetWorldScale);
+var targetGridProjection = RadarProjection.ProjectGrid(
+    radarFrame.PlayerX / RadarProjection.WorldUnitsPerGridUnit,
+    radarFrame.PlayerY / RadarProjection.WorldUnitsPerGridUnit,
+    radarFrame.Markers[0].X / RadarProjection.WorldUnitsPerGridUnit,
+    radarFrame.Markers[0].Y / RadarProjection.WorldUnitsPerGridUnit,
+    400, 300, targetGridScale);
+if (Math.Abs(targetWorldProjection.X - targetGridProjection.X) > 0.000001 ||
+    Math.Abs(targetWorldProjection.Y - targetGridProjection.Y) > 0.000001)
+    throw new Exception("Target radar grid scale was not converted to the world scale.");
 var sameGrid = RadarProjection.ProjectGrid(radarFrame.PlayerX / RadarProjection.WorldUnitsPerGridUnit,
     radarFrame.PlayerY / RadarProjection.WorldUnitsPerGridUnit,
     radarFrame.Markers[0].X / RadarProjection.WorldUnitsPerGridUnit,
@@ -691,6 +704,10 @@ if (!PrivacyGameplayFrames.TryParse(privacyPulse, 123, DateTime.UtcNow, out var 
         123, DateTime.UtcNow, out _))
     throw new Exception("Privacy gameplay evidence accepted a stale or unrelated process sample.");
 var labels = window.GetLogicalDescendants().OfType<TextBlock>().Select(item => item.Text).ToArray();
+var radarGridScaleField = window.GetLogicalDescendants().OfType<TextBox>()
+    .SingleOrDefault(field => field.Watermark == "像素/地图格");
+if (radarGridScaleField?.Text != "0.66")
+    throw new Exception("Target radar grid scale was not prefilled in the desktop UI.");
 if (!labels.Contains("开始使用") || !labels.Any(item => item?.Contains("选择人数与客户端") == true) ||
     !labels.Any(item => item?.Contains("准备并开始") == true) ||
     !labels.Any(item => item?.Contains("自动跟随与追赶") == true) ||
