@@ -4,11 +4,11 @@ namespace PartyPilot.Desktop;
 // coordinate. This does not establish the candidate's game-world calibration.
 public static class RadarTerrainRaster
 {
-    // 0.6.17 defaults: map 42%, border 40%, background 15%.
-    // The target's terrain bitmap scales base alphas 224 and 38 by these
-    // settings; Avalonia's Premul bitmap needs the corresponding BGRA bytes.
-    private const byte BorderAlpha = 90;
-    private const byte BackgroundAlpha = 38;
+    // Fresh 0.6.17 settings use UltimateShippingDefaults, then truncate the
+    // navigation values to map 58%, border 26%, background 6% in the feed.
+    // The target scales base alphas 224 and 38; this bitmap uses Premul BGRA.
+    private const byte BorderAlpha = 80;
+    private const byte BackgroundAlpha = 21;
     private static readonly (int X, int Y)[] CardinalNeighbors =
         [(-1, 0), (1, 0), (0, -1), (0, 1)];
 
@@ -55,16 +55,16 @@ public static class RadarTerrainRaster
                 }
                 if (boundary)
                 {
-                    pixels[offset] = 70;
-                    pixels[offset + 1] = 74;
-                    pixels[offset + 2] = 74;
+                    pixels[offset] = 62;
+                    pixels[offset + 1] = 66;
+                    pixels[offset + 2] = 66;
                     pixels[offset + 3] = BorderAlpha;
                 }
                 else
                 {
-                    pixels[offset] = 9;
-                    pixels[offset + 1] = 7;
-                    pixels[offset + 2] = 5;
+                    pixels[offset] = 5;
+                    pixels[offset + 1] = 4;
+                    pixels[offset + 2] = 3;
                     pixels[offset + 3] = BackgroundAlpha;
                 }
             }
