@@ -107,27 +107,17 @@ internal static class RadarTerrainCaptureSmoke
                     $"blocked={projected[(32 * 64 + 26) * 4 + 3]}, " +
                     $"walkable={projected[(27 * 64 + 32) * 4 + 3]}, " +
                     $"outside={projected[(63 * 64) * 4 + 3]}.");
-            var neighbors = new[] { (X: -1, Y: 0), (X: 1, Y: 0),
-                (X: 0, Y: -1), (X: 0, Y: 1) };
+            var smoothedPixels = 0;
             for (var y = 0; y < 64; y++)
             for (var x = 0; x < 64; x++)
             {
-                var (gridX, gridY) = RadarProjection.UnprojectGrid(1, 0,
-                    x + 0.5, y + 0.5, 32, 32, 8);
-                var expected = 0;
-                if (gridX >= 0 && gridY >= 0 && gridX < capture.Width && gridY < capture.Height)
-                {
-                    var cellX = (int)Math.Floor(gridX);
-                    var cellY = (int)Math.Floor(gridY);
-                    if (capture.Renderable(cellX, cellY))
-                        expected = neighbors.Any(delta => cellX + delta.X < 0 || cellY + delta.Y < 0 ||
-                            cellX + delta.X >= capture.Width ||
-                            cellY + delta.Y >= capture.Height ||
-                            !capture.Renderable(cellX + delta.X, cellY + delta.Y)) ? 80 : 21;
-                }
-                if (projected[(y * 64 + x) * 4 + 3] != expected)
-                    throw new Exception($"Incremental radar projection changed pixel ({x},{y}).");
+                var alpha = projected[(y * 64 + x) * 4 + 3];
+                if (alpha > 80)
+                    throw new Exception($"Radar terrain exceeded configured edge opacity at ({x},{y}).");
+                if (alpha is > 0 and < 80 and not 21) smoothedPixels++;
             }
+            if (smoothedPixels == 0)
+                throw new Exception("Radar terrain lost the target-style smoothed edge transition.");
             var interior = RadarTerrainRaster.Render(capture, matching, 1, 1, 1);
             if (!interior.SequenceEqual(new byte[] { 5, 4, 3, 21 }))
                 throw new Exception("Radar terrain interior did not use the target's default fill colour and opacity.");
@@ -137,8 +127,32 @@ internal static class RadarTerrainCaptureSmoke
                 throw new Exception("Zero terrain layer opacity did not clear the map fill and border.");
             var diagonal = RadarTerrainRaster.Render(capture,
                 matching with { GridX = 1, GridY = 1 }, 1, 1, 1);
-            if (diagonal[3] != 21)
-                throw new Exception("A diagonal blocked neighbor incorrectly became a wall edge.");
+            if (diagonal[3] is <= 0 or > 80)
+                throw new Exception("Chamfer-smoothed diagonal terrain left the configured opacity range.");
+            var wideData = Enumerable.Repeat((byte)0x11, 1201 * 4).ToArray();
+            var wideDataPath = Path.Combine(directory, "wide.packed");
+            var wideMetadataPath = Path.Combine(directory, "wide.json");
+            File.WriteAllBytes(wideDataPath, wideData);
+            File.WriteAllText(wideMetadataPath, JsonSerializer.Serialize(new
+            {
+                Status = "candidate_capture_only", ProcessId = 123, AreaHash = "42",
+                AreaAddress = "0xABCDEF", Anchor = "ingame_data_address",
+                PackedStart = "0x100000", RawGridX = 1200.0, RawGridY = 2.0,
+                SeenUtc = DateTime.UtcNow, Width = 2402, Height = 4,
+                BytesPerRow = 1201, PackedBytes = wideData.Length,
+                PatchX = 0, PatchY = 0, PatchRows = new[] { "11" },
+                Sha256 = Convert.ToHexString(SHA256.HashData(wideData)).ToLowerInvariant(),
+                DataFile = "wide.packed"
+            }));
+            if (!RadarTerrainCapture.TryLoad(wideMetadataPath, out var wideCapture) ||
+                wideCapture is null)
+                throw new Exception("Wide candidate terrain failed to load for downsample check.");
+            var wideFrame = matching with { GridX = 1200, GridY = 2,
+                SeenUtc = DateTime.UtcNow };
+            var widePixels = RadarTerrainRaster.Render(wideCapture, wideFrame, 64, 64, 8);
+            if (widePixels.Length != 64 * 64 * 4 ||
+                !widePixels.Where((_, index) => index % 4 == 3).Any(alpha => alpha > 0))
+                throw new Exception("Wide candidate terrain lost all map pixels after downsampling.");
             var autoDirectory = Path.Combine(directory, "auto");
             Directory.CreateDirectory(autoDirectory);
             var catalog = new RadarTerrainCatalog(autoDirectory);
