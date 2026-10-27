@@ -27,7 +27,7 @@ public sealed record LiveFollowPlan(double Stop, double Catchup,
         Regex.IsMatch(value.Trim(), @"^[1-9][0-9]*(ms|s|m|h)$", RegexOptions.CultureInvariant);
 }
 
-public sealed record FlaskBridgeRequest(int Player, string Resource);
+public sealed record FlaskBridgeRequest(int Player, string Resource, string? DirectInput = null);
 public sealed record FollowPadCommand(int Player, int Pad, string Command, string Status, string? Reason);
 
 public sealed record FollowBridgeFrame(string Command, string Status, string? Reason)
@@ -66,7 +66,7 @@ public static class LiveFollowFrame
     // The live sensor has one locally identified player per client and no multi-role coordinates.
     public static FollowBridgeFrame Parse(string json, int followerPartyPlayer, int followerPad,
         int expectedLeader = 1, int expectedCommandCount = 1,
-        IReadOnlySet<int>? allowedFlaskPlayers = null)
+        IReadOnlySet<int>? allowedFlaskPlayers = null, int customRuleCount = 0)
     {
         if (followerPartyPlayer is < 1 or > 6 || followerPad is < 1 or > 6 ||
             expectedLeader is < 1 or > 6 || expectedLeader == followerPartyPlayer)
@@ -142,9 +142,12 @@ public static class LiveFollowFrame
         var flasks = new List<FlaskBridgeRequest>();
         if (root.TryGetProperty("flasks", out var flaskValue))
         {
+            var allowedPlayerCount = allowedFlaskPlayers?.Count ?? 2;
             if (flaskValue.ValueKind != JsonValueKind.Array ||
-                flaskValue.GetArrayLength() > 2 * (allowedFlaskPlayers?.Count ?? 2))
+                customRuleCount < 0 ||
+                flaskValue.GetArrayLength() > (2L + customRuleCount) * allowedPlayerCount)
                 throw new InvalidDataException("Live follow returned an invalid flask list.");
+            var customPerPlayer = new Dictionary<int, int>();
             foreach (var item in flaskValue.EnumerateArray())
             {
                 if (item.ValueKind != JsonValueKind.Object ||
@@ -152,16 +155,38 @@ public static class LiveFollowFrame
                     !(allowedFlaskPlayers?.Contains(player) ??
                         (player == expectedLeader || player == followerPartyPlayer)) ||
                     !item.TryGetProperty("resource", out var resourceValue) || resourceValue.ValueKind != JsonValueKind.String ||
-                    resourceValue.GetString() is not ("life" or "mana") ||
+                    resourceValue.GetString() is not ("life" or "mana" or "action") ||
                     !item.TryGetProperty("percent", out var percentValue) || !percentValue.TryGetDouble(out var percent) ||
                     !double.IsFinite(percent) || percent is < 0 or > 100 ||
                     !item.TryGetProperty("reason", out var flaskReasonValue) || flaskReasonValue.ValueKind != JsonValueKind.String ||
-                    flaskReasonValue.GetString() is not ("threshold" or "emergency" or "sustained" or "ward_break" or "support"))
+                    flaskReasonValue.GetString() is not { } activationReason || activationReason.Length > 160)
                     throw new InvalidDataException("Live follow returned an invalid flask request.");
                 var resource = resourceValue.GetString()!;
-                if (flasks.Any(existing => existing.Player == player && existing.Resource == resource))
+                var custom = activationReason.StartsWith("custom ", StringComparison.Ordinal);
+                if (!custom && (activationReason is not ("threshold" or "emergency" or "sustained" or "ward_break" or "support") ||
+                    resource == "action"))
+                    throw new InvalidDataException("Live follow returned an unsupported flask reason.");
+                if (custom)
+                {
+                    customPerPlayer.TryGetValue(player, out var seenCustom);
+                    if (seenCustom >= customRuleCount)
+                        throw new InvalidDataException("Live follow exceeded the configured custom recovery rules.");
+                    customPerPlayer[player] = seenCustom + 1;
+                }
+                string? directInput = null;
+                if (item.TryGetProperty("direct_input", out var inputValue))
+                {
+                    if (inputValue.ValueKind != JsonValueKind.String ||
+                        inputValue.GetString() is not ("X" or "Y" or "LB" or "RB" or "LT" or "RT" or "D-pad Up" or "D-pad Down"))
+                        throw new InvalidDataException("Live follow returned an unsupported recovery input.");
+                    directInput = inputValue.GetString();
+                }
+                if ((resource == "action") != (directInput is not null) || directInput is not null && !custom)
+                    throw new InvalidDataException("Live follow mixed flask and direct action inputs.");
+                if (!custom && flasks.Any(existing => existing.Player == player && existing.Resource == resource &&
+                    existing.DirectInput is null))
                     throw new InvalidDataException("Live follow repeated a flask request.");
-                flasks.Add(new FlaskBridgeRequest(player, resource));
+                flasks.Add(new FlaskBridgeRequest(player, resource, directInput));
             }
         }
         if (mirrorIdle)
@@ -242,7 +267,8 @@ public static class LiveFollowFrame
                 PadCommands = [new FollowPadCommand(followerPartyPlayer, followerPad, movement, state, reason)] };
     }
 
-    public static FollowBridgeFrame ParseDynamic(string json, PartyTopology topology)
+    public static FollowBridgeFrame ParseDynamic(string json, PartyTopology topology,
+        int customRuleCount = 0)
     {
         if (topology.Id is not ("2-split" or "3-three-singles"))
             throw new ArgumentException("Dynamic live follow requires one player per client.");
@@ -263,7 +289,7 @@ public static class LiveFollowFrame
             throw new InvalidDataException("Live follow returned commands for the wrong players.");
         var allowedPlayers = topology.Slots.Select(slot => slot.PartyPlayer).ToHashSet();
         var parsed = followers.Select(slot => Parse(json, slot.PartyPlayer, slot.RuntimePad,
-            leader, followers.Length, allowedPlayers)).ToArray();
+            leader, followers.Length, allowedPlayers, customRuleCount)).ToArray();
         var padCommands = parsed.SelectMany(frame => frame.PadCommands).ToArray();
         var sameStatus = parsed.All(frame => frame.Status == parsed[0].Status);
         var sameReason = parsed.All(frame => frame.Reason == parsed[0].Reason);

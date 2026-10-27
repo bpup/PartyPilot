@@ -569,6 +569,8 @@ var potion = LiveFollowFrame.Parse(
     "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}},\"flasks\":[{\"player\":2,\"resource\":\"life\",\"percent\":30,\"reason\":\"threshold\"}]}", 2, 3);
 var supportPotion = LiveFollowFrame.Parse(
     "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}},\"flasks\":[{\"player\":2,\"resource\":\"life\",\"percent\":40,\"reason\":\"support\"}]}", 2, 3);
+const string customActionFrame = """{"focused":1,"commands":{"2":{"state":"waiting"}},"flasks":[{"player":2,"resource":"action","percent":30,"reason":"custom Energy Shield ≤50% · priority 50","direct_input":"X"}]}""";
+var customAction = LiveFollowFrame.Parse(customActionFrame, 2, 3, customRuleCount: 1);
 if (!movement.Command.Contains("\"slot\":3") || movement.Status != "following" ||
     !sprintMovement.Command.Contains("\"sprint_down\":true") ||
     !waiting.Command.Contains("\"slot\":3") || waiting.Status != "waiting" ||
@@ -578,8 +580,22 @@ if (!movement.Command.Contains("\"slot\":3") || movement.Status != "following" |
     !suppressedB.Command.Contains("\"suppress_mirrored_b\":true") ||
     !idleMirror.Command.Contains("\"mirror_idle\":true") ||
     potion.Flasks.Count != 1 || potion.Flasks[0] != new FlaskBridgeRequest(2, "life") ||
-    supportPotion.Flasks.Count != 1 || supportPotion.Flasks[0] != new FlaskBridgeRequest(2, "life"))
+    supportPotion.Flasks.Count != 1 || supportPotion.Flasks[0] != new FlaskBridgeRequest(2, "life") ||
+    customAction.Flasks.Count != 1 || customAction.Flasks[0] != new FlaskBridgeRequest(2, "action", "X"))
     throw new Exception("Live follow did not map P2 to the second client's system pad.");
+try
+{
+    LiveFollowFrame.Parse(customActionFrame, 2, 3);
+    throw new Exception("Custom recovery output passed without a configured rule.");
+}
+catch (InvalidDataException) { }
+try
+{
+    LiveFollowFrame.Parse(customActionFrame.Replace("\"X\"", "\"A\"", StringComparison.Ordinal),
+        2, 3, customRuleCount: 1);
+    throw new Exception("Unapproved custom recovery input reached the bridge boundary.");
+}
+catch (InvalidDataException) { }
 var splitTopology = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-split");
 var switchedMain = LiveFollowFrame.ParseDynamic(
     "{\"focused\":2,\"commands\":{\"1\":{\"state\":\"following\",\"x\":0,\"y\":1}}}", splitTopology);

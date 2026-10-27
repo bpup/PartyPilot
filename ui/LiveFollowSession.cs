@@ -22,6 +22,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     private MainInputSample? _pendingMainInput;
     private readonly bool _relayMainInput;
     private readonly bool _catchUpPriority;
+    private readonly int _customRuleCount;
     private int _inputSubscriptionActive;
     private readonly SemaphoreSlim _controlSignal = new(0);
     private readonly CancellationTokenSource _controlCancellation = new();
@@ -38,7 +39,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
 
     private LiveFollowSession(Process process, BridgeSession bridge, PartyTopology topology,
         Task<string> readError, FollowBridgeFrame initialFrame, bool relayMainInput,
-        bool catchUpPriority)
+        bool catchUpPriority, int customRuleCount)
     {
         _process = process;
         _bridge = bridge;
@@ -49,6 +50,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         _readError = readError;
         _relayMainInput = relayMainInput;
         _catchUpPriority = catchUpPriority;
+        _customRuleCount = customRuleCount;
         Current = initialFrame;
         if (bridge.AutoFlaskEnabled)
         {
@@ -108,6 +110,16 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         _controlSignal.Release();
     }
 
+    private static int ReadCustomRuleCount(string path)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object || root.EnumerateObject().Count() != 1 ||
+            !root.TryGetProperty("rules", out var rules) || rules.ValueKind != JsonValueKind.Array)
+            throw new InvalidDataException("Custom recovery settings need a rules array.");
+        return rules.GetArrayLength();
+    }
+
     public static async Task<LiveFollowSession> StartAsync(string executable, PartyTopology topology,
         IReadOnlyList<LaunchedClient> clients, BridgeSession bridge, LiveFollowPlan plan,
         IReadOnlyDictionary<int, string>? memberNames = null,
@@ -126,7 +138,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         int closeMirrorDuration = 400,
         FollowerMirrorConfig? followerMirror = null,
         string? flaskSupportFile = null,
-        string? flaskRulesFile = null)
+        string? flaskRulesFile = null,
+        string? flaskCustomFile = null)
     {
         if (aggressiveBlinkCatchUp && classicSprintCatchUp)
             throw new ArgumentException("Classic and aggressive sprint modes cannot be combined.");
@@ -144,6 +157,11 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             (!bridge.AutoFlaskEnabled || !Path.IsPathFullyQualified(flaskRulesFile) ||
              !File.Exists(flaskRulesFile)))
             throw new ArgumentException("Player flask rules need enabled flasks and an existing settings file.");
+        if (flaskCustomFile is not null &&
+            (!bridge.AutoFlaskEnabled || !Path.IsPathFullyQualified(flaskCustomFile) ||
+             !File.Exists(flaskCustomFile)))
+            throw new ArgumentException("Custom recovery rules need enabled flasks and an existing settings file.");
+        var customRuleCount = flaskCustomFile is null ? 0 : ReadCustomRuleCount(flaskCustomFile);
         if (closeRangeMirror && closeMirrorDuration is < 50 or > 5000)
             throw new ArgumentOutOfRangeException(nameof(closeMirrorDuration));
         if (topology.Id is not ("2-split" or "3-three-singles") ||
@@ -261,6 +279,11 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             start.ArgumentList.Add("-flask-rules-file");
             start.ArgumentList.Add(flaskRulesFile);
         }
+        if (flaskCustomFile is not null)
+        {
+            start.ArgumentList.Add("-flask-custom-file");
+            start.ArgumentList.Add(flaskCustomFile);
+        }
         if (bridge.LastFocusedLeadsEnabled) start.ArgumentList.Add("-last-focused-leads");
         start.ArgumentList.Add("-allow-follow-pause");
         var process = Process.Start(start) ?? throw new InvalidOperationException("Live follow did not start.");
@@ -285,8 +308,9 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                     var first = await process.StandardOutput.ReadLineAsync(startup.Token);
                     if (first is null) throw new InvalidDataException("Live follow exited without a decision frame.");
                     frame = bridge.LastFocusedLeadsEnabled
-                        ? LiveFollowFrame.ParseDynamic(first, topology)
-                        : LiveFollowFrame.Parse(first, 2, topology.Slots[1].RuntimePad);
+                        ? LiveFollowFrame.ParseDynamic(first, topology, customRuleCount)
+                        : LiveFollowFrame.Parse(first, 2, topology.Slots[1].RuntimePad,
+                            customRuleCount: customRuleCount);
                     frame = LiveFollowFrame.ApplyCatchUpPriority(frame,
                         sprintCatchUp && sprintCatchUpPriority);
                 } while (frame.FocusedPlayer != initialLeader);
@@ -299,11 +323,14 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 foreach (var request in frame.Flasks)
                 {
                     var pad = topology.Slots.Single(slot => slot.PartyPlayer == request.Player).RuntimePad;
-                    await bridge.SendFlaskAsync(pad, request.Resource);
+                    if (request.DirectInput is { } input)
+                        await bridge.SendRecoveryActionAsync(pad, input);
+                    else
+                        await bridge.SendFlaskAsync(pad, request.Resource);
                 }
             }
             session = new LiveFollowSession(process, bridge, topology, readError, frame,
-                relayMainInput, sprintCatchUp && sprintCatchUpPriority);
+                relayMainInput, sprintCatchUp && sprintCatchUpPriority, customRuleCount);
             if (relayMainInput)
             {
                 await bridge.SetMainInputSubscriptionAsync(true);
@@ -375,8 +402,9 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 var line = await _process.StandardOutput.ReadLineAsync();
                 if (line is null) break;
                 var frame = _bridge.LastFocusedLeadsEnabled
-                    ? LiveFollowFrame.ParseDynamic(line, _topology)
-                    : LiveFollowFrame.Parse(line, 2, _topology.Slots[1].RuntimePad);
+                    ? LiveFollowFrame.ParseDynamic(line, _topology, _customRuleCount)
+                    : LiveFollowFrame.Parse(line, 2, _topology.Slots[1].RuntimePad,
+                        customRuleCount: _customRuleCount);
                 frame = LiveFollowFrame.ApplyCatchUpPriority(frame, _catchUpPriority);
                 if (_stopping) break;
                 var nextPads = frame.PadCommands.Select(command => command.Pad).ToHashSet();
@@ -388,7 +416,13 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 if (_bridge.AutoFlaskEnabled)
                 {
                     foreach (var request in frame.Flasks)
-                        await _bridge.SendFlaskAsync(_playerToPad[request.Player], request.Resource);
+                    {
+                        var pad = _playerToPad[request.Player];
+                        if (request.DirectInput is { } input)
+                            await _bridge.SendRecoveryActionAsync(pad, input);
+                        else
+                            await _bridge.SendFlaskAsync(pad, request.Resource);
+                    }
                 }
                 var changed = Current.Status != frame.Status || Current.Reason != frame.Reason ||
                     Current.FocusedPlayer != frame.FocusedPlayer ||

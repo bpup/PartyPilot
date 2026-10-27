@@ -61,6 +61,7 @@ internal static class ProcessPipelineSmoke
         var wgiBridgeExe = Path.Combine(directory, "fake-wgi-bridge");
         var client3BridgeExe = Path.Combine(directory, "fake-client3-bridge");
         var followExe = Path.Combine(directory, "fake-follow");
+        var customFollowExe = Path.Combine(directory, "fake-custom-follow");
         var terrainFollowExe = Path.Combine(directory, "fake-terrain-follow");
         var disabledClassicExe = Path.Combine(directory, "fake-disabled-classic-follow");
         var aggressiveFollowExe = Path.Combine(directory, "fake-aggressive-follow");
@@ -132,6 +133,10 @@ internal static class ProcessPipelineSmoke
                 "if {(s['slot'],s['state']) for s in states} != {(1,'clear'),(2,'clear')}: sys.exit(2)\n" +
                 "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0,\"manual_override_eligible\":true,\"sprint_down\":true}},\"flasks\":[{\"player\":2,\"resource\":\"life\",\"percent\":30,\"reason\":\"support\"}]}', flush=True)\n" +
                 "for line in sys.stdin:\n    control=json.loads(line)\n    if control.get('type')!='follow_pause': sys.exit(2)\n    if control.get('state')=='paused': print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"reason\":\"follow paused\"}}}', flush=True)\n    elif control.get('state')=='following': print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0}}}', flush=True)\n    else: sys.exit(2)\n");
+            File.WriteAllText(customFollowExe, "#!/usr/bin/env python3\nimport sys\n" +
+                "if '-auto-flask' not in sys.argv or '-flask-custom-file' not in sys.argv: sys.exit(2)\n" +
+                "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}},\"flasks\":[{\"player\":2,\"resource\":\"action\",\"percent\":30,\"reason\":\"custom Energy Shield ≤50% · priority 50\",\"direct_input\":\"X\"}]}', flush=True)\n" +
+                "for line in sys.stdin: pass\n");
             var terrainClient1 = Path.Combine(directory, "terrain-client-1.json");
             var terrainClient2 = Path.Combine(directory, "terrain-client-2.json");
             File.WriteAllText(terrainClient1, "{}");
@@ -227,6 +232,7 @@ internal static class ProcessPipelineSmoke
             File.SetUnixFileMode(mainInputFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(attackInputFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(followExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(customFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(terrainFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(disabledClassicExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(aggressiveFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -382,6 +388,22 @@ internal static class ProcessPipelineSmoke
                 !lines[^1].Contains("\"slot\":3,\"state\":\"waiting\""))
                 throw new Exception("Live follow did not hand off movement/flasks and neutralize on exit: " + string.Join(" | ", lines));
             Console.WriteLine("Desktop movement, flask, pause/resume, and stop handoff checked with local fake executables.");
+            var customFile = Path.Combine(directory, "custom-recovery.json");
+            File.Copy(Path.GetFullPath("testdata/flask-custom-live.json"), customFile);
+            await using (var customFollow = await LiveFollowSession.StartAsync(customFollowExe,
+                topology, clients, bridge, plan, flaskCustomFile: customFile))
+            {
+                customFollow.StartReading();
+                var customDeadline = DateTime.UtcNow.AddSeconds(3);
+                while ((!File.Exists(log) || !File.ReadAllLines(log).Any(line =>
+                           line.Contains("\"type\":\"recovery_action\",\"slot\":3,\"input\":\"X\""))) &&
+                       DateTime.UtcNow < customDeadline)
+                    await Task.Delay(20);
+                if (!File.Exists(log) || !File.ReadAllLines(log).Any(line =>
+                        line.Contains("\"type\":\"recovery_action\",\"slot\":3,\"input\":\"X\"")))
+                    throw new Exception("Desktop did not hand off custom X recovery to P2's pad.");
+            }
+            Console.WriteLine("Desktop custom recovery decision reached the assigned bridge pad.");
             try
             {
                 await LiveFollowSession.StartAsync(terrainFollowExe, topology, clients, bridge, plan,
