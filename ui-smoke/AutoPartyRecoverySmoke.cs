@@ -38,11 +38,18 @@ internal static class AutoPartyRecoverySmoke
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         var renewed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var count = 0;
-        var lease = AutoPartyRecoverySession.KeepBridgeLeaseAsync(_ =>
+        var previousContext = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(new UnpumpedContext());
+        Task lease;
+        try
         {
-            if (Interlocked.Increment(ref count) == 3) renewed.TrySetResult();
-            return Task.CompletedTask;
-        }, TimeSpan.FromMilliseconds(10), cancellation.Token);
+            lease = AutoPartyRecoverySession.KeepBridgeLeaseAsync(_ =>
+            {
+                if (Interlocked.Increment(ref count) == 3) renewed.TrySetResult();
+                return Task.CompletedTask;
+            }, TimeSpan.FromMilliseconds(10), cancellation.Token);
+        }
+        finally { SynchronizationContext.SetSynchronizationContext(previousContext); }
         await renewed.Task.WaitAsync(TimeSpan.FromSeconds(1));
         cancellation.Cancel();
         try { await lease; }
@@ -59,5 +66,10 @@ internal static class AutoPartyRecoverySmoke
             throw new Exception("A failed Auto Party bridge renewal was ignored.");
         }
         catch (IOException error) when (error.Message == "Bridge renewal failed") { }
+    }
+
+    private sealed class UnpumpedContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback callback, object? state) { }
     }
 }

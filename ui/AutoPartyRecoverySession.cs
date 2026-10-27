@@ -87,8 +87,8 @@ internal sealed class AutoPartyRecoverySession
         TimeSpan interval, CancellationToken token)
     {
         using var timer = new PeriodicTimer(interval);
-        while (await timer.WaitForNextTickAsync(token))
-            await renew(token);
+        while (await timer.WaitForNextTickAsync(token).ConfigureAwait(false))
+            await renew(token).ConfigureAwait(false);
     }
 
     private async Task<bool> RecoverClientAsync(int targetClient, IReadOnlySet<int> stableClients, CancellationToken token)
