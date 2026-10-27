@@ -3578,6 +3578,11 @@ public sealed class MainWindow : Window
             }
             if (prelaunchBridge is not null && !prelaunchBridge.IsRunning)
                 throw new InvalidOperationException("虚拟手柄在游戏启动前中断；游戏尚未启动。");
+            var logStartOffsets = action == ClientAction.Start
+                ? Enumerable.Range(0, _selectedTopology.ClientCount)
+                    .Select(index => LaunchedClients.CaptureLogStartOffset(_paths[index].Text?.Trim()))
+                    .ToArray()
+                : [];
             using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("启动器未能启动");
             var error = process.StandardError.ReadToEndAsync();
             Task<string> output;
@@ -3625,7 +3630,12 @@ public sealed class MainWindow : Window
             {
                 try
                 {
-                    _launchedClients = LaunchedClients.ParseSuccessfulLaunch(output.Result, _selectedTopology.ClientCount);
+                    var launched = LaunchedClients.ParseSuccessfulLaunch(output.Result,
+                        _selectedTopology.ClientCount);
+                    _launchedClients = action == ClientAction.Start
+                        ? launched.Select((client, index) => client with
+                            { LogStartOffset = logStartOffsets[index] }).ToArray()
+                        : launched;
                     _sessionGameIdentities = SessionGameClientShutdown.Capture(_launchedClients);
                     if (_pairing is not null) ShowCurrentPairingStep();
                 }

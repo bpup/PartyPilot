@@ -17,6 +17,17 @@ type Tail struct {
 }
 
 func OpenTail(path string) (*Tail, error) {
+	return openTail(path, nil)
+}
+
+// OpenTailFrom replays only bytes written after a recorded pre-launch EOF.
+// A missing or truncated source is rejected rather than treating old history
+// as a current area observation.
+func OpenTailFrom(path string, offset int64) (*Tail, error) {
+	return openTail(path, &offset)
+}
+
+func openTail(path string, start *int64) (*Tail, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -30,6 +41,13 @@ func OpenTail(path string) (*Tail, error) {
 	if err != nil {
 		file.Close()
 		return nil, err
+	}
+	if start != nil {
+		if *start < 0 || *start > position {
+			file.Close()
+			return nil, fmt.Errorf("log start offset is outside the current file")
+		}
+		position = *start
 	}
 	if err := file.Close(); err != nil {
 		return nil, err

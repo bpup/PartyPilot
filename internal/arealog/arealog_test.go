@@ -128,6 +128,30 @@ func TestTailIgnoresHistoryAndWaitsForCompleteLine(t *testing.T) {
 	}
 }
 
+func TestTailReplaysOnlyRecordedSessionBytes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "Client.txt")
+	old := []byte("old generation\n")
+	if err := os.WriteFile(path, append(append([]byte{}, old...),
+		[]byte("current generation\n")...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	tail, err := OpenTailFrom(path, int64(len(old)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tail.Close()
+	if lines, err := tail.Poll(); err != nil || len(lines) != 1 ||
+		lines[0] != "current generation" {
+		t.Fatalf("pre-launch boundary did not recover current session: %q, %v", lines, err)
+	}
+	if _, err := OpenTailFrom(path, -1); err == nil {
+		t.Fatal("negative log boundary was accepted")
+	}
+	if _, err := OpenTailFrom(path, 9999); err == nil {
+		t.Fatal("boundary past a truncated log was accepted")
+	}
+}
+
 func TestTailReopensRotatedLog(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "Client.txt")
 	if err := os.WriteFile(path, []byte("old\n"), 0600); err != nil {

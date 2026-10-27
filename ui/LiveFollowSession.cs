@@ -147,6 +147,11 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             new[] { "-exe", $"{slot.PartyPlayer}={clients[slot.Client - 1].Executable}" })];
     }
 
+    internal static IReadOnlyList<string> LogStartArguments(IReadOnlyList<LaunchedClient> clients) =>
+        [.. clients.SelectMany((client, index) => client.LogStartOffset is { } offset
+            ? new[] { "-log-start-offset", $"{index + 1}={offset}" }
+            : Array.Empty<string>())];
+
     internal static FollowBridgeFrame ParseFrame(string json, PartyTopology topology,
         bool lastFocusedLeads, int customRuleCount = 0) =>
         lastFocusedLeads || topology.PlayerCount > 2
@@ -237,6 +242,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             "-max-age", plan.MaxAge, "-log-max-age", plan.LogMaxAge
         }) start.ArgumentList.Add(argument);
         foreach (var argument in ExecutableArguments(topology, clients))
+            start.ArgumentList.Add(argument);
+        foreach (var argument in LogStartArguments(clients))
             start.ArgumentList.Add(argument);
         if (plan.LeaderName.Length > 0)
         {

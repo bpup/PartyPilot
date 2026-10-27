@@ -58,6 +58,30 @@ internal static class ProcessPipelineSmoke
              new LaunchedClient(102, 202, "D:/GameB.exe")]);
         if (!fourSources.SequenceEqual(["-exe", "1=C:/GameA.exe", "-exe", "2=D:/GameB.exe"]))
             throw new Exception("Four-player live logs were bound by role instead of client.");
+        var sessionLogs = LiveFollowSession.LogStartArguments(
+            [new LaunchedClient(101, 201, "C:/GameA.exe") { LogStartOffset = 42 },
+             new LaunchedClient(102, 202, "D:/GameB.exe")]);
+        if (!sessionLogs.SequenceEqual(["-log-start-offset", "1=42"]))
+            throw new Exception("Live follow lost the launched client's log boundary or replayed an attached client.");
+        var logRoot = Path.Combine(Path.GetTempPath(),
+            "partypilot-log-start-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(logRoot, "logs"));
+            var gamePath = Path.Combine(logRoot, "PathOfExile_x64.exe");
+            var logPath = Path.Combine(logRoot, "logs", "Client.txt");
+            File.WriteAllText(logPath, "previous session\n");
+            var startOffset = LaunchedClients.CaptureLogStartOffset(gamePath);
+            if (startOffset != "previous session\n".Length ||
+                LaunchedClients.CaptureLogStartOffset("relative-game.exe") is not null)
+                throw new Exception("Desktop did not capture the exact pre-launch game log boundary.");
+            File.AppendAllText(logPath, "current session\n");
+            if (!LiveFollowSession.LogStartArguments(
+                    [new LaunchedClient(101, 201, gamePath) { LogStartOffset = startOffset }])
+                .SequenceEqual(["-log-start-offset", $"1={startOffset}"]))
+                throw new Exception("Desktop did not pass the captured launch boundary to live follow.");
+        }
+        finally { if (Directory.Exists(logRoot)) Directory.Delete(logRoot, true); }
         var fourFrame = LiveFollowFrame.ParseDynamic(
             "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0}," +
             "\"3\":{\"state\":\"following\",\"x\":0,\"y\":1},\"4\":{\"state\":\"waiting\"}}}", fourTopology);

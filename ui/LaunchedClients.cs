@@ -2,10 +2,31 @@ using System.Text.Json;
 
 namespace PartyPilot.Desktop;
 
-public sealed record LaunchedClient(int Pid, long WindowHandle, string Executable);
+public sealed record LaunchedClient(int Pid, long WindowHandle, string Executable)
+{
+    // Only a client started by this desktop session may replay its log from
+    // the byte position recorded immediately before the launcher ran.
+    public long? LogStartOffset { get; init; }
+}
 
 public static class LaunchedClients
 {
+    public static long? CaptureLogStartOffset(string? executable)
+    {
+        if (string.IsNullOrWhiteSpace(executable) || !Path.IsPathFullyQualified(executable))
+            return null;
+        try
+        {
+            var path = Path.Combine(Path.GetDirectoryName(executable)!, "logs", "Client.txt");
+            var info = new FileInfo(path);
+            return info.Exists ? info.Length : 0;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
     // Matches cmd/clientlaunch's single JSON result; a preflight or partial launch is not a binding.
     public static IReadOnlyList<LaunchedClient> ParseSuccessfulLaunch(string output, int expectedCount)
     {

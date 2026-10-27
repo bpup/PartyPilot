@@ -37,6 +37,15 @@ func TestOrderedModeAcceptsOnlyOrdinarySingleClientSamples(t *testing.T) {
 }
 
 func TestSourcesAndRoster(t *testing.T) {
+	var offsets logStartOffsets
+	if err := offsets.Set("1=42"); err != nil || offsets[1] != 42 {
+		t.Fatalf("session log boundary was rejected: %v", err)
+	}
+	for _, value := range []string{"1=43", "0=0", "4=0", "2=-1", "2=bad"} {
+		if err := offsets.Set(value); err == nil {
+			t.Fatalf("invalid session log boundary was accepted: %q", value)
+		}
+	}
 	roster, err := parseRoster("1:101,2:202")
 	if err != nil || len(roster) != 2 {
 		t.Fatalf("valid roster rejected: %v", err)

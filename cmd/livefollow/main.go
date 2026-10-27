@@ -26,6 +26,25 @@ import (
 )
 
 type sources map[int]string
+type logStartOffsets map[int]int64
+
+func (offsets *logStartOffsets) String() string { return fmt.Sprint(map[int]int64(*offsets)) }
+func (offsets *logStartOffsets) Set(value string) error {
+	slotText, offsetText, ok := strings.Cut(value, "=")
+	slot, slotErr := strconv.Atoi(slotText)
+	offset, offsetErr := strconv.ParseInt(offsetText, 10, 64)
+	if !ok || slotErr != nil || offsetErr != nil || slot < 1 || slot > 3 || offset < 0 {
+		return errors.New("log start offset must be CLIENT=nonnegative byte offset")
+	}
+	if *offsets == nil {
+		*offsets = make(logStartOffsets)
+	}
+	if _, exists := (*offsets)[slot]; exists {
+		return fmt.Errorf("duplicate log start offset for client %d", slot)
+	}
+	(*offsets)[slot] = offset
+	return nil
+}
 
 type memberNames map[int]string
 
@@ -477,7 +496,8 @@ func decodeStandaloneSample(data []byte) (telemetry.Sample, error) {
 	return telemetry.Decode(data)
 }
 
-func run(address string, roster map[int]int, paths map[int]string, leader int, engine *live.Engine,
+func run(address string, roster map[int]int, paths map[int]string, offsets logStartOffsets,
+	leader int, engine *live.Engine,
 	flasks *live.FlaskSession, menuInput <-chan menuInput, ordered, allowFollowPause bool) error {
 	endpoint, err := net.ResolveUDPAddr("udp", address)
 	if err != nil || endpoint.IP == nil || !endpoint.IP.IsLoopback() {
@@ -494,8 +514,19 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 	}
 	sort.Ints(slots)
 	tails := make(map[int]*arealog.Tail, len(slots))
+	for client := range offsets {
+		if roster[client] == 0 {
+			return fmt.Errorf("log start offset has no bound client %d", client)
+		}
+	}
 	for _, slot := range slots {
-		tail, err := arealog.OpenTail(paths[slot])
+		var tail *arealog.Tail
+		var err error
+		if offset, recorded := offsets[slot]; recorded {
+			tail, err = arealog.OpenTailFrom(paths[slot], offset)
+		} else {
+			tail, err = arealog.OpenTail(paths[slot])
+		}
 		if err != nil {
 			for _, opened := range tails {
 				opened.Close()
@@ -623,9 +654,11 @@ func main() {
 	var targets followTargets
 	var playerStops stopDistances
 	var bindings roleBindings
+	var offsets logStartOffsets
 	flag.Var(&bindings, "role-bind", "ROLE:CLIENT:LOCAL:PID; ordered input only, repeat for every role")
 	flag.Var(&logs, "log", "SLOT=Client.txt path")
 	flag.Var(&exes, "exe", "SLOT=game executable path")
+	flag.Var(&offsets, "log-start-offset", "CLIENT=pre-launch Client.txt byte offset; started clients only")
 	flag.Var(&terrainBindings, "terrain-binding", "SLOT=JSON path with explicit capture and live instance mapping")
 	flag.Var(&names, "member-name", "SLOT=confirmed character name for departure detection")
 	flag.Var(&targets, "follow-target", "SLOT=TARGET; 0 means Current MAIN")
@@ -808,7 +841,7 @@ func main() {
 		go readMenuInput(os.Stdin, commands)
 	}
 	fmt.Fprintln(os.Stderr, "Live follow decision stream; Windows controller and PoE2 behavior remain unverified.")
-	if err := run(*address, roster, paths, *leader, engine, flaskSession, menuCommands,
+	if err := run(*address, roster, paths, offsets, *leader, engine, flaskSession, menuCommands,
 		*orderedInput, *allowFollowPause); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
