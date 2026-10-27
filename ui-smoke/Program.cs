@@ -37,6 +37,7 @@ HybridTopologySmoke.Run();
 HybridPairingGuideSmoke.Run();
 RadarHotkeySmoke.Run();
 AutoPartyInviteSmoke.Run();
+LiveMemberNameSelectionSmoke.Run();
 AutoPartyRecoverySmoke.Run();
 await AutoPartyRecoverySchedulerSmoke.RunAsync();
 await PartyLeaveLogSmoke.RunAsync();

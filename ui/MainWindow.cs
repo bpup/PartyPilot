@@ -3162,17 +3162,9 @@ public sealed class MainWindow : Window
                     throw new InvalidOperationException($"P{slot.PartyPlayer} 的停止距离必须在 0–200 之间。");
                 if (stop is double value) playerStops[slot.PartyPlayer] = value;
             }
-            IReadOnlyDictionary<int, string>? memberNames = null;
-            if (AutoPartyInviteNames.TryCreate(_selectedTopology,
-                    _inviteNames.Take(_selectedTopology.PlayerCount).Select(box => box.Text).ToArray(),
-                    out var inviteNames) && inviteNames is not null)
-            {
-                var confirmed = _selectedTopology.Slots.Where(slot => slot.PartyPlayer != 1)
-                    .ToDictionary(slot => slot.PartyPlayer,
-                        slot => inviteNames.ForClient(slot.Client));
-                if (plan.LeaderName.Length == 0) confirmed[1] = inviteNames.ForClient(1);
-                memberNames = confirmed;
-            }
+            var memberNames = LiveMemberNameSelection.TryCreate(_selectedTopology,
+                _inviteNames.Take(_selectedTopology.PlayerCount).Select(box => box.Text).ToArray(),
+                plan.LeaderName);
             var session = await LiveFollowSession.StartAsync(executable, _selectedTopology,
                 _launchedClients, _bridge, plan, memberNames, followTargets, playerStops,
                 terrain, _classicCollisionDodge.IsChecked == true,
