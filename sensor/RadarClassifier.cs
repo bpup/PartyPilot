@@ -103,6 +103,9 @@ public static class RadarClassifier
     public static bool IsPlayerPath(string path) =>
         path.StartsWith("Metadata/Characters/", StringComparison.OrdinalIgnoreCase);
 
+    public static bool IsQuestItemPath(string? path) =>
+        path?.StartsWith("Metadata/Items/QuestItems/", StringComparison.OrdinalIgnoreCase) == true;
+
     public static bool IsWorldItemWrapperPath(string path)
     {
         if (!path.StartsWith("Metadata/", StringComparison.OrdinalIgnoreCase)) return false;

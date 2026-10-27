@@ -470,6 +470,20 @@ if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(questRadarText), 12
     RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
         questRadarText.Replace("\"Label\":\"Quest marker\"", "\"Label\":null")), 123, DateTime.UtcNow, out _))
     throw new Exception("Radar quest marker parsing or display failed.");
+var questItemRadarText = radarText.Replace(
+    "\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\"",
+    "\"Category\":\"quest\",\"Path\":\"Metadata/MiscellaneousObjects/WorldItem@123\",\"ItemPath\":\"Metadata/Items/QuestItems/Gallows/Act2/SuicideNote\",\"Label\":\"Final Letter\"");
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(questItemRadarText), 123,
+        DateTime.UtcNow, out var questItemFrame) ||
+    questItemFrame?.Markers[1].Category != "quest" ||
+    RadarOverlayWindow.DisplayLabel(questItemFrame.Markers[1]) != "任务线索 · Final Letter" ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        questItemRadarText.Replace("Metadata/Items/QuestItems/Gallows/Act2/SuicideNote",
+            "Metadata/Items/Weapons/Sword")), 123, DateTime.UtcNow, out _) ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        questItemRadarText.Replace("Metadata/MiscellaneousObjects/WorldItem@123",
+            "Metadata/MiscellaneousObjects/Waypoint")), 123, DateTime.UtcNow, out _))
+    throw new Exception("Radar quest item was lost or accepted without a matching wrapper and item path.");
 var bossRadarText = radarText.Replace(
     "\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\"",
     "\"Category\":\"boss\",\"Path\":\"Metadata/Monsters/HyenaMonster/Objects/BossRoomMinimapIcon\",\"Label\":\"Rathbreaker\"");

@@ -1162,7 +1162,9 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                     // An unreadable wrapper must not become an asserted loot marker.
                 }
             }
-            var category = lootName != null ? "loot" : isPlayer ? "player" : RadarClassifier.Category(path);
+            var questItem = lootName != null && RadarClassifier.IsQuestItemPath(itemPath);
+            var category = questItem ? "quest" : lootName != null ? "loot" :
+                isPlayer ? "player" : RadarClassifier.Category(path);
             if (category == null) continue;
             bool? monsterComponentPresent = null;
             int? monsterLifeCurrent = null;
@@ -1212,8 +1214,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 Label = lootName ?? (isPlayer ? playerName : category == "quest" ? RadarClassifier.QuestLabel(path) :
                     category == "boss" ? RadarClassifier.BossLabel(path) : null),
                 ItemPath = itemPath,
-                Stack = lootStack,
-                Rarity = lootRarity,
+                Stack = questItem ? null : lootStack,
+                Rarity = questItem ? null : lootRarity,
                 MonsterComponentPresent = monsterComponentPresent,
                 MonsterLifeCurrent = monsterLifeCurrent,
                 MonsterLifeMaximum = monsterLifeMaximum,

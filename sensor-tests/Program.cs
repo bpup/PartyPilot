@@ -297,6 +297,9 @@ Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
     RadarClassifier.Category("Metadata/Characters/Player") == null &&
     RadarClassifier.IsWorldItemWrapperPath("Metadata/MiscellaneousObjects/WorldItem@123") &&
     !RadarClassifier.IsWorldItemWrapperPath("Metadata/Items/Weapons/Sword") &&
+    RadarClassifier.IsQuestItemPath("Metadata/Items/QuestItems/Gallows/Act2/SuicideNote") &&
+    !RadarClassifier.IsQuestItemPath("Metadata/Items/Weapons/Sword") &&
+    !RadarClassifier.IsQuestItemPath("Metadata/Items/QuestItemsFake/SuicideNote") &&
     RadarClassifier.IsNavigation("waypoint") && RadarClassifier.IsNavigation("quest") &&
     RadarClassifier.IsNavigation("boss") && RadarClassifier.IsNavigation("essence") &&
     RadarClassifier.Category("Metadata/MiscellaneousObjects/Monolith") == "essence" &&

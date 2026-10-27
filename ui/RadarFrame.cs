@@ -122,7 +122,10 @@ public static class RadarFrames
                      itemPath != null || stack != null || rarity != null)) return false;
                 if (category == "quest" &&
                     (string.IsNullOrWhiteSpace(label) || Encoding.UTF8.GetByteCount(label) > 96 ||
-                     itemPath != null || stack != null || rarity != null)) return false;
+                     (itemPath != null && (!WorldItemWrapperPath(path) ||
+                         !itemPath.StartsWith("Metadata/Items/QuestItems/", StringComparison.OrdinalIgnoreCase) ||
+                         Encoding.UTF8.GetByteCount(itemPath) > 256)) ||
+                     stack != null || rarity != null)) return false;
                 if (category is not ("player" or "loot" or "quest" or "boss") &&
                     (label != null || itemPath != null || stack != null || rarity != null)) return false;
                 markers.Add(new RadarMarker(id, category, path, label, itemPath, stack, rarity, x, y));
