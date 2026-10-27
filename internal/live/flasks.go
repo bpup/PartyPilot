@@ -158,7 +158,8 @@ func (session *FlaskSession) ObserveSample(sample telemetry.Sample, now time.Tim
 		Mana:         flask.Pool{Current: sample.Mana, Maximum: sample.ManaMax},
 		EnergyShield: flask.Pool{Current: sample.EnergyShield, Maximum: sample.EnergyShieldMax},
 	}
-	// The target's live call passes recovering=false; Ward has no verified live source.
+	// The target's local and distributed live calls pass recovering=false;
+	// Ward has no verified live source here.
 	activations, err := session.engine.Step(slot, sample.SeenUTC, data, rules,
 		session.menuOpen[slot], false)
 	if err != nil {

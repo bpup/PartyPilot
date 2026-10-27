@@ -58,7 +58,7 @@ internal sealed class FlaskRuleDialog : Window
         AddNumber(rows, "生命冷却（100–60000 毫秒）", _lifeCooldown);
         AddNumber(rows, "生命最低缺口（0–10000）", _lifeMinMissing);
         rows.Children.Add(_skipRecovering);
-        rows.Children.Add(new TextBlock { Text = "当前实时传感器没有可靠的恢复状态；此选项已保存，但实时判断暂时无法据此跳过。",
+        rows.Children.Add(new TextBlock { Text = "0.6.17 的实时药剂调用固定传入未恢复状态；此选项会保存，但当前实时判断不会据此跳过。",
             TextWrapping = Avalonia.Media.TextWrapping.Wrap });
         rows.Children.Add(_manaEnabled);
         AddNumber(rows, "魔力触发阈值（1–95%）", _manaTrigger);
