@@ -90,13 +90,16 @@ window.UpdateLayout();
 if (window.GetLogicalDescendants().OfType<TextBox>()
         .Single(box => box.Name == "follow-stop-global").Text != "9" ||
     window.GetLogicalDescendants().OfType<TextBox>()
-        .Single(box => box.Name == "follow-catchup-global").Text != "90")
+        .Single(box => box.Name == "follow-catchup-global").Text != "39.13940256045524")
     throw new Exception("The observed 0.6.17 distance values were not prefilled.");
 var priorityChoice = window.GetLogicalDescendants().OfType<CheckBox>()
     .Single(box => box.Content?.ToString()?.StartsWith("追赶优先", StringComparison.Ordinal) == true);
 var attackChoice = window.GetLogicalDescendants().OfType<CheckBox>()
     .Single(box => box.Content?.ToString()?.StartsWith("攻击时同步主控移动方向", StringComparison.Ordinal) == true);
-if (priorityChoice.IsChecked != false || attackChoice.IsChecked != true)
+if (priorityChoice.IsChecked != true || attackChoice.IsChecked != true ||
+    window.GetLogicalDescendants().OfType<CheckBox>()
+        .Single(box => box.Content?.ToString()?.StartsWith("启用经典冲刺追赶", StringComparison.Ordinal) == true)
+        .IsChecked != true)
     throw new Exception("Desktop did not load the observed follow input defaults.");
 priorityChoice.IsChecked = true;
 attackChoice.IsChecked = false;
@@ -244,9 +247,8 @@ var classicSprint = window.GetLogicalDescendants().OfType<CheckBox>()
     .Single(box => box.Content?.ToString()?.StartsWith("启用经典冲刺追赶", StringComparison.Ordinal) == true);
 if (terrainPaths.Length != 3 || !terrainPaths[0].IsEffectivelyVisible ||
     !terrainPaths[1].IsEffectivelyVisible || terrainPaths[2].IsEffectivelyVisible ||
-    terrainDodge.IsChecked != false || terrainDodge.IsEnabled || classicSprint.IsChecked != false)
-    throw new Exception("Two-client terrain and classic sprint controls did not default off.");
-classicSprint.IsChecked = true;
+    terrainDodge.IsChecked != false || !terrainDodge.IsEnabled || classicSprint.IsChecked != true)
+    throw new Exception("Two-client terrain or classic sprint first-run controls were incorrect.");
 if (!terrainDodge.IsEnabled)
     throw new Exception("Classic sprint did not expose its optional terrain collision setting.");
 terrainDodge.IsChecked = true;

@@ -7,7 +7,7 @@ internal sealed record FollowInputOptions(bool SprintCatchUp, bool SprintCatchUp
     int AggressiveSprintRetryDelayMs, bool CloseRangeMirror, int CloseRangeMirrorDurationMs)
 {
     internal static FollowInputOptions TargetDefaults { get; } =
-        new(true, false, true, false, false, 800, false, 400);
+        new(true, true, true, true, false, 800, false, 400);
 
     internal bool IsValid => !(ClassicSprintCatchUp && AggressiveBlinkCatchUp) &&
         AggressiveSprintRetryDelayMs is >= 500 and <= 1500 &&

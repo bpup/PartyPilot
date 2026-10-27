@@ -915,11 +915,11 @@ public sealed class MainWindow : Window
         _followStop.Name = "follow-stop-global";
         _followStop.Text = "9";
         _followCatchup.Name = "follow-catchup-global";
-        _followCatchup.Text = "90";
+        _followCatchup.Text = "39.13940256045524";
         var fields = new (TextBox Box, string Label)[]
         {
-            (_followStop, "停止距离（0.6.17 静态值 9）"),
-            (_followCatchup, "追赶距离（0.6.17 静态值 90）"),
+            (_followStop, "停止距离（0.6.17 首次启动配置 9）"),
+            (_followCatchup, "追赶距离（0.6.17 首次启动配置约 39.14）"),
             (_followMaxAge, "位置有效期（ms/s/m/h）"), (_followLogAge, "区域首次核对时限（ms/s/m/h）")
         };
         foreach (var (box, label) in fields)
@@ -935,8 +935,8 @@ public sealed class MainWindow : Window
         _sprintCatchUp.IsChecked = true;
         _sprintCatchUp.IsCheckedChanged += (_, _) => UpdateFollowControls();
         panel.Children.Add(_sprintCatchUp);
-        _sprintCatchUpPriority.Content = "追赶优先，暂停镜像施法按键（0.6.17 设置模型默认关闭）";
-        _sprintCatchUpPriority.IsChecked = false;
+        _sprintCatchUpPriority.Content = "追赶优先，暂停镜像施法按键（0.6.17 首次启动配置开启）";
+        _sprintCatchUpPriority.IsChecked = true;
         panel.Children.Add(_sprintCatchUpPriority);
         _mirrorAttackDirection.Content = "攻击时同步主控移动方向（目标版默认开启；实体手柄）";
         _mirrorAttackDirection.IsChecked = true;
@@ -944,7 +944,7 @@ public sealed class MainWindow : Window
         _followInputPreferenceStatus.Foreground = MutedBrush;
         _followInputPreferenceStatus.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(_followInputPreferenceStatus);
-        _classicSprintCatchUp.Content = "启用经典冲刺追赶（0.6.17 分布式客户端默认关闭）";
+        _classicSprintCatchUp.Content = "启用经典冲刺追赶（0.6.17 首次启动配置开启）";
         _classicSprintCatchUp.IsCheckedChanged += (_, _) =>
         {
             if (_classicSprintCatchUp.IsChecked == true) _aggressiveBlinkCatchUp.IsChecked = false;

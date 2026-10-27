@@ -12,13 +12,14 @@ internal static class FollowInputPreferenceSmoke
             var store = new FollowInputPreferenceStore(path);
             var initial = store.Load();
             if (!initial.Success || initial.Options != FollowInputOptions.TargetDefaults ||
-                initial.Options.SprintCatchUpPriority)
+                !initial.Options.SprintCatchUpPriority || !initial.Options.ClassicSprintCatchUp)
                 throw new Exception("Observed follow input defaults were not restored.");
             var chosen = FollowInputOptions.TargetDefaults with
             {
                 SprintCatchUp = false,
                 SprintCatchUpPriority = false,
                 MirrorAttackDirection = false,
+                ClassicSprintCatchUp = false,
                 AggressiveBlinkCatchUp = true,
                 AggressiveSprintRetryDelayMs = 900,
                 CloseRangeMirror = true,
