@@ -52,6 +52,7 @@ if (args.Contains("--stdin"))
 }
 
 PrivateSlotFrameTests.Run();
+HybridKeyboardInputTests.Run();
 PrivateSlotConfigTests.Run();
 PrivateSlotPublisherTests.Run();
 Client3FocusRoutingTests.Run();
