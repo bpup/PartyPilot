@@ -1,0 +1,1717 @@
+[
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/AreaTransitions/FallenTreeSlash_in.tdt",
+    "x": 2,
+    "y": 1,
+    "label": "Mud Burrow"
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/AreaTransitions/FallenTreeSlash_out.tdt",
+    "x": 2,
+    "y": 1,
+    "label": "Mud Burrow"
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/AreaTransitions/FallenTreeWoods_in.tdt",
+    "x": 2,
+    "y": 1,
+    "label": "Mud Burrow"
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/AreaTransitions/FallenTreeWoods_out.tdt",
+    "x": 2,
+    "y": 1,
+    "label": "Mud Burrow"
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/Slash/HagWitchArena_01.tdt",
+    "x": 5,
+    "y": 0,
+    "label": "Beira of the Rotten"
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/Slash/HagWitchArena_02.tdt",
+    "x": 5,
+    "y": 0,
+    "label": "Beira of the Rotten"
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/Slash/HagWitchArena_03.tdt",
+    "x": 5,
+    "y": 0,
+    "label": "Beira of the Rotten"
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/Slash/HagWitchArena_04.tdt",
+    "x": 5,
+    "y": 0,
+    "label": "Beira of the Rotten"
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/Slash/HagWitchArena_05.tdt",
+    "x": 5,
+    "y": 0,
+    "label": "Beira of the Rotten"
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/Slash/HagWitchArena_06.tdt",
+    "x": 5,
+    "y": 0,
+    "label": "Beira of the Rotten"
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/Slash/HagWitchArena_07.tdt",
+    "x": 5,
+    "y": 0,
+    "label": "Beira of the Rotten"
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/AreaTransitions/Clearfell_OldForest_Transition_01.tdt",
+    "x": 1,
+    "y": 0,
+    "label": "The Grelwood"
+  },
+  {
+    "area": "G1_3",
+    "path": "Metadata/Terrain/Woods/Mudburrow/Path/path_St_Spawner_v02_01.tdt",
+    "x": 1,
+    "y": 0,
+    "label": "To Devourer"
+  },
+  {
+    "area": "G1_4",
+    "path": "Metadata/Terrain/Woods/GrimTangle/areatransitions/GrimtangleTransitionDown_02.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "The Corpse Tree"
+  },
+  {
+    "area": "G1_4",
+    "path": "Metadata/Terrain/Woods/OldForestWoods/Feature/PlantBoss_01.tdt",
+    "x": 0,
+    "y": 5,
+    "label": "The Moving Bramble"
+  },
+  {
+    "area": "G1_4",
+    "path": "Metadata/Terrain/Woods/OldForestWoods/Feature/BurnTheWitch_01.tdt",
+    "x": 0,
+    "y": 4,
+    "label": "Areagne's Hut"
+  },
+  {
+    "area": "G1_4",
+    "path": "Metadata/Terrain/Woods/AreaTransitions/OldForestToGrimTangle_02_metatile.tdt",
+    "x": 6,
+    "y": 2,
+    "label": "The Grim Tangle"
+  },
+  {
+    "area": "G1_4",
+    "path": "Metadata/Terrain/Woods/AreaTransitions/redvale_transition_02_oldforest.tdt",
+    "x": 2,
+    "y": 4,
+    "label": "The Red Vale"
+  },
+  {
+    "area": "G1_4",
+    "path": "Metadata/Terrain/Woods/AreaTransitions/OldForest_Clearfell_transition_01.tdt",
+    "x": 4,
+    "y": 3,
+    "label": "Clearfell"
+  },
+  {
+    "area": "G1_5",
+    "path": "Metadata/Terrain/Woods/AreaTransitions/redvale_transition_02_redvale.tdt",
+    "x": 1,
+    "y": 1,
+    "label": "The Grelwood"
+  },
+  {
+    "area": "G1_6",
+    "path": "Metadata/Terrain/Woods/GrimTangle/feature/BossArena_01.tdt",
+    "x": 5,
+    "y": 7,
+    "label": "Den of the Druid"
+  },
+  {
+    "area": "G1_6",
+    "path": "Metadata/Terrain/Woods/GrimTangle/areatransitions/GrimtangleTransitionUp_02.tdt",
+    "x": 0,
+    "y": 1,
+    "label": "Cemetery of the Eternals"
+  },
+  {
+    "area": "G1_6",
+    "path": "Metadata/Terrain/Woods/GrimTangle/areatransitions/IntroArea.tdt",
+    "x": 7,
+    "y": 0,
+    "label": "The Grelwood"
+  },
+  {
+    "area": "G1_7",
+    "path": "Metadata/Terrain/Woods/Graveyard/Feature/mausoleum_01.tdt",
+    "x": 0,
+    "y": 1,
+    "label": "Mausoleum of the Praetor"
+  },
+  {
+    "area": "G1_7",
+    "path": "Metadata/Terrain/Woods/Graveyard/Feature/tomb_02.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Tomb of the Consort"
+  },
+  {
+    "area": "G1_7",
+    "path": "Metadata/Terrain/Woods/Graveyard/Feature/tomb_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Tomb of the Consort"
+  },
+  {
+    "area": "G1_7",
+    "path": "Metadata/Terrain/Woods/Graveyard/Feature/GraveyardArena.tdt",
+    "x": 3,
+    "y": 10,
+    "label": "Arena / Hunting Grounds"
+  },
+  {
+    "area": "G1_7",
+    "path": "Metadata/Terrain/Woods/Graveyard/Feature/GraveyardToGrimTangle_transition_01.tdt",
+    "x": 2,
+    "y": 0,
+    "label": "The Grim Tangle"
+  },
+  {
+    "area": "G1_8",
+    "path": "Metadata/Terrain/Woods/GraveyardDungeons/Transitions/Transition_Mausoleum_to_Graveyard_02.tdt",
+    "x": 0,
+    "y": 2,
+    "label": "Cemetery of the Eternals"
+  },
+  {
+    "area": "G1_8",
+    "path": "Metadata/Terrain/Woods/GraveyardDungeons/Transitions/Mausoleum_SecretEntrance_01.tdt",
+    "x": 1,
+    "y": 0,
+    "label": "Forgotten Riches"
+  },
+  {
+    "area": "G1_8",
+    "path": "Metadata/Terrain/Woods/GraveyardDungeons/Feature/MausoleumBoss_ArenaFloor.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "MausoleumBoss_ArenaFloor"
+  },
+  {
+    "area": "G1_9",
+    "path": "Metadata/Terrain/Woods/GraveyardDungeons/Feature/TombBoss_ArenaFloor.tdt",
+    "x": 2,
+    "y": 2,
+    "label": "Asinia"
+  },
+  {
+    "area": "G1_9",
+    "path": "Metadata/Terrain/Woods/GraveyardDungeons/Feature/Tomb_Landmark_01.tdt",
+    "x": 4,
+    "y": 7,
+    "label": "Embattled Trove"
+  },
+  {
+    "area": "G1_11",
+    "path": "Metadata/Terrain/Woods/AreaTransitions/CanopyRoadTransition_01.tdt",
+    "x": 4,
+    "y": 2,
+    "label": "Freythorn"
+  },
+  {
+    "area": "G1_11",
+    "path": "Metadata/Terrain/Woods/Features_Cairns/CairnBrecon.tdt",
+    "x": 1,
+    "y": 0,
+    "label": "Crowbell Start"
+  },
+  {
+    "area": "G1_11",
+    "path": "Metadata/Terrain/Woods/HuntingGrounds/RitualClearing01.tdt",
+    "x": 0,
+    "y": 4,
+    "label": "Ritual Site"
+  },
+  {
+    "area": "G1_11",
+    "path": "Metadata/Terrain/Woods/AreaTransitions/CliffRoad_Cnr_transition_01.tdt",
+    "x": 3,
+    "y": 4,
+    "label": "Cemetery of the Eternals"
+  },
+  {
+    "area": "G1_11",
+    "path": "Metadata/Terrain/Woods/Features_Cairns/DolmenDeAzutan_03.tdt",
+    "x": 0,
+    "y": 9,
+    "label": "Crowbell Arena"
+  },
+  {
+    "area": "G1_11",
+    "path": "Metadata/Terrain/Woods/Features_Cairns/GrassHole_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Dryadic Ritual"
+  },
+  {
+    "area": "G1_12",
+    "path": "Metadata/Terrain/Woods/Canopy/Features/CanopySpireTransition_01.tdt",
+    "x": 2,
+    "y": 2,
+    "label": "Hunting Grounds"
+  },
+  {
+    "area": "G1_12",
+    "path": "Metadata/Terrain/Woods/Canopy/Features/CanopyArena.tdt",
+    "x": 8,
+    "y": 8,
+    "label": "The King in the Mists"
+  },
+  {
+    "area": "G1_13_1",
+    "path": "Metadata/Terrain/Woods/Village/RoadFields/Feature/YurtUna_01.tdt",
+    "x": 3,
+    "y": 3,
+    "label": "Una's Lute"
+  },
+  {
+    "area": "G1_13_1",
+    "path": "Metadata/Terrain/Woods/Village/RoadFields/Bosstile_01.tdt",
+    "x": 5,
+    "y": 5,
+    "label": "Crop Circle"
+  },
+  {
+    "area": "G1_13_1",
+    "path": "Metadata/Terrain/Woods/Village/RoadFields/Feature/RoadVillage_Areatransition.tdt",
+    "x": 8,
+    "y": 3,
+    "label": "Ogham Village"
+  },
+  {
+    "area": "G1_13_2",
+    "path": "Metadata/Terrain/Woods/Village/Huts/VillageArena_02.tdt",
+    "x": 6,
+    "y": 7,
+    "label": "Executioner's Block"
+  },
+  {
+    "area": "G1_13_2",
+    "path": "Metadata/Terrain/Woods/Village/Blacksmith_Large.tdt",
+    "x": 7,
+    "y": 9,
+    "label": "Renly's Tools"
+  },
+  {
+    "area": "G1_13_2",
+    "path": "Metadata/Terrain/Woods/Village/RoadFields/Feature/RoadVillage_Areatransition_village_side.tdt",
+    "x": 7,
+    "y": 2,
+    "label": "Ogham Farmlands"
+  },
+  {
+    "area": "G1_14",
+    "path": "Metadata/Terrain/Woods/Manor/CourtyardFeatures/Manor_GrandEntrance_Transition_01.tdt",
+    "x": 2,
+    "y": 4,
+    "label": "Oghams Manor"
+  },
+  {
+    "area": "G1_14",
+    "path": "Metadata/Terrain/Woods/Manor/CourtyardFeatures/Gallows_02.tdt",
+    "x": 9,
+    "y": 2,
+    "label": "Gallows"
+  },
+  {
+    "area": "G1_14",
+    "path": "Metadata/Terrain/Woods/Village/Huts/VillageArena_02_courtyard_side.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Entrance"
+  },
+  {
+    "area": "G1_15",
+    "path": "Metadata/Terrain/Woods/Manor/Features/Chapel_boss_01.tdt",
+    "x": 6,
+    "y": 8,
+    "label": "Candlemass"
+  },
+  {
+    "area": "G1_15",
+    "path": "Metadata/Terrain/Woods/Manor/Interior/Features/ThickWall_StairsDown_Cc_01.tdt",
+    "x": 1,
+    "y": 2,
+    "label": "Stairs Down"
+  },
+  {
+    "area": "G1_15",
+    "path": "Metadata/Terrain/Woods/Manor/Features/ArenaTop_01.tdt",
+    "x": 8,
+    "y": 2,
+    "label": "Throne of the Wolf"
+  },
+  {
+    "area": "G1_15",
+    "path": "Metadata/Terrain/Woods/Manor/Interior/Features/Manor_Entrance_01.tdt",
+    "x": 2,
+    "y": 1,
+    "label": "The Manor Ramparts"
+  },
+  {
+    "area": "G1_15",
+    "path": "Metadata/Terrain/Woods/Manor/Interior/Features/ThickWall_AreaTransition_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Stairs Up"
+  },
+  {
+    "area": "G2_1",
+    "path": "Metadata/Terrain/Desert/UnwalkableDune/DunePlatform/Dune_Platform_Feature_01.tdt",
+    "x": 3,
+    "y": 3,
+    "label": "Raiders Cliffs"
+  },
+  {
+    "area": "G2_2",
+    "path": "Metadata/Terrain/Desert/Maraketh/TraitorsPassage/TraitorsPassage_Arena_01.tdt",
+    "x": 3,
+    "y": 3,
+    "label": "Prison of the Disgraced"
+  },
+  {
+    "area": "G2_2",
+    "path": "Metadata/Terrain/Desert/CavePath/Features/Thickwall_Cave_Entrance.tdt",
+    "x": 1,
+    "y": 0,
+    "label": "The Halani Gates"
+  },
+  {
+    "area": "G2_2",
+    "path": "Metadata/Terrain/Desert/CavePath/Features/cave_entrance_01.tdt",
+    "x": 1,
+    "y": 5,
+    "label": "The Ardura Caravan"
+  },
+  {
+    "area": "G2_2",
+    "path": "Metadata/Terrain/Desert/CavePath/Features/Landmark_feature_01.tdt",
+    "x": 1,
+    "y": 0,
+    "label": "Bell Chest"
+  },
+  {
+    "area": "G2_3",
+    "path": "Metadata/Terrain/Desert/Gates/Features/boss_arena.tdt",
+    "x": 5,
+    "y": 4,
+    "label": "Infested Tower"
+  },
+  {
+    "area": "G2_3",
+    "path": "Metadata/Terrain/Desert/AreaTransitions/Ruin_PassageStair_01.tdt",
+    "x": 1,
+    "y": 3,
+    "label": "Traitor's Passage"
+  },
+  {
+    "area": "G2_4_1",
+    "path": "Metadata/Terrain/Desert/BuriedCity/Features/QueenKabalaRoom_01_meta01.tdt",
+    "x": 2,
+    "y": 8,
+    "label": "Kabala"
+  },
+  {
+    "area": "G2_4_1",
+    "path": "Metadata/Terrain/Desert/BuriedCity/Features/Keth_Stairs_RuinEntrance.tdt",
+    "x": 4,
+    "y": 2,
+    "label": "The Lost City"
+  },
+  {
+    "area": "G2_4_1",
+    "path": "Metadata/Terrain/Desert/BuriedCity/Features/Keth_SinkholeTransition_01.tdt",
+    "x": 1,
+    "y": 0,
+    "label": "Looted Vault"
+  },
+  {
+    "area": "G2_4_1",
+    "path": "Metadata/Terrain/Desert/BuriedCity/Features/Keth_Stairs_RuinEntrance.tdt",
+    "x": 1,
+    "y": 0,
+    "label": "Looted Vault"
+  },
+  {
+    "area": "G2_4_1",
+    "path": "Metadata/Terrain/Desert/BuriedCity/Features/Cityroof_Entrance.tdt",
+    "x": 6,
+    "y": 2,
+    "label": "The Ardura Caravan"
+  },
+  {
+    "area": "G2_4_2",
+    "path": "Metadata/Terrain/Desert/Maraketh/Features/Thickwall_StairsDown_01.tdt",
+    "x": 2,
+    "y": 2,
+    "label": "Buried Shrines"
+  },
+  {
+    "area": "G2_4_2",
+    "path": "Metadata/Terrain/Desert/Maraketh/Features/KethEntrance_01.tdt",
+    "x": 1,
+    "y": 2,
+    "label": "Keth"
+  },
+  {
+    "area": "G2_4_3",
+    "path": "Metadata/Terrain/Desert/Maraketh/Features/Thickwall_BossTransition_01.tdt",
+    "x": 1,
+    "y": 1,
+    "label": "The Heart of Keth"
+  },
+  {
+    "area": "G2_4_3",
+    "path": "Metadata/Terrain/Desert/Maraketh/Floor/Floortrim_BossMedallion_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Elemental Offering"
+  },
+  {
+    "area": "G2_4_3",
+    "path": "Metadata/Terrain/Desert/Maraketh/Features/Thickwall_StairsUp_01.tdt",
+    "x": 1,
+    "y": 2,
+    "label": "The Lost City"
+  },
+  {
+    "area": "G2_4_3",
+    "path": "Metadata/Terrain/Desert/Maraketh/Floor/ThickWall_TransitionWide_St_01.tdt",
+    "x": 0,
+    "y": 1,
+    "label": "Buried Shrines"
+  },
+  {
+    "area": "G2_4_3",
+    "path": "Metadata/Terrain/Desert/Maraketh/Arena/CentrePattern_01.tdt",
+    "x": 0,
+    "y": 1,
+    "label": "The Vestibule"
+  },
+  {
+    "area": "G2_4_3",
+    "path": "Metadata/Terrain/Desert/Maraketh/Arena/Thickwall_GoddessStatue_01.tdt",
+    "x": 1,
+    "y": 0,
+    "label": "The Water Goddess"
+  },
+  {
+    "area": "G2_5_1",
+    "path": "Metadata/Terrain/Desert/Badlands/Features/AreaTransition_BadlandsToPits_01.tdt",
+    "x": 3,
+    "y": 3,
+    "label": "The Bone Pits"
+  },
+  {
+    "area": "G2_5_1",
+    "path": "Metadata/Terrain/Desert/Badlands/Features/Badlands_Entrance_01.tdt",
+    "x": 14,
+    "y": 4,
+    "label": "The Ardura Caravan"
+  },
+  {
+    "area": "G2_5_1",
+    "path": "Metadata/Terrain/Desert/Badlands/Features/Landmark_feature_02.tdt",
+    "x": 4,
+    "y": 7,
+    "label": "Fossilised Memorial"
+  },
+  {
+    "area": "G2_5_1",
+    "path": "Metadata/Terrain/Desert/Badlands/Features/AbyssHole.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Lightless Passage"
+  },
+  {
+    "area": "Abyss_Intro",
+    "path": "Metadata/Terrain/Gallows/Leagues/Abyss/AbyssHub/Tiles/AbyssPitFeature_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Rare Fight"
+  },
+  {
+    "area": "G2_5_2",
+    "path": "Metadata/Terrain/Desert/Badlands/Features/AreaTransition_BadlandsToPits_01.tdt",
+    "x": 5,
+    "y": 3,
+    "label": "Mastodon Badlands"
+  },
+  {
+    "area": "G2_5_2",
+    "path": "Metadata/Terrain/Desert/Badlands/Features/MastodonArena_01.tdt",
+    "x": 4,
+    "y": 5,
+    "label": "Blackrib Pit"
+  },
+  {
+    "area": "G2_6",
+    "path": "Metadata/Terrain/Desert/UnwalkableDune/Titans/Feature/titan_valley_boss_01.tdt",
+    "x": 8,
+    "y": 3,
+    "label": "Medallion"
+  },
+  {
+    "area": "G2_6",
+    "path": "Metadata/Terrain/Desert/UnwalkableDune/Titans/Feature/TitanQuest01.tdt",
+    "x": 4,
+    "y": 6,
+    "label": "Ancient Seal"
+  },
+  {
+    "area": "G2_6",
+    "path": "Metadata/Terrain/Desert/UnwalkableDune/Titans/Feature/TitanQuest02.tdt",
+    "x": 5,
+    "y": 3,
+    "label": "Ancient Seal"
+  },
+  {
+    "area": "G2_6",
+    "path": "Metadata/Terrain/Desert/UnwalkableDune/Titans/Feature/TitanQuest03.tdt",
+    "x": 5,
+    "y": 2,
+    "label": "Ancient Seal"
+  },
+  {
+    "area": "G2_6",
+    "path": "Metadata/Terrain/Desert/UnwalkableDune/Titans/Feature/GrottoExit01.tdt",
+    "x": 3,
+    "y": 2,
+    "label": "The Titan Grotto"
+  },
+  {
+    "area": "G2_6",
+    "path": "Metadata/Terrain/Desert/UnwalkableDune/Titans/Feature/CartEntrance_01.tdt",
+    "x": 8,
+    "y": 3,
+    "label": "The Ardura Caravan"
+  },
+  {
+    "area": "G2_7",
+    "path": "Metadata/Terrain/Desert/CaveTitans/Features/Titan_Arena_01.tdt",
+    "x": 5,
+    "y": 5,
+    "label": "Dais of Reckoning"
+  },
+  {
+    "area": "G2_7",
+    "path": "Metadata/Terrain/Desert/CaveTitans/Features/Staircase_Entrance_01.tdt",
+    "x": 2,
+    "y": 10,
+    "label": "Valley of the Titans"
+  },
+  {
+    "area": "G2_8",
+    "path": "Metadata/Terrain/Desert/Pillars/Base/Arena/bossroom_02.tdt",
+    "x": 7,
+    "y": 7,
+    "label": "Forgotten Corpses"
+  },
+  {
+    "area": "G2_8",
+    "path": "Metadata/Terrain/Desert/Pillars/Base/PillarBase_CartTransition_01.tdt",
+    "x": 1,
+    "y": 0,
+    "label": "The Ardura Caravan"
+  },
+  {
+    "area": "G2_8",
+    "path": "Metadata/Terrain/Desert/Pillars/Base/PillarBaseWide_StairsUp_01.tdt",
+    "x": 3,
+    "y": 1,
+    "label": "Path of Mourning"
+  },
+  {
+    "area": "G2_9_1",
+    "path": "Metadata/Terrain/Desert/Pillars/Upper/PillarUpper_StairsUp_01.tdt",
+    "x": 4,
+    "y": 1,
+    "label": "The Spires of Deshar"
+  },
+  {
+    "area": "G2_9_1",
+    "path": "Metadata/Terrain/Desert/Pillars/Lower/Wide/PillarLowerWide_StairsDown_01.tdt",
+    "x": 3,
+    "y": 0,
+    "label": "Deshar"
+  },
+  {
+    "area": "G2_9_1",
+    "path": "Metadata/Terrain/Desert/Pillars/Lower/Pillar_TinyBalcony_feature_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Shifting Vases"
+  },
+  {
+    "area": "G2_9_2",
+    "path": "Metadata/Terrain/Desert/Pillars/Tops/PillarArena.tdt",
+    "x": 5,
+    "y": 4,
+    "label": "Arena"
+  },
+  {
+    "area": "G2_9_2",
+    "path": "Metadata/Terrain/Desert/Pillars/Tall/PillarTall_StairsDown_01.tdt",
+    "x": 1,
+    "y": 2,
+    "label": "Path of Mourning"
+  },
+  {
+    "area": "G2_9_2",
+    "path": "Metadata/Terrain/Desert/Pillars/Tops/PillarTopWide_Shrine_01.tdt",
+    "x": 1,
+    "y": 2,
+    "label": "Sisters of Garukhan"
+  },
+  {
+    "area": "G2_10_1",
+    "path": "Metadata/Terrain/Desert/Quarry/Features/MiningShaftCrane.tdt",
+    "x": 2,
+    "y": 2,
+    "label": "Mawdun Mine"
+  },
+  {
+    "area": "G2_10_1",
+    "path": "Metadata/Terrain/Desert/Quarry/Features/Maraketh_Entrance_01.tdt",
+    "x": 5,
+    "y": 2,
+    "label": "The Ardura Caravan"
+  },
+  {
+    "area": "G2_10_2",
+    "path": "Metadata/Terrain/Desert/Foundry/Features/Foundry_Bossroom_01.tdt",
+    "x": 4,
+    "y": 4,
+    "label": "Munitions Bunker"
+  },
+  {
+    "area": "G2_10_2",
+    "path": "Metadata/Terrain/Desert/Quarry/Features/MiningShaftFloor.tdt",
+    "x": 1,
+    "y": 1,
+    "label": "Mawdun Quarry"
+  },
+  {
+    "area": "G2_12_1",
+    "path": "Metadata/Terrain/Desert/FarudinCarts/cart_walkway_02.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Dreadnought Vanguard"
+  },
+  {
+    "area": "G2_12_2",
+    "path": "Metadata/Terrain/Desert/FarudinCarts/Features/DreadnoughtArena_03.tdt",
+    "x": 4,
+    "y": 7,
+    "label": "The Faridun Throne"
+  },
+  {
+    "area": "G2_12_2",
+    "path": "Metadata/Terrain/Desert/FarudinCarts/cart_walkway_02.tdt",
+    "x": 0,
+    "y": 1,
+    "label": "The Dreadnought"
+  },
+  {
+    "area": "G2_13",
+    "path": "Metadata/Terrain/Desert/KethAscendancy/Level_1/Feature/pedestal_02.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Relic Altar"
+  },
+  {
+    "area": "G3_1",
+    "path": "Metadata/Terrain/Jungle/SandsweptMarsh/bossman.tdt",
+    "x": 4,
+    "y": 4,
+    "label": "Foul Ritual"
+  },
+  {
+    "area": "G3_1",
+    "path": "Metadata/Terrain/Jungle/SandsweptMarsh/marsh_exit.tdt",
+    "x": 3,
+    "y": 9,
+    "label": "Ziggurat Encampment"
+  },
+  {
+    "area": "G3_1",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/SandToWater/Feature/EntranceCaravanFord_01.tdt",
+    "x": 4,
+    "y": 4,
+    "label": "Mini Town"
+  },
+  {
+    "area": "G3_1",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/Fills/JungleGroundPuddle_04.tdt",
+    "x": 2,
+    "y": 0,
+    "label": "Orok Campfire"
+  },
+  {
+    "area": "G3_2_1",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/AreaTransitions/JungleDepths_to_ChimeralWetlands.tdt",
+    "x": 3,
+    "y": 1,
+    "label": "Chimeral Wetlands"
+  },
+  {
+    "area": "G3_2_1",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/Feature/Jungle_WaterwayAltar_01.tdt",
+    "x": 2,
+    "y": 0,
+    "label": "Canal Mechanism"
+  },
+  {
+    "area": "G3_2_1",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/AreaTransitions/JungleToWaterways_01.tdt",
+    "x": 2,
+    "y": 4,
+    "label": "Jungle Ruins"
+  },
+  {
+    "area": "G3_2_1",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/Bog/AreaTransition/EntranceBog_02.tdt",
+    "x": 3,
+    "y": 6,
+    "label": "The Azak Bog"
+  },
+  {
+    "area": "G3_2_1",
+    "path": "Metadata/Terrain/Jungle/AntHill/AntHollow/hollow_StSW_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Larva Hollow"
+  },
+  {
+    "area": "G3_2_1",
+    "path": "Metadata/Terrain/Jungle/AntHill/AntJungle_Edge/AntEdge_Landmark_Feature_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Troubled Camp"
+  },
+  {
+    "area": "G3_2_1",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/Waterway/Jungle_Waterway_Ramp_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "The Matlan Waterways"
+  },
+  {
+    "area": "G3_2_2",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/CvWW_01.tdt",
+    "x": 0,
+    "y": 1,
+    "label": "Narag's Hut"
+  },
+  {
+    "area": "G3_2_2",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/Feature/Jungle_WaterwaysLever_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Waterways Lever"
+  },
+  {
+    "area": "G3_3",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/AreaTransitions/JungleDepths_to_SnakePit.tdt",
+    "x": 3,
+    "y": 2,
+    "label": "The Venom Crypts"
+  },
+  {
+    "area": "G3_3",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/AreaTransitions/JungleToWaterways_01_reverse.tdt",
+    "x": 3,
+    "y": 2,
+    "label": "Infested Barrens"
+  },
+  {
+    "area": "G3_3",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/AreaTransitions/JungleDepths_to_Town.tdt",
+    "x": 3,
+    "y": 5,
+    "label": "Ziggurat Encampment"
+  },
+  {
+    "area": "G3_3",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/RuinedThinwall/JungleDepths_Cv_FootwallEnd_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Troubled Camp"
+  },
+  {
+    "area": "G3_3",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/RuinedThinwall/RuinedThinwall_Tri_06.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Monkeee"
+  },
+  {
+    "area": "G3_4",
+    "path": "Metadata/Terrain/Jungle/AreaTransitions/SnakePit_to_JungleDepths.tdt",
+    "x": 4,
+    "y": 4,
+    "label": "Jungle Ruins"
+  },
+  {
+    "area": "G3_4",
+    "path": "Metadata/Terrain/Dungeon/NextFeatures/dungeon_altar_v01_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Quest close - passive effects"
+  },
+  {
+    "area": "G3_5",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/AreaTransitions/Observatory_Entrance_01.tdt",
+    "x": 8,
+    "y": 0,
+    "label": "Deadly Nest"
+  },
+  {
+    "area": "G3_5",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/AreaTransitions/ChimeralJungle_to_ChaosTemple.tdt",
+    "x": 6,
+    "y": 5,
+    "label": "The Temple of Chaos"
+  },
+  {
+    "area": "G3_5",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/AreaTransitions/ChimeralWetlands_to_JungleDepths.tdt",
+    "x": 3,
+    "y": 1,
+    "label": "Infested Barrens"
+  },
+  {
+    "area": "G3_6_1",
+    "path": "Metadata/Terrain/Dungeon/NextFeatures/dungeon_door_thin_boss.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "The Oubliette"
+  },
+  {
+    "area": "G3_6_1",
+    "path": "Metadata/Terrain/Dungeon/NextFeatures/Machinarium_Entrance_02.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Jiquani's Sanctum"
+  },
+  {
+    "area": "G3_6_1",
+    "path": "Metadata/Terrain/Dungeon/NextFeatures/dungeon_cave_v01_01.tdt",
+    "x": 2,
+    "y": 0,
+    "label": "Transition"
+  },
+  {
+    "area": "G3_6_1",
+    "path": "Metadata/Terrain/Dungeon/NextStairs/dungeon_stairs_straight_v01_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Stair Place"
+  },
+  {
+    "area": "G3_6_2",
+    "path": "Metadata/Terrain/Jungle/VaalInterior/VaalGenerator/VaalGenerator.tdt",
+    "x": 3,
+    "y": 3,
+    "label": "Generator"
+  },
+  {
+    "area": "G3_6_2",
+    "path": "Metadata/Terrain/Dungeon/NextFeatures/VaalCorruptionAltar.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Corruption Altar"
+  },
+  {
+    "area": "G3_6_2",
+    "path": "Metadata/Terrain/Dungeon/Machinarium/BossWall01.tdt",
+    "x": 3,
+    "y": 0,
+    "label": "Boss"
+  },
+  {
+    "area": "G3_7",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/Bog/Features/BurningWitchArena.tdt",
+    "x": 4,
+    "y": 5,
+    "label": "Ignagduk, The Bog Witch"
+  },
+  {
+    "area": "G3_7",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/Bog/AreaTransition/EntranceBog_01.tdt",
+    "x": 3,
+    "y": 3,
+    "label": "Infested Barrens"
+  },
+  {
+    "area": "G3_8",
+    "path": "Metadata/Terrain/Jungle/AreaTransitions/SunkenCityPresent/jungle_pyramid_entrance_atziri_03.tdt",
+    "x": 5,
+    "y": 6,
+    "label": "Apex of Filth"
+  },
+  {
+    "area": "G3_8",
+    "path": "Metadata/Terrain/Jungle/AreaTransitions/SunkenCityPresent/jungle_pyramid_entrance_vault_01.tdt",
+    "x": 2,
+    "y": 6,
+    "label": "The Molten Vault"
+  },
+  {
+    "area": "G3_8",
+    "path": "Metadata/Terrain/Jungle/AreaTransitions/SunkenCityPresent/SunkenCityToTown_01.tdt",
+    "x": 1,
+    "y": 1,
+    "label": "Ziggurat Encampment"
+  },
+  {
+    "area": "G3_9",
+    "path": "Metadata/Terrain/Dungeon/TreasureVault/BossChannel_02.tdt",
+    "x": 0,
+    "y": 5,
+    "label": "Mektul, The Forgemaster"
+  },
+  {
+    "area": "G3_9",
+    "path": "Metadata/Terrain/Jungle/TreasureVault/BrutalistThickwall/Brutal_Entrance_01.tdt",
+    "x": 1,
+    "y": 1,
+    "label": "The Drowned City"
+  },
+  {
+    "area": "G3_11",
+    "path": "Metadata/Terrain/Jungle/Aggorat/Features/AggoratArena_01.tdt",
+    "x": 4,
+    "y": 4,
+    "label": "Queen of Filth"
+  },
+  {
+    "area": "G3_11",
+    "path": "Metadata/Terrain/Jungle/Aggorat/Outerwall/AggoratOuterArena_Present_02.tdt",
+    "x": 4,
+    "y": 6,
+    "label": "Cauldron Keeper"
+  },
+  {
+    "area": "G3_11",
+    "path": "Metadata/Terrain/Jungle/Aggorat/Features/Present/AggoratToSunkenCity_Present_02.tdt",
+    "x": 4,
+    "y": 5,
+    "label": "The Drowned City"
+  },
+  {
+    "area": "G3_11",
+    "path": "Metadata/Terrain/Jungle/Aggorat/Features/Present/AggoratToSunkenCity_Present_01.tdt",
+    "x": 4,
+    "y": 8,
+    "label": "Waypoint"
+  },
+  {
+    "area": "G3_12",
+    "path": "Metadata/Terrain/Dungeon/Ziggurat/ziggurat_outerwall_end_stairsdown_02.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Stairs Down"
+  },
+  {
+    "area": "G3_12",
+    "path": "Metadata/Terrain/Dungeon/Ziggurat/ziggurat_outerwall_end_stairsup_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Stairs Up"
+  },
+  {
+    "area": "G3_12",
+    "path": "Metadata/Terrain/Dungeon/Ziggurat/ziggurat_outerwall_end_stairsup_02.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Stairs Up"
+  },
+  {
+    "area": "G3_12",
+    "path": "Metadata/Terrain/Dungeon/Ziggurat/ziggurat_to_sunkencity_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Ziggurat Encampment"
+  },
+  {
+    "area": "G3_14",
+    "path": "Metadata/Terrain/Jungle/AreaTransitions/SunkenCity/jungle_pyramid_entrance_atziri_01_metatile.tdt",
+    "x": 6,
+    "y": 5,
+    "label": "Aggorat"
+  },
+  {
+    "area": "G3_14",
+    "path": "Metadata/Terrain/Jungle/AreaTransitions/SunkenCity/jungle_town_lower_entrance_past_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Town"
+  },
+  {
+    "area": "G3_16",
+    "path": "Metadata/Terrain/Jungle/Aggorat/Outerwall/AggoratOuterArena_02.tdt",
+    "x": 4,
+    "y": 4,
+    "label": "Sacrificial Dagger"
+  },
+  {
+    "area": "G3_16",
+    "path": "Metadata/Terrain/Jungle/Aggorat/Features/DoryanisSanctumEntrance_01.tdt",
+    "x": 4,
+    "y": 4,
+    "label": "The Black Chambers"
+  },
+  {
+    "area": "G3_16",
+    "path": "Metadata/Terrain/Jungle/Aggorat/Features/AggoratArena_Past_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Idol 1"
+  },
+  {
+    "area": "G3_16",
+    "path": "Metadata/Terrain/Jungle/Aggorat/Features/AggoratToSunkenCity_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Utzaal"
+  },
+  {
+    "area": "G3_16",
+    "path": "Metadata/Terrain/Jungle/Aggorat/Features/Aggorat_AtziriAltar_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Altar"
+  },
+  {
+    "area": "G3_17",
+    "path": "Metadata/Terrain/Dungeon/DoryanisSanctum/Features/Doryani_Arena_01.tdt",
+    "x": 7,
+    "y": 7,
+    "label": "Arena"
+  },
+  {
+    "area": "G3_17",
+    "path": "Metadata/Terrain/Jungle/AreaTransitions/DoryanisSanctumEntranceInt_01_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Aggorat"
+  },
+  {
+    "area": "G4_1_1",
+    "path": "Metadata/Terrain/Islands/Tiles/Island/Volcano/Goblins/Features/GoblinMinesEntrance_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Volcanic Warrens"
+  },
+  {
+    "area": "G4_1_1",
+    "path": "Metadata/Terrain/Islands/Tiles/Island/Volcano/SulphurRockVein_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Voltaxic spire"
+  },
+  {
+    "area": "G4_1_1",
+    "path": "Metadata/Terrain/Islands/Tiles/Island/Volcano/Goblins/Features/GoblinTownArena_01.tdt",
+    "x": 6,
+    "y": 7,
+    "label": "Goblin Arena"
+  },
+  {
+    "area": "G4_1_1",
+    "path": "Metadata/Terrain/Islands/Tiles/Island/Volcano/BeastCamp_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Rare - Good rewards"
+  },
+  {
+    "area": "G4_1_1",
+    "path": "Metadata/Terrain/Islands/Tiles/Island/Volcano/FailedDelveHub_01.tdt",
+    "x": 5,
+    "y": 9,
+    "label": "Lesser jewellers orb"
+  },
+  {
+    "area": "G4_1_2",
+    "path": "Metadata/Terrain/Islands/Tiles/CoralDungeon/Features/GoblinCaveEntrance_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Isle of Kin"
+  },
+  {
+    "area": "G4_1_2",
+    "path": "Metadata/Terrain/Islands/Tiles/CoralDungeon/Features/GoblinCaveArena/GoblinCaveArena_01.tdt",
+    "x": 6,
+    "y": 7,
+    "label": "Goblin Arena1"
+  },
+  {
+    "area": "G4_1_2",
+    "path": "Metadata/Terrain/Islands/Tiles/CoralDungeon/Features/GoblinCaveArena/GoblinCaveArena_02.tdt",
+    "x": 7,
+    "y": 6,
+    "label": "Rares"
+  },
+  {
+    "area": "G4_2_1",
+    "path": "Metadata/Terrain/Islands/Tiles/Island/Features/UnwalkableCliff_Transition_Up_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Journey's end"
+  },
+  {
+    "area": "G4_2_1",
+    "path": "Metadata/Terrain/Islands/Tiles/Island/UnwalkableCliff/KedgeBay/UnwalkableCliff_CaveEntrance_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Quest - deadman chest"
+  },
+  {
+    "area": "G4_2_2",
+    "path": "Metadata/Terrain/Islands/Tiles/Island/Features/UnwalkableCliff_Transition_Up_02.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Kedge Bay"
+  },
+  {
+    "area": "G4_2_2",
+    "path": "Metadata/Terrain/Islands/Tiles/Island/JourneysEnd/JourneysEnd_ExplodingShip_02.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Loot - SHIP EXPLODES"
+  },
+  {
+    "area": "G4_2_2",
+    "path": "Metadata/Terrain/Islands/Tiles/Island/JourneysEnd/BossArena_02.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Boss - Captain Hartlin"
+  },
+  {
+    "area": "G4_3_1",
+    "path": "Metadata/Terrain/Islands/Tiles/TropicalIsland/Features/Shark_Arena_02.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Boss - Shark"
+  },
+  {
+    "area": "G4_3_1",
+    "path": "Metadata/Terrain/Islands/Tiles/TropicalIsland/TropicalCliff/TropicalCliff_Cv_Cove_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Singing Caverns"
+  },
+  {
+    "area": "G4_3_1",
+    "path": "Metadata/Terrain/Islands/Tiles/TropicalIsland/Features/TropicalCoastCliff_CrabCave_02.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Crab Rare"
+  },
+  {
+    "area": "G4_3_1",
+    "path": "Metadata/Terrain/Islands/Tiles/TropicalIsland/Features/TropicalCoastCliff_CrabCave_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Singing Caverns"
+  },
+  {
+    "area": "G4_3_2",
+    "path": "Metadata/Terrain/Islands/Tiles/CoralDungeon/Features/SirenDonut_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Boss - Siren"
+  },
+  {
+    "area": "G4_3_2",
+    "path": "Metadata/Terrain/Islands/Tiles/CoralDungeon/Features/CoveTreasure_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Quest - Humming Pearl"
+  },
+  {
+    "area": "G4_3_2",
+    "path": "Metadata/Terrain/Islands/Tiles/CoralDungeon/Features/EggRoom_WW_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Egg Room"
+  },
+  {
+    "area": "G4_3_2",
+    "path": "Metadata/Terrain/Islands/Tiles/CoralDungeon/Features/SirenCoveEntrance_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Whakapanu Island"
+  },
+  {
+    "area": "G4_4_1",
+    "path": "Metadata/Terrain/Islands/Tiles/CoralDungeon/Thickwall/CoralSinkhole/Arena/SudokuArena_03.tdt",
+    "x": 20,
+    "y": 7,
+    "label": "Pay respects at end"
+  },
+  {
+    "area": "G4_4_1",
+    "path": "Metadata/Terrain/Islands/Tiles/CoralDungeon/Features/Spiral_Eighths/Sinkhole_Spiral_QuarterHeight_WalkableHalf_01.tdt",
+    "x": 4,
+    "y": 4,
+    "label": "Hall of the dead"
+  },
+  {
+    "area": "G4_4_2",
+    "path": "Metadata/Terrain/Islands/Tiles/HallsOfTheDead/CaveWall/Halls_CaveWall_Hinekora_Door_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "3 Test Areas"
+  },
+  {
+    "area": "G4_4_2",
+    "path": "Metadata/Terrain/Islands/Tiles/CoralDungeon/Thickwall/CoralSinkhole/Arena/YamaArena_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Boss - Yama"
+  },
+  {
+    "area": "G4_7",
+    "path": "Metadata/Terrain/Islands/Tiles/Island/ShrikeIsland/ShrikeIslandArena.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Arena"
+  },
+  {
+    "area": "G4_7",
+    "path": "Metadata/Terrain/Islands/Tiles/CoralDungeon/Thickwall/Island/Birdnest_Cc_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Quest - Map piece"
+  },
+  {
+    "area": "G4_5_1",
+    "path": "Metadata/Terrain/Islands/Tiles/Prison/Features/dungeon_prison_entrance_down_v01_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Dungeon entrance down"
+  },
+  {
+    "area": "G4_5_1",
+    "path": "Metadata/Terrain/Islands/Tiles/Prison/Features/prison_armoury_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Armoury"
+  },
+  {
+    "area": "G4_5_1",
+    "path": "Metadata/Terrain/Islands/Tiles/Prison/Features/dungeon_prison_chapel_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Flask buff - Need key"
+  },
+  {
+    "area": "G4_5_2",
+    "path": "Metadata/Terrain/Islands/Tiles/Prison/Features/LowerPrison/Maximumprison.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Boss"
+  },
+  {
+    "area": "G4_5_2",
+    "path": "Metadata/Terrain/Islands/Tiles/Prison/Features/dungeon_prison_chapel_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Flask buff - Need key"
+  },
+  {
+    "area": "G4_5_2",
+    "path": "Metadata/Terrain/Islands/Tiles/Prison/Features/LowerPrison/Warden_Office.tdt",
+    "x": 2,
+    "y": 3,
+    "label": "Warden office"
+  },
+  {
+    "area": "G4_8b",
+    "path": "Metadata/Terrain/Islands/Tiles/TwilightIsland/Feature/TwilightArena.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Boss"
+  },
+  {
+    "area": "G4_8b",
+    "path": "Metadata/Terrain/Islands/Tiles/TwilightIsland/Feature/TwilightLighthouse.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Bell - Currency"
+  },
+  {
+    "area": "G4_8b",
+    "path": "Metadata/Terrain/Islands/Tiles/TwilightIsland/Feature/TwilightOverlook.tdt",
+    "x": 3,
+    "y": 8,
+    "label": "Bell"
+  },
+  {
+    "area": "G4_8b",
+    "path": "Metadata/Terrain/Islands/Tiles/TwilightIsland/Feature/bell_feature_01.tdt",
+    "x": 1,
+    "y": 1,
+    "label": "Bell"
+  },
+  {
+    "area": "G4_10",
+    "path": "Metadata/Terrain/Islands/Tiles/TwilightIsland/DigSite/DigSiteFeature/Uncovered_Precursor_Feature_02.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Chest"
+  },
+  {
+    "area": "G4_10",
+    "path": "Metadata/Terrain/Islands/Tiles/TwilightIsland/PrecursorRuins/Arena/BossArena_Forge_PCR_01.tdt",
+    "x": 6,
+    "y": 7,
+    "label": "Boss"
+  },
+  {
+    "area": "G4_11_1b",
+    "path": "Metadata/Terrain/Islands/Tiles/BloodFever/Features/Ngakanu/NgakanuToBloodFever_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Heart of the Tribe"
+  },
+  {
+    "area": "G4_11_1b",
+    "path": "Metadata/Terrain/Islands/Tiles/BloodFever/Features/Ngakanu/Medicine_Lady_01.tdt",
+    "x": 8,
+    "y": 6,
+    "label": "Medicine lady"
+  },
+  {
+    "area": "G4_11_2",
+    "path": "Metadata/Terrain/Islands/Tiles/BloodFever/Features/Whare_fill_02.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Rare chests"
+  },
+  {
+    "area": "G4_11_2",
+    "path": "Metadata/Terrain/Islands/Tiles/BloodFever/Features/ArenaCombined/ArenaCombined_01.tdt",
+    "x": 9,
+    "y": 8,
+    "label": "Boss"
+  },
+  {
+    "area": "P1_1",
+    "path": "Metadata/Terrain/interlude/part1/p1_1/feature/forest_transition_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Forest 1 of 2"
+  },
+  {
+    "area": "P1_1",
+    "path": "Metadata/Terrain/interlude/part1/p1_1/feature/monolith_transition_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Stones of serle"
+  },
+  {
+    "area": "P1_2",
+    "path": "Metadata/Terrain/interlude/part1/p1_2/feature/farmlands_transition_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Farmlands"
+  },
+  {
+    "area": "P1_2",
+    "path": "Metadata/Terrain/Maps/UniqueMegalith/Tiles/RitualClearing02.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Boss"
+  },
+  {
+    "area": "P1_3",
+    "path": "Metadata/Terrain/interlude/part1/p1_3/holten_transition_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Holten"
+  },
+  {
+    "area": "P1_4",
+    "path": "Metadata/Terrain/interlude/part1/p1_4/blackwood_transition_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Blackwood"
+  },
+  {
+    "area": "P1_4",
+    "path": "Metadata/Terrain/interlude/part1/p1_4/holtondocktransition.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Soul Ferryman - Sells runes"
+  },
+  {
+    "area": "P1_4",
+    "path": "Metadata/Terrain/interlude/part1/p1_4/holton_estate_transition_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Holton Estate"
+  },
+  {
+    "area": "P1_4",
+    "path": "Metadata/Terrain/Interlude/Part1/P1_4/Chaple_01.tdt",
+    "x": 7,
+    "y": 11,
+    "label": "Bosses"
+  },
+  {
+    "area": "P1_4",
+    "path": "Metadata/Terrain/Interlude/Part1/P1_4/Prison_entrance.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Woven"
+  },
+  {
+    "area": "P1_4",
+    "path": "Metadata/Terrain/Interlude/Part1/P1_4/Holton_Estate_Transition_01.tdt",
+    "x": 10,
+    "y": 1,
+    "label": "Holten Estate"
+  },
+  {
+    "area": "P1_5",
+    "path": "Metadata/Terrain/Interlude/Part1/P1_5/Holten_Prison_Bossroom.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Boss"
+  },
+  {
+    "area": "P1_6",
+    "path": "Metadata/Terrain/Maps/Derelict/Tiles/StairsUp_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Boss stairs"
+  },
+  {
+    "area": "P1_6",
+    "path": "Metadata/Terrain/Maps/Derelict/Tiles/HoltenBossStairsDown_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Boss stairs"
+  },
+  {
+    "area": "P2_1",
+    "path": "Metadata/Terrain/Interlude/Part2/P2_1/Dregs_Transition.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Pools of Khatal"
+  },
+  {
+    "area": "P2_1",
+    "path": "Metadata/Terrain/Interlude/Part2/P2_1/Titan_Forge.tdt",
+    "x": 4,
+    "y": 5,
+    "label": "Forge"
+  },
+  {
+    "area": "P2_1",
+    "path": "Metadata/Terrain/Interlude/Part2/P2_1/Salt_Waste_Bossroom.tdt",
+    "x": 14,
+    "y": 11,
+    "label": "Bosses"
+  },
+  {
+    "area": "P2_1",
+    "path": "Metadata/Terrain/interlude/part2/p2_1/gates_exit_transition_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Galai Gates"
+  },
+  {
+    "area": "P2_1",
+    "path": "Metadata/Terrain/Interlude/Part2/P2_1/forge_entrance.tdt",
+    "x": 2,
+    "y": 2,
+    "label": "Forge Entrance"
+  },
+  {
+    "area": "P2_1",
+    "path": "Metadata/Terrain/Interlude/Part2/P2_1/SaltWaste_Building_Landmark_01.tdt",
+    "x": 2,
+    "y": 4,
+    "label": "Seal"
+  },
+  {
+    "area": "P2_1",
+    "path": "Metadata/Terrain/Interlude/Part2/P2_1/Gates_Exit_transition_01.tdt",
+    "x": 7,
+    "y": 3,
+    "label": "The Galai Gates"
+  },
+  {
+    "area": "P2_1",
+    "path": "Metadata/Terrain/Desert/Oasis/Ruins/ruinwall_Tri_01.tdt",
+    "x": 1,
+    "y": 2,
+    "label": "Torbik"
+  },
+  {
+    "area": "P2_2",
+    "path": "Metadata/Terrain/Interlude/Part2/P2_2/PenitentArchive_Exit.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Exit"
+  },
+  {
+    "area": "P2_3",
+    "path": "Metadata/Terrain/Interlude/Part2/P2_3/BossRoomTile.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Boss"
+  },
+  {
+    "area": "P2_3",
+    "path": "Metadata/Terrain/Gallows/Act4_Interlude/Part2/P2_3/Tiles/SealPillar_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "2 Seal locations - Loot"
+  },
+  {
+    "area": "P2_4",
+    "path": "Metadata/Terrain/interlude/part2/p2_4/saitwaste_entrance_transition.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Saitwaste Entrance"
+  },
+  {
+    "area": "P2_5",
+    "path": "Metadata/Terrain/Interlude/Part2/Gates/AreaTransitions/GatesEnd_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Gates end"
+  },
+  {
+    "area": "P2_6",
+    "path": "Metadata/Terrain/Maps/SevenWaters/Tiles/Feature/Arena_Transition_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Entrance"
+  },
+  {
+    "area": "P2_6",
+    "path": "Metadata/Terrain/Maps/SevenWaters/Tiles/BuildingWall/BuildingWall_X_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Pillars - Buff choice"
+  },
+  {
+    "area": "P2_7",
+    "path": "Metadata/Terrain/Interlude/Part2/P2_7/Qimah_bossroom.tdt",
+    "x": 11,
+    "y": 7,
+    "label": "Boss"
+  },
+  {
+    "area": "P2_7",
+    "path": "Metadata/Terrain/Maps/SevenWaters/Tiles/BuildingWall/BuildingWall_X_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Pillars - Buff choice"
+  },
+  {
+    "area": "P3_1",
+    "path": "Metadata/Terrain/interlude/part3/p3_1/town_to_jungle_transition.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Glade"
+  },
+  {
+    "area": "P3_1",
+    "path": "Metadata/Terrain/Interlude/Part3/P3_1/Jungle_to_KriarVillage_Transition.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Kriar Village"
+  },
+  {
+    "area": "P3_2",
+    "path": "Metadata/Terrain/interlude/part3/p3_2/jungle_transition.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Ashen Forest"
+  },
+  {
+    "area": "P3_2",
+    "path": "Metadata/Terrain/Interlude/Part3/P3_2/KriarVillage_Bossroom.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Boss"
+  },
+  {
+    "area": "P3_3",
+    "path": "Metadata/Terrain/Interlude/Part3/P3_3/GlacialTarn_Bossroom.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Boss"
+  },
+  {
+    "area": "P3_3",
+    "path": "Metadata/Terrain/Maps/FrozenFalls/Tiles/Cove_01.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Coves"
+  },
+  {
+    "area": "P3_4",
+    "path": "Metadata/Terrain/Interlude/Part3/P3_4/Cave_Bossroom.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Boss"
+  },
+  {
+    "area": "P3_5",
+    "path": "Metadata/Terrain/Interlude/Part3/P3_5/Ravine_Exit_Transition.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Ravine"
+  },
+  {
+    "area": "P3_6",
+    "path": "Metadata/Terrain/Interlude/Part3/P3_6/Ravine_Bossroom.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Boss"
+  },
+  {
+    "area": "P3_7",
+    "path": "Metadata/Terrain/Interlude/Part3/P3_7/BloodVault_Bossroom.tdt",
+    "x": 0,
+    "y": 0,
+    "label": "Boss"
+  }
+]

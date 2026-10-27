@@ -6,6 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="../data/campaign-landmarks-0.6.17.json" LogicalName="PartyPilot.CampaignLandmarks" />
+    <EmbeddedResource Include="../data/quest-tile-rules-0.6.17.json" LogicalName="PartyPilot.QuestTileRules" />
     <Compile Include="../sensor/LocalSlotCandidateScanner.cs" Link="LocalSlotCandidateScanner.cs" />
     <Compile Include="../sensor/LocalSlotMotionSampler.cs" Link="LocalSlotMotionSampler.cs" />
     <Compile Include="../sensor/FastOrderedCandidateFrame.cs" Link="FastOrderedCandidateFrame.cs" />

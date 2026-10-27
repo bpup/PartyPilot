@@ -11,5 +11,7 @@
       <HintPath>$(EXILECORE2_DIR)/ExileCore2.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <EmbeddedResource Include="../data/campaign-landmarks-0.6.17.json" LogicalName="PartyPilot.CampaignLandmarks" />
+    <EmbeddedResource Include="../data/quest-tile-rules-0.6.17.json" LogicalName="PartyPilot.QuestTileRules" />
   </ItemGroup>
 </Project>

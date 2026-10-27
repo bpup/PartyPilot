@@ -135,6 +135,7 @@ public sealed class RadarOverlayWindow : Window
                     if (!double.IsFinite(x) || !double.IsFinite(y) ||
                         x < 8 || y < 8 || x > Bounds.Width - 8 || y > Bounds.Height - 8) continue;
                     AddDot(x, y, 10, MarkerBrush(room.Category));
+                    if (string.IsNullOrEmpty(room.Label)) continue;
                     var label = new TextBlock
                     {
                         Text = room.Label,
@@ -194,6 +195,7 @@ public sealed class RadarOverlayWindow : Window
         "league" => Brushes.Magenta,
         "loot" => Brushes.Yellow,
         "quest" => Brushes.YellowGreen,
+        "campaign" => Brushes.YellowGreen,
         "boss" => Brushes.Red,
         "portal" => Brushes.MediumPurple,
         "waypoint" => Brushes.DeepSkyBlue,

@@ -260,23 +260,62 @@ public sealed class RadarTerrainCapture
             !Text(root, "QuestTileAnchor", out var sourceAnchor) || sourceAnchor != anchor)
             return false;
         var parsed = new List<RadarTerrainRoom>(values.GetArrayLength());
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seen = new HashSet<(string Path, int X, int Y)>();
+        var campaignPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var genericPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var value in values.EnumerateArray())
         {
             if (value.ValueKind != JsonValueKind.Object ||
                 !Text(value, "Path", out var path) || path.Length > 255 ||
                 !Text(value, "Category", out var category) ||
-                !Text(value, "Label", out var label) ||
+                !value.TryGetProperty("Label", out var labelValue) ||
+                labelValue.ValueKind != JsonValueKind.String ||
+                labelValue.GetString() is not { } label || label.Length > 100 ||
                 !Number(value, "TileX", out var tileX) ||
                 !Number(value, "TileY", out var tileY) ||
                 !Finite(value, "GridX", out var x) || !Finite(value, "GridY", out var y) ||
-                tileX < 0 || tileY < 0 || x != tileX * 23d + 11.5 ||
-                y != tileY * 23d + 11.5 || x >= width || y >= height ||
-                QuestTileRules.Classify(areaId, path) is not { } expected ||
-                category != expected.Category || label != expected.Label ||
-                !seen.Add(path)) return false;
+                !Number(value, "AdjustmentX", out var adjustmentX) ||
+                !Number(value, "AdjustmentY", out var adjustmentY) ||
+                !value.TryGetProperty("RotationX", out var rotationX) ||
+                !value.TryGetProperty("RotationY", out var rotationY) ||
+                !value.TryGetProperty("RotationSwap", out var rotationSwap) ||
+                tileX < 0 || tileY < 0 ||
+                x != tileX * 23d + 11.5 + adjustmentX ||
+                y != tileY * 23d + 11.5 + adjustmentY ||
+                x < 0 || y < 0 || x >= width || y >= height ||
+                !seen.Add((path.ToUpperInvariant(), tileX, tileY))) return false;
+            GeneratedRoomClassifier.Marker? expected;
+            if (rotationX.ValueKind == JsonValueKind.Number &&
+                rotationY.ValueKind == JsonValueKind.Number &&
+                (rotationSwap.ValueKind is JsonValueKind.True or JsonValueKind.False) &&
+                rotationX.TryGetInt32(out var rawX) && rotationY.TryGetInt32(out var rawY) &&
+                rawX is >= 0 and <= 255 && rawY is >= 0 and <= 255 &&
+                adjustmentX == 0 && adjustmentY == 0)
+            {
+                expected = QuestTileRules.CampaignClassify(areaId, path, rawX, rawY,
+                    rotationSwap.GetBoolean());
+                campaignPaths.Add(path);
+            }
+            else if (rotationX.ValueKind == JsonValueKind.Null &&
+                     rotationY.ValueKind == JsonValueKind.Null &&
+                     rotationSwap.ValueKind == JsonValueKind.Null &&
+                     tileX * 23 + adjustmentX > 0 &&
+                     tileY * 23 + adjustmentY > 0 &&
+                     (adjustmentX == 0 && adjustmentY == 0 ||
+                      areaId == "G4_10" &&
+                      (adjustmentX == 300 && adjustmentY == 0 ||
+                       adjustmentX == 0 && adjustmentY == 300)))
+            {
+                expected = QuestTileRules.GenericClassify(areaId, path);
+                genericPaths.Add(path);
+            }
+            else return false;
+            if (expected is null || category != expected.Category ||
+                label != expected.Label) return false;
             parsed.Add(new RadarTerrainRoom(path, category, label, x, y));
         }
+        if (QuestTileRules.IsCampaign(areaId) && genericPaths.Overlaps(campaignPaths))
+            return false;
         tiles = parsed;
         return true;
     }

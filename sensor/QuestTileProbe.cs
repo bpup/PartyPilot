@@ -11,7 +11,9 @@ internal static class QuestTileProbe
     private const int MaxAnchors = 64;
     private const int MaxDistinctAssets = 16_384;
     internal sealed record Anchor(string Path, string Category, string Label,
-        double GridX, double GridY, int TileX, int TileY);
+        double GridX, double GridY, int TileX, int TileY,
+        int? RotationX = null, int? RotationY = null, bool? RotationSwap = null,
+        int AdjustmentX = 0, int AdjustmentY = 0);
     internal sealed record Result(string Status, string? AreaId, int TilesChecked,
         int NamedTiles, int MatchedTiles, bool Truncated, Anchor[] Anchors);
 
@@ -40,6 +42,8 @@ internal static class QuestTileProbe
         var incomplete = false;
         var paths = new Dictionary<long, string?>();
         var matches = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+        var campaign = new List<Anchor>();
+        var campaignPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (var first = 0; first < total; first += ChunkTiles)
         {
             var count = Math.Min(ChunkTiles, total - first);
@@ -62,18 +66,39 @@ internal static class QuestTileProbe
                 }
                 if (path == null) { incomplete = true; continue; }
                 namedTiles++;
-                if (QuestTileRules.Classify(areaId, path) == null) continue;
+                var rawX = records[local * TileBytes + 52];
+                var rawY = records[local * TileBytes + 53];
+                var swap = (records[local * TileBytes + 54] & 1) != 0;
+                var landmark = QuestTileRules.CampaignClassify(areaId, path, rawX, rawY, swap);
+                if (landmark != null)
+                {
+                    campaignPaths.Add(path);
+                    campaign.Add(new(path, landmark.Category, landmark.Label,
+                        ((first + local) % layout.TilesX) * 23 + 11.5,
+                        ((first + local) / layout.TilesX) * 23 + 11.5,
+                        (first + local) % layout.TilesX,
+                        (first + local) / layout.TilesX, rawX, rawY, swap));
+                }
+                var generic = QuestTileRules.GenericClassify(areaId, path);
+                if (generic == null && landmark == null) continue;
                 matchedTiles++;
-                if (!matches.TryGetValue(path, out var list))
-                    matches[path] = list = [];
-                list.Add(first + local);
+                if (generic != null)
+                {
+                    if (!matches.TryGetValue(path, out var list))
+                        matches[path] = list = [];
+                    list.Add(first + local);
+                }
             }
         }
         if (incomplete) return new("tile_paths_incomplete", areaId, checkedTiles,
             namedTiles, matchedTiles, true, []);
-        var anchors = new List<Anchor>();
+        if (campaign.Count > MaxAnchors)
+            return new("anchor_limit", areaId, checkedTiles, namedTiles,
+                matchedTiles, true, []);
+        var anchors = new List<Anchor>(campaign);
         foreach (var (path, indices) in matches)
         {
+            if (QuestTileRules.IsCampaign(areaId) && campaignPaths.Contains(path)) continue;
             if (anchors.Count == MaxAnchors)
                 return new("anchor_limit", areaId, checkedTiles, namedTiles,
                     matchedTiles, true, []);
@@ -84,9 +109,25 @@ internal static class QuestTileProbe
                 Math.Pow(index / layout.TilesX - meanY, 2));
             var x = representative % layout.TilesX;
             var y = representative / layout.TilesX;
-            var marker = QuestTileRules.Classify(areaId, path)!;
+            var marker = QuestTileRules.GenericClassify(areaId, path)!;
+            var shiftX = 0;
+            var shiftY = 0;
+            if (areaId == "G4_10")
+            {
+                var sameRow = indices.Count(index => index / layout.TilesX ==
+                    indices[0] / layout.TilesX);
+                if (sameRow < 20) shiftY = 300;
+                else shiftX = 300;
+            }
+            var originX = x * 23 + shiftX;
+            var originY = y * 23 + shiftY;
+            var gridX = originX + 11.5;
+            var gridY = originY + 11.5;
+            if (originX <= 0 || originY <= 0 ||
+                originX >= layout.TilesX * 23 || originY >= layout.TilesY * 23)
+                continue;
             anchors.Add(new(path, marker.Category, marker.Label,
-                x * 23 + 11.5, y * 23 + 11.5, x, y));
+                gridX, gridY, x, y, null, null, null, shiftX, shiftY));
         }
         return new(matchedTiles > 0 ? "candidate_tiles_observed" : "no_matches",
             areaId, checkedTiles, namedTiles, matchedTiles, false, anchors.ToArray());

@@ -421,7 +421,8 @@ void TestPackedTerrainProbe()
             16, 1, 1, false,
             [new QuestTileProbe.Anchor(
                 "Metadata/Terrain/Woods/GraveyardDungeons/Feature/MausoleumBoss_ArenaFloor.tdt",
-                "boss", "Campaign boss arena", 11.5, 11.5, 0, 0)]);
+                "campaign", "MausoleumBoss_ArenaFloor", 11.5, 11.5, 0, 0,
+                0, 0, false)]);
         var capture = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate!,
             capturePosition, 108.69565f, 217.3913f, Read, () => true, captureDirectory,
             123, "test-area", anchored.Candidate!.AreaAddress, anchored.Candidate.Anchor,
@@ -716,12 +717,26 @@ void TestQuestTileProbe()
     var id = RawAreaIdReader.Read(state, Read);
     var result = QuestTileProbe.Scan(new PackedTerrainProbe.AreaLayout(area, 232, 4, 4),
         92, 92, id, Read);
-    Require(id == "G1_8" && result is
+    Require(QuestTileRules.GenericCount == 192 && QuestTileRules.CampaignCount == 245 &&
+        id == "G1_8" && result is
         { Status: "candidate_tiles_observed", TilesChecked: 16, NamedTiles: 2,
             MatchedTiles: 2, Truncated: false,
-            Anchors: [{ Path: tilePath, Category: "boss", Label: "Campaign boss arena",
-                TileX: 0, TileY: 0, GridX: 11.5, GridY: 11.5 }] },
+            Anchors: [{ Path: tilePath, Category: "campaign", Label: "MausoleumBoss_ArenaFloor",
+                TileX: 0, TileY: 0, GridX: 11.5, GridY: 11.5, RotationX: 0,
+                RotationY: 0, RotationSwap: false },
+                { Path: tilePath, Category: "campaign", TileX: 1, TileY: 0,
+                GridX: 34.5, GridY: 11.5 }] },
         "The area-bound tile name or representative tile position changed.");
+    const string rotatedPath = "Metadata/Terrain/Woods/AreaTransitions/FallenTreeSlash_in.tdt";
+    Require(QuestTileRules.CampaignClassify("G1_2", rotatedPath, 2, 1, false) ==
+            new GeneratedRoomClassifier.Marker("campaign", "Mud Burrow") &&
+        QuestTileRules.CampaignClassify("G1_2", rotatedPath, 1, 2, true) ==
+            new GeneratedRoomClassifier.Marker("campaign", "Mud Burrow") &&
+        QuestTileRules.CampaignClassify("G1_2", rotatedPath, 1, 2, false) == null &&
+        QuestTileRules.GenericClassify("G1_2", rotatedPath) ==
+            new GeneratedRoomClassifier.Marker("transition", "Campaign exit") &&
+        QuestTileRules.GenericClassify("G1_9", rotatedPath) == null,
+        "Campaign rotation, area isolation or generic fallback rules changed.");
     Require(QuestTileProbe.Scan(new(area, 232, 4, 4), 92, 92, "G1_9", Read).Status ==
             "no_matches" &&
         QuestTileProbe.Scan(new(area, 232, 4, 4), 92, 92, null, Read).Status ==
@@ -732,6 +747,29 @@ void TestQuestTileProbe()
         RawAreaIdReader.Read(state, (address, length) =>
             address == areaText ? new byte[length] : Read(address, length)) == null,
         "Unknown IDs, wrong areas or incomplete tile paths were accepted.");
+    Array.Clear(records);
+    BitConverter.GetBytes(asset).CopyTo(records, 5 * 56 + 8);
+    BitConverter.GetBytes(asset).CopyTo(records, 6 * 56 + 8);
+    Array.Clear(pathBytes);
+    System.Text.Encoding.Unicode.GetBytes(
+        "Metadata/Terrain/Desert/Gates/Ruins/ruin_ruinwall_Cv_MMMM_01.tdt")
+        .CopyTo(pathBytes, 0);
+    var generic = QuestTileProbe.Scan(new(area, 232, 4, 4), 92, 92, "MapHeadland", Read);
+    Require(generic is { Status: "candidate_tiles_observed", MatchedTiles: 2,
+        Anchors: [{ Category: "boss", Label: "", TileX: 1,
+            TileY: 1, GridX: 34.5, GridY: 34.5 }] },
+        "Repeated generic tiles were not grouped to the representative site.");
+    Array.Clear(records);
+    BitConverter.GetBytes(asset).CopyTo(records, 8);
+    records[52] = 1;
+    records[53] = 2;
+    records[54] = 1;
+    Array.Clear(pathBytes);
+    System.Text.Encoding.Unicode.GetBytes(rotatedPath).CopyTo(pathBytes, 0);
+    var rotated = QuestTileProbe.Scan(new(area, 232, 4, 4), 92, 92, "G1_2", Read);
+    Require(rotated is { Anchors: [{ Category: "campaign", Label: "Mud Burrow",
+        RotationX: 1, RotationY: 2, RotationSwap: true }] },
+        "A rotated campaign tile did not override its generic exit marker.");
 }
 var largeLoot = Enumerable.Range(1, 96).Select(index => (object)new
 {

@@ -63,8 +63,10 @@ internal static class RadarTerrainCaptureSmoke
                 QuestTiles = new[]
                 {
                     new { Path = "Metadata/Terrain/Woods/GraveyardDungeons/Feature/MausoleumBoss_ArenaFloor.tdt",
-                        Category = "boss", Label = "Campaign boss arena",
-                        GridX = 11.5, GridY = 11.5, TileX = 0, TileY = 0 }
+                        Category = "campaign", Label = "MausoleumBoss_ArenaFloor",
+                        GridX = 11.5, GridY = 11.5, TileX = 0, TileY = 0,
+                        RotationX = (int?)0, RotationY = (int?)0, RotationSwap = (bool?)false,
+                        AdjustmentX = 0, AdjustmentY = 0 }
                 }
             });
             File.WriteAllText(metadataPath, Metadata("01"));
@@ -74,7 +76,7 @@ internal static class RadarTerrainCaptureSmoke
                 capture.Rooms.Count != 3 ||
                 capture.Rooms[0] is not { Category: "boss", Label: "Boss arena" } ||
                 capture.Rooms[1] is not { Category: "quest", Label: "Soul Core Generator" } ||
-                capture.Rooms[2] is not { Category: "boss", Label: "Campaign boss arena" } ||
+                capture.Rooms[2] is not { Category: "campaign", Label: "MausoleumBoss_ArenaFloor" } ||
                 capture.Walkable(0, 0) || !capture.Walkable(1, 0))
                 throw new Exception("Radar rejected a valid bounded terrain capture or decoded nibble order incorrectly.");
             var matching = new RadarFrame(123, DateTime.UtcNow, 42, "0xABCDEF", 30, 30, [])
@@ -115,7 +117,7 @@ internal static class RadarTerrainCaptureSmoke
                 !terrainWindow.GetLogicalDescendants().OfType<TextBlock>()
                     .Any(label => label.Text == "Soul Core Generator") ||
                 !terrainWindow.GetLogicalDescendants().OfType<TextBlock>()
-                    .Any(label => label.Text == "Campaign boss arena") ||
+                    .Any(label => label.Text == "MausoleumBoss_ArenaFloor") ||
                 terrainWindow.CaptureRenderedFrame() is null)
                 throw new Exception("Matching terrain was not drawn behind radar markers.");
             terrainWindow.Apply(matching with { AreaHash = 43 }, null);
@@ -145,6 +147,10 @@ internal static class RadarTerrainCaptureSmoke
                 "\"QuestTileAreaId\":\"G1_9\""));
             if (RadarTerrainCapture.TryLoad(metadataPath, out _))
                 throw new Exception("Radar accepted a tile landmark from another area.");
+            File.WriteAllText(metadataPath, Metadata("01").Replace("\"RotationX\":0",
+                "\"RotationX\":1"));
+            if (RadarTerrainCapture.TryLoad(metadataPath, out _))
+                throw new Exception("Radar accepted a campaign label with the wrong tile rotation.");
             File.WriteAllText(metadataPath, Metadata("10"));
             if (RadarTerrainCapture.TryLoad(metadataPath, out _))
                 throw new Exception("Radar accepted terrain whose observed patch disagrees with packed cells.");
