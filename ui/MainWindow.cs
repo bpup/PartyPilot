@@ -100,6 +100,7 @@ public sealed class MainWindow : Window
     private bool _updatingFollowTargetChoices;
     private readonly TextBlock _followTargetPreferenceStatus = new();
     private readonly Button _startFollow = new();
+    private readonly Button _pauseFollow = new();
     private readonly Button _stopFollow = new();
     private readonly TextBlock _followStatus = new();
     private readonly TextBox _radarScale = new();
@@ -696,6 +697,9 @@ public sealed class MainWindow : Window
         _stopFollow.Content = "停止跟随";
         _stopFollow.Click += async (_, _) => await StopFollowAsync();
         actions.Children.Add(_startFollow);
+        _pauseFollow.Content = "暂停跟随";
+        _pauseFollow.Click += (_, _) => ToggleFollowPause();
+        actions.Children.Add(_pauseFollow);
         actions.Children.Add(_stopFollow);
         panel.Children.Add(actions);
         _followStatus.Text = "等待配对完成；真实游戏中的方向与角色绑定尚未验证。";
@@ -1727,6 +1731,8 @@ public sealed class MainWindow : Window
             _selectedTopology?.Id is "2-split" or "3-three-singles" &&
             _launchedClients.Count == _selectedTopology.ClientCount && valid;
         _stopFollow.IsEnabled = _follow is not null;
+        _pauseFollow.IsEnabled = _follow is not null && !_followStopping;
+        _pauseFollow.Content = _follow?.Paused == true ? "恢复跟随" : "暂停跟随";
     }
 
     private async Task PrepareBridgeAsync()
@@ -2064,6 +2070,11 @@ public sealed class MainWindow : Window
 
     private void FollowStatusChanged(FollowBridgeFrame frame)
     {
+        if (frame.Reason == "follow paused")
+        {
+            _followStatus.Text = "跟随已暂停；所有自动方向已回中，恢复后仍需新鲜位置与区域证据。";
+            return;
+        }
         if (_selectedTopology?.Id == "3-three-singles" &&
             frame.Reason is not ("party disbanded" or "local client left party" or "followed member left party"))
         {
@@ -2104,6 +2115,23 @@ public sealed class MainWindow : Window
         _followStatus.Text = string.IsNullOrWhiteSpace(reason)
             ? "跟随进程已结束，自动方向已停止。"
             : $"跟随进程已结束，自动方向已停止：{reason}";
+    }
+
+    private void ToggleFollowPause()
+    {
+        if (_follow is not { } session || _followStopping) return;
+        try
+        {
+            session.SetPaused(!session.Paused);
+            _followStatus.Text = session.Paused
+                ? "已请求暂停跟随；等待实时决策确认自动方向回中。"
+                : "已请求恢复跟随；仍需新鲜位置与区域证据。";
+            UpdateFollowControls();
+        }
+        catch (InvalidOperationException error)
+        {
+            _followStatus.Text = $"跟随状态未切换：{error.Message}";
+        }
     }
 
     private async Task StopFollowAsync()

@@ -16,6 +16,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     private readonly Dictionary<int, int> _playerToPad;
     private readonly ConcurrentQueue<(int Player, string State)> _pendingMenu = new();
     private readonly ConcurrentQueue<int> _pendingFocus = new();
+    private readonly ConcurrentQueue<bool> _pendingPause = new();
     private readonly SemaphoreSlim _controlSignal = new(0);
     private readonly CancellationTokenSource _controlCancellation = new();
     private readonly Task<string> _readError;
@@ -25,6 +26,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     private bool _stopping;
 
     public FollowBridgeFrame Current { get; private set; }
+    public bool Paused { get; private set; }
     public event Action<FollowBridgeFrame>? StatusChanged;
     public event Action<string>? Ended;
 
@@ -76,6 +78,14 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         }
     }
 
+    public void SetPaused(bool paused)
+    {
+        if (_stopping || _process.HasExited) throw new InvalidOperationException("Live follow has stopped.");
+        Paused = paused;
+        _pendingPause.Enqueue(paused);
+        _controlSignal.Release();
+    }
+
     public static async Task<LiveFollowSession> StartAsync(string executable, PartyTopology topology,
         IReadOnlyList<LaunchedClient> clients, BridgeSession bridge, LiveFollowPlan plan,
         IReadOnlyDictionary<int, string>? memberNames = null,
@@ -94,7 +104,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            RedirectStandardInput = bridge.AutoFlaskEnabled || bridge.LastFocusedLeadsEnabled,
+            RedirectStandardInput = true,
             CreateNoWindow = true
         };
         foreach (var argument in new[]
@@ -150,6 +160,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         }
         if (bridge.AutoFlaskEnabled) start.ArgumentList.Add("-auto-flask");
         if (bridge.LastFocusedLeadsEnabled) start.ArgumentList.Add("-last-focused-leads");
+        start.ArgumentList.Add("-allow-follow-pause");
         var process = Process.Start(start) ?? throw new InvalidOperationException("Live follow did not start.");
         var readError = process.StandardError.ReadToEndAsync();
         FollowBridgeFrame? initialFrame = null;
@@ -211,8 +222,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     public void StartReading()
     {
         if (_readFrames != Task.CompletedTask) throw new InvalidOperationException("Live follow is already being read.");
-        if (_bridge.AutoFlaskEnabled || _bridge.LastFocusedLeadsEnabled)
-            _writeControls = WriteControlsAsync();
+        _writeControls = WriteControlsAsync();
         _readFrames = ReadFramesAsync();
     }
 
@@ -293,7 +303,9 @@ internal sealed class LiveFollowSession : IAsyncDisposable
 
     private async Task FlushControlsAsync()
     {
-        if (!_bridge.AutoFlaskEnabled && !_bridge.LastFocusedLeadsEnabled) return;
+        while (_pendingPause.TryDequeue(out var paused))
+            await _process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new
+                { type = "follow_pause", state = paused ? "paused" : "following" }));
         while (_pendingFocus.TryDequeue(out var player))
             await _process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new
                 { type = "manual_focus", slot = player }));

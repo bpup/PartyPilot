@@ -61,7 +61,8 @@ internal static class ProcessPipelineSmoke
                 "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"reason\":\"missing position\"}}}', flush=True)\n" +
                 "states = [json.loads(sys.stdin.readline()) for _ in range(2)]\n" +
                 "if {(s['slot'],s['state']) for s in states} != {(1,'clear'),(2,'clear')}: sys.exit(2)\n" +
-                "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0,\"manual_override_eligible\":true,\"sprint_down\":true}},\"flasks\":[{\"player\":2,\"resource\":\"life\",\"percent\":30,\"reason\":\"threshold\"}]}', flush=True)\n");
+                "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0,\"manual_override_eligible\":true,\"sprint_down\":true}},\"flasks\":[{\"player\":2,\"resource\":\"life\",\"percent\":30,\"reason\":\"threshold\"}]}', flush=True)\n" +
+                "for line in sys.stdin:\n    control=json.loads(line)\n    if control.get('type')!='follow_pause': sys.exit(2)\n    if control.get('state')=='paused': print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"reason\":\"follow paused\"}}}', flush=True)\n    elif control.get('state')=='following': print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0}}}', flush=True)\n    else: sys.exit(2)\n");
             File.WriteAllText(dynamicBridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '--last-focused-leads' not in sys.argv: sys.exit(2)\n" +
                 "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"last_focused_leads\":true,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
@@ -159,19 +160,31 @@ internal static class ProcessPipelineSmoke
                 Console.WriteLine("Pipeline smoke: fake follow ready.");
                 follow.StartReading();
                 var deadline = DateTime.UtcNow.AddSeconds(5);
-                while (DateTime.UtcNow < deadline && (!File.Exists(log) || File.ReadAllLines(log).Length < 4))
+                while (DateTime.UtcNow < deadline && (!File.Exists(log) || File.ReadAllLines(log).Length < 3))
                     await Task.Delay(20);
+                follow.SetPaused(true);
+                while (DateTime.UtcNow < deadline && follow.Current.Reason != "follow paused")
+                    await Task.Delay(20);
+                if (follow.Current.Reason != "follow paused")
+                    throw new Exception("The paused follow frame was not received.");
+                follow.SetPaused(false);
+                while (DateTime.UtcNow < deadline && follow.Current.Status != "following")
+                    await Task.Delay(20);
+                if (follow.Current.Status != "following")
+                    throw new Exception("The resumed follow frame was not received.");
             }
             var lines = File.Exists(log) ? File.ReadAllLines(log) : [];
-            if (lines.Length < 4 ||
+            if (lines.Length < 6 ||
                 !lines[0].Contains("\"slot\":3,\"state\":\"waiting\"") ||
                 !lines[1].Contains("\"slot\":3,\"state\":\"catching_up\"") ||
                 !lines[1].Contains("\"manual_override_eligible\":true") ||
                 !lines[1].Contains("\"sprint_down\":true") ||
                 !lines[2].Contains("\"type\":\"flask\",\"slot\":3,\"resource\":\"life\"") ||
+                !lines.Any(line => line.Contains("\"slot\":3,\"state\":\"following\"")) ||
+                !lines.Any(line => line.Contains("\"slot\":3,\"state\":\"waiting\"")) ||
                 !lines[^1].Contains("\"slot\":3,\"state\":\"waiting\""))
                 throw new Exception("Live follow did not hand off movement/flasks and neutralize on exit: " + string.Join(" | ", lines));
-            Console.WriteLine("Desktop decision-to-bridge movement, flask, and stop handoff checked with local fake executables.");
+            Console.WriteLine("Desktop movement, flask, pause/resume, and stop handoff checked with local fake executables.");
             await using (var dynamicBridge = await BridgeSession.StartAsync(dynamicBridgeExe, topology.Slots, 0,
                 @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"], false,
                 lastFocusedLeads: true))

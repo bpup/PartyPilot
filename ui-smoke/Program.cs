@@ -71,6 +71,15 @@ if (window.GetLogicalDescendants().OfType<Button>().Count(button =>
         button.Content?.ToString() == "保存快捷键") != 1)
     throw new Exception("The desktop did not expose the Auto Party key setting.");
 if (window.GetLogicalDescendants().OfType<Button>().Count(button =>
+        button.Content?.ToString() == "暂停跟随") != 1)
+    throw new Exception("The desktop did not expose temporary follow pause.");
+var pausedFrame = LiveFollowFrame.Parse(
+    "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"reason\":\"follow paused\"}}}",
+    2, 3);
+if (pausedFrame.Status != "waiting" || pausedFrame.Reason != "follow paused" ||
+    !pausedFrame.Command.Contains("\"state\":\"waiting\"", StringComparison.Ordinal))
+    throw new Exception("Follow pause did not neutralize the routed controller command.");
+if (window.GetLogicalDescendants().OfType<Button>().Count(button =>
         button.Content?.ToString() == "标记登录字段") != 3)
     throw new Exception("The desktop did not expose one login marker per client.");
 if (window.GetLogicalDescendants().OfType<CheckBox>().Count(box =>

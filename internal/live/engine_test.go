@@ -74,6 +74,39 @@ func TestLiveFollowRequiresKnownWorldCoordinateSpace(t *testing.T) {
 	}
 }
 
+func TestFollowPauseReleasesMovementAndRequiresFreshEvidenceOnResume(t *testing.T) {
+	now := time.Now().UTC()
+	engine, err := New(map[int]int{1: 101, 2: 202}, 1,
+		follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10,
+			MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	for _, slot := range []int{1, 2} {
+		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
+			ObservedAt: now, Origin: "live"})
+	}
+	for _, sample := range []telemetry.Sample{
+		{ProcessID: 101, SeenUTC: now.Add(time.Millisecond), X: 12},
+		{ProcessID: 202, SeenUTC: now.Add(time.Millisecond), X: 0},
+	} {
+		observeGridSample(engine, sample)
+	}
+	if got := engine.Step(now.Add(time.Millisecond))[2]; got.State != follow.CatchingUp {
+		t.Fatalf("initial movement was missing: %+v", got)
+	}
+	engine.SetFollowPaused(true)
+	if got := engine.Step(now.Add(2 * time.Millisecond))[2]; got.State != follow.Waiting ||
+		got.Reason != "follow paused" || got.ManualOverrideEligible {
+		t.Fatalf("pause retained movement or manual override: %+v", got)
+	}
+	engine.SetFollowPaused(false)
+	if got := engine.Step(now.Add(2 * time.Second))[2]; got.State != follow.Waiting {
+		t.Fatalf("stale pre-pause positions resumed movement: %+v", got)
+	}
+}
+
 func TestLiveCrossClientMotionSkewHoldsOnlyAffectedFollower(t *testing.T) {
 	start := time.Now().UTC()
 	engine, err := New(map[int]int{1: 101, 2: 202, 3: 303}, 1,

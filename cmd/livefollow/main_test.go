@@ -134,15 +134,15 @@ func TestMenuInputRequiresBoundPlayerAndOpenStream(t *testing.T) {
 	}
 	input := make(chan menuInput, 2)
 	input <- menuInput{Type: "menu_guard", Slot: 1, State: "clear"}
-	if err := applyMenuInput(session, engine, input); err != nil {
+	if err := applyMenuInput(session, engine, input, false); err != nil {
 		t.Fatal(err)
 	}
 	input <- menuInput{Type: "menu_guard", Slot: 3, State: "clear"}
-	if err := applyMenuInput(session, engine, input); err == nil {
+	if err := applyMenuInput(session, engine, input, false); err == nil {
 		t.Fatal("unbound player menu command accepted")
 	}
 	close(input)
-	if err := applyMenuInput(session, engine, input); err == nil {
+	if err := applyMenuInput(session, engine, input, false); err == nil {
 		t.Fatal("closed menu input left automatic flasks armed")
 	}
 	malformed := make(chan menuInput, 2)
@@ -155,11 +155,37 @@ func TestMenuInputRequiresBoundPlayerAndOpenStream(t *testing.T) {
 	engine.SetLastFocusedLeads(true)
 	focus := make(chan menuInput, 2)
 	focus <- menuInput{Type: "manual_focus", Slot: 2}
-	if err := applyMenuInput(nil, engine, focus); err != nil || engine.Leader() != 2 {
+	if err := applyMenuInput(nil, engine, focus, false); err != nil || engine.Leader() != 2 {
 		t.Fatalf("manual focus did not change live MAIN: %v", err)
 	}
 	focus <- menuInput{Type: "manual_focus", Slot: 3}
-	if err := applyMenuInput(nil, engine, focus); err == nil || engine.Leader() != 2 {
+	if err := applyMenuInput(nil, engine, focus, false); err == nil || engine.Leader() != 2 {
 		t.Fatal("unknown manual focus changed live MAIN")
+	}
+}
+
+func TestFollowPauseControlRequiresOptInAndExplicitState(t *testing.T) {
+	engine, err := live.New(map[int]int{1: 101, 2: 202}, 1,
+		follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10,
+			MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := make(chan menuInput, 1)
+	input <- menuInput{Type: "follow_pause", State: "paused"}
+	if err := applyMenuInput(nil, engine, input, false); err == nil || engine.FollowPaused() {
+		t.Fatal("follow pause bypassed explicit opt-in")
+	}
+	input <- menuInput{Type: "follow_pause", State: "paused"}
+	if err := applyMenuInput(nil, engine, input, true); err != nil || !engine.FollowPaused() {
+		t.Fatalf("explicit pause was lost: %v", err)
+	}
+	input <- menuInput{Type: "follow_pause", State: "unexpected"}
+	if err := applyMenuInput(nil, engine, input, true); err == nil || !engine.FollowPaused() {
+		t.Fatal("invalid pause state changed follow")
+	}
+	input <- menuInput{Type: "follow_pause", State: "following"}
+	if err := applyMenuInput(nil, engine, input, true); err != nil || engine.FollowPaused() {
+		t.Fatalf("explicit resume was lost: %v", err)
 	}
 }

@@ -221,7 +221,8 @@ func readMenuInput(reader io.Reader, output chan<- menuInput) {
 	for scanner.Scan() {
 		var input menuInput
 		if err := json.Unmarshal(scanner.Bytes(), &input); err != nil ||
-			(input.Type != "menu_guard" && input.Type != "manual_focus") {
+			(input.Type != "menu_guard" && input.Type != "manual_focus" &&
+				input.Type != "follow_pause") {
 			output <- menuInput{Err: errors.New("invalid live control command")}
 			return
 		}
@@ -232,7 +233,8 @@ func readMenuInput(reader io.Reader, output chan<- menuInput) {
 	}
 }
 
-func applyMenuInput(session *live.FlaskSession, engine *live.Engine, input <-chan menuInput) error {
+func applyMenuInput(session *live.FlaskSession, engine *live.Engine, input <-chan menuInput,
+	allowFollowPause bool) error {
 	if input == nil {
 		return nil
 	}
@@ -257,6 +259,12 @@ func applyMenuInput(session *live.FlaskSession, engine *live.Engine, input <-cha
 				if err := engine.ObserveManualFocus(command.Slot); err != nil {
 					return err
 				}
+			case "follow_pause":
+				if !allowFollowPause || command.Slot != 0 ||
+					(command.State != "paused" && command.State != "following") {
+					return errors.New("invalid follow pause control")
+				}
+				engine.SetFollowPaused(command.State == "paused")
 			default:
 				return errors.New("invalid live control command")
 			}
@@ -267,7 +275,7 @@ func applyMenuInput(session *live.FlaskSession, engine *live.Engine, input <-cha
 }
 
 func run(address string, roster map[int]int, paths map[int]string, leader int, engine *live.Engine,
-	flasks *live.FlaskSession, menuInput <-chan menuInput, ordered bool) error {
+	flasks *live.FlaskSession, menuInput <-chan menuInput, ordered, allowFollowPause bool) error {
 	endpoint, err := net.ResolveUDPAddr("udp", address)
 	if err != nil || endpoint.IP == nil || !endpoint.IP.IsLoopback() {
 		return errors.New("listen address must be loopback")
@@ -306,7 +314,7 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 		return err
 	}
 	for {
-		if err := applyMenuInput(flasks, engine, menuInput); err != nil {
+		if err := applyMenuInput(flasks, engine, menuInput, allowFollowPause); err != nil {
 			return fail("menu guard input failed", err)
 		}
 		var activations []flask.Activation
@@ -376,6 +384,7 @@ func main() {
 	leaderName := flag.String("leader-name", "", "configured character name of the followed leader, for departure detection")
 	lastFocusedLeads := flag.Bool("last-focused-leads", false, "use manually focused player as the current follow MAIN")
 	autoFlask := flag.Bool("auto-flask", false, "enable life and mana flask decisions for explicitly bound clients")
+	allowFollowPause := flag.Bool("allow-follow-pause", false, "accept explicit pause/resume controls on stdin")
 	address := flag.String("listen", "127.0.0.1:47617", "loopback sensor address")
 	var logs, exes, terrainBindings sources
 	var names memberNames
@@ -477,13 +486,14 @@ func main() {
 			os.Exit(2)
 		}
 	}
-	if *autoFlask || *lastFocusedLeads {
+	if *autoFlask || *lastFocusedLeads || *allowFollowPause {
 		commands := make(chan menuInput, 16)
 		menuCommands = commands
 		go readMenuInput(os.Stdin, commands)
 	}
 	fmt.Fprintln(os.Stderr, "Live follow decision stream; Windows controller and PoE2 behavior remain unverified.")
-	if err := run(*address, roster, paths, *leader, engine, flaskSession, menuCommands, *orderedInput); err != nil {
+	if err := run(*address, roster, paths, *leader, engine, flaskSession, menuCommands,
+		*orderedInput, *allowFollowPause); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

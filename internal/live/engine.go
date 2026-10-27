@@ -38,7 +38,13 @@ type Engine struct {
 	leaderName       string
 	memberNames      map[int]string
 	stopped          string
+	followPaused     bool
 }
+
+// SetFollowPaused temporarily releases movement without discarding process,
+// area, or player observations. A latched party stop still takes precedence.
+func (e *Engine) SetFollowPaused(paused bool) { e.followPaused = paused }
+func (e *Engine) FollowPaused() bool          { return e.followPaused }
 
 // Target 0.6.17 uses grid coordinates for follow distances. Its distributed
 // core maps grid deltas to world deltas with this factor. Render.Pos from the
@@ -325,6 +331,15 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 		for _, slot := range e.slots {
 			if slot != e.leader {
 				commands[slot] = follow.Command{State: follow.Waiting, Reason: e.stopped}
+			}
+		}
+		return commands
+	}
+	if e.followPaused {
+		commands := make(map[int]follow.Command, len(e.slots)-1)
+		for _, slot := range e.slots {
+			if slot != e.leader {
+				commands[slot] = follow.Command{State: follow.Waiting, Reason: "follow paused"}
 			}
 		}
 		return commands
