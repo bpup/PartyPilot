@@ -33,6 +33,7 @@ type UI struct {
 }
 
 type Player struct {
+	Position          *Point   `json:"position,omitempty"`
 	Alive             *bool    `json:"alive"`
 	Loading           *bool    `json:"loading"`
 	ActiveCombo       *bool    `json:"activeCombo"`
@@ -77,8 +78,14 @@ type Plan struct {
 	Behavior          string `json:"behavior,omitempty"`
 	ComboID           string `json:"comboId,omitempty"`
 	TargetID          string `json:"targetId,omitempty"`
+	Aim               *Aim   `json:"aim,omitempty"`
 	Reason            string `json:"reason,omitempty"`
 	ScheduledOffsetMS *int   `json:"scheduledOffsetMs,omitempty"`
+}
+
+type Aim struct {
+	RightX int16 `json:"rightX"`
+	RightY int16 `json:"rightY"`
 }
 
 func (w World) Validate() error {
@@ -91,6 +98,7 @@ func (w World) Validate() error {
 	}
 	for id, player := range w.Players {
 		if id < 1 || id > 6 || player.Alive == nil || player.Loading == nil || player.ActiveCombo == nil ||
+			player.Position != nil && (!finite(float64(player.Position.X)) || !finite(float64(player.Position.Y))) ||
 			player.DistanceFromMainM == nil || !finite(*player.DistanceFromMainM) || *player.DistanceFromMainM < 0 ||
 			player.HealthPercent != nil && (!finite(*player.HealthPercent) ||
 				*player.HealthPercent < 0 || *player.HealthPercent > 100) {

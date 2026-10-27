@@ -11,7 +11,7 @@ func testWorld() World {
 	players := make(map[int]Player)
 	for number := 1; number <= 6; number++ {
 		players[number] = Player{Alive: ptr(true), Loading: ptr(false), ActiveCombo: ptr(false),
-			DistanceFromMainM: ptr(0.0), HealthPercent: ptr(100.0)}
+			Position: &Point{X: 0, Y: 0}, DistanceFromMainM: ptr(0.0), HealthPercent: ptr(100.0)}
 	}
 	monster := func(id, rarity string) Monster {
 		distance := make(map[int]float64)

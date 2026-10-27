@@ -95,6 +95,14 @@ internal static class BridgeProtocol
                 !root.TryGetProperty("hold_ms", out var hold) ||
                 !hold.TryGetInt32(out var duration) || duration is < 45 or > 160)
                 return false;
+            var hasRightX = root.TryGetProperty("right_x", out var rightX);
+            var hasRightY = root.TryGetProperty("right_y", out var rightY);
+            if (hasRightX != hasRightY) return false;
+            if (hasRightX)
+            {
+                if (!rightX.TryGetInt16(out var x) || !rightY.TryGetInt16(out var y)) return false;
+                pulse = pulse with { RightX = x, RightY = y };
+            }
             command = new CombatControl(name, value, pulse, duration);
             return true;
         }
@@ -138,7 +146,7 @@ internal static class BridgeProtocol
     internal static bool ValidCombatPulse(PadReport pulse)
     {
         const ushort allowed = 0xF30F;
-        if (pulse.LeftX != 0 || pulse.LeftY != 0 || pulse.RightX != 0 || pulse.RightY != 0 ||
+        if (pulse.LeftX != 0 || pulse.LeftY != 0 ||
             (pulse.Buttons & ~allowed) != 0 ||
             System.Numerics.BitOperations.PopCount((uint)pulse.Buttons) > 1 ||
             pulse.LeftTrigger is not (0 or 255) || pulse.RightTrigger is not (0 or 255) ||

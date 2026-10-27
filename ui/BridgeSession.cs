@@ -625,14 +625,14 @@ internal sealed class BridgeSession : IAsyncDisposable
     };
 
     internal Task BeginCombatAsync(int slot, CancellationToken token = default) =>
-        SendCombatControlAsync("combat_begin", slot, null, 0, token);
+        SendCombatControlAsync("combat_begin", slot, null, 0, 0, 0, token);
 
     internal Task PulseCombatAsync(int slot, string input, int holdMilliseconds,
-        CancellationToken token = default) =>
-        SendCombatControlAsync("combat_pulse", slot, input, holdMilliseconds, token);
+        short rightX = 0, short rightY = 0, CancellationToken token = default) =>
+        SendCombatControlAsync("combat_pulse", slot, input, holdMilliseconds, rightX, rightY, token);
 
     internal Task EndCombatAsync(int slot, CancellationToken token = default) =>
-        SendCombatControlAsync("combat_end", slot, null, 0, token);
+        SendCombatControlAsync("combat_end", slot, null, 0, 0, 0, token);
 
     internal static bool ValidCombatInput(string? input, int holdMilliseconds)
     {
@@ -646,7 +646,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     }
 
     private async Task SendCombatControlAsync(string type, int slot, string? input,
-        int holdMilliseconds, CancellationToken token)
+        int holdMilliseconds, short rightX, short rightY, CancellationToken token)
     {
         if (!CombatEnabled || IsHybridMode || !_slots.Contains(slot) ||
             (type == "combat_pulse" && !ValidCombatInput(input, holdMilliseconds)))
@@ -660,7 +660,8 @@ internal sealed class BridgeSession : IAsyncDisposable
                 new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
             Volatile.Write(ref _pendingCombat, pending);
             var command = type == "combat_pulse"
-                ? JsonSerializer.Serialize(new { type, slot, input = input!.Trim().ToUpperInvariant(), hold_ms = holdMilliseconds })
+                ? JsonSerializer.Serialize(new { type, slot, input = input!.Trim().ToUpperInvariant(),
+                    hold_ms = holdMilliseconds, right_x = rightX, right_y = rightY })
                 : JsonSerializer.Serialize(new { type, slot });
             await WriteCommandAsync(command, token);
             await pending.Completion.Task.WaitAsync(TimeSpan.FromSeconds(2), token);

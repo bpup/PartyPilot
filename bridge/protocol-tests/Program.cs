@@ -467,9 +467,11 @@ if (pad3.Report != default || pad2.Report != default)
     throw new Exception("Disconnect did not neutralize focused pad.");
 if (router.ApplyLine("{\"type\":\"focus\",\"slot\":6}", now) || pad3.Report != default)
     throw new Exception("Unassigned focus was not rejected safely.");
-if (!BridgeProtocol.TryParseCombat("{\"type\":\"combat_pulse\",\"slot\":2,\"input\":\"LT+X\",\"hold_ms\":85}",
+if (!BridgeProtocol.TryParseCombat("{\"type\":\"combat_pulse\",\"slot\":2,\"input\":\"LT+X\",\"hold_ms\":85,\"right_x\":32767,\"right_y\":0}",
         out var combatCommand) || combatCommand.Pulse.Buttons != 0x4000 ||
-    combatCommand.Pulse.LeftTrigger != 255 ||
+    combatCommand.Pulse.LeftTrigger != 255 || combatCommand.Pulse.RightX != 32767 ||
+    BridgeProtocol.TryParseCombat("{\"type\":\"combat_pulse\",\"slot\":2,\"input\":\"X\",\"hold_ms\":85,\"right_x\":100}", out _) ||
+    BridgeProtocol.TryParseCombat("{\"type\":\"combat_pulse\",\"slot\":2,\"input\":\"X\",\"hold_ms\":85,\"right_x\":40000,\"right_y\":0}", out _) ||
     BridgeProtocol.TryParseCombat("{\"type\":\"combat_pulse\",\"slot\":2,\"input\":\"L3\",\"hold_ms\":85}", out _) ||
     BridgeProtocol.TryParseCombat("{\"type\":\"combat_pulse\",\"slot\":2,\"input\":\"X\",\"hold_ms\":161}", out _) ||
     BridgeProtocol.TryParseCombat("{\"type\":\"combat_pulse\",\"slot\":7,\"input\":\"X\",\"hold_ms\":85}", out _))
@@ -489,18 +491,23 @@ if (!combatRouter.BeginCombat(2, now) || combatRouter.BeginCombat(2, now.AddMill
     combatRouter.PulseCombat(2, new PadReport(0x4000, 0, 0, 100, 0, 0, 0),
         85, now.AddMilliseconds(1)) ||
     !combatRouter.PulseCombat(2, combatCommand.Pulse, 85, now.AddMilliseconds(1)) ||
-    combatPad2.Report.Buttons != 0x4000 || combatPad2.Report.LeftTrigger != 255 ||
+    combatPad2.Report.Buttons != 0 || combatPad2.Report.LeftTrigger != 255 ||
+    combatPad2.Report.RightX != 32767 ||
     combatPad2.X != 0 || combatPad1.Report.Buttons != 0x1000 ||
     combatRouter.PulseCombat(2, combatCommand.Pulse, 85, now.AddMilliseconds(2)))
     throw new Exception("Combat lease failed to isolate one follower skill pulse.");
-combatRouter.Tick(now.AddMilliseconds(87));
+combatRouter.Tick(now.AddMilliseconds(46));
+if (combatPad2.Report.Buttons != 0x4000 || combatPad2.Report.LeftTrigger != 255 ||
+    combatPad2.Report.RightX != 32767)
+    throw new Exception("LT chord did not press the skill after the 45 ms trigger lead.");
+combatRouter.Tick(now.AddMilliseconds(132));
 if (combatPad2.X != 32767 || combatPad2.Report.Buttons != 0)
     throw new Exception("Combat pulse did not release back to follower movement.");
-if (!combatRouter.PulseCombat(2, combatCommand.Pulse, 85, now.AddMilliseconds(100)))
+if (!combatRouter.PulseCombat(2, combatCommand.Pulse, 85, now.AddMilliseconds(140)))
     throw new Exception("A held combat lease did not accept its next pulse.");
 combatRouter.SetMenuGuardActive(true);
 if (combatPad2.Report != default ||
-    combatRouter.PulseCombat(2, combatCommand.Pulse, 85, now.AddMilliseconds(101)))
+    combatRouter.PulseCombat(2, combatCommand.Pulse, 85, now.AddMilliseconds(141)))
     throw new Exception("Menu guard failed to release combat ownership.");
 combatRouter.SetMenuGuardActive(false);
 if (!combatRouter.BeginCombat(2, now.AddMilliseconds(200)) ||

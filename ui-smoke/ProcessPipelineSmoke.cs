@@ -245,7 +245,7 @@ internal static class ProcessPipelineSmoke
                     BridgeSession.ValidCombatInput("LT+X", 44))
                     throw new Exception("Combat input gate accepted an unsupported binding or duration.");
                 await combatBridge.BeginCombatAsync(3);
-                await combatBridge.PulseCombatAsync(3, "LT+X", 85);
+                await combatBridge.PulseCombatAsync(3, "LT+X", 85, 32767, 0);
                 await combatBridge.EndCombatAsync(3);
                 var sent = File.ReadAllLines(combatLog).Select(line => JsonDocument.Parse(line)).ToArray();
                 try
@@ -253,6 +253,8 @@ internal static class ProcessPipelineSmoke
                     if (sent.Length != 3 || sent[0].RootElement.GetProperty("type").GetString() != "combat_begin" ||
                         sent[1].RootElement.GetProperty("input").GetString() != "LT+X" ||
                         sent[1].RootElement.GetProperty("hold_ms").GetInt32() != 85 ||
+                        sent[1].RootElement.GetProperty("right_x").GetInt32() != 32767 ||
+                        sent[1].RootElement.GetProperty("right_y").GetInt32() != 0 ||
                         sent[2].RootElement.GetProperty("type").GetString() != "combat_end")
                         throw new Exception("Combat ownership and pulse did not cross the desktop process boundary.");
                 }

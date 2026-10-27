@@ -115,6 +115,11 @@ func (c *TargetCoordinator) Assign(profile Profile, world World, plans []Plan) {
 			}
 		}
 	}
+	for i := range plans {
+		if plans[i].Status == "planned_only" {
+			plans[i].Aim = AimAt(world, plans[i].Player, plans[i].TargetID)
+		}
+	}
 }
 
 func requiresSpecificTarget(combo Combo) bool {

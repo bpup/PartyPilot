@@ -72,6 +72,7 @@ internal sealed class BridgeRouter
             nowUtc.Kind != DateTimeKind.Utc || route.CombatLeaseUntilUtc > nowUtc) return false;
         route.CombatLeaseUntilUtc = nowUtc.AddSeconds(10);
         route.CombatPulseUntilUtc = default;
+        route.CombatChordFullAtUtc = default;
         route.CombatPulse = default;
         route.LifeUntilUtc = route.ManaUntilUtc = DateTime.MinValue;
         ResetEngageDodgeForSlot(slot);
@@ -88,7 +89,9 @@ internal sealed class BridgeRouter
             !BridgeProtocol.ValidCombatPulse(pulse) ||
             route.CombatPulseUntilUtc > nowUtc) return false;
         route.CombatPulse = pulse;
-        route.CombatPulseUntilUtc = nowUtc.AddMilliseconds(holdMilliseconds);
+        var chord = pulse.LeftTrigger == 255 && pulse.Buttons != 0;
+        route.CombatChordFullAtUtc = chord ? nowUtc.AddMilliseconds(45) : default;
+        route.CombatPulseUntilUtc = nowUtc.AddMilliseconds(holdMilliseconds + (chord ? 45 : 0));
         route.CombatLeaseUntilUtc = nowUtc.AddSeconds(10);
         ResetEngageDodgeForSlot(slot);
         Render(slot, route);
@@ -100,6 +103,7 @@ internal sealed class BridgeRouter
         if (!_routes.TryGetValue(slot, out var route)) return;
         route.CombatLeaseUntilUtc = default;
         route.CombatPulseUntilUtc = default;
+        route.CombatChordFullAtUtc = default;
         route.CombatPulse = default;
         Render(slot, route);
     }
@@ -475,13 +479,20 @@ internal sealed class BridgeRouter
             {
                 route.CombatLeaseUntilUtc = default;
                 route.CombatPulseUntilUtc = default;
+                route.CombatChordFullAtUtc = default;
                 route.CombatPulse = default;
                 expired = true;
             }
             else if (route.CombatPulseUntilUtc != default && nowUtc >= route.CombatPulseUntilUtc)
             {
                 route.CombatPulseUntilUtc = default;
+                route.CombatChordFullAtUtc = default;
                 route.CombatPulse = default;
+                expired = true;
+            }
+            else if (route.CombatChordFullAtUtc != default && nowUtc >= route.CombatChordFullAtUtc)
+            {
+                route.CombatChordFullAtUtc = default;
                 expired = true;
             }
             if (route.LifeUntilUtc != DateTime.MinValue && nowUtc >= route.LifeUntilUtc)
@@ -541,6 +552,7 @@ internal sealed class BridgeRouter
                 route.CatchUpPriority = false;
                 route.LifeUntilUtc = route.ManaUntilUtc = DateTime.MinValue;
                 route.CombatLeaseUntilUtc = route.CombatPulseUntilUtc = default;
+                route.CombatChordFullAtUtc = default;
                 route.CombatPulse = default;
                 route.DodgeSprint.Reset();
                 route.Output.SetReport(default);
@@ -607,7 +619,9 @@ internal sealed class BridgeRouter
         if (route.CombatPulseUntilUtc != default)
         {
             route.DodgeSprint.Reset();
-            route.Output.SetReport(WithEngageDodge(route.CombatPulse, slot, false));
+            var pulse = route.CombatChordFullAtUtc == default ? route.CombatPulse :
+                route.CombatPulse with { Buttons = 0, RightTrigger = 0 };
+            route.Output.SetReport(WithEngageDodge(pulse, slot, false));
             return;
         }
         if (_rightStickFollowerOverride && _physicalConnected && _isolatedSlot == 0 &&
@@ -689,6 +703,7 @@ internal sealed class BridgeRouter
         {
             route.CombatLeaseUntilUtc = default;
             route.CombatPulseUntilUtc = default;
+            route.CombatChordFullAtUtc = default;
             route.CombatPulse = default;
         }
     }
@@ -706,6 +721,7 @@ internal sealed class BridgeRouter
         public DateTime ManaUntilUtc { get; set; }
         public DateTime CombatLeaseUntilUtc { get; set; }
         public DateTime CombatPulseUntilUtc { get; set; }
+        public DateTime CombatChordFullAtUtc { get; set; }
         public PadReport CombatPulse { get; set; }
         public DodgeSprintButtonArbiter DodgeSprint { get; } = new();
     }
