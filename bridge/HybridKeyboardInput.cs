@@ -29,6 +29,7 @@ internal static class HybridKeyboardInput
         HybridAction.DpadLeft, HybridAction.DpadRight,
         HybridAction.Start, HybridAction.View
     ];
+    internal static HybridAction ActionForIndex(int index) => BoundActions[index - 6];
 
     internal static HybridAction ActionForKey(int key, HybridBindingConfig? bindings = null)
     {
@@ -91,7 +92,8 @@ internal sealed class HybridKeyboardState
     private readonly HashSet<int> _pressed = [];
     private readonly HashSet<int> _blockedUntilRelease = [];
     private readonly HashSet<int> _mainMirrorBlockedUntilRelease = [];
-    private readonly HashSet<int> _menuTriggerBlockedUntilRelease = [];
+    private readonly HashSet<int> _menuBlockedUntilRelease = [];
+    private readonly HybridAction _menuBlockedActions;
     private bool _gameForeground;
     private bool _menuOpen;
     private bool _mainMirrorEnabled;
@@ -101,6 +103,8 @@ internal sealed class HybridKeyboardState
     {
         _bindings = bindings ?? HybridBindingConfig.Default;
         _availablePlayers = [.. availablePlayers.Where(player => player is >= 2 and <= 6)];
+        foreach (var index in _bindings.MenuBlockedActions)
+            _menuBlockedActions |= HybridKeyboardInput.ActionForIndex(index);
     }
 
     internal int FocusedPlayer { get; private set; } = 1;
@@ -115,7 +119,7 @@ internal sealed class HybridKeyboardState
             foreach (var key in _pressed)
                 if (!_blockedUntilRelease.Contains(key) &&
                     HybridKeyboardInput.FocusForKey(key, _bindings) == 0)
-                    actions |= HybridKeyboardInput.ActionForKey(key, _bindings);
+                    actions |= EffectiveActionsForKey(key);
             return (ushort)(HybridKeyboardInput.Map(actions).Buttons & (0x0010 | 0x0020 | 0x2000));
         }
     }
@@ -154,7 +158,7 @@ internal sealed class HybridKeyboardState
             _pressed.Remove(virtualKey);
             _blockedUntilRelease.Remove(virtualKey);
             _mainMirrorBlockedUntilRelease.Remove(virtualKey);
-            _menuTriggerBlockedUntilRelease.Remove(virtualKey);
+            _menuBlockedUntilRelease.Remove(virtualKey);
             return Snapshot() with { ConfirmReleased = confirmReleased };
         }
         if (!_gameForeground)
@@ -167,8 +171,8 @@ internal sealed class HybridKeyboardState
         if (!_pressed.Add(virtualKey)) return Snapshot();
         if (_blockedUntilRelease.Contains(virtualKey)) return Snapshot();
         if (_menuOpen && (HybridKeyboardInput.ActionForKey(virtualKey, _bindings) &
-                HybridAction.RightTrigger) != 0)
-            _menuTriggerBlockedUntilRelease.Add(virtualKey);
+                _menuBlockedActions) != 0)
+            _menuBlockedUntilRelease.Add(virtualKey);
         var focus = HybridKeyboardInput.FocusForKey(virtualKey, _bindings);
         if (focus != 0 && (focus == 1 || _availablePlayers.Contains(focus)))
         {
@@ -201,8 +205,8 @@ internal sealed class HybridKeyboardState
         _menuOpen = open;
         if (open)
             foreach (var key in _pressed)
-                if ((HybridKeyboardInput.ActionForKey(key, _bindings) & HybridAction.RightTrigger) != 0)
-                    _menuTriggerBlockedUntilRelease.Add(key);
+                if ((HybridKeyboardInput.ActionForKey(key, _bindings) & _menuBlockedActions) != 0)
+                    _menuBlockedUntilRelease.Add(key);
         return true;
     }
 
@@ -231,8 +235,8 @@ internal sealed class HybridKeyboardState
     private HybridAction EffectiveActionsForKey(int key)
     {
         var actions = HybridKeyboardInput.ActionForKey(key, _bindings);
-        if (_menuOpen || _menuTriggerBlockedUntilRelease.Contains(key))
-            actions &= ~HybridAction.RightTrigger;
+        if (_menuOpen || _menuBlockedUntilRelease.Contains(key))
+            actions &= ~_menuBlockedActions;
         return actions;
     }
 }

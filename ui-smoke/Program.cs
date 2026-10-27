@@ -146,6 +146,9 @@ if (args.Contains("--ui-controls-only"))
     if (bindings.GetLogicalDescendants().OfType<ComboBox>().Count() !=
         PartyPilot.Common.HybridBindingConfig.Definitions.Length + 2)
         throw new Exception("The keyboard map editor omitted a focus or controller action.");
+    if (bindings.GetLogicalDescendants().OfType<CheckBox>().Count(box =>
+            box.Content?.ToString() == "菜单禁用") != 21)
+        throw new Exception("The keyboard map editor omitted base or custom menu suppression.");
     bindings.Close();
     var sample = new LoginCalibrationDialog(1,
         new LoginCalibrationFrame(new byte[320 * 240 * 4], 320, 240), "sample-layout");

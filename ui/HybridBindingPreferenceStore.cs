@@ -24,9 +24,12 @@ internal sealed class HybridBindingPreferenceStore
                 return (false, HybridBindingConfig.Default);
             var custom = json.RootElement.TryGetProperty("custom", out var customValue)
                 ? customValue.Deserialize<HybridCustomAction[]>() : [];
-            if (custom is null || !HybridBindingConfig.TryCreate(
+            var menuBlocked = json.RootElement.TryGetProperty("menuBlocked", out var blockedValue)
+                ? blockedValue.Deserialize<int[]>() : [19];
+            if (custom is null || menuBlocked is null || !HybridBindingConfig.TryCreate(
                     Enumerable.Range(0, HybridBindingConfig.Definitions.Length)
-                        .Select(baseBindings.KeyAt).ToArray(), custom, out var bindings) || bindings is null)
+                        .Select(baseBindings.KeyAt).ToArray(), custom,
+                    menuBlocked, out var bindings) || bindings is null)
                 return (false, HybridBindingConfig.Default);
             return (true, bindings);
         }
@@ -46,7 +49,8 @@ internal sealed class HybridBindingPreferenceStore
             {
                 keys = string.Join(',', Enumerable.Range(0, HybridBindingConfig.Definitions.Length)
                     .Select(bindings.KeyAt)),
-                custom = bindings.CustomActions
+                custom = bindings.CustomActions,
+                menuBlocked = bindings.MenuBlockedBaseActions
             }));
             File.Move(temporary, _path, overwrite: true);
             return true;

@@ -335,6 +335,45 @@ internal static class HybridKeyboardInputTests
         if (layeredState.Snapshot().Report.RightTrigger != 0 ||
             layeredState.Snapshot().Report.Buttons != 0x1000)
             throw new Exception("Hybrid menu RT suppression also erased an unrelated shared action.");
+        var configuredKeys = HybridBindingConfig.Definitions.Select(item => item.DefaultKey).ToArray();
+        var configuredExtras = new[]
+        {
+            new HybridCustomAction("禁用 X", "", 70, 14, true),
+            new HybridCustomAction("共用按键", "", 70, 11)
+        };
+        if (!HybridBindingConfig.TryCreate(configuredKeys, configuredExtras, [11],
+                out var configuredMenu) || configuredMenu is null ||
+            !HybridBindingConfig.TryParse(configuredMenu.Encode(), out var parsedMenu) ||
+            parsedMenu?.Encode() != configuredMenu.Encode() ||
+            !parsedMenu.MenuBlockedActions.Order().SequenceEqual(new[] { 11, 14 }) ||
+            !HybridBindingConfig.TryCreate(configuredKeys, [], [], out var unblockedMenu) ||
+            unblockedMenu is null ||
+            !HybridBindingConfig.TryParse(unblockedMenu.Encode(), out var parsedUnblockedMenu) ||
+            parsedUnblockedMenu?.MenuBlockedActions.Count != 0 ||
+            !HybridBindingConfig.TryParse(HybridBindingConfig.Default.Encode(),
+                out var parsedLegacyMenu) ||
+            !parsedLegacyMenu!.MenuBlockedActions.SequenceEqual([19]) ||
+            HybridBindingConfig.TryParse(configuredMenu.Encode() + ",11", out _) ||
+            HybridBindingConfig.TryCreate(configuredKeys, configuredExtras, [11, 11], out _))
+            throw new Exception("Configured menu suppression did not round-trip or reject duplicate actions.");
+        var configuredState = new HybridKeyboardState([2], parsedMenu);
+        configuredState.Handle(0x71, true, true);
+        configuredState.Handle(0x71, false, true);
+        configuredState.Handle(0x45, true, true); // Base Confirm
+        configuredState.Handle(70, true, true);   // Extra X and Confirm
+        configuredState.Handle(65538, true, true); // RT is no longer blocked
+        configuredState.SetMenuOpen(true);
+        if (configuredState.Snapshot().Report.Buttons != 0 ||
+            configuredState.Snapshot().Report.RightTrigger != 255)
+            throw new Exception("Configured menu action mask did not suppress base and custom actions.");
+        configuredState.SetMenuOpen(false);
+        if (configuredState.Snapshot().Report.Buttons != 0)
+            throw new Exception("Held configured menu actions resumed before release.");
+        configuredState.Handle(0x45, false, true);
+        configuredState.Handle(70, false, true);
+        configuredState.Handle(0x45, true, true);
+        if (configuredState.Snapshot().Report.Buttons != 0x1000)
+            throw new Exception("Configured menu action failed to rearm after release.");
         var menuNeutral = new FakePad();
         var menuFollower = new FakePad();
         var menuRouter = new BridgeRouter(new Dictionary<int, IPadOutput>

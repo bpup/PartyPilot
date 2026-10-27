@@ -2,7 +2,7 @@ namespace PartyPilot.Common;
 
 internal readonly record struct HybridBindingDefinition(string Id, string Label, int DefaultKey);
 internal readonly record struct HybridCustomAction(string Label, string Description,
-    int Key, int ActionIndex);
+    int Key, int ActionIndex, bool BlockDuringMenu = false);
 
 internal sealed class HybridBindingConfig
 {
@@ -26,17 +26,24 @@ internal sealed class HybridBindingConfig
 
     private readonly int[] _keys;
     private readonly HybridCustomAction[] _customActions;
+    private readonly int[] _menuBlockedBaseActions;
     internal static HybridBindingConfig Default { get; } = new(
-        Definitions.Select(item => item.DefaultKey).ToArray(), []);
+        Definitions.Select(item => item.DefaultKey).ToArray(), [], [19]);
 
-    private HybridBindingConfig(int[] keys, HybridCustomAction[] customActions)
+    private HybridBindingConfig(int[] keys, HybridCustomAction[] customActions,
+        int[] menuBlockedBaseActions)
     {
         _keys = keys;
         _customActions = customActions;
+        _menuBlockedBaseActions = menuBlockedBaseActions;
     }
 
     internal int KeyAt(int index) => _keys[index];
     internal IReadOnlyList<HybridCustomAction> CustomActions => _customActions;
+    internal IReadOnlyList<int> MenuBlockedBaseActions => _menuBlockedBaseActions;
+    internal IReadOnlyList<int> MenuBlockedActions => _menuBlockedBaseActions
+        .Concat(_customActions.Where(action => action.BlockDuringMenu)
+            .Select(action => action.ActionIndex)).Distinct().ToArray();
     internal int FocusForKey(int key)
     {
         for (var index = 0; index < 6; index++)
@@ -48,24 +55,38 @@ internal sealed class HybridBindingConfig
     internal static bool Matches(int mapped, int key) => mapped != 0 &&
         (mapped == key || mapped == 160 && key == 16 ||
          mapped == 162 && key == 17 || mapped == 164 && key == 18);
-    internal string Encode() => string.Join(',', _keys) + (_customActions.Length == 0 ? "" :
-        "|" + string.Join(',', _customActions.Select(action =>
-            $"{action.Key}:{action.ActionIndex}")));
+    internal string Encode()
+    {
+        var baseKeys = string.Join(',', _keys);
+        var custom = string.Join(',', _customActions.Select(action =>
+            $"{action.Key}:{action.ActionIndex}" + (action.BlockDuringMenu ? ":1" : "")));
+        var standardMenu = _menuBlockedBaseActions.SequenceEqual([19]);
+        return baseKeys + (custom.Length == 0 && standardMenu ? "" : "|" + custom) +
+            (standardMenu ? "" : "|" + string.Join(',', _menuBlockedBaseActions));
+    }
 
     internal static bool TryCreate(IReadOnlyList<int> keys, out HybridBindingConfig? config) =>
         TryCreate(keys, [], out config);
 
     internal static bool TryCreate(IReadOnlyList<int> keys,
         IReadOnlyList<HybridCustomAction> customActions, out HybridBindingConfig? config)
+        => TryCreate(keys, customActions, [19], out config);
+
+    internal static bool TryCreate(IReadOnlyList<int> keys,
+        IReadOnlyList<HybridCustomAction> customActions,
+        IReadOnlyList<int> menuBlockedBaseActions, out HybridBindingConfig? config)
     {
         config = null;
         if (keys.Count != Definitions.Length || keys.Any(key => !AllowedKey(key)) ||
             customActions.Any(action => !AllowedKey(action.Key) ||
                 action.ActionIndex is < 6 or >= 26 || action.Label is null ||
-                action.Description is null)) return false;
+                action.Description is null) ||
+            menuBlockedBaseActions.Any(index => index is < 6 or >= 26) ||
+            menuBlockedBaseActions.Distinct().Count() != menuBlockedBaseActions.Count) return false;
         var assigned = keys.Where(key => key != 0).ToArray();
         if (assigned.Distinct().Count() != assigned.Length) return false;
-        config = new HybridBindingConfig(keys.ToArray(), customActions.ToArray());
+        config = new HybridBindingConfig(keys.ToArray(), customActions.ToArray(),
+            menuBlockedBaseActions.ToArray());
         return true;
     }
 
@@ -74,25 +95,34 @@ internal sealed class HybridBindingConfig
         config = null;
         if (encoded is null) return false;
         var sections = encoded.Split('|');
-        if (sections.Length is < 1 or > 2) return false;
+        if (sections.Length is < 1 or > 3) return false;
         var parts = sections[0].Split(',');
         if (parts.Length != Definitions.Length) return false;
         var keys = new int[parts.Length];
         for (var index = 0; index < parts.Length; index++)
             if (!int.TryParse(parts[index], out keys[index])) return false;
         var custom = new List<HybridCustomAction>();
-        if (sections.Length == 2)
+        if (sections.Length >= 2 && sections[1].Length != 0)
         {
-            if (sections[1].Length == 0) return false;
             foreach (var entry in sections[1].Split(','))
             {
                 var pair = entry.Split(':');
-                if (pair.Length != 2 || !int.TryParse(pair[0], out var key) ||
+                if (pair.Length is < 2 or > 3 || !int.TryParse(pair[0], out var key) ||
                     !int.TryParse(pair[1], out var actionIndex)) return false;
-                custom.Add(new HybridCustomAction("", "", key, actionIndex));
+                if (pair.Length == 3 && pair[2] != "1") return false;
+                custom.Add(new HybridCustomAction("", "", key, actionIndex,
+                    pair.Length == 3));
             }
         }
-        return TryCreate(keys, custom, out config);
+        if (sections.Length == 2 && sections[1].Length == 0) return false;
+        var blocked = new List<int>();
+        if (sections.Length == 3 && sections[2].Length != 0)
+            foreach (var entry in sections[2].Split(','))
+            {
+                if (!int.TryParse(entry, out var index)) return false;
+                blocked.Add(index);
+            }
+        return TryCreate(keys, custom, sections.Length == 3 ? blocked : [19], out config);
     }
 
     private static bool AllowedKey(int key) => key == 0 ||

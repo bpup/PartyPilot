@@ -9,8 +9,9 @@ namespace PartyPilot.Desktop;
 internal sealed class HybridBindingDialog : Window
 {
     private sealed record CustomRow(StackPanel Container, TextBox Label, TextBox Description,
-        ComboBox Key, ComboBox Action);
+        ComboBox Key, ComboBox Action, CheckBox BlockDuringMenu);
     private readonly ComboBox[] _choices = new ComboBox[HybridBindingConfig.Definitions.Length];
+    private readonly CheckBox[] _menuBlocked = new CheckBox[HybridBindingConfig.Definitions.Length];
     private readonly StackPanel _customPanel = new() { Spacing = 10 };
     private readonly List<CustomRow> _customRows = [];
     private readonly TextBlock _status = new() { Foreground = Brushes.Orange, TextWrapping = TextWrapping.Wrap };
@@ -38,7 +39,7 @@ internal sealed class HybridBindingDialog : Window
                 Margin = new Thickness(0, 10, 0, 0)
             });
             var definition = HybridBindingConfig.Definitions[index];
-            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,190") };
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,190,92") };
             var label = new TextBlock { Text = definition.Label, VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(label, 0);
             row.Children.Add(label);
@@ -52,6 +53,18 @@ internal sealed class HybridBindingDialog : Window
             _choices[index] = choice;
             Grid.SetColumn(choice, 1);
             row.Children.Add(choice);
+            if (index >= 6)
+            {
+                var blocked = new CheckBox
+                {
+                    Content = "菜单禁用",
+                    IsChecked = current.MenuBlockedBaseActions.Contains(index),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                _menuBlocked[index] = blocked;
+                Grid.SetColumn(blocked, 2);
+                row.Children.Add(blocked);
+            }
             rows.Children.Add(row);
         }
         rows.Children.Add(new TextBlock
@@ -62,7 +75,7 @@ internal sealed class HybridBindingDialog : Window
         });
         rows.Children.Add(new TextBlock
         {
-            Text = "同一按键可同时触发多个虚拟手柄动作；菜单中禁用动作尚待游戏菜单状态验证。",
+            Text = "同一按键可同时触发多个虚拟手柄动作；菜单禁用适用于键鼠聚焦的跟随角色。",
             TextWrapping = TextWrapping.Wrap
         });
         rows.Children.Add(_customPanel);
@@ -98,12 +111,19 @@ internal sealed class HybridBindingDialog : Window
         var controls = new WrapPanel { ItemSpacing = 8 };
         controls.Children.Add(key);
         controls.Children.Add(target);
+        var blocked = new CheckBox
+        {
+            Content = "菜单禁用",
+            IsChecked = action.BlockDuringMenu,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        controls.Children.Add(blocked);
         var remove = new Button { Content = "删除" };
         controls.Children.Add(remove);
         container.Children.Add(label);
         container.Children.Add(description);
         container.Children.Add(controls);
-        var row = new CustomRow(container, label, description, key, target);
+        var row = new CustomRow(container, label, description, key, target, blocked);
         remove.Click += (_, _) =>
         {
             _customRows.Remove(row);
@@ -120,8 +140,10 @@ internal sealed class HybridBindingDialog : Window
         var custom = _customRows.Select(row => new HybridCustomAction(
             row.Label.Text ?? "", row.Description.Text ?? "",
             AutoPartyKeyBinding.VirtualKey(row.Key.SelectedItem as string ?? "None"),
-            row.Action.SelectedIndex + 6)).ToArray();
-        if (!HybridBindingConfig.TryCreate(keys, custom, out var config) || config is null)
+            row.Action.SelectedIndex + 6, row.BlockDuringMenu.IsChecked == true)).ToArray();
+        var menuBlocked = Enumerable.Range(6, 20)
+            .Where(index => _menuBlocked[index].IsChecked == true).ToArray();
+        if (!HybridBindingConfig.TryCreate(keys, custom, menuBlocked, out var config) || config is null)
         {
             var duplicate = keys.Where(key => key != 0).GroupBy(key => key)
                 .FirstOrDefault(group => group.Count() > 1);

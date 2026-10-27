@@ -20,7 +20,8 @@ internal static class HybridBridgeReadySmoke
 
         if (!HybridBindingConfig.TryCreate(HybridBindingConfig.Definitions
                 .Select(item => item.DefaultKey).ToArray(),
-                [new HybridCustomAction("额外确认", "第二个 A 键", 70, 11)], out var bindings) ||
+                [new HybridCustomAction("额外确认", "第二个 A 键", 70, 11, true)],
+                [11, 19], out var bindings) ||
             bindings is null)
             throw new Exception("An extra Hybrid action could not be configured.");
         var confirmed = ready[..^1] + ",\"hybrid_binding_keys\":\"" + bindings.Encode() + "\"}";
@@ -38,8 +39,18 @@ internal static class HybridBridgeReadySmoke
             if (!store.Save(bindings) || !store.Load().Success ||
                 store.Load().Bindings.Encode() != bindings.Encode() ||
                 store.Load().Bindings.CustomActions.Single().Label != "额外确认" ||
-                store.Load().Bindings.CustomActions.Single().Description != "第二个 A 键")
+                store.Load().Bindings.CustomActions.Single().Description != "第二个 A 键" ||
+                !store.Load().Bindings.CustomActions.Single().BlockDuringMenu ||
+                !store.Load().Bindings.MenuBlockedBaseActions.SequenceEqual([11, 19]))
                 throw new Exception("Hybrid binding preference did not round-trip.");
+            File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(new
+            {
+                keys = string.Join(',', HybridBindingConfig.Definitions.Select(item => item.DefaultKey)),
+                custom = Array.Empty<HybridCustomAction>()
+            }));
+            if (!store.Load().Success ||
+                !store.Load().Bindings.MenuBlockedBaseActions.SequenceEqual([19]))
+                throw new Exception("Older Hybrid binding preferences lost their default menu mask.");
         }
         finally { if (File.Exists(path)) File.Delete(path); }
     }
