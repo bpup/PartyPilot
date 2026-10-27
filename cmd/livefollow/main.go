@@ -139,6 +139,21 @@ func (s *sources) Set(value string) error {
 	return nil
 }
 
+func validateClassicCollisionBindings(enabled bool, roster map[int]int, bindings sources) error {
+	if !enabled {
+		return nil
+	}
+	if len(roster) == 0 || len(bindings) != len(roster) {
+		return errors.New("classic collision dodge needs an explicit terrain binding for every client")
+	}
+	for client := range roster {
+		if strings.TrimSpace(bindings[client]) == "" {
+			return fmt.Errorf("classic collision dodge has no terrain binding for client %d", client)
+		}
+	}
+	return nil
+}
+
 func parseRoster(value string) (map[int]int, error) {
 	roster := make(map[int]int)
 	for _, entry := range strings.Split(value, ",") {
@@ -383,6 +398,8 @@ func main() {
 	logAge := flag.Duration("log-max-age", 0, "maximum area-log signal age")
 	leaderName := flag.String("leader-name", "", "configured character name of the followed leader, for departure detection")
 	lastFocusedLeads := flag.Bool("last-focused-leads", false, "use manually focused player as the current follow MAIN")
+	classicCollisionDodge := flag.Bool("classic-collision-dodge", false,
+		"opt into terrain-backed classic sprint collision recovery")
 	autoFlask := flag.Bool("auto-flask", false, "enable life and mana flask decisions for explicitly bound clients")
 	allowFollowPause := flag.Bool("allow-follow-pause", false, "accept explicit pause/resume controls on stdin")
 	address := flag.String("listen", "127.0.0.1:47617", "loopback sensor address")
@@ -415,6 +432,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
+	if err := validateClassicCollisionBindings(*classicCollisionDodge, roster, terrainBindings); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 	var paths map[int]string
 	if *orderedInput {
 		paths, err = resolveLogPaths(roster, logs, exes, arealog.ValidateClientPaths)
@@ -430,7 +451,8 @@ func main() {
 		os.Exit(2)
 	}
 	config := follow.Config{StopDistance: *stop, ResumeDistance: *stop + 3, CatchUpDistance: *catchup,
-		MaxAge: *maxAge, TargetTrail: true, AsyncTargetPath: true}
+		MaxAge: *maxAge, TargetTrail: true, AsyncTargetPath: true,
+		ClassicCollisionDodge: *classicCollisionDodge}
 	var engine *live.Engine
 	if *orderedInput {
 		engine, err = live.NewWithBindings(bindings, *leader, config, *logAge)

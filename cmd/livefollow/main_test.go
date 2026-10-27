@@ -42,6 +42,27 @@ func TestSourcesAndRoster(t *testing.T) {
 	}
 }
 
+func TestClassicCollisionDodgeRequiresAllBoundTerrain(t *testing.T) {
+	roster := map[int]int{1: 101, 2: 202}
+	if err := validateClassicCollisionBindings(false, roster, nil); err != nil {
+		t.Fatalf("disabled target-default collision mode required terrain: %v", err)
+	}
+	if err := validateClassicCollisionBindings(true, roster, nil); err == nil {
+		t.Fatal("collision mode accepted missing terrain bindings")
+	}
+	if err := validateClassicCollisionBindings(true, roster, sources{1: "first.json"}); err == nil {
+		t.Fatal("collision mode accepted a partially bound party")
+	}
+	if err := validateClassicCollisionBindings(true, roster,
+		sources{1: "first.json", 2: "second.json"}); err != nil {
+		t.Fatalf("complete explicit terrain bindings were rejected: %v", err)
+	}
+	if err := validateClassicCollisionBindings(true, roster,
+		sources{1: "first.json", 3: "third.json"}); err == nil {
+		t.Fatal("collision mode accepted terrain for the wrong client")
+	}
+}
+
 func TestOrderedRoleBindingsUseClientLogs(t *testing.T) {
 	var bindings roleBindings
 	for _, value := range []string{"1:1:1:101", "2:1:2:101", "3:2:1:202", "4:2:2:202"} {
