@@ -31,7 +31,9 @@ internal static class TransitionApproachPlan
                 var command = WaitingCommand(frame, local[0]);
                 var approach = Build(match, topology, nowUtc);
                 if (command is not null && approach is not null)
-                    replacements[command.Player] = command with { Command = approach.Command,
+                    replacements[command.Player] = command with { Command =
+                        ReplayMovement(evidence, match!, local[0], match!.PlayerX,
+                            match.PlayerY) ?? approach.Command,
                         Status = "approaching_transition", Reason = null };
                 continue;
             }
@@ -52,8 +54,10 @@ internal static class TransitionApproachPlan
             var partnerPosition = secondLeads ? pair.First : pair.Second;
             var driverCommand = secondLeads ? secondCommand : firstCommand;
             var partnerCommand = secondLeads ? firstCommand : secondCommand;
-            if (BuildMovement(driverSlot, driverPosition.X, driverPosition.Y,
-                    match.DestinationX, match.DestinationY, 7) is { } movement)
+            if ((ReplayMovement(evidence, match, driverSlot,
+                    driverPosition.X, driverPosition.Y) ??
+                 BuildMovement(driverSlot, driverPosition.X, driverPosition.Y,
+                    match.DestinationX, match.DestinationY, 7)) is { } movement)
                 replacements[driverSlot.PartyPlayer] = driverCommand with { Command = movement,
                     Status = "approaching_transition", Reason = null };
             if (BuildMovement(partnerSlot, partnerPosition.X, partnerPosition.Y,
@@ -170,6 +174,17 @@ internal static class TransitionApproachPlan
     private static double GridDistance(double x, double y, double otherX, double otherY) =>
         Math.Sqrt(Math.Pow(x - otherX, 2) + Math.Pow(y - otherY, 2)) /
         RadarProjection.WorldUnitsPerGridUnit;
+
+    private static string? ReplayMovement(TransitionAnchorEvidence evidence,
+        TransitionAnchorMatch match, PartySlot slot, double x, double y)
+    {
+        if (GridDistance(x, y, match.DestinationX, match.DestinationY) <= 7)
+            return null;
+        if (evidence.ReplayTarget(match, slot.PartyPlayer, x, y) is not { } target)
+            return null;
+        var final = target.X == match.DestinationX && target.Y == match.DestinationY;
+        return BuildMovement(slot, x, y, target.X, target.Y, final ? 7 : 1.5);
+    }
 
     private static string? BuildMovement(PartySlot slot, double fromX, double fromY,
         double toX, double toY, double stopGrid)

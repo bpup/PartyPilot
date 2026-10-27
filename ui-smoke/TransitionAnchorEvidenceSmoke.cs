@@ -90,6 +90,51 @@ internal static class TransitionAnchorEvidenceSmoke
             secondLeads.PadCommands[0].Status != "approaching_transition" ||
             movingSecond.SelectDriver(movingSecond.Match(1, 2, now)!, 3, 1, 4, 100) != 4)
             throw new Exception("Nearer P4 did not lead while P3 followed the driver.");
+        var breadcrumb = new TransitionAnchorEvidence();
+        var routeAnchor = entrance with { X = 110, Y = 100 };
+        breadcrumb.Observe(1, Frame(101, now.AddMilliseconds(-800), 41,
+            0, 0, routeAnchor));
+        breadcrumb.Observe(1, Frame(101, now.AddMilliseconds(-700), 41,
+            0, 100, routeAnchor));
+        breadcrumb.Observe(1, Frame(101, now.AddMilliseconds(-600), 41,
+            105, 100, routeAnchor));
+        breadcrumb.Observe(2, Frame(202, now.AddMilliseconds(-300), 42,
+            290, 0, routeAnchor with { X = 400, Y = 100 }));
+        breadcrumb.Observe(1, Frame(101, now.AddMilliseconds(-100), 43,
+            300, 300));
+        var route = breadcrumb.Match(1, 2, now);
+        if (route?.Approach is not { Count: >= 3 } ||
+            breadcrumb.ReplayTarget(route, 3, 290, 0) is not { } next ||
+            next.X >= 350 || next.Y < 90)
+            throw new Exception("Leader approach did not retain its turn near the entrance.");
+        var breadcrumbFrame = live with
+        {
+            Positions =
+            [
+                live.Positions[0] with { X = 290, Y = 0 },
+                live.Positions[1] with { X = 280, Y = 0 }
+            ]
+        };
+        var replayed = TransitionApproachPlan.Apply(breadcrumbFrame, topology,
+            breadcrumb, true, false, now);
+        using (var replayCommand = System.Text.Json.JsonDocument.Parse(
+            replayed.PadCommands[0].Command))
+        {
+            if (replayed.PadCommands[0].Status != "approaching_transition" ||
+                replayCommand.RootElement.GetProperty("x").GetDouble() >= 0)
+                throw new Exception("Destination driver ignored the saved entrance turn.");
+        }
+        var discontinuous = new TransitionAnchorEvidence();
+        discontinuous.Observe(1, Frame(101, now.AddMilliseconds(-800), 41,
+            -500, 0, routeAnchor));
+        discontinuous.Observe(1, Frame(101, now.AddMilliseconds(-400), 41,
+            105, 100, routeAnchor));
+        discontinuous.Observe(2, Frame(202, now.AddMilliseconds(-300), 42,
+            290, 0, routeAnchor with { X = 400, Y = 100 }));
+        discontinuous.Observe(1, Frame(101, now.AddMilliseconds(-100), 43,
+            300, 300));
+        if (discontinuous.Match(1, 2, now)?.Approach is { Count: > 0 })
+            throw new Exception("A position jump was reused as a walkable breadcrumb.");
         if (evidence.Match(handoff, topology, now.AddSeconds(13)) is not null)
             throw new Exception("Expired transition remained eligible.");
         evidence.Observe(2, Frame(202, now, 42, 200, 200,
