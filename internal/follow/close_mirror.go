@@ -22,8 +22,8 @@ type CloseMirrorInput struct {
 
 // CloseMirror mirrors a short burst of the main controller's left stick while
 // Smart Follow is holding, then asks Smart Follow to continue on its own.
-// This mirrors the supplied 0.6.17 controller's state transitions; connecting
-// a trusted physical-input stream and the continuation path is a separate gate.
+// This mirrors the supplied 0.6.17 controller's state transitions; the live
+// caller supplies the trusted input stream and continuation decision.
 type CloseMirror struct {
 	leftWasActive          bool
 	active                 bool

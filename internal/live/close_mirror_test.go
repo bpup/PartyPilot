@@ -69,3 +69,48 @@ func TestLiveCloseMirrorRequiresFreshMainInputAndReleasesOnPause(t *testing.T) {
 		t.Fatalf("resume reused old controller input: %+v", got)
 	}
 }
+
+func TestLiveCloseMirrorHandsOffOnExpiryInSameFrame(t *testing.T) {
+	at := time.Unix(2200, 0).UTC()
+	engine, err := New(map[int]int{1: 101, 2: 202}, 1,
+		follow.Config{StopDistance: 10, ResumeDistance: 13, CatchUpDistance: 90,
+			MaxAge: time.Second, TargetTrail: true}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	for _, slot := range []int{1, 2} {
+		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
+			ObservedAt: at, Origin: "live"})
+	}
+	for _, sample := range []telemetry.Sample{
+		{ProcessID: 101, SeenUTC: at.Add(time.Millisecond), X: 9},
+		{ProcessID: 202, SeenUTC: at.Add(time.Millisecond)},
+	} {
+		if !observeGridSample(engine, sample) {
+			t.Fatal("initial position rejected")
+		}
+	}
+	start := at.Add(time.Millisecond)
+	engine.SetAcceptMainInput(true)
+	engine.SetCloseRangeMirror(true, 400*time.Millisecond)
+	engine.ObserveMainInput(MainInput{Slot: 1, LeftX: 1, ObservedAt: start}, start)
+	if got := engine.Step(start)[2]; !got.MirrorMovement {
+		t.Fatalf("mirror burst did not start: %+v", got)
+	}
+	moved := start.Add(350 * time.Millisecond)
+	if !observeGridSample(engine, telemetry.Sample{ProcessID: 101, SeenUTC: moved, X: 10}) ||
+		!observeGridSample(engine, telemetry.Sample{ProcessID: 202, SeenUTC: moved}) {
+		t.Fatal("moving frame rejected")
+	}
+	engine.ObserveMainInput(MainInput{Slot: 1, LeftX: 1, ObservedAt: moved}, moved)
+	if got := engine.Step(moved)[2]; !got.MirrorMovement {
+		t.Fatalf("burst ended before configured duration: %+v", got)
+	}
+	expired := start.Add(400 * time.Millisecond)
+	engine.ObserveMainInput(MainInput{Slot: 1, LeftX: 1, ObservedAt: expired}, expired)
+	if got := engine.Step(expired)[2]; got.State != follow.Following || got.MirrorMovement ||
+		got.X <= 0 || got.Y <= 0 {
+		t.Fatalf("mirror expiry did not transfer movement in the same frame: %+v", got)
+	}
+}

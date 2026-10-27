@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"partypilot/internal/follow"
+	"partypilot/internal/navigation"
 )
 
 // SetCloseRangeMirror enables the supplied build's optional two-player stick
@@ -29,7 +30,7 @@ func (e *Engine) resetCloseMirrors() {
 }
 
 func (e *Engine) applyCloseMirror(slot int, command follow.Command, now time.Time,
-	positions map[int]follow.Position) follow.Command {
+	positions map[int]follow.Position, terrains map[int]*navigation.Grid) follow.Command {
 	if !e.closeMirrorEnabled || len(e.slots) != 2 ||
 		e.coordinator.ResolvedTargets()[slot] != e.leader ||
 		command.State == follow.Waiting || command.Reason == "manual control" {
@@ -51,7 +52,8 @@ func (e *Engine) applyCloseMirror(slot int, command follow.Command, now time.Tim
 		mirror = &follow.CloseMirror{}
 		e.closeMirrors[slot] = mirror
 	}
-	return mirror.Apply(follow.CloseMirrorInput{
+	originalState := command.State
+	command = mirror.Apply(follow.CloseMirrorInput{
 		Follow: command, LeftX: input.LeftX, LeftY: input.LeftY,
 		Enabled: true, Blocked: input.Blocked,
 		Duration: e.closeMirrorDuration, Now: now,
@@ -61,4 +63,15 @@ func (e *Engine) applyCloseMirror(slot int, command follow.Command, now time.Tim
 			command.Reason == "Teleport terrain path" ||
 			command.Reason == "Teleport obstacle recovery",
 	})
+	if mirror.ContinuousFollow && originalState == follow.Holding && !input.Blocked {
+		continued := e.coordinator.ContinueCloseFollow(slot, now, positions, terrains[slot])
+		if continued.State == follow.Following || continued.State == follow.CatchingUp {
+			continued.X, continued.Y = isometricStick(continued.X, continued.Y)
+		}
+		if continued.State != follow.Waiting {
+			continued.ManualOverrideEligible = command.ManualOverrideEligible
+		}
+		return continued
+	}
+	return command
 }

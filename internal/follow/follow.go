@@ -75,6 +75,7 @@ func (e *Engine) Reset() {
 	e.terrainSeen = false
 	e.initialHeading = point{}
 	e.lastLeaderSampleAt = time.Time{}
+	e.lastLeaderMotionAt = time.Time{}
 	e.leaderSpeedAverage = 0
 	e.holdingTarget = false
 	e.heldTarget = point{}
@@ -108,6 +109,7 @@ type Engine struct {
 	terrainSeen           bool
 	initialHeading        point
 	lastLeaderSampleAt    time.Time
+	lastLeaderMotionAt    time.Time
 	leaderSpeedAverage    float64
 	holdingTarget         bool
 	heldTarget            point
@@ -165,6 +167,14 @@ func (e *Engine) Step(now time.Time, leader, follower Position) Command {
 }
 
 func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terrain *navigation.Grid) Command {
+	return e.StepWithTerrainCloseFollow(now, leader, follower, terrain, false)
+}
+
+// StepWithTerrainCloseFollow re-evaluates a holding follower after the close
+// mirror burst ends. The stop bubble can be crossed only behind a recently
+// moving leader; normal callers always pass false.
+func (e *Engine) StepWithTerrainCloseFollow(now time.Time, leader, follower Position,
+	terrain *navigation.Grid, continuousCloseFollow bool) Command {
 	wait := func(reason string) Command {
 		blocked := e.trailBlocked
 		terrainSeen := e.terrainSeen
@@ -214,8 +224,11 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 			return Command{State: Waiting, Reason: reason}
 		}
 	}
+	continuousActive := continuousCloseFollow && !jump && distance > 5 &&
+		!e.lastLeaderMotionAt.IsZero() && now.Sub(e.lastLeaderMotionAt) >= 0 &&
+		now.Sub(e.lastLeaderMotionAt) < 250*time.Millisecond
 	if e.config.TargetTrail {
-		if e.config.StopDistance <= 0 {
+		if e.config.StopDistance <= 0 || continuousActive {
 			e.stopBubbleHolding = false
 		} else if distance <= e.config.StopDistance {
 			e.stopBubbleHolding = true
@@ -224,7 +237,7 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 		}
 	}
 	if e.config.TargetTrail && e.stopBubbleHolding ||
-		!e.config.TargetTrail && (distance <= e.config.StopDistance ||
+		!e.config.TargetTrail && !continuousActive && (distance <= e.config.StopDistance ||
 			(!e.moving && distance < e.config.ResumeDistance)) {
 		e.moving = false
 		e.catchingUp = false
@@ -271,11 +284,39 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 	if e.config.TargetTrail {
 		target := e.trailingTarget(e.config.StopDistance)
 		targetX, targetY = target.x, target.y
+		if continuousActive {
+			e.holdingTarget = false
+			if math.Hypot(targetX-follower.X, targetY-follower.Y) <= 2.5 ||
+				(targetX-follower.X)*dx+(targetY-follower.Y)*dy <= 0 {
+				budget := math.Min(4, distance-5)
+				nearest := 0
+				nearestDistance := math.Inf(1)
+				for index, candidate := range e.trail {
+					candidateDistance := math.Hypot(candidate.x-follower.X, candidate.y-follower.Y)
+					if candidateDistance < nearestDistance {
+						nearest, nearestDistance = index, candidateDistance
+					}
+				}
+				for _, candidate := range e.trail[nearest:] {
+					cx, cy := candidate.x-follower.X, candidate.y-follower.Y
+					length := math.Hypot(cx, cy)
+					if budget > 0.25 && length > 2.5 && cx*dx+cy*dy > 0 {
+						targetX = follower.X + cx/length*math.Min(budget, length)
+						targetY = follower.Y + cy/length*math.Min(budget, length)
+						break
+					}
+				}
+			}
+		}
 		if e.holdingTarget && math.Hypot(targetX-e.heldTarget.x, targetY-e.heldTarget.y) >= 1.5 {
 			e.holdingTarget = false
 		}
+		threshold := 2.5
+		if continuousActive {
+			threshold = 0.25
+		}
 		if !e.holdingTarget &&
-			(math.Hypot(targetX-follower.X, targetY-follower.Y) <= 2.5 || distance <= 3.75) {
+			(math.Hypot(targetX-follower.X, targetY-follower.Y) <= threshold || distance <= 3.75) {
 			e.holdingTarget = true
 			e.heldTarget = target
 		}
@@ -449,6 +490,9 @@ func (e *Engine) updateTargetTrail(leader, follower Position) bool {
 	jump := false
 	if len(e.trail) > 0 && e.trailArea == leader.Area {
 		delta := math.Hypot(current.x-e.lastLeader.x, current.y-e.lastLeader.y)
+		if delta*delta > 0.01 && leader.Seen.After(e.lastLeaderSampleAt) {
+			e.lastLeaderMotionAt = leader.Seen
+		}
 		seconds := math.Max(0.001, leader.Seen.Sub(e.lastLeaderSampleAt).Seconds())
 		speed := delta / seconds
 		jump = delta >= 40 || (delta >= 12 &&

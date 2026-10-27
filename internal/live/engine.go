@@ -484,7 +484,7 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 		if life := lives[slot]; life != nil && *life > 0 && command.State != follow.Waiting {
 			command.ManualOverrideEligible = true
 		}
-		command = e.applyCloseMirror(slot, command, now, positions)
+		command = e.applyCloseMirror(slot, command, now, positions, terrains)
 		commands[slot] = command
 	}
 	return commands

@@ -161,6 +161,18 @@ func (c *Coordinator) StepWithTerrainsAndHolds(now time.Time, positions map[int]
 	return c.stepWithTerrainForSlot(now, positions, func(slot int) *navigation.Grid { return terrains[slot] }, holds)
 }
 
+// ContinueCloseFollow reevaluates one follower in the same frame after a
+// close-range mirror burst asks Smart Follow to take over.
+func (c *Coordinator) ContinueCloseFollow(slot int, now time.Time,
+	positions map[int]follow.Position, terrain *navigation.Grid) follow.Command {
+	engine := c.followers[slot]
+	target := c.ResolvedTargets()[slot]
+	if engine == nil || target == slot || target == 0 || slot == c.router.Focused().Slot {
+		return follow.Command{State: follow.Waiting, Reason: "close follow unavailable"}
+	}
+	return engine.StepWithTerrainCloseFollow(now, positions[target], positions[slot], terrain, true)
+}
+
 func (c *Coordinator) stepWithTerrainForSlot(now time.Time, positions map[int]follow.Position,
 	terrainFor func(int) *navigation.Grid, holds map[int]string) map[int]follow.Command {
 	activeLeader := c.leader
