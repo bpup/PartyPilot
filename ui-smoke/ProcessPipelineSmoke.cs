@@ -45,6 +45,26 @@ internal static class ProcessPipelineSmoke
             throw new Exception("Three-client live follow accepted an unknown role.");
         }
         catch (InvalidDataException) { }
+        var fourTopology = PartyTopologies.ForPlayerCount(4).Single(item => item.Id == "4-balanced");
+        var fourFrame = LiveFollowFrame.ParseDynamic(
+            "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0}," +
+            "\"3\":{\"state\":\"following\",\"x\":0,\"y\":1},\"4\":{\"state\":\"waiting\"}}}", fourTopology);
+        var fourSwitched = LiveFollowFrame.ParseDynamic(
+            "{\"focused\":4,\"commands\":{\"1\":{\"state\":\"waiting\"}," +
+            "\"2\":{\"state\":\"waiting\"},\"3\":{\"state\":\"waiting\"}}}", fourTopology);
+        if (!fourFrame.PadCommands.Select(command => command.Pad).SequenceEqual([2, 3, 4]) ||
+            fourFrame.PadCommands[0].Status != "catching_up" ||
+            !fourFrame.PadCommands[1].Command.Contains("\"slot\":3", StringComparison.Ordinal) ||
+            !fourSwitched.PadCommands.Select(command => command.Pad).SequenceEqual([1, 2, 3]))
+            throw new Exception("Four-player follow frames lost a local role or pad mapping.");
+        try
+        {
+            LiveFollowFrame.ParseDynamic(
+                "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}," +
+                "\"3\":{\"state\":\"waiting\"}}}", fourTopology);
+            throw new Exception("Four-player follow accepted a missing P4 command.");
+        }
+        catch (InvalidDataException) { }
         var six = PartyTopologies.ForPlayerCount(6).Single(item => item.Id == "6-balanced");
         var sixFrame = LiveFollowFrame.ParseDynamic(
             "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0,\"sprint_down\":true}," +

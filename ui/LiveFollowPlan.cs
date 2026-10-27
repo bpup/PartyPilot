@@ -270,7 +270,7 @@ public static class LiveFollowFrame
     public static FollowBridgeFrame ParseDynamic(string json, PartyTopology topology,
         int customRuleCount = 0)
     {
-        if (topology.Id is not ("2-split" or "3-three-singles" or "6-balanced"))
+        if (topology.Id is not ("2-split" or "3-three-singles" or "4-balanced" or "6-balanced"))
             throw new ArgumentException("Dynamic live follow requires a supported role-to-pad layout.");
         using var document = JsonDocument.Parse(json);
         if (document.RootElement.ValueKind != JsonValueKind.Object ||
