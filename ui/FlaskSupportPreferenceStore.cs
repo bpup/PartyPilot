@@ -117,6 +117,14 @@ internal sealed class FlaskSupportPreferenceStore
                 !double.IsFinite(monitor.TriggerPercent) || monitor.TriggerPercent is < 1 or > 99)
                 return false;
         }
+        foreach (var drinker in bindings.GroupBy(binding => binding.DrinkerPlayer))
+        {
+            var first = drinker.First();
+            if (drinker.Any(binding => binding.SupportBuild != first.SupportBuild ||
+                binding.BuildHasNoMana != first.BuildHasNoMana ||
+                binding.SustainedUse != first.SustainedUse))
+                return false;
+        }
         return true;
     }
 
@@ -129,7 +137,8 @@ internal sealed class FlaskSupportPreferenceStore
 
     private static FlaskSupportPreferenceResult Result(FlaskSupportBinding[] bindings, string path,
         string message) => new(true, bindings,
-        bindings.Any(binding => binding.SupportBuild && binding.Monitor.Enabled) ? path : null, message);
+        bindings.Any(binding => binding.SupportBuild || binding.BuildHasNoMana ||
+            binding.SustainedUse || binding.Monitor.Enabled) ? path : null, message);
 
     private static FlaskSupportPreferenceResult Invalid() =>
         new(false, [], null, "共享药剂设置无效；请重新选择并保存后再开始跟随。");

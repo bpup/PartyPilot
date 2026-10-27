@@ -22,7 +22,12 @@ internal static class FlaskSupportPreferenceSmoke
             if (store.Save(2, [binding, binding]).Success ||
                 store.Save(2, [binding with { Monitor = binding.Monitor with { TargetPlayer = 3 } }]).Success)
                 throw new Exception("Duplicate or unbound Drinker targets were accepted.");
-            File.WriteAllText(saved.RuntimeFile,
+            var noManaOnly = FlaskSupportPreferenceStore.Default(2, 1) with { BuildHasNoMana = true };
+            if (store.Save(2, [noManaOnly]).RuntimeFile is null ||
+                store.Load(2).RuntimeFile is null)
+                throw new Exception("No-mana Drinker setting did not reach the live process file.");
+            saved = store.Save(2, [binding]);
+            File.WriteAllText(saved.RuntimeFile!,
                 "{\"bindings\":[{\"drinker_player\":2,\"support_build\":true," +
                 "\"monitor\":{\"enabled\":true,\"target_player\":1}}]}");
             if (store.Load(2).Success)

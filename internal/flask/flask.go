@@ -150,6 +150,7 @@ func (engine *Engine) Step(player int, now time.Time, vitals Vitals, rules Setti
 	state.lastWard = copyNumber(vitals.Ward.Current)
 	lifePool := vitals.Life
 	lifeRule := rules.Life
+	lifeRule.Sustained = lifeRule.Sustained || rules.SustainedUse
 	if rules.ChaosInoculation && vitals.Life.Maximum != nil && *vitals.Life.Maximum <= 1 &&
 		vitals.EnergyShield.Maximum != nil && *vitals.EnergyShield.Maximum > 0 {
 		lifePool = vitals.EnergyShield
@@ -169,7 +170,10 @@ func (engine *Engine) Step(player int, now time.Time, vitals Vitals, rules Setti
 			vitals.Ward.Current != nil && *vitals.Ward.Current > 0), false); result != nil {
 		activations = append(activations, *result)
 	}
-	if result := evaluate("mana", player, now, vitals.Mana, rules.Mana, &state.mana, false, false); result != nil {
+	manaRule := rules.Mana
+	manaRule.Enabled = manaRule.Enabled && !rules.BuildHasNoMana
+	manaRule.Sustained = manaRule.Sustained || rules.SustainedUse
+	if result := evaluate("mana", player, now, vitals.Mana, manaRule, &state.mana, false, false); result != nil {
 		activations = append(activations, *result)
 	}
 	return state.withoutEmptyFlasks(now, vitals, activations), nil

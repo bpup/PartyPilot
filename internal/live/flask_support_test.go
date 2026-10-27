@@ -76,3 +76,36 @@ func TestLiveDrinkerSupportNeedsBothBoundActorsInSameArea(t *testing.T) {
 		t.Fatalf("different area instance caused support: %+v", got)
 	}
 }
+
+func TestLiveDrinkerOptionsMustAgreeAcrossTargets(t *testing.T) {
+	liveEngine, err := New(map[int]int{1: 101, 2: 202, 3: 303}, 1,
+		follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10,
+			MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer liveEngine.Close()
+	session, err := NewFlaskSession(liveEngine, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := FlaskSupportBinding{DrinkerPlayer: 2, SupportBuild: true,
+		Monitor: flask.SupportMonitor{TargetPlayer: 1, MonitorResource: "Life",
+			TriggerPercent: 50, FlaskResource: "Life"}}
+	second := first
+	second.Monitor.TargetPlayer = 3
+	second.BuildHasNoMana = true
+	if err := session.ConfigureSupport([]FlaskSupportBinding{first, second}); err == nil ||
+		err.Error() != "inconsistent drinker flask settings" {
+		t.Fatalf("inconsistent drinker settings: %v", err)
+	}
+	first.BuildHasNoMana, second.BuildHasNoMana = true, true
+	first.SustainedUse, second.SustainedUse = true, true
+	if err := session.ConfigureSupport([]FlaskSupportBinding{first, second}); err != nil {
+		t.Fatal(err)
+	}
+	rules, err := session.rulesFor(2)
+	if err != nil || !rules.BuildHasNoMana || !rules.SustainedUse || !rules.SupportBuild {
+		t.Fatalf("drinker options did not reach own rules: %+v %v", rules, err)
+	}
+}

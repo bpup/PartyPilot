@@ -75,6 +75,25 @@ func TestSustainedCooldownAndMissingVitals(t *testing.T) {
 	}
 }
 
+func TestDrinkerGlobalOptionsAlsoControlOwnFlasks(t *testing.T) {
+	rules, err := ResetProfiles(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules.BuildHasNoMana = true
+	rules.SustainedUse = true
+	engine := New()
+	start := time.Unix(200, 0)
+	first, err := engine.Step(1, start, vitals(50, 20), rules, false, false)
+	if err != nil || len(first) != 1 || first[0].Resource != "life" {
+		t.Fatalf("no-mana drinker emitted mana or missed life: %+v %v", first, err)
+	}
+	again, err := engine.Step(1, start.Add(200*time.Millisecond), vitals(50, 20), rules, false, false)
+	if err != nil || len(again) != 1 || again[0].Resource != "life" || again[0].Reason != "sustained" {
+		t.Fatalf("drinker did not sustain its own life flask: %+v %v", again, err)
+	}
+}
+
 func TestCompanionMinimumDeficitAndSeparatePlayerState(t *testing.T) {
 	rules, _ := ResetProfiles(2)
 	rules.Mana.Enabled = false
