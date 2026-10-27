@@ -119,6 +119,9 @@ internal static class PackedTerrainCapture
             byte[]? last = null;
             long lastAddress = 0;
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            var sampleStride = Math.Max(1, (int)(length / 16_384));
+            var sampledBytes = 0;
+            var inRangeNibbles = 0;
             using (var output = new FileStream(temporary, FileMode.CreateNew,
                 FileAccess.Write, FileShare.None))
             {
@@ -133,9 +136,20 @@ internal static class PackedTerrainCapture
                     lastAddress = source.Start + offset;
                     output.Write(bytes);
                     hash.AppendData(bytes);
+                    var firstSample = ((offset + sampleStride - 1) / sampleStride) * sampleStride;
+                    for (var sampleOffset = firstSample; sampleOffset < offset + size;
+                        sampleOffset += sampleStride)
+                    {
+                        var value = bytes[(int)(sampleOffset - offset)];
+                        sampledBytes++;
+                        if ((value & 15) <= 5) inRangeNibbles++;
+                        if ((value >> 4) <= 5) inRangeNibbles++;
+                    }
                 }
                 output.Flush(flushToDisk: true);
             }
+            if (sampledBytes == 0 || inRangeNibbles * 5 < sampledBytes * 8)
+                return new Outcome("out_of_range_nibbles");
             if (first == null || last == null ||
                 !Matches(read(source.Start, first.Length), first) ||
                 !Matches(read(lastAddress, last.Length), last))

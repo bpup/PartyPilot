@@ -66,8 +66,15 @@ internal static class PackedTerrainProbe
         if (area < 0x10000 || area >= 0x7FFF_FFFF_FFFF ||
             !float.IsFinite(gridX) || !float.IsFinite(gridY) ||
             gridX < 0 || gridY < 0) return new Result("missing_anchor_or_grid", null);
-        var header = read(area, HeaderBytes);
-        if (header is not { Length: HeaderBytes }) return new Result("header_unreadable", null);
+        byte[]? header = null;
+        for (var size = HeaderBytes; size >= 1024; size /= 2)
+        {
+            var candidateHeader = read(area, size);
+            if (candidateHeader is not { Length: >= 1024 and <= HeaderBytes }) continue;
+            header = candidateHeader;
+            break;
+        }
+        if (header is null) return new Result("header_unreadable", null);
         Candidate? selected = null;
         var ambiguous = false;
         for (var offset = 0; offset + 184 + 144 + 4 <= header.Length; offset += 8)
@@ -91,8 +98,8 @@ internal static class PackedTerrainProbe
                     Math.Abs(width - tilesX * TileCells) > TileCells ||
                     Math.Abs(height - tilesY * TileCells) > TileCells ||
                     gridX >= width || gridY >= height) continue;
-                var sample = read(start, Math.Min(4096, (int)length));
-                if (sample == null || sample.Length != Math.Min(4096, (int)length)) continue;
+                var sample = read(start, Math.Min(16 * 1024, (int)length));
+                if (sample == null || sample.Length != Math.Min(16 * 1024, (int)length)) continue;
                 var inRange = 0;
                 foreach (var value in sample)
                 {

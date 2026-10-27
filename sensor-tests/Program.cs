@@ -431,12 +431,32 @@ void TestPackedTerrainProbe()
     Require(result.Status == "candidate_patch_observed" && result.Candidate is { } candidate &&
         candidate.Width == 92 && candidate.Height == 92 && candidate.BytesPerRow == 46 &&
         candidate.PatchX == 6 && candidate.PatchY == 16 &&
-        candidate.PatchRows[4] == "111101111" && candidate.SampledNibbles == 8192,
+        candidate.PatchRows[4] == "111101111" && candidate.SampledNibbles == packed.Length * 2,
         "Packed terrain candidate dimensions, nibble order or local patch changed.");
     Require(PackedTerrainProbe.Scan(area, 100, 20, Read).Status == "no_candidate" &&
         PackedTerrainProbe.Scan(0, 10, 20, Read).Status == "missing_anchor_or_grid" &&
         PackedTerrainProbe.Scan(area, float.NaN, 20, Read).Status == "missing_anchor_or_grid",
         "Invalid packed terrain candidate was accepted.");
+    var largeHeader = (byte[])header.Clone();
+    const long largeStart = 0x400000;
+    var largePacked = Enumerable.Repeat((byte)0xFF, 92 * 184).ToArray();
+    Array.Fill(largePacked, (byte)0x11, 0, 4096);
+    BitConverter.GetBytes(8L).CopyTo(largeHeader, tuple);
+    BitConverter.GetBytes(8L).CopyTo(largeHeader, tuple + 8);
+    BitConverter.GetBytes(largeStart).CopyTo(largeHeader, tuple + 184);
+    BitConverter.GetBytes(largeStart + largePacked.Length).CopyTo(largeHeader, tuple + 192);
+    BitConverter.GetBytes(92).CopyTo(largeHeader, tuple + 184 + 24);
+    byte[]? ReadLarge(long address, int size) =>
+        address == area && size == largeHeader.Length ? largeHeader :
+        address >= largeStart && address + size <= largeStart + largePacked.Length
+            ? largePacked.AsSpan((int)(address - largeStart), size).ToArray() : null;
+    Require(PackedTerrainProbe.Scan(area, 10, 20, ReadLarge).Status == "no_candidate",
+        "A valid 4 KiB prefix hid invalid values in the target's 16 KiB sample.");
+    byte[]? ReadShortHeader(long address, int size) =>
+        address == area ? size <= 1024 ? header.AsSpan(0, 1024).ToArray() : null :
+        Read(address, size);
+    Require(PackedTerrainProbe.Scan(area, 10, 20, ReadShortHeader).Status ==
+        "candidate_patch_observed", "A readable 1 KiB area header was rejected.");
     var anchored = PackedTerrainProbe.ScanAnchors([
         new("state_pointer_static_656", 0),
         new("ingame_data_address", area)
@@ -540,6 +560,21 @@ void TestPackedTerrainProbe()
         Require(mismatch.Status == "patch_mismatch" &&
             Directory.GetFiles(captureDirectory, "*.packed").Length == 1,
             "A full-map export inconsistent with the observed patch was retained.");
+        var invalidPacked = Enumerable.Repeat((byte)0xFF, packed.Length).ToArray();
+        for (var y = anchored.Candidate.PatchY;
+            y < anchored.Candidate.PatchY + anchored.Candidate.PatchRows.Length; y++)
+            Array.Copy(packed, y * bytesPerRow + anchored.Candidate.PatchX / 2,
+                invalidPacked, y * bytesPerRow + anchored.Candidate.PatchX / 2, 5);
+        byte[]? ReadInvalid(long address, int size) =>
+            address >= packedStart && address + size <= packedStart + invalidPacked.Length
+                ? invalidPacked.AsSpan((int)(address - packedStart), size).ToArray()
+                : Read(address, size);
+        var outOfRange = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate,
+            capturePosition, 108.69565f, 217.3913f, ReadInvalid, () => true, captureDirectory,
+            123, "test-area", anchored.Candidate.AreaAddress, anchored.Candidate.Anchor, DateTime.UtcNow);
+        Require(outOfRange.Status == "out_of_range_nibbles" &&
+            Directory.GetFiles(captureDirectory, "*.packed").Length == 1,
+            "A full-map export with invalid terrain values was retained.");
         var areaChecks = 0;
         var areaChanged = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate,
             capturePosition, 108.69565f, 217.3913f, Read,
