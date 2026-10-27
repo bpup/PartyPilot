@@ -43,6 +43,9 @@ Require(two.VectorHeaderAddress == "0x1005C8" &&
     LocalSlotCandidateScanner.Revalidate(two, local, paths, Read,
         ingameStateAddress: state),
     "The selected vector header was not revalidated.");
+Require(!LocalSlotCandidateScanner.Revalidate(two, 0x700000, paths, Read,
+        ingameStateAddress: state),
+    "The selected vector remained valid after the observed local player changed.");
 memory[state + 656] = BitConverter.GetBytes(0x900000L);
 Require(!LocalSlotCandidateScanner.Revalidate(two, local, paths, Read,
         ingameStateAddress: state),

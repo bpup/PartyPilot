@@ -124,8 +124,10 @@ public static class LocalSlotCandidateScanner
                 System.Globalization.CultureInfo.InvariantCulture, out var headerAddress) ||
             !Plausible(headerAddress) ||
             !TryReadOrder(headerAddress, observedLocalAddress, visiblePaths, read,
-                readMissingPath, out var ordered, out _, out _, out _)) return false;
-        return ordered.Select(value => $"0x{value:X}").SequenceEqual(candidate.OrderedAddresses);
+                readMissingPath, out var ordered, out _, out _, out var containsObservedLocal))
+            return false;
+        return containsObservedLocal == candidate.ContainsObservedLocal &&
+            ordered.Select(value => $"0x{value:X}").SequenceEqual(candidate.OrderedAddresses);
     }
 
     private static IEnumerable<int> SearchDeltas()
