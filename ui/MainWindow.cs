@@ -58,6 +58,11 @@ public sealed class MainWindow : Window
     private readonly TextBlock _inviteStatus = new();
     private readonly Button _runAutoParty = new();
     private readonly Button _stopAutoParty = new();
+    private readonly ComboBox _autoPartyKey = new();
+    private readonly Button _saveAutoPartyKey = new();
+    private readonly TextBlock _autoPartyKeyStatus = new();
+    private readonly AutoPartyKeyPreferenceStore _autoPartyKeyPreferences = new();
+    private string _autoPartyKeyValue = "F8";
     private readonly Button _watchPartyLog = new();
     private readonly TextBlock _autoPartyStatus = new();
     private readonly TextBlock _status = new();
@@ -147,6 +152,7 @@ public sealed class MainWindow : Window
     private PartyLeaveLogMonitor? _partyLogMonitor;
     private bool _autoPartyRunning;
     private AutoPartyKeyboardHook? _autoPartyHotkey;
+    private bool _restoringAutoPartyKey;
     private bool _closing;
     private string _loginStatus = "waiting";
     private bool _busy;
@@ -194,6 +200,13 @@ public sealed class MainWindow : Window
 
         shell.Children.Add(new ScrollViewer { Content = content });
         Content = shell;
+        var keyPreference = _autoPartyKeyPreferences.Load();
+        _autoPartyKeyValue = keyPreference.Success ? keyPreference.Key : "None";
+        _autoPartyKey.SelectedItem = _autoPartyKeyValue;
+        _autoPartyKeyStatus.Text = keyPreference.Success
+            ? $"自动组队快捷键：{_autoPartyKeyValue}；仅在已绑定游戏窗口前台生效。"
+            : "快捷键设置文件无效或无法读取；请选择按键重新保存。";
+        _autoPartyKey.SelectionChanged += (_, _) => SaveAutoPartyKeySelection();
         _playerCount.SelectionChanged += (_, _) => UpdateTopologyOptions();
         _topologyVariant.SelectionChanged += (_, _) => UpdateClientRows();
         _applyLayout.IsCheckedChanged += (_, _) => UpdateLayoutControls();
@@ -211,8 +224,9 @@ public sealed class MainWindow : Window
                     if (_autoPartyRunning) _autoPartyCancellation?.Cancel();
                     else if (_runAutoParty.IsEnabled) _ = RunAutoPartyAsync();
                 }));
+            _autoPartyHotkey.SetKey(AutoPartyKeyBinding.VirtualKey(_autoPartyKeyValue));
             if (!_autoPartyHotkey.Start())
-                _autoPartyStatus.Text = "F8 快捷键未能启用；仍可使用自动组队按钮。";
+                _autoPartyKeyStatus.Text = "快捷键监听未能启用；仍可使用自动组队按钮。";
         };
         Closed += async (_, _) =>
         {
@@ -567,7 +581,18 @@ public sealed class MainWindow : Window
 
     private Border BuildAutoPartyStep()
     {
-        var panel = Step("3A", "AUTO PARTY · 组队邀请", "按角色填写游戏中的准确名称。游戏窗口前台时按 F8 可运行或取消自动组队。自动恢复向其他客户端发出全新邀请，按目标版菜单顺序接受，并检查 Current Party 画面候选人数。Windows 游戏内效果待验证。");
+        var panel = Step("3A", "AUTO PARTY · 组队邀请", "按角色填写游戏中的准确名称。已绑定游戏窗口前台时按所选快捷键可运行或取消自动组队。自动恢复向其他客户端发出全新邀请，按目标版菜单顺序接受，并检查 Current Party 画面候选人数。Windows 游戏内效果待验证。");
+        panel.Children.Add(Label("自动组队快捷键（目标版默认 F8；None 关闭）", 12, MutedBrush));
+        _autoPartyKey.ItemsSource = AutoPartyKeyBinding.Options;
+        _autoPartyKey.Width = 190;
+        _autoPartyKey.HorizontalAlignment = HorizontalAlignment.Left;
+        panel.Children.Add(_autoPartyKey);
+        _saveAutoPartyKey.Content = "保存快捷键";
+        _saveAutoPartyKey.Click += (_, _) => SaveAutoPartyKeySelection(force: true);
+        panel.Children.Add(_saveAutoPartyKey);
+        _autoPartyKeyStatus.Foreground = MutedBrush;
+        _autoPartyKeyStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_autoPartyKeyStatus);
         for (var player = 1; player <= 6; player++)
         {
             var row = new StackPanel { Spacing = 4 };
@@ -1486,6 +1511,28 @@ public sealed class MainWindow : Window
     {
         _probeRoster.IsEnabled = OperatingSystem.IsWindows() && !_busy && !_rosterBusy &&
             _selectedTopology is not null && _launchedClients.Count == _selectedTopology.ClientCount;
+    }
+
+    private void SaveAutoPartyKeySelection(bool force = false)
+    {
+        if (_restoringAutoPartyKey || _autoPartyKey.SelectedItem is not string selected ||
+            selected == _autoPartyKeyValue && !force) return;
+        if (!_autoPartyKeyPreferences.Save(selected))
+        {
+            _autoPartyKeyStatus.Text = "快捷键保存失败；已恢复上一个按键。";
+            _restoringAutoPartyKey = true;
+            try { _autoPartyKey.SelectedItem = _autoPartyKeyValue; }
+            finally { _restoringAutoPartyKey = false; }
+            return;
+        }
+        _autoPartyKeyValue = selected;
+        _autoPartyHotkey?.SetKey(AutoPartyKeyBinding.VirtualKey(selected));
+        _autoPartyKeyStatus.Text = OperatingSystem.IsWindows() &&
+            _autoPartyHotkey is { IsStarted: false }
+            ? "快捷键已保存，但键盘监听未能启用；仍可使用自动组队按钮。"
+            : selected == "None"
+            ? "自动组队快捷键已关闭。"
+            : $"自动组队快捷键：{selected}；仅在已绑定游戏窗口前台生效。";
     }
 
     private void UpdateAutoPartyControls()

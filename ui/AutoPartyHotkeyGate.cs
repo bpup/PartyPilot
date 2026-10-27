@@ -5,6 +5,8 @@ internal sealed class AutoPartyHotkeyGate
 {
     private bool _down;
 
+    internal void Reset() => _down = false;
+
     internal (bool Consume, bool Trigger) Handle(bool isDown, bool gameForeground)
     {
         if (!isDown)

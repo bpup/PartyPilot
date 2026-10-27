@@ -2,11 +2,10 @@ using System.Runtime.InteropServices;
 
 namespace PartyPilot.Desktop;
 
-// A low-level hook avoids taking F8 from unrelated foreground applications.
+// A low-level hook avoids taking the chosen key from unrelated applications.
 internal sealed class AutoPartyKeyboardHook : IDisposable
 {
     private const int HookKeyboardLowLevel = 13;
-    private const int VirtualKeyF8 = 0x77;
     private const int KeyDown = 0x100;
     private const int KeyUp = 0x101;
     private const int SysKeyDown = 0x104;
@@ -15,7 +14,9 @@ internal sealed class AutoPartyKeyboardHook : IDisposable
     private readonly Action _pressed;
     private readonly HookProcedure _procedure;
     private readonly AutoPartyHotkeyGate _gate = new();
+    private int _virtualKey = 0x77;
     private nint _handle;
+    internal bool IsStarted => _handle != 0;
 
     internal AutoPartyKeyboardHook(Func<bool> gameForeground, Action pressed)
     {
@@ -33,10 +34,16 @@ internal sealed class AutoPartyKeyboardHook : IDisposable
         return _handle != 0;
     }
 
+    internal void SetKey(int virtualKey)
+    {
+        _virtualKey = virtualKey;
+        _gate.Reset();
+    }
+
     private nint Callback(int code, nint message, nint data)
     {
         if (code < 0 || (long)message is not (KeyDown or KeyUp or SysKeyDown or SysKeyUp) ||
-            Marshal.ReadInt32(data) != VirtualKeyF8)
+            _virtualKey == 0 || Marshal.ReadInt32(data) != _virtualKey)
             return CallNextHookEx(_handle, code, message, data);
         try
         {
