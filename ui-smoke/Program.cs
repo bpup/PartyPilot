@@ -21,6 +21,7 @@ await AutoLoginFillSmoke.RunAsync();
 AutoLoginPreferenceSmoke.Run();
 AutoLoginStartupPlanSmoke.Run();
 LeadershipPreferenceSmoke.Run();
+FollowInputPreferenceSmoke.Run();
 MenuGuardPreferenceSmoke.Run();
 RightStickDodgePreferenceSmoke.Run();
 FollowerMirrorPreferenceSmoke.Run();
@@ -76,9 +77,23 @@ var followPreferencePath = Path.Combine(Path.GetTempPath(),
 var followPreferenceStore = new FollowTargetPreferenceStore(followPreferencePath);
 var stopPreferenceStore = new FollowStopPreferenceStore(Path.Combine(
     Path.GetDirectoryName(followPreferencePath)!, "follow-stops.json"));
-var window = new MainWindow(followPreferenceStore, stopPreferenceStore);
+var followInputPreferenceStore = new FollowInputPreferenceStore(Path.Combine(
+    Path.GetDirectoryName(followPreferencePath)!, "follow-input.json"));
+var window = new MainWindow(followPreferenceStore, stopPreferenceStore,
+    followInputPreferenceStore);
 window.Show();
 window.UpdateLayout();
+var priorityChoice = window.GetLogicalDescendants().OfType<CheckBox>()
+    .Single(box => box.Content?.ToString()?.StartsWith("追赶优先", StringComparison.Ordinal) == true);
+var attackChoice = window.GetLogicalDescendants().OfType<CheckBox>()
+    .Single(box => box.Content?.ToString()?.StartsWith("攻击时同步主控移动方向", StringComparison.Ordinal) == true);
+if (priorityChoice.IsChecked != true || attackChoice.IsChecked != true)
+    throw new Exception("Desktop did not load the observed follow input defaults.");
+priorityChoice.IsChecked = false;
+attackChoice.IsChecked = false;
+if (followInputPreferenceStore.Load() is not
+    { Success: true, SprintCatchUpPriority: false, MirrorAttackDirection: false })
+    throw new Exception("Desktop did not save changed follow input options.");
 var mirrorDialog = new FollowerMirrorDialog(PartyPilot.Common.FollowerMirrorConfig.Default, 3);
 var mirrorResult = mirrorDialog.ShowDialog<PartyPilot.Common.FollowerMirrorConfig?>(window);
 var mirrorPlayer = mirrorDialog.GetLogicalDescendants().OfType<ComboBox>()
@@ -685,8 +700,16 @@ variant.SelectedIndex = 1;
 Dispatcher.UIThread.RunJobs();
 if (p2Stop.Text != "37.25" || !p2Stop.IsEffectivelyVisible)
     throw new Exception("System pad P3's stop distance was lost when switching to two-client split.");
-var restoredWindow = new MainWindow(followPreferenceStore, stopPreferenceStore);
+var restoredWindow = new MainWindow(followPreferenceStore, stopPreferenceStore,
+    followInputPreferenceStore);
 restoredWindow.Show();
+if (restoredWindow.GetLogicalDescendants().OfType<CheckBox>()
+        .Single(box => box.Content?.ToString()?.StartsWith("追赶优先", StringComparison.Ordinal) == true)
+        .IsChecked != false ||
+    restoredWindow.GetLogicalDescendants().OfType<CheckBox>()
+        .Single(box => box.Content?.ToString()?.StartsWith("攻击时同步主控移动方向", StringComparison.Ordinal) == true)
+        .IsChecked != false)
+    throw new Exception("Follow input choices were not restored in a new desktop window.");
 var restoredCount = restoredWindow.GetLogicalDescendants().OfType<ComboBox>()
     .Single(item => item.PlaceholderText == "选择 1–6 人");
 restoredCount.SelectedIndex = 2;
@@ -701,11 +724,19 @@ if (restoredStop.Text != "37.25")
     throw new Exception("P2's stop distance did not reload in a new desktop window.");
 restoredWindow.Close();
 File.WriteAllText(Path.Combine(Path.GetDirectoryName(followPreferencePath)!, "follow-stops.json"), "{}");
-var repairWindow = new MainWindow(followPreferenceStore, stopPreferenceStore);
+File.WriteAllText(Path.Combine(Path.GetDirectoryName(followPreferencePath)!, "follow-input.json"), "{}");
+var repairWindow = new MainWindow(followPreferenceStore, stopPreferenceStore,
+    followInputPreferenceStore);
 repairWindow.Show();
 if (!repairWindow.GetLogicalDescendants().OfType<TextBlock>().Any(item =>
         item.Text?.StartsWith("每角色停止距离设置无效", StringComparison.Ordinal) == true))
     throw new Exception("A damaged stop setting was silently accepted in the desktop.");
+if (!repairWindow.GetLogicalDescendants().OfType<TextBlock>().Any(item =>
+        item.Text?.StartsWith("跟随输入设置文件无效", StringComparison.Ordinal) == true) ||
+    repairWindow.GetLogicalDescendants().OfType<CheckBox>()
+        .Single(box => box.Content?.ToString()?.StartsWith("追赶优先", StringComparison.Ordinal) == true)
+        .IsChecked is not null)
+    throw new Exception("Damaged follow input settings were silently accepted in the desktop.");
 var repairCount = repairWindow.GetLogicalDescendants().OfType<ComboBox>()
     .Single(item => item.PlaceholderText == "选择 1–6 人");
 repairCount.SelectedIndex = 2;

@@ -119,6 +119,9 @@ public sealed class MainWindow : Window
     private readonly CheckBox _sprintCatchUp = new();
     private readonly CheckBox _sprintCatchUpPriority = new();
     private readonly CheckBox _mirrorAttackDirection = new();
+    private readonly FollowInputPreferenceStore _followInputPreferences;
+    private readonly TextBlock _followInputPreferenceStatus = new();
+    private bool _followInputPreferenceReady;
     private readonly CheckBox _aggressiveBlinkCatchUp = new();
     private readonly TextBox _aggressiveSprintRetryDelay = new();
     private readonly CheckBox _closeRangeMirror = new();
@@ -219,10 +222,12 @@ public sealed class MainWindow : Window
     public MainWindow() : this(new FollowTargetPreferenceStore()) { }
 
     internal MainWindow(FollowTargetPreferenceStore followTargetPreferences,
-        FollowStopPreferenceStore? followStopPreferences = null)
+        FollowStopPreferenceStore? followStopPreferences = null,
+        FollowInputPreferenceStore? followInputPreferences = null)
     {
         _followTargetPreferences = followTargetPreferences;
         _followStopPreferences = followStopPreferences ?? new FollowStopPreferenceStore();
+        _followInputPreferences = followInputPreferences ?? new FollowInputPreferenceStore();
         Title = "PartyPilot · Play";
         Width = 1120;
         Height = 800;
@@ -259,6 +264,13 @@ public sealed class MainWindow : Window
 
         shell.Children.Add(new ScrollViewer { Content = content });
         Content = shell;
+        var followInput = _followInputPreferences.Load();
+        _sprintCatchUpPriority.IsChecked = followInput.Success ? followInput.SprintCatchUpPriority : null;
+        _mirrorAttackDirection.IsChecked = followInput.Success ? followInput.MirrorAttackDirection : null;
+        _followInputPreferenceReady = followInput.Success;
+        _followInputPreferenceStatus.Text = followInput.Message;
+        _sprintCatchUpPriority.IsCheckedChanged += (_, _) => SaveFollowInputPreference();
+        _mirrorAttackDirection.IsCheckedChanged += (_, _) => SaveFollowInputPreference();
         var hybridPreference = _hybridBindingPreferences.Load();
         _hybridBindings = hybridPreference.Bindings;
         _hybridBindingsStatus.Text = hybridPreference.Success
@@ -849,6 +861,9 @@ public sealed class MainWindow : Window
         _mirrorAttackDirection.Content = "攻击时同步主控移动方向（目标版默认开启；实体手柄）";
         _mirrorAttackDirection.IsChecked = true;
         panel.Children.Add(_mirrorAttackDirection);
+        _followInputPreferenceStatus.Foreground = MutedBrush;
+        _followInputPreferenceStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_followInputPreferenceStatus);
         _classicSprintCatchUp.Content = "启用经典冲刺追赶（0.6.17 分布式客户端默认关闭）";
         _classicSprintCatchUp.IsCheckedChanged += (_, _) =>
         {
@@ -2185,6 +2200,23 @@ public sealed class MainWindow : Window
         }
     }
 
+    private void SaveFollowInputPreference()
+    {
+        if (_sprintCatchUpPriority.IsChecked is not bool priority ||
+            _mirrorAttackDirection.IsChecked is not bool mirror)
+        {
+            _followInputPreferenceReady = false;
+            _followInputPreferenceStatus.Text = "请选择追赶优先和攻击方向同步两个选项以保存。";
+        }
+        else
+        {
+            var saved = _followInputPreferences.Save(priority, mirror);
+            _followInputPreferenceReady = saved.Success;
+            _followInputPreferenceStatus.Text = saved.Message;
+        }
+        UpdateFollowControls();
+    }
+
     private void UpdateFollowControls()
     {
         foreach (var choice in _followTargets)
@@ -2234,7 +2266,8 @@ public sealed class MainWindow : Window
         }
         else _terrainBindingStatus.Text = "当前布局不支持实时地形绑定。";
         _startFollow.IsEnabled = OperatingSystem.IsWindows() && !_busy && !_followStopping && _follow is null &&
-            _followTargetPreferenceReady && _followStopPreferenceReady && _bridge is not null && _pairingSettled &&
+            _followTargetPreferenceReady && _followStopPreferenceReady && _followInputPreferenceReady &&
+            _bridge is not null && _pairingSettled &&
             (!_bridge.IsHybridMode || _hybridPairing?.Phase == HybridPairingPhase.Complete &&
              Volatile.Read(ref _hybridFocusedPlayer) == 1 && Volatile.Read(ref _hybridFocusTransition) == 0) &&
             (_selectedTopology?.Id is "2-split" or "3-three-singles") &&
@@ -2906,7 +2939,7 @@ public sealed class MainWindow : Window
         if (_bridge is null || !_pairingSettled || _selectedTopology is null || _follow is not null || _followStopping ||
             _bridge.IsHybridMode && (_hybridPairing?.Phase != HybridPairingPhase.Complete ||
                 Volatile.Read(ref _hybridFocusedPlayer) != 1 || Volatile.Read(ref _hybridFocusTransition) != 0) ||
-            !_followTargetPreferenceReady || !_followStopPreferenceReady ||
+            !_followTargetPreferenceReady || !_followStopPreferenceReady || !_followInputPreferenceReady ||
             !LiveFollowPlan.TryCreate(_followStop.Text, _followCatchup.Text,
                 _followMaxAge.Text, _followLogAge.Text, _followLeaderName.Text, out var plan) || plan is null) return;
         var executable = LiveFollowSession.FindExecutable();
