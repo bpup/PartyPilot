@@ -1786,8 +1786,8 @@ public sealed class MainWindow : Window
             session.FrameReceived += RadarFrameReceived;
             _radar = session;
             _radarStatus.Text = captures.Count == 0 && catalog is null
-                ? "雷达已打开；等待各游戏进程的只读标记。失焦或样本过期会隐藏标记。"
-                : "雷达已打开；候选地形会在进程、区域与角色格坐标均匹配时显示，游戏内地图方向待核对。";
+                ? $"地图覆盖层已启动，按 {_radarHotkey.DisplayText} 显示；等待各游戏进程的只读标记。失焦或样本过期会隐藏标记。"
+                : $"地图覆盖层已启动，按 {_radarHotkey.DisplayText} 显示；候选地形需匹配进程、区域与角色格坐标，游戏内方向待核对。";
         }
         catch (Exception exception)
         {
