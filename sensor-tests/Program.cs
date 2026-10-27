@@ -270,6 +270,25 @@ Require(crossAreaConflict.Status == "conflicting_candidates" &&
     crossAreaConflict.CandidateAreaAddresses.SequenceEqual(["0x100000", "0x900000"]),
     "Conflicting orders from different area anchors were accepted.");
 TestRawRenderPositionReader();
+var targetableBytes = new Dictionary<long, byte[]> { [0x500000 + 86] = [1] };
+byte[]? ReadTargetable(long address, int size) =>
+    targetableBytes.TryGetValue(address, out var value) && value.Length == size ? value : null;
+Require(TargetableQuestStateProbe.Read(0x500000, ReadTargetable) == true,
+    "The target build's observed task-state byte was missed.");
+targetableBytes[0x500000 + 86] = [0];
+Require(TargetableQuestStateProbe.Read(0x500000, ReadTargetable) == false,
+    "An observed zero task-state byte became a candidate.");
+targetableBytes[0x500000 + 86] = [2];
+Require(TargetableQuestStateProbe.Read(0x500000, ReadTargetable) == null &&
+    TargetableQuestStateProbe.Read(0x500001, ReadTargetable) == null &&
+    TargetableQuestStateProbe.Read(0, ReadTargetable) == null &&
+    RadarClassifier.CanProbeQuestState("Metadata/Quest/MainCampaignObjective") &&
+    !RadarClassifier.CanProbeQuestState("Metadata/MiscellaneousObjects/OrdinaryProp") &&
+    !RadarClassifier.CanProbeQuestState("Metadata/Items/QuestItems/Test") &&
+    !RadarClassifier.CanProbeQuestState("Metadata/Monsters/Test") &&
+    RadarClassifier.QuestStateCandidateLabel("Metadata/Quest/MainCampaignObjective") ==
+        "Main Campaign Objective",
+    "Unknown task-state data or unrelated paths became task candidates.");
 TestTerrainDiagnostic();
 TestPackedTerrainProbe();
 TestGeneratedRoomProbe();

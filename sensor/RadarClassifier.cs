@@ -34,6 +34,38 @@ public static class RadarClassifier
         category is "checkpoint" or "waypoint" or "portal" or "transition" or "quest" or
             "boss" or "essence";
 
+    public static bool CanProbeQuestState(string path) =>
+        path.StartsWith("Metadata/", StringComparison.OrdinalIgnoreCase) &&
+        !path.StartsWith("Metadata/Items/", StringComparison.OrdinalIgnoreCase) &&
+        !path.StartsWith("Metadata/Effects/", StringComparison.OrdinalIgnoreCase) &&
+        !path.StartsWith("Metadata/Projectiles/", StringComparison.OrdinalIgnoreCase) &&
+        !path.StartsWith("Metadata/Monsters/", StringComparison.OrdinalIgnoreCase) &&
+        !IsWorldItemWrapperPath(path) &&
+        (path.Contains("Quest", StringComparison.OrdinalIgnoreCase) ||
+         path.Contains("Objective", StringComparison.OrdinalIgnoreCase));
+
+    public static string QuestStateCandidateLabel(string path)
+    {
+        var name = path.TrimEnd('/').Split('/').Last();
+        if (name.Length == 0) return "任务目标";
+        var label = new System.Text.StringBuilder(name.Length + 8);
+        for (var i = 0; i < name.Length; i++)
+        {
+            var c = name[i];
+            if (c is '_' or '-')
+            {
+                if (label.Length > 0 && label[^1] != ' ') label.Append(' ');
+            }
+            else
+            {
+                if (i > 0 && char.IsUpper(c) && char.IsLower(name[i - 1]) &&
+                    label.Length > 0 && label[^1] != ' ') label.Append(' ');
+                label.Append(c);
+            }
+        }
+        return label.ToString().Trim();
+    }
+
     // A path hint for dormant objects only. It does not assert that a quest is active.
     public static string? DormantQuestLabel(string path)
     {

@@ -470,6 +470,18 @@ if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(questRadarText), 12
     RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
         questRadarText.Replace("\"Label\":\"Quest marker\"", "\"Label\":null")), 123, DateTime.UtcNow, out _))
     throw new Exception("Radar quest marker parsing or display failed.");
+var stateQuestText = questRadarText.Replace("Metadata/Effects/QuestMarker",
+    "Metadata/Quest/MainCampaignObjective").Replace("\"Label\":\"Quest marker\"",
+    "\"Label\":\"Main Campaign Objective\",\"QuestStateCandidate\":true");
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(stateQuestText), 123,
+        DateTime.UtcNow, out var stateQuestFrame) ||
+    stateQuestFrame?.Markers[1].QuestStateCandidate != true ||
+    RadarOverlayWindow.DisplayLabel(stateQuestFrame.Markers[1]) !=
+        "候选 · 任务线索 · Main Campaign Objective" ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        stateQuestText.Replace("\"QuestStateCandidate\":true", "\"QuestStateCandidate\":\"true\"")),
+        123, DateTime.UtcNow, out _))
+    throw new Exception("Candidate quest-state marker lost its provenance or accepted an invalid flag.");
 var questItemRadarText = radarText.Replace(
     "\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\"",
     "\"Category\":\"quest\",\"Path\":\"Metadata/MiscellaneousObjects/WorldItem@123\",\"ItemPath\":\"Metadata/Items/QuestItems/Gallows/Act2/SuicideNote\",\"Label\":\"Final Letter (Skill Points)\"");

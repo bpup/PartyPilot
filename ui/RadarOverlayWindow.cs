@@ -90,7 +90,7 @@ public sealed class RadarOverlayWindow : Window
             "essence" => "精华",
             _ => marker.Path.Split('/').Last()
         };
-        return dormantCandidate ? "候选 · " + label : label;
+        return dormantCandidate || marker.QuestStateCandidate ? "候选 · " + label : label;
     }
 
     private static string? LocalizeGenericLabel(string? label) => label switch

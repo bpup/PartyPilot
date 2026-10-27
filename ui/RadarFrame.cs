@@ -5,7 +5,8 @@ using System.Text.Json;
 namespace PartyPilot.Desktop;
 
 public sealed record RadarMarker(uint Id, string Category, string Path, string? Label,
-    string? ItemPath, int? Stack, string? Rarity, double X, double Y);
+    string? ItemPath, int? Stack, string? Rarity, double X, double Y,
+    bool QuestStateCandidate = false);
 
 public sealed record RadarFrame(int ProcessId, DateTime SeenUtc, uint AreaHash, string? AreaAddress,
     double PlayerX, double PlayerY,
@@ -104,6 +105,14 @@ public static class RadarFrames
                     if (rarityValue.ValueKind != JsonValueKind.String) return false;
                     rarity = rarityValue.GetString();
                 }
+                var questStateCandidate = false;
+                if (item.TryGetProperty("QuestStateCandidate", out var questStateValue))
+                {
+                    if (questStateValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return false;
+                    questStateCandidate = questStateValue.GetBoolean();
+                }
+                if (questStateCandidate && (category != "quest" || itemPath != null ||
+                    !ValidQuestCandidatePath(path))) return false;
                 if (category == "player" &&
                     (!path.StartsWith("Metadata/Characters/", StringComparison.OrdinalIgnoreCase) ||
                      string.IsNullOrWhiteSpace(label) || Encoding.UTF8.GetByteCount(label) > 64 ||
@@ -132,7 +141,8 @@ public static class RadarFrames
                 if (category is not ("player" or "loot" or "quest" or "boss") &&
                     (category is not ("transition" or "portal") && label != null ||
                      itemPath != null || stack != null || rarity != null)) return false;
-                markers.Add(new RadarMarker(id, category, path, label, itemPath, stack, rarity, x, y));
+                markers.Add(new RadarMarker(id, category, path, label, itemPath, stack, rarity, x, y,
+                    questStateCandidate));
             }
             frame = new RadarFrame(pid, seenUtc, areaHash, addressValue.GetString(), playerX, playerY, markers)
             {
@@ -240,6 +250,16 @@ public static class RadarFrames
         if (suffix >= 0) name = name[..suffix];
         return name.Equals("WorldItem", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool ValidQuestCandidatePath(string path) =>
+        path.StartsWith("Metadata/", StringComparison.Ordinal) &&
+        !path.StartsWith("Metadata/Items/", StringComparison.OrdinalIgnoreCase) &&
+        !path.StartsWith("Metadata/Effects/", StringComparison.OrdinalIgnoreCase) &&
+        !path.StartsWith("Metadata/Projectiles/", StringComparison.OrdinalIgnoreCase) &&
+        !path.StartsWith("Metadata/Monsters/", StringComparison.OrdinalIgnoreCase) &&
+        !WorldItemWrapperPath(path) &&
+        (path.Contains("Quest", StringComparison.OrdinalIgnoreCase) ||
+         path.Contains("Objective", StringComparison.OrdinalIgnoreCase));
 }
 
 public sealed class RadarLandmarkCache

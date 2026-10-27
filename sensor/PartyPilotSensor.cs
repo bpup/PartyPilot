@@ -1166,6 +1166,30 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             var questItem = lootName != null && RadarClassifier.IsQuestItemPath(itemPath);
             var category = questItem ? "quest" : lootName != null ? "loot" :
                 isPlayer ? "player" : RadarClassifier.Category(path);
+            var questStateCandidate = false;
+            if (category == null && RadarClassifier.CanProbeQuestState(path))
+            {
+                try
+                {
+                    var targetable = entity.GetComponent<Targetable>();
+                    if (targetable != null)
+                    {
+                        byte[]? ReadQuestByte(long address, int size)
+                        {
+                            try { return GameController.IngameState.Data.M.ReadMem(address, size); }
+                            catch { return null; }
+                        }
+                        questStateCandidate = TargetableQuestStateProbe.Read(targetable.Address,
+                            ReadQuestByte) == true &&
+                            Encoding.UTF8.GetByteCount(RadarClassifier.QuestStateCandidateLabel(path)) <= 96;
+                        if (questStateCandidate) category = "quest";
+                    }
+                }
+                catch
+                {
+                    // A failed build-specific probe never creates a quest marker.
+                }
+            }
             if (category == null) continue;
             string? destinationName = null;
             if (category is "transition" or "portal")
@@ -1226,9 +1250,11 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 EntityId = entity.Id,
                 Category = category,
                 Path = path,
-                Label = questItem ? RadarClassifier.QuestItemLabel(itemPath!, lootName!) :
+                Label = questStateCandidate ? RadarClassifier.QuestStateCandidateLabel(path) :
+                    questItem ? RadarClassifier.QuestItemLabel(itemPath!, lootName!) :
                     destinationName ?? lootName ?? (isPlayer ? playerName : category == "quest" ? RadarClassifier.QuestLabel(path) :
                     category == "boss" ? RadarClassifier.BossLabel(path) : null),
+                QuestStateCandidate = questStateCandidate,
                 ItemPath = itemPath,
                 Stack = questItem ? null : lootStack,
                 Rarity = questItem ? null : lootRarity,
