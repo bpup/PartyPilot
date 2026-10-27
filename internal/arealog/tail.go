@@ -9,11 +9,12 @@ import (
 
 // Tail begins at EOF so old log entries cannot be presented as fresh evidence.
 type Tail struct {
-	path     string
-	info     os.FileInfo
-	position int64
-	partial  []byte
-	closed   bool
+	path      string
+	info      os.FileInfo
+	position  int64
+	partial   []byte
+	rotations uint64
+	closed    bool
 }
 
 func OpenTail(path string) (*Tail, error) {
@@ -60,6 +61,8 @@ func (t *Tail) Close() error {
 	return nil
 }
 
+func (t *Tail) Rotations() uint64 { return t.rotations }
+
 func (t *Tail) Poll() ([]string, error) {
 	if t.closed {
 		return nil, os.ErrClosed
@@ -78,6 +81,7 @@ func (t *Tail) Poll() ([]string, error) {
 	}
 	if !os.SameFile(info, t.info) || info.Size() < t.position {
 		t.info, t.position, t.partial = info, 0, nil
+		t.rotations++
 	}
 	if _, err := file.Seek(t.position, io.SeekStart); err != nil {
 		return nil, err

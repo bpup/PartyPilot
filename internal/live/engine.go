@@ -188,6 +188,28 @@ func (e *Engine) ObserveClientLogLine(processID int, line string, observedAt tim
 	}
 }
 
+// A replaced or truncated Client.txt can no longer prove the prior area's
+// identity. The next complete generation and fresh positions must rebind it.
+func (e *Engine) InvalidateClientArea(processID int) bool {
+	roles := e.pidToRoles[processID]
+	if len(roles) == 0 {
+		return false
+	}
+	for _, role := range roles {
+		delete(e.areas, role.Slot)
+		delete(e.areaHashes, role.Slot)
+		delete(e.samples, role.Slot)
+		delete(e.vitals, role.Slot)
+		delete(e.strictVitals, role.Slot)
+		delete(e.terrainStable, role.Slot)
+	}
+	delete(e.orderedIdentities, processID)
+	e.mainInputValid = false
+	e.coordinator.ResetFollow()
+	e.resetCloseMirrors()
+	return true
+}
+
 func New(roster map[int]int, leader int, config follow.Config, logAge time.Duration) (*Engine, error) {
 	if len(roster) < 2 || len(roster) > 3 || logAge <= 0 {
 		return nil, fmt.Errorf("live sensor supports 2–3 clients with positive log age")

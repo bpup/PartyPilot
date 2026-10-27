@@ -601,9 +601,14 @@ func run(address string, roster map[int]int, paths map[int]string, offsets logSt
 		}
 		now := time.Now().UTC()
 		for _, slot := range slots {
+			previousRotations := tails[slot].Rotations()
 			lines, err := tails[slot].Poll()
 			if err != nil {
 				return fail("log read failed", fmt.Errorf("slot %d log: %w", slot, err))
+			}
+			if tails[slot].Rotations() != previousRotations {
+				engine.InvalidateClientArea(roster[slot])
+				activations = nil
 			}
 			for _, line := range lines {
 				engine.ObserveClientLogLine(roster[slot], line, now)

@@ -553,6 +553,57 @@ func TestFiveRolesMixDualAndStandaloneClientPositions(t *testing.T) {
 	}
 }
 
+func TestLogRotationRevokesBothLocalRolesUntilNewGeneration(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	engine, err := NewWithBindings([]RoleBinding{
+		{Slot: 1, Client: 1, LocalPlayer: 1, ProcessID: 101},
+		{Slot: 2, Client: 1, LocalPlayer: 2, ProcessID: 101},
+		{Slot: 3, Client: 2, LocalPlayer: 1, ProcessID: 303},
+	}, 1, follow.Config{StopDistance: 2, ResumeDistance: 3,
+		CatchUpDistance: 10, MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	for _, pid := range []int{101, 303} {
+		if !engine.ObserveClientArea(pid, arealog.Signal{AreaID: "G2_4", Seed: 123,
+			ObservedAt: now, Origin: "live"}) {
+			t.Fatal("initial client area was rejected")
+		}
+	}
+	frame := OrderedClientFrame{ProcessID: 101, SeenUTC: now.Add(time.Millisecond),
+		ReceivedAt: now.Add(time.Millisecond), TickMS: now.UnixMilli() + 1,
+		AreaHash: 55, AreaInstanceAddress: "0x100000", VectorHeaderAddress: "0x100100",
+		OrderedAddresses: []string{"0x200000", "0x300000"},
+		CoordinateSpace:  "world", PlayerOrderReliable: true,
+		PlayerOrderSource: "experimental_static_vector_0.6.17",
+		Players: []OrderedLocalPlayer{
+			{LocalPlayer: 1, X: 30 * worldPerGridUnit},
+			{LocalPlayer: 2, X: 0},
+		}}
+	if !engine.ObserveOrderedClient(frame) || !observeGridSample(engine, telemetry.Sample{
+		ProcessID: 303, SeenUTC: frame.SeenUTC, X: 0, AreaHash: 66}) ||
+		engine.Step(frame.SeenUTC)[2].State != follow.CatchingUp {
+		t.Fatal("initial two-local follow did not start")
+	}
+	if !engine.InvalidateClientArea(101) || engine.InvalidateClientArea(999) ||
+		engine.Step(now.Add(2 * time.Millisecond))[2].State != follow.Waiting ||
+		engine.Step(now.Add(2 * time.Millisecond))[3].State != follow.Waiting ||
+		len(engine.areas) != 1 || len(engine.samples) != 1 {
+		t.Fatal("rotation retained one local role or unrelated client was revoked")
+	}
+	if !engine.ObserveClientArea(101, arealog.Signal{AreaID: "G2_4", Seed: 123,
+		ObservedAt: now.Add(3 * time.Millisecond), Origin: "live"}) {
+		t.Fatal("new log generation was rejected")
+	}
+	frame.SeenUTC = now.Add(4 * time.Millisecond)
+	frame.ReceivedAt = frame.SeenUTC
+	frame.TickMS += 3
+	if !engine.ObserveOrderedClient(frame) || engine.Step(frame.SeenUTC)[2].State != follow.CatchingUp {
+		t.Fatal("fresh log and motion did not restore two-local follow")
+	}
+}
+
 func TestOrderedClientRejectsUnverifiedAndAmbiguousBindings(t *testing.T) {
 	config := follow.Config{StopDistance: 2, ResumeDistance: 3,
 		CatchUpDistance: 10, MaxAge: time.Second}
