@@ -35,6 +35,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ctest --test-dir "$env:RUNNER_TEMP/private-slots" -C Release --output-on-failure
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build and exercise multi-instance runtime
+        shell: pwsh
+        run: |
+          cmake -S native/multi-instance-runtime -B "$env:RUNNER_TEMP/multi-instance" -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build "$env:RUNNER_TEMP/multi-instance" --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ctest --test-dir "$env:RUNNER_TEMP/multi-instance" -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Desktop client 3 contract
         run: dotnet run --project ui-smoke/PartyPilot.Desktop.Smoke.csproj -c Release -- --client3-plan-only
       - name: Desktop headless checks
