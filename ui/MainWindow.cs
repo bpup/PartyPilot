@@ -463,7 +463,7 @@ public sealed class MainWindow : Window
         {
             _focusGuide.Text = HybridSelected
                 ? "键鼠默认操作：F1 返回 P1，F2–F6 切换其他角色；返回 P1 后，其他角色恢复自动跟随。聚焦键可在上方按键映射中修改。"
-                : "手柄操作：按下左摇杆 L3 控制 P1，按下右摇杆 R3 控制 P2；LT+L3/R3 切换 P3/P4，LT+方向键上/下切换 P5/P6。单独控制时可立即切到 P3–P6；松开后间隔至少 350 毫秒再次按当前角色聚焦键，可返回共同控制，其余角色恢复自动跟随。";
+                : "手柄操作：按下左摇杆 L3 控制 P1，按下右摇杆 R3 控制 P2；LT+L3/R3 切换 P3/P4，LT+方向键上/下切换 P5/P6。单独控制后松开并再按同一聚焦键，即可返回共同控制，让跟随者继续追近；快速连按也生效。切换到其他角色仍需间隔 350 毫秒，P3–P6 组合键除外。";
             _pairingStatus.Text = HybridSelected
                 ? "键鼠模式要求客户端 1 仅有 P1。启动游戏前会先建立虚拟手柄；绑定现有窗口后也可手动准备。"
                 : "实体手柄模式需要确认 HidHide 隔离与输入设备。";
@@ -471,7 +471,7 @@ public sealed class MainWindow : Window
         };
         panel.Children.Add(_inputMode);
         _focusGuide.Name = "focus-help";
-        _focusGuide.Text = "手柄操作：按下左摇杆 L3 控制 P1，按下右摇杆 R3 控制 P2；LT+L3/R3 切换 P3/P4，LT+方向键上/下切换 P5/P6。单独控制时可立即切到 P3–P6；松开后间隔至少 350 毫秒再次按当前角色聚焦键，可返回共同控制，其余角色恢复自动跟随。";
+        _focusGuide.Text = "手柄操作：按下左摇杆 L3 控制 P1，按下右摇杆 R3 控制 P2；LT+L3/R3 切换 P3/P4，LT+方向键上/下切换 P5/P6。单独控制后松开并再按同一聚焦键，即可返回共同控制，让跟随者继续追近；快速连按也生效。切换到其他角色仍需间隔 350 毫秒，P3–P6 组合键除外。";
         _focusGuide.Foreground = MutedBrush;
         _focusGuide.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(_focusGuide);

@@ -347,8 +347,12 @@ internal sealed class BridgeRouter
         // immediately switch to another player. Repeating the active chord
         // still needs a release edge before returning to shared control.
         var promoteChord = pressedRole is >= 3 and <= 6 && _isolatedSlot != 0;
+        // A second edge on the already focused role returns to shared follow
+        // even inside the normal 350 ms switch debounce.
         if (pressedRole != 0 && _focusPads.TryGetValue(pressedRole, out var pressedSlot) &&
-            (promoteChord || nowUtc - _lastFocusToggleUtc >= TimeSpan.FromMilliseconds(350)))
+            (promoteChord ||
+             pressedSlot == _isolatedSlot && nowUtc > _lastFocusToggleUtc ||
+             nowUtc - _lastFocusToggleUtc >= TimeSpan.FromMilliseconds(350)))
         {
             _lastManualFocusSlot = pressedSlot;
             if (_lastFocusedLeads && _mainSlot != pressedSlot)

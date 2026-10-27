@@ -860,6 +860,19 @@ hotkeyRouter.ApplyLine("{\"type\":\"focus\",\"slot\":2}", now);
 hotkeyRouter.ApplyLine("{\"type\":\"focus\",\"slot\":1}", now);
 if (pad2ForHotkey.X != 32767)
     throw new Exception("External MAIN focus did not resume ordinary follower routing.");
+var doubleTapMain = new FakePad();
+var doubleTapFollower = new FakePad();
+var doubleTapRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
+    { [1] = doubleTapMain, [2] = doubleTapFollower });
+if (!doubleTapRouter.ConfigurePhysical(1) ||
+    !doubleTapRouter.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", now))
+    throw new Exception("Double press follow setup failed.");
+doubleTapRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080 }, now);
+doubleTapRouter.SetPhysical(default, now.AddMilliseconds(60));
+doubleTapRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080 }, now.AddMilliseconds(180));
+if (doubleTapRouter.FocusedSlot != 1 || doubleTapFollower.X != 32767 ||
+    doubleTapRouter.LastManualFocusSlot != 2)
+    throw new Exception("A second R3 press did not resume P2 follow inside switch debounce.");
 var splitMain = new FakePad();
 var splitFollower = new FakePad();
 var splitRouter = new BridgeRouter(new Dictionary<int, IPadOutput> { [1] = splitMain, [3] = splitFollower });
