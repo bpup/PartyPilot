@@ -15,6 +15,8 @@ import (
 type World struct {
 	Timestamp       time.Time      `json:"timestamp"`
 	AreaInstance    string         `json:"areaInstance"`
+	AreaID          string         `json:"areaId,omitempty"`
+	AreaLabel       string         `json:"areaLabel,omitempty"`
 	DataAgeMS       *int           `json:"dataAgeMs"`
 	SafeZone        *bool          `json:"safeZone"`
 	EmergencyActive *bool          `json:"emergencyActive"`
@@ -95,6 +97,9 @@ func (w World) Validate() error {
 		w.UI.InventoryOpen == nil || w.UI.StashOpen == nil || w.UI.VendorOpen == nil ||
 		w.UI.ChatOpen == nil || w.Players == nil || w.Monsters == nil {
 		return errors.New("world safety or area evidence is incomplete")
+	}
+	if !*w.SafeZone && IsKnownSafeZone(w.AreaID, w.AreaLabel) {
+		return errors.New("world declares combat safety in a known safe zone")
 	}
 	for id, player := range w.Players {
 		if id < 1 || id > 6 || player.Alive == nil || player.Loading == nil || player.ActiveCombo == nil ||

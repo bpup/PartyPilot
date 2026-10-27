@@ -503,6 +503,31 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             _slotCandidateStatus = "scan_failed";
             return;
         }
+        object? areaSafety = null;
+        string? observedAreaName = null;
+        var areaSafetyStatus = "unavailable";
+        try
+        {
+            var area = GameController.Area.CurrentArea;
+            if (area != null)
+            {
+                if (area.Hash == frameAreaHash)
+                {
+                    observedAreaName = area.Name;
+                    areaSafety = new
+                    {
+                        Hash = area.Hash,
+                        Town = area.IsTown,
+                        Hideout = area.IsHideout,
+                        Peaceful = area.IsPeaceful
+                    };
+                    areaSafetyStatus = "observed";
+                }
+                else areaSafetyStatus = "area_mismatch";
+            }
+        }
+        catch { areaSafetyStatus = "unavailable"; }
+        if (!SameAreaAndPlayer()) return;
         var position = render.Pos;
         var sourceTickMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         // AreaName is diagnostic only. It does not identify a specific instance.
@@ -511,8 +536,11 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             ProcessId = GameController.Window.Process.Id,
             SeenUtc = now,
             TickMs = sourceTickMs,
-            AreaName = GameController.Area.CurrentArea?.Name,
-            AreaHash = GameController.IngameState.Data.CurrentAreaHash,
+            AreaName = observedAreaName,
+            AreaHash = frameAreaHash,
+            AreaSafety = areaSafety,
+            AreaSafetyStatus = areaSafetyStatus,
+            AreaSafetySeenUtc = now,
             CoordinateSpace = "world",
             X = position.X,
             Y = position.Y,

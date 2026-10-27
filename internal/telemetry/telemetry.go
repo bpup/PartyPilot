@@ -10,48 +10,51 @@ import (
 )
 
 type Sample struct {
-	ProcessID                  int                  `json:"ProcessId"`
-	SeenUTC                    time.Time            `json:"SeenUtc"`
-	TickMS                     int64                `json:"TickMs,omitempty"`
-	ReceivedAt                 time.Time            `json:"-"`
-	AreaName                   string               `json:"AreaName"`
-	AreaHash                   uint32               `json:"AreaHash"`
-	CoordinateSpace            string               `json:"CoordinateSpace,omitempty"`
-	X                          float64              `json:"X"`
-	Y                          float64              `json:"Y"`
-	Z                          float64              `json:"Z"`
-	Life                       *float64             `json:"Life,omitempty"`
-	LifeMax                    *float64             `json:"LifeMax,omitempty"`
-	Mana                       *float64             `json:"Mana,omitempty"`
-	ManaMax                    *float64             `json:"ManaMax,omitempty"`
-	EnergyShield               *float64             `json:"EnergyShield,omitempty"`
-	EnergyShieldMax            *float64             `json:"EnergyShieldMax,omitempty"`
-	IngameDataAddress          string               `json:"IngameDataAddress,omitempty"`
-	ObservedLocalAddress       string               `json:"ObservedLocalAddress,omitempty"`
-	LocalSlotCandidates        *LocalSlotCandidates `json:"LocalSlotCandidates,omitempty"`
-	LocalSlotCandidateStatus   string               `json:"LocalSlotCandidateStatus,omitempty"`
-	SkillBindSource            *SkillBindSource     `json:"SkillBindSource,omitempty"`
-	SkillBindSourceStatus      string               `json:"SkillBindSourceStatus,omitempty"`
-	SkillBindSourceSeenUTC     *time.Time           `json:"SkillBindSourceSeenUtc,omitempty"`
-	RadarEntities              []RadarEntity        `json:"RadarEntities,omitempty"`
-	RadarStatus                string               `json:"RadarStatus,omitempty"`
-	RadarSeenUTC               *time.Time           `json:"RadarSeenUtc,omitempty"`
-	UiObservation              *UiObservation       `json:"UiObservation,omitempty"`
-	UiObservationStatus        string               `json:"UiObservationStatus,omitempty"`
-	UiObservationSeenUTC       *time.Time           `json:"UiObservationSeenUtc,omitempty"`
-	GroundHover                *GroundHover         `json:"GroundHover,omitempty"`
-	GroundHoverStatus          string               `json:"GroundHoverStatus,omitempty"`
-	ItemCards                  []RawItemCard        `json:"ItemCards,omitempty"`
-	ItemCardStatus             string               `json:"ItemCardStatus,omitempty"`
-	ItemCardSeenUTC            *time.Time           `json:"ItemCardSeenUtc,omitempty"`
-	TerrainSummary             *RawTerrainSummary   `json:"TerrainSummary,omitempty"`
-	TerrainStatus              string               `json:"TerrainStatus,omitempty"`
-	TerrainSeenUTC             *time.Time           `json:"TerrainSeenUtc,omitempty"`
-	PackedTerrainProbe         *PackedTerrainProbe  `json:"PackedTerrainProbe,omitempty"`
-	PackedTerrainStatus        string               `json:"PackedTerrainStatus,omitempty"`
-	PackedTerrainCaptureStatus string               `json:"PackedTerrainCaptureStatus,omitempty"`
-	VisiblePlayers             []VisiblePlayer      `json:"VisiblePlayers,omitempty"`
-	VisiblePlayersStatus       string               `json:"VisiblePlayersStatus,omitempty"`
+	ProcessID                  int                    `json:"ProcessId"`
+	SeenUTC                    time.Time              `json:"SeenUtc"`
+	TickMS                     int64                  `json:"TickMs,omitempty"`
+	ReceivedAt                 time.Time              `json:"-"`
+	AreaName                   string                 `json:"AreaName"`
+	AreaHash                   uint32                 `json:"AreaHash"`
+	AreaSafety                 *AreaSafetyObservation `json:"AreaSafety,omitempty"`
+	AreaSafetyStatus           string                 `json:"AreaSafetyStatus,omitempty"`
+	AreaSafetySeenUTC          *time.Time             `json:"AreaSafetySeenUtc,omitempty"`
+	CoordinateSpace            string                 `json:"CoordinateSpace,omitempty"`
+	X                          float64                `json:"X"`
+	Y                          float64                `json:"Y"`
+	Z                          float64                `json:"Z"`
+	Life                       *float64               `json:"Life,omitempty"`
+	LifeMax                    *float64               `json:"LifeMax,omitempty"`
+	Mana                       *float64               `json:"Mana,omitempty"`
+	ManaMax                    *float64               `json:"ManaMax,omitempty"`
+	EnergyShield               *float64               `json:"EnergyShield,omitempty"`
+	EnergyShieldMax            *float64               `json:"EnergyShieldMax,omitempty"`
+	IngameDataAddress          string                 `json:"IngameDataAddress,omitempty"`
+	ObservedLocalAddress       string                 `json:"ObservedLocalAddress,omitempty"`
+	LocalSlotCandidates        *LocalSlotCandidates   `json:"LocalSlotCandidates,omitempty"`
+	LocalSlotCandidateStatus   string                 `json:"LocalSlotCandidateStatus,omitempty"`
+	SkillBindSource            *SkillBindSource       `json:"SkillBindSource,omitempty"`
+	SkillBindSourceStatus      string                 `json:"SkillBindSourceStatus,omitempty"`
+	SkillBindSourceSeenUTC     *time.Time             `json:"SkillBindSourceSeenUtc,omitempty"`
+	RadarEntities              []RadarEntity          `json:"RadarEntities,omitempty"`
+	RadarStatus                string                 `json:"RadarStatus,omitempty"`
+	RadarSeenUTC               *time.Time             `json:"RadarSeenUtc,omitempty"`
+	UiObservation              *UiObservation         `json:"UiObservation,omitempty"`
+	UiObservationStatus        string                 `json:"UiObservationStatus,omitempty"`
+	UiObservationSeenUTC       *time.Time             `json:"UiObservationSeenUtc,omitempty"`
+	GroundHover                *GroundHover           `json:"GroundHover,omitempty"`
+	GroundHoverStatus          string                 `json:"GroundHoverStatus,omitempty"`
+	ItemCards                  []RawItemCard          `json:"ItemCards,omitempty"`
+	ItemCardStatus             string                 `json:"ItemCardStatus,omitempty"`
+	ItemCardSeenUTC            *time.Time             `json:"ItemCardSeenUtc,omitempty"`
+	TerrainSummary             *RawTerrainSummary     `json:"TerrainSummary,omitempty"`
+	TerrainStatus              string                 `json:"TerrainStatus,omitempty"`
+	TerrainSeenUTC             *time.Time             `json:"TerrainSeenUtc,omitempty"`
+	PackedTerrainProbe         *PackedTerrainProbe    `json:"PackedTerrainProbe,omitempty"`
+	PackedTerrainStatus        string                 `json:"PackedTerrainStatus,omitempty"`
+	PackedTerrainCaptureStatus string                 `json:"PackedTerrainCaptureStatus,omitempty"`
+	VisiblePlayers             []VisiblePlayer        `json:"VisiblePlayers,omitempty"`
+	VisiblePlayersStatus       string                 `json:"VisiblePlayersStatus,omitempty"`
 }
 
 // UiObservation contains raw panel visibility reads. It is not a verified
@@ -65,6 +68,15 @@ type UiObservation struct {
 	SettingsPanelVisible         *bool `json:"SettingsPanelVisible"`
 	OpenLeftPanelVisible         *bool `json:"OpenLeftPanelVisible"`
 	OpenRightPanelVisible        *bool `json:"OpenRightPanelVisible"`
+}
+
+// AreaSafetyObservation carries raw ExileCore2 area flags with a matching
+// area hash. It does not by itself authorize combat input.
+type AreaSafetyObservation struct {
+	Hash     uint32 `json:"Hash"`
+	Town     *bool  `json:"Town"`
+	Hideout  *bool  `json:"Hideout"`
+	Peaceful *bool  `json:"Peaceful"`
 }
 
 // RawTerrainSummary is diagnostic evidence only. Values are not walkability flags.
@@ -243,6 +255,7 @@ func Decode(data []byte) (Sample, error) {
 			item.SkillBindSourceSeenUTC, item.LocalSlotCandidates,
 			item.ObservedLocalAddress, item.SeenUTC) ||
 		!validRadar(item.RadarEntities, item.RadarStatus, item.RadarSeenUTC) ||
+		!validAreaSafety(item.AreaSafety, item.AreaSafetyStatus, item.AreaSafetySeenUTC, item.AreaHash) ||
 		!validUiObservation(item.UiObservation, item.UiObservationStatus, item.UiObservationSeenUTC) ||
 		!validGroundHover(item.GroundHover, item.GroundHoverStatus, item.RadarSeenUTC) ||
 		!validRawItemCards(item.ItemCards, item.ItemCardStatus, item.ItemCardSeenUTC,
@@ -254,6 +267,20 @@ func Decode(data []byte) (Sample, error) {
 		return Sample{}, ErrInvalidSample
 	}
 	return item, nil
+}
+
+func validAreaSafety(observation *AreaSafetyObservation, status string, seen *time.Time, areaHash uint32) bool {
+	if status == "" {
+		return observation == nil && seen == nil
+	}
+	if seen == nil || seen.IsZero() {
+		return false
+	}
+	if status == "unavailable" || status == "area_mismatch" {
+		return observation == nil
+	}
+	return status == "observed" && observation != nil && observation.Hash == areaHash &&
+		observation.Town != nil && observation.Hideout != nil && observation.Peaceful != nil
 }
 
 func validUiObservation(observation *UiObservation, status string, seen *time.Time) bool {
