@@ -24,6 +24,17 @@ jobs:
         run: dotnet run --project sensor-tests/PartyPilot.Sensor.Tests.csproj -c Release
         env:
           DOTNET_ROLL_FORWARD: Major
+      - name: Build ExileCore2 sensor plugin
+        shell: pwsh
+        run: |
+          $reference = Join-Path $env:RUNNER_TEMP "exilecore2-reference"
+          New-Item -ItemType Directory -Force -Path $reference | Out-Null
+          $assembly = Join-Path $reference "ExileCore2.dll"
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/exCore2/ExileCore2/435c0b4ed2dc66eb166dcb8b66de6b089c8cbd29/ExileCore2.dll" -OutFile $assembly
+          if ((Get-FileHash $assembly -Algorithm SHA256).Hash -ne "F21CD2F34927ADD94293153D6DDC2B9404420121620D3F31247B230879F4CB1A") { throw "ExileCore2 reference hash differs" }
+          $env:EXILECORE2_DIR = $reference
+          dotnet build sensor/PartyPilot.Sensor.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build Windows input bridge
         run: dotnet build bridge/PartyPilot.Bridge.csproj -c Release
       - name: Build and exercise private client 3 input runtime

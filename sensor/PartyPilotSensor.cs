@@ -881,6 +881,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
 
     private void EmitFastOrderedCandidate(DateTime seenUtc)
     {
+        var processId = 0;
+        uint areaHash = 0;
         try
         {
             var player = GameController.Player;
@@ -890,8 +892,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             var stateAddress = GameController.IngameState.Address;
             var areaAddress = data.Address;
             var localAddress = player.Address;
-            var areaHash = data.CurrentAreaHash;
-            var processId = GameController.Window.Process.Id;
+            areaHash = data.CurrentAreaHash;
+            processId = GameController.Window.Process.Id;
             if (localAddress <= 0 || processId <= 0) return;
             bool SameIdentity()
             {
@@ -927,7 +929,11 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                     ingameStateAddress: stateAddress);
                 // A failed revalidation must revoke a previously accepted ordered frame.
             }
-            if (!SameIdentity()) return;
+            if (!SameIdentity())
+            {
+                EmitFastOrderedInvalidation(processId, areaHash, seenUtc);
+                return;
+            }
             var bytes = FastOrderedCandidateFrame.Encode(processId, areaHash,
                 GameController.Area.CurrentArea?.Name, captured, seenUtc,
                 DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
@@ -943,7 +949,24 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         }
         catch
         {
-            // The experimental stream must not interrupt the normal sensor.
+            // Once a PID is known, revoke its prior ordered positions instead
+            // of leaving the last movement active until sample expiry.
+            EmitFastOrderedInvalidation(processId, areaHash, seenUtc);
+        }
+    }
+
+    private void EmitFastOrderedInvalidation(int processId, uint areaHash, DateTime seenUtc)
+    {
+        if (processId <= 0 || seenUtc == default || !Settings.ExperimentalOrderedFollow.Value) return;
+        try
+        {
+            var bytes = FastOrderedCandidateFrame.Encode(processId, areaHash, null,
+                null, seenUtc, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            _udp.Send(bytes, bytes.Length, Receiver);
+        }
+        catch
+        {
+            // Failure reporting must not interrupt ExileCore's render callback.
         }
     }
 
