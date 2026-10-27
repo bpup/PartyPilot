@@ -15,6 +15,9 @@ REQUIRED = {
     "release/desktop/PartyPilot.Desktop.exe",
     "release/bridge/PartyPilot.Bridge.exe",
     "release/PartyPilot-LiveFollow.exe",
+    "release/PartyPilot-BridgeFeed.exe",
+    "release/PartyPilot-PartyReplay.exe",
+    "release/PartyPilot.exe",
     "release/PartyPilot-FpsConfig.exe",
     "release/PartyPilot-ClientLaunch.exe",
     "release/PartyPilot.Sensor.dll",
@@ -28,6 +31,13 @@ REQUIRED = {
     "release/native/PartyPilot.PrivateSlots.Smoke.exe",
     "release/native/PartyPilot.MultiInstance.dll",
     "release/native/PartyPilot.MultiInstance.Smoke.exe",
+}
+
+FOLLOW_BINARIES = {
+    "release/PartyPilot-BridgeFeed.exe": "bridgefeed",
+    "release/PartyPilot-LiveFollow.exe": "livefollow",
+    "release/PartyPilot-PartyReplay.exe": "partyreplay",
+    "release/PartyPilot.exe": "partypilot",
 }
 
 
@@ -44,6 +54,9 @@ def refresh_binaries() -> None:
     built = ROOT / "sensor/bin/Release/net8.0-windows"
     for name in ("PartyPilot.Sensor.dll", "PartyPilot.Sensor.deps.json"):
         shutil.copy2(built / name, ROOT / "release" / name)
+    for output, command in FOLLOW_BINARIES.items():
+        run(["go", "build", "-o", output, "./cmd/" + command], cwd=ROOT,
+            env={**os.environ, "GOOS": "windows", "GOARCH": "amd64"}, check=True)
 
 
 def check_binaries_current() -> None:
@@ -61,6 +74,9 @@ def check_binaries_current() -> None:
             [*source_files("sensor"), *shared,
              ROOT / "sensor/PartyPilot.Sensor.csproj"]
     }
+    follow_sources = [*ROOT.glob("internal/**/*.go"), ROOT / "go.mod"]
+    for output, command in FOLLOW_BINARIES.items():
+        binaries[ROOT / output] = [*follow_sources, *ROOT.glob(f"cmd/{command}/*.go")]
     stale = [str(path.relative_to(ROOT)) for path, sources in binaries.items()
              if not path.is_file() or not sources or
              path.stat().st_mtime_ns < max(source.stat().st_mtime_ns for source in sources)]
@@ -72,7 +88,7 @@ def check_binaries_current() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--refresh", action="store_true",
-                        help="rebuild the desktop and sensor binaries before packaging")
+                        help="rebuild desktop, sensor, and follow binaries before packaging")
     args = parser.parse_args()
     if args.refresh:
         refresh_binaries()

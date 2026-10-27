@@ -45,27 +45,29 @@ func (e *Engine) asyncTargetRouteDirection(terrain *navigation.Grid,
 		e.planTarget = point{targetX, targetY}
 		e.planAvoid = point{avoidX, avoidY}
 		e.planRequestedAt = now
-		e.route = nil
 	}
 	plan := e.planner.Request(terrain,
 		navigation.Waypoint{X: e.planOrigin.x, Y: e.planOrigin.y},
 		navigation.Waypoint{X: e.planTarget.x, Y: e.planTarget.y},
 		navigation.Waypoint{X: e.planAvoid.x, Y: e.planAvoid.y}, 0)
 	e.planPending = plan.State == navigation.PathPending
-	if plan.State != navigation.PathReady {
-		e.route = nil
-		e.routeTerrain = nil
-		return 0, 0, plan.State
+	if plan.State == navigation.PathReady {
+		e.route = plan.Route
+		e.routeTerrain = terrain
 	}
-	e.route = terrain.AdvanceTargetRoute(plan.Route, fromX, fromY, avoidX, avoidY, 5)
-	e.routeTerrain = terrain
-	if len(e.route) == 0 || !terrain.HasClearFollowSegmentAvoid(fromX, fromY,
+	if e.routeTerrain != terrain {
+		e.route = nil
+	}
+	e.route = terrain.AdvanceTargetRoute(e.route, fromX, fromY, avoidX, avoidY, 5)
+	if len(e.route) > 0 && !terrain.HasClearFollowSegmentAvoid(fromX, fromY,
 		e.route[0].X, e.route[0].Y, avoidX, avoidY, 5) {
 		e.route = nil
 		e.routeTerrain = nil
 		e.clearPlanner()
-		e.planPending = true
-		return 0, 0, navigation.PathPending
+		e.planningTerrain = nil
+	}
+	if len(e.route) == 0 {
+		return 0, 0, plan.State
 	}
 	dx, dy := e.route[0].X-fromX, e.route[0].Y-fromY
 	length := math.Hypot(dx, dy)
