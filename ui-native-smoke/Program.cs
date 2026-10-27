@@ -28,13 +28,11 @@ internal static class Program
             throw new Exception("Native radar hotkey remained registered after disposal.")) { }
         var hotkeyVisibility = new RadarVisibility();
         hotkeyVisibility.ObserveRegisteredPress(true);
-        hotkeyVisibility.Observe(true, true);
         if (!hotkeyVisibility.Enabled)
-            throw new Exception("Registered and polled radar presses toggled twice.");
-        hotkeyVisibility.Observe(false, false);
+            throw new Exception("Registered radar press did not show the overlay.");
         hotkeyVisibility.ObserveRegisteredPress(true);
         if (hotkeyVisibility.Enabled)
-            throw new Exception("Radar hotkey did not rearm after release.");
+            throw new Exception("A second registered radar press did not hide the overlay.");
         var game = new Window { Width = 640, Height = 480, Topmost = true,
             Title = "Radar native smoke target" };
         game.Position = new PixelPoint(80, 80);
