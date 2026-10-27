@@ -29,5 +29,35 @@ internal static class AutoPartyRecoverySmoke
             AutoPartyInviterSelection.Select(topology, new HashSet<int> { 2, 3 }, 1, 1) != 2 ||
             AutoPartyInviterSelection.Select(topology, new HashSet<int> { 1, 3 }, 5, 1) != 3)
             throw new Exception("Auto Party inviter priority differs from the supplied build.");
+
+        CheckLeaseRenewalAsync().GetAwaiter().GetResult();
+    }
+
+    private static async Task CheckLeaseRenewalAsync()
+    {
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        var renewed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var count = 0;
+        var lease = AutoPartyRecoverySession.KeepBridgeLeaseAsync(_ =>
+        {
+            if (Interlocked.Increment(ref count) == 3) renewed.TrySetResult();
+            return Task.CompletedTask;
+        }, TimeSpan.FromMilliseconds(10), cancellation.Token);
+        await renewed.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        cancellation.Cancel();
+        try { await lease; }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        if (count < 3) throw new Exception("Auto Party stopped renewing its bridge lease during recovery.");
+
+        using var failureCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        var failed = AutoPartyRecoverySession.KeepBridgeLeaseAsync(_ =>
+            throw new IOException("Bridge renewal failed"), TimeSpan.FromMilliseconds(10),
+            failureCancellation.Token);
+        try
+        {
+            await failed;
+            throw new Exception("A failed Auto Party bridge renewal was ignored.");
+        }
+        catch (IOException error) when (error.Message == "Bridge renewal failed") { }
     }
 }

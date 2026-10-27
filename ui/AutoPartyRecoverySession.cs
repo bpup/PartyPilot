@@ -43,11 +43,32 @@ internal sealed class AutoPartyRecoverySession
         {
             await _bridge.BeginAutoPartyAsync(token);
             began = true;
-            var result = await AutoPartyRecoveryScheduler.RunAsync(_topology.ClientCount,
-                requestedTargetClient, (client, stable, cancellation) =>
-                    RecoverClientAsync(client, stable, cancellation), token);
-            FailedClient = result.FailedClient;
-            return result.Complete;
+            using var leaseCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
+            var keepAlive = KeepBridgeLeaseAsync(_bridge.RenewAutoPartyAsync,
+                TimeSpan.FromSeconds(2), leaseCancellation.Token);
+            try
+            {
+                var recovery = AutoPartyRecoveryScheduler.RunAsync(_topology.ClientCount,
+                    requestedTargetClient, (client, stable, cancellation) =>
+                        RecoverClientAsync(client, stable, cancellation), leaseCancellation.Token);
+                if (await Task.WhenAny(recovery, keepAlive) == keepAlive)
+                {
+                    leaseCancellation.Cancel();
+                    try { await recovery; }
+                    catch { /* Observe recovery after the lease failure. */ }
+                    await keepAlive;
+                    throw new InvalidOperationException("Auto Party bridge lease stopped unexpectedly.");
+                }
+                var result = await recovery;
+                FailedClient = result.FailedClient;
+                return result.Complete;
+            }
+            finally
+            {
+                leaseCancellation.Cancel();
+                try { await keepAlive; }
+                catch (OperationCanceledException) when (leaseCancellation.IsCancellationRequested) { }
+            }
         }
         finally
         {
@@ -60,6 +81,14 @@ internal sealed class AutoPartyRecoverySession
                 }
             }
         }
+    }
+
+    internal static async Task KeepBridgeLeaseAsync(Func<CancellationToken, Task> renew,
+        TimeSpan interval, CancellationToken token)
+    {
+        using var timer = new PeriodicTimer(interval);
+        while (await timer.WaitForNextTickAsync(token))
+            await renew(token);
     }
 
     private async Task<bool> RecoverClientAsync(int targetClient, IReadOnlySet<int> stableClients, CancellationToken token)
