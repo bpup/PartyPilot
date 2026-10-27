@@ -178,10 +178,18 @@ internal static class RadarTerrainCaptureSmoke
             var repeatedTerrainImage = terrainWindow.GetLogicalDescendants().OfType<Image>().Single();
             if (!ReferenceEquals(firstTerrainImage.Source, repeatedTerrainImage.Source))
                 throw new Exception("An unchanged player grid regenerated the whole terrain bitmap.");
-            terrainWindow.Apply(matching with { GridX = 4 }, discovered);
+            terrainWindow.Apply(matching with { GridX = 4,
+                SeenUtc = matching.SeenUtc.AddMilliseconds(2) }, discovered);
             var movedTerrainImage = terrainWindow.GetLogicalDescendants().OfType<Image>().Single();
-            if (ReferenceEquals(firstTerrainImage.Source, movedTerrainImage.Source))
-                throw new Exception("A moved player reused a stale terrain projection.");
+            if (!ReferenceEquals(firstTerrainImage.Source, movedTerrainImage.Source) ||
+                !double.IsFinite(Canvas.GetLeft(movedTerrainImage)) ||
+                Math.Abs(Canvas.GetLeft(movedTerrainImage)) < 0.1)
+                throw new Exception("A fast motion frame did not shift the cached terrain projection.");
+            terrainWindow.Apply(matching with { GridX = 4,
+                SeenUtc = matching.SeenUtc.AddMilliseconds(300) }, discovered);
+            var refreshedTerrainImage = terrainWindow.GetLogicalDescendants().OfType<Image>().Single();
+            if (ReferenceEquals(firstTerrainImage.Source, refreshedTerrainImage.Source))
+                throw new Exception("Terrain was not regenerated after the bounded motion refresh.");
             terrainWindow.Apply(matching with { AreaHash = 43 }, null);
             if (terrainWindow.TerrainVisible ||
                 terrainWindow.GetLogicalDescendants().OfType<Image>().Any())

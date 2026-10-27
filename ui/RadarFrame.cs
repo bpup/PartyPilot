@@ -18,6 +18,84 @@ public sealed record RadarFrame(int ProcessId, DateTime SeenUtc, uint AreaHash, 
     public IReadOnlyList<RadarMarker> DormantCandidates { get; init; } = [];
 }
 
+public sealed record RadarMotionFrame(int ProcessId, DateTime SeenUtc, uint AreaHash,
+    string AreaAddress, string? StateAreaAddress, double PlayerX, double PlayerY,
+    double? GridX, double? GridY)
+{
+    public static bool TryParse(ReadOnlySpan<byte> json, int expectedPid, DateTime nowUtc,
+        out RadarMotionFrame? motion)
+    {
+        motion = null;
+        if (json.Length is < 2 or > 2048) return false;
+        try
+        {
+            using var document = JsonDocument.Parse(json.ToArray());
+            var root = document.RootElement;
+            if (!root.TryGetProperty("Kind", out var kind) || kind.GetString() != "radar_motion" ||
+                !root.TryGetProperty("ProcessId", out var process) ||
+                !process.TryGetInt32(out var pid) || pid != expectedPid ||
+                !root.TryGetProperty("SeenUtc", out var seen) ||
+                !seen.TryGetDateTime(out var seenUtc) || seenUtc.Kind != DateTimeKind.Utc ||
+                seenUtc > nowUtc || nowUtc - seenUtc > TimeSpan.FromSeconds(2) ||
+                !root.TryGetProperty("AreaHash", out var hash) ||
+                !hash.TryGetUInt32(out var areaHash) || areaHash == 0 ||
+                !root.TryGetProperty("RadarAreaAddress", out var address) ||
+                address.GetString() is not { } areaAddress ||
+                !RadarFrames.ValidAddress(areaAddress) ||
+                !TryFinite(root, "X", out var x) || !TryFinite(root, "Y", out var y))
+                return false;
+            string? stateAddress = null;
+            if (root.TryGetProperty("RadarStateAreaAddress", out var state) &&
+                state.ValueKind != JsonValueKind.Null)
+            {
+                stateAddress = state.GetString();
+                if (stateAddress == null || !RadarFrames.ValidAddress(stateAddress)) return false;
+            }
+            double? gridX = null;
+            double? gridY = null;
+            if (root.TryGetProperty("RadarGridX", out var rawX) &&
+                rawX.ValueKind != JsonValueKind.Null)
+            {
+                if (!rawX.TryGetDouble(out var value) || !double.IsFinite(value)) return false;
+                gridX = value;
+            }
+            if (root.TryGetProperty("RadarGridY", out var rawY) &&
+                rawY.ValueKind != JsonValueKind.Null)
+            {
+                if (!rawY.TryGetDouble(out var value) || !double.IsFinite(value)) return false;
+                gridY = value;
+            }
+            if (gridX.HasValue != gridY.HasValue) return false;
+            motion = new RadarMotionFrame(pid, seenUtc, areaHash, areaAddress,
+                stateAddress, x, y, gridX, gridY);
+            return true;
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException)
+        { return false; }
+    }
+
+    public bool TryApply(RadarFrame full, out RadarFrame? moved)
+    {
+        moved = null;
+        if (full.ProcessId != ProcessId || full.AreaHash != AreaHash ||
+            !string.Equals(full.AreaAddress, AreaAddress, StringComparison.OrdinalIgnoreCase) ||
+            full.SeenUtc > SeenUtc || SeenUtc - full.SeenUtc > TimeSpan.FromSeconds(2) ||
+            full.StateAreaAddress != null &&
+            !string.Equals(full.StateAreaAddress, StateAreaAddress, StringComparison.OrdinalIgnoreCase))
+            return false;
+        moved = full with { SeenUtc = SeenUtc, PlayerX = PlayerX, PlayerY = PlayerY,
+            StateAreaAddress = StateAreaAddress, GridX = GridX, GridY = GridY };
+        return true;
+    }
+
+    private static bool TryFinite(JsonElement element, string name, out double value)
+    {
+        value = 0;
+        return element.TryGetProperty(name, out var field) &&
+            field.TryGetDouble(out value) && double.IsFinite(value);
+    }
+}
+
 public static class RadarFrames
 {
     public static bool TryParse(ReadOnlySpan<byte> json, int expectedPid, DateTime nowUtc,
@@ -234,7 +312,7 @@ public static class RadarFrames
         return element.TryGetProperty(name, out var field) && field.TryGetDouble(out value) && double.IsFinite(value);
     }
 
-    private static bool ValidAddress(string value) => value.Length is >= 4 and <= 18 &&
+    internal static bool ValidAddress(string value) => value.Length is >= 4 and <= 18 &&
         value.StartsWith("0x", StringComparison.Ordinal) &&
         value.AsSpan(2).IndexOfAnyExcept("0123456789ABCDEFabcdef") < 0 &&
         ulong.TryParse(value.AsSpan(2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var address) &&

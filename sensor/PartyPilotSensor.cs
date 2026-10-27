@@ -33,6 +33,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     private SkillBindSourceScanner.Result? _skillBindSource;
     private string? _skillBindSourceStatus;
     private DateTime _lastRadarSentUtc;
+    private bool _radarStreamHealthy;
     private DateTime _lastDormantMapScanUtc;
     private object? _dormantMapObservation;
     private readonly DormantNavigationSurvey _dormantSurvey = new();
@@ -64,6 +65,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             RevokeLastExperimentalOrdered(now);
         if (!Settings.Enable.Value)
         {
+            _radarStreamHealthy = false;
             _monsterTracker.Reset();
             _monsterTrackerAreaHash = null;
             _dormantMapObservation = null;
@@ -389,6 +391,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             _monsterTracker.Reset();
             _monsterTrackerAreaHash = null;
         }
+        if (!Settings.DiagnoseRadarEntities.Value) _radarStreamHealthy = false;
         if (Settings.DiagnoseRadarEntities.Value && now - _lastRadarSentUtc >= TimeSpan.FromMilliseconds(500))
         {
             _lastRadarSentUtc = now;
@@ -430,12 +433,14 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                     }
                 }
                 radarStatus = "ok";
+                _radarStreamHealthy = true;
             }
             catch
             {
                 _monsterTracker.Reset();
                 _monsterTrackerAreaHash = null;
                 radarStatus = "scan_failed";
+                _radarStreamHealthy = false;
             }
             uiObservationSeenUtc = now;
             try
@@ -875,6 +880,48 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             _udp.Send(pairing, pairing.Length, PairingReceiver);
         }
         if (radarSeenUtc.HasValue) _udp.Send(bytes, bytes.Length, RadarReceiver);
+        if (Settings.DiagnoseRadarEntities.Value && _radarStreamHealthy && frameAreaHash != 0)
+        {
+            double? motionGridX = radarGridX;
+            double? motionGridY = radarGridY;
+            string? motionStateAreaAddress = radarStateAreaAddress;
+            var needsRawGrid = Settings.DiagnoseTerrain.Value || Settings.DiagnoseDormantAreaMap.Value;
+            if (needsRawGrid && !radarSeenUtc.HasValue)
+            {
+                try
+                {
+                    byte[]? ReadMotionMap(long address, int size)
+                    {
+                        try { return GameController.IngameState.Data.M.ReadMem(address, size); }
+                        catch { return null; }
+                    }
+                    var raw = RawRenderPositionReader.Read(frameLocalAddress, ReadMotionMap);
+                    motionGridX = raw?.GridX;
+                    motionGridY = raw?.GridY;
+                    var pointer = ReadMotionMap(frameStateAddress + 656, 8);
+                    motionStateAreaAddress = pointer is { Length: 8 }
+                        ? FormatAddress(BitConverter.ToInt64(pointer)) : null;
+                }
+                catch { motionGridX = null; motionGridY = null; }
+            }
+            if (!needsRawGrid || motionGridX.HasValue && motionGridY.HasValue)
+            {
+                var motion = JsonSerializer.SerializeToUtf8Bytes(new
+                {
+                    Kind = "radar_motion",
+                    ProcessId = frameProcessId,
+                    SeenUtc = now,
+                    AreaHash = frameAreaHash,
+                    RadarAreaAddress = FormatAddress(frameDataAddress),
+                    RadarStateAreaAddress = motionStateAreaAddress,
+                    X = position.X,
+                    Y = position.Y,
+                    RadarGridX = motionGridX,
+                    RadarGridY = motionGridY
+                });
+                _udp.Send(motion, motion.Length, RadarReceiver);
+            }
+        }
         var privacyPulse = JsonSerializer.SerializeToUtf8Bytes(new
         {
             ProcessId = GameController.Window.Process.Id,

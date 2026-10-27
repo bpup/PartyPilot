@@ -11,6 +11,8 @@ internal sealed class RadarSession : IAsyncDisposable
     private readonly CancellationTokenSource _cancellation = new();
     private readonly Dictionary<int, RadarOverlayWindow> _windows;
     private readonly Dictionary<int, RadarLandmarkCache> _landmarks = new();
+    private readonly Dictionary<int, RadarFrame> _lastFullFrames = new();
+    private readonly Dictionary<int, RadarTerrainCapture?> _lastTerrains = new();
     private readonly Dictionary<int, nint> _gameHandles;
     private readonly RadarVisibility _visibility;
     private readonly Dictionary<int, RadarTerrainCapture>? _manualTerrains;
@@ -127,31 +129,51 @@ internal sealed class RadarSession : IAsyncDisposable
                 if (!IPAddress.IsLoopback(packet.RemoteEndPoint.Address) || packet.Buffer.Length > 65507) continue;
                 foreach (var (pid, window) in _windows)
                 {
-                    if (!RadarFrames.TryParse(packet.Buffer, pid, DateTime.UtcNow, out var frame) || frame == null)
-                        continue;
-                    if (lastQueued.TryGetValue(pid, out var previous) && frame.SeenUtc <= previous)
-                        break;
-                    lastQueued[pid] = frame.SeenUtc;
-                    RadarTerrainCapture? terrain = null;
-                    if (_manualTerrains is not null && _manualTerrains.TryGetValue(pid, out var manual) &&
-                        manual.Matches(frame))
+                    if (RadarFrames.TryParse(packet.Buffer, pid, DateTime.UtcNow, out var frame) &&
+                        frame != null)
                     {
-                        if (manual.MetadataUnchanged()) terrain = manual;
-                        else if (RadarTerrainCapture.TryLoad(manual.MetadataPath, out var refreshed) &&
-                                 refreshed?.Matches(frame) == true)
+                        if (lastQueued.TryGetValue(pid, out var previous) && frame.SeenUtc <= previous)
+                            break;
+                        lastQueued[pid] = frame.SeenUtc;
+                        RadarTerrainCapture? terrain = null;
+                        if (_manualTerrains is not null && _manualTerrains.TryGetValue(pid, out var manual) &&
+                            manual.Matches(frame))
                         {
-                            _manualTerrains[pid] = refreshed;
-                            terrain = refreshed;
+                            if (manual.MetadataUnchanged()) terrain = manual;
+                            else if (RadarTerrainCapture.TryLoad(manual.MetadataPath, out var refreshed) &&
+                                     refreshed?.Matches(frame) == true)
+                            {
+                                _manualTerrains[pid] = refreshed;
+                                terrain = refreshed;
+                            }
                         }
+                        terrain ??= _terrainCatalog?.FindMatching(frame, DateTime.UtcNow);
+                        Dispatcher.UIThread.Post(() =>
+                        {
+                            if (_disposed) return;
+                            if (!_landmarks[pid].TryApply(frame, out var enriched) || enriched is null)
+                                return;
+                            _lastFullFrames[pid] = enriched;
+                            _lastTerrains[pid] = terrain;
+                            window.Apply(enriched, terrain);
+                            FrameReceived?.Invoke(pid, enriched.Markers.Count, window.TerrainVisible);
+                        });
+                        break;
                     }
-                    terrain ??= _terrainCatalog?.FindMatching(frame, DateTime.UtcNow);
+                    if (!RadarMotionFrame.TryParse(packet.Buffer, pid, DateTime.UtcNow,
+                            out var motion) || motion is null) continue;
+                    if (lastQueued.TryGetValue(pid, out var last) && motion.SeenUtc <= last)
+                        break;
+                    lastQueued[pid] = motion.SeenUtc;
                     Dispatcher.UIThread.Post(() =>
                     {
-                        if (_disposed) return;
-                        if (!_landmarks[pid].TryApply(frame, out var enriched) || enriched is null)
+                        if (_disposed || !_lastFullFrames.TryGetValue(pid, out var full) ||
+                            !motion.TryApply(full, out var moved) || moved is null)
                             return;
-                        window.Apply(enriched, terrain);
-                        FrameReceived?.Invoke(pid, enriched.Markers.Count, window.TerrainVisible);
+                        _lastTerrains.TryGetValue(pid, out var terrain);
+                        if (terrain != null && !terrain.MetadataUnchanged()) terrain = null;
+                        window.Apply(moved, terrain);
+                        FrameReceived?.Invoke(pid, moved.Markers.Count, window.TerrainVisible);
                     });
                     break;
                 }

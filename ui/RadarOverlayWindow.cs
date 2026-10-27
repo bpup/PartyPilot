@@ -27,6 +27,7 @@ public sealed class RadarOverlayWindow : Window
     private WriteableBitmap? _terrainBitmap;
     private (RadarTerrainCapture Terrain, double GridX, double GridY, int Width, int Height)?
         _terrainRenderKey;
+    private DateTime _terrainRenderedAt;
     public bool TargetIsLost { get; private set; }
     public bool TerrainVisible => _terrainBitmap is not null;
 
@@ -136,7 +137,13 @@ public sealed class RadarOverlayWindow : Window
             if ((long)width * height <= 4_194_304)
             {
                 var key = (_terrain, _frame.GridX!.Value, _frame.GridY!.Value, width, height);
-                if (_terrainBitmap is null || _terrainRenderKey != key)
+                var sameCaptureAndSize = _terrainBitmap is not null &&
+                    _terrainRenderKey is { } previous &&
+                    ReferenceEquals(previous.Terrain, _terrain) &&
+                    previous.Width == width && previous.Height == height;
+                if (!sameCaptureAndSize ||
+                    _terrainRenderKey != key &&
+                    _frame.SeenUtc - _terrainRenderedAt >= TimeSpan.FromMilliseconds(250))
                 {
                     ReleaseTerrainBitmap();
                     var pixels = RadarTerrainRaster.Render(_terrain, _frame, width, height,
@@ -152,12 +159,23 @@ public sealed class RadarOverlayWindow : Window
                     }
                     _terrainBitmap = bitmap;
                     _terrainRenderKey = key;
+                    _terrainRenderedAt = _frame.SeenUtc;
                 }
-                _canvas.Children.Add(new Image
+                var image = new Image
                 {
                     Source = _terrainBitmap, Width = Bounds.Width, Height = Bounds.Height,
                     Stretch = Stretch.Fill
-                });
+                };
+                if (_terrainRenderKey is { } rendered &&
+                    (rendered.GridX != key.Item2 || rendered.GridY != key.Item3))
+                {
+                    var (offsetX, offsetY) = RadarProjection.ProjectGrid(key.Item2, key.Item3,
+                        rendered.GridX, rendered.GridY, centerX, centerY,
+                        _scale * RadarProjection.WorldUnitsPerGridUnit);
+                    Canvas.SetLeft(image, offsetX - centerX);
+                    Canvas.SetTop(image, offsetY - centerY);
+                }
+                _canvas.Children.Add(image);
                 terrainDrawn = true;
                 foreach (var room in _terrain.Rooms)
                 {
