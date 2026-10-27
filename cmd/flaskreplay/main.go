@@ -13,13 +13,15 @@ import (
 )
 
 type frame struct {
-	Now        time.Time     `json:"now"`
-	Player     int           `json:"player"`
-	Vitals     flask.Vitals  `json:"vitals"`
-	Support    *supportFrame `json:"support,omitempty"`
-	MenuOpen   *bool         `json:"menu_open"`
-	Recovering *bool         `json:"recovering"`
-	Reset      bool          `json:"reset,omitempty"`
+	Now         time.Time          `json:"now"`
+	Player      int                `json:"player"`
+	Vitals      flask.Vitals       `json:"vitals"`
+	CustomRules []flask.CustomRule `json:"custom_rules,omitempty"`
+	InCombat    *bool              `json:"in_combat,omitempty"`
+	Support     *supportFrame      `json:"support,omitempty"`
+	MenuOpen    *bool              `json:"menu_open"`
+	Recovering  *bool              `json:"recovering"`
+	Reset       bool               `json:"reset,omitempty"`
 }
 
 type supportFrame struct {
@@ -55,8 +57,9 @@ func run(path string, combinedDefence bool) error {
 		if err := json.Unmarshal(scanner.Bytes(), &input); err != nil {
 			return fmt.Errorf("line %d: %w", line, err)
 		}
-		if input.MenuOpen == nil || input.Support == nil && input.Recovering == nil {
-			return fmt.Errorf("line %d: menu_open and normal-frame recovering are required", line)
+		if input.MenuOpen == nil || input.Support == nil && input.Recovering == nil ||
+			len(input.CustomRules) > 0 && (input.InCombat == nil || input.Support != nil) {
+			return fmt.Errorf("line %d: menu_open, normal-frame recovering, and custom-rule in_combat are required", line)
 		}
 		settings, err := flask.ResetProfiles(input.Player)
 		if err != nil {
@@ -78,8 +81,9 @@ func run(path string, combinedDefence bool) error {
 			activations, err = engine.StepSupport(input.Player, input.Now,
 				support.TargetVitals, settings, support.Monitor, *input.MenuOpen)
 		} else {
-			activations, err = engine.Step(input.Player, input.Now, input.Vitals,
-				settings, *input.MenuOpen, *input.Recovering)
+			activations, err = engine.StepWithCustom(input.Player, input.Now, input.Vitals,
+				settings, *input.MenuOpen, *input.Recovering, input.CustomRules,
+				input.InCombat == nil || *input.InCombat)
 		}
 		if err != nil {
 			return fmt.Errorf("line %d: %w", line, err)

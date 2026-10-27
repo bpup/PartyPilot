@@ -43,10 +43,11 @@ type Settings struct {
 }
 
 type Activation struct {
-	Player   int     `json:"player"`
-	Resource string  `json:"resource"`
-	Percent  float64 `json:"percent"`
-	Reason   string  `json:"reason"`
+	Player      int     `json:"player"`
+	Resource    string  `json:"resource"`
+	Percent     float64 `json:"percent"`
+	Reason      string  `json:"reason"`
+	DirectInput string  `json:"direct_input,omitempty"`
 }
 
 type ruleState struct {
@@ -56,11 +57,12 @@ type ruleState struct {
 }
 
 type playerState struct {
-	lastStep time.Time
-	life     ruleState
-	mana     ruleState
-	lastWard *float64
-	empty    map[string]*emptyFlaskWatch
+	lastStep   time.Time
+	life       ruleState
+	mana       ruleState
+	lastWard   *float64
+	empty      map[string]*emptyFlaskWatch
+	customLast map[string]time.Time
 }
 
 type emptyFlaskWatch struct {
@@ -127,10 +129,20 @@ func ResetProfiles(player int) (Settings, error) {
 }
 
 func (engine *Engine) Step(player int, now time.Time, vitals Vitals, rules Settings, menuOpen, recovering bool) ([]Activation, error) {
+	return engine.StepWithCustom(player, now, vitals, rules, menuOpen, recovering, nil, true)
+}
+
+// StepWithCustom evaluates target-version custom recovery rules after the
+// built-in life and mana checks. In-combat state must be supplied by the caller.
+func (engine *Engine) StepWithCustom(player int, now time.Time, vitals Vitals, rules Settings,
+	menuOpen, recovering bool, custom []CustomRule, inCombat bool) ([]Activation, error) {
 	if player < 1 || player > 6 || now.IsZero() || !validRule(rules.Life) || !validRule(rules.Mana) ||
 		math.IsNaN(rules.EsTrigger) || math.IsInf(rules.EsTrigger, 0) || rules.EsTrigger < 0 || rules.EsTrigger > 100 ||
 		!validPool(vitals.Life) || !validPool(vitals.Mana) || !validPool(vitals.EnergyShield) || !validWard(vitals.Ward) {
 		return nil, errors.New("invalid player, time, rule, or vitals")
+	}
+	if err := validateCustomRules(custom); err != nil {
+		return nil, err
 	}
 	state := engine.players[player]
 	if state == nil {
@@ -176,6 +188,7 @@ func (engine *Engine) Step(player int, now time.Time, vitals Vitals, rules Setti
 	if result := evaluate("mana", player, now, vitals.Mana, manaRule, &state.mana, false, false); result != nil {
 		activations = append(activations, *result)
 	}
+	activations = append(activations, state.evaluateCustom(player, now, vitals, custom, inCombat, wardBroke)...)
 	return state.withoutEmptyFlasks(now, vitals, activations), nil
 }
 
@@ -214,6 +227,10 @@ func (state *playerState) withoutEmptyFlasks(now time.Time, vitals Vitals, activ
 	}
 	kept := activations[:0]
 	for _, activation := range activations {
+		if activation.DirectInput != "" {
+			kept = append(kept, activation)
+			continue
+		}
 		watch := state.empty[activation.Resource]
 		if watch == nil {
 			watch = &emptyFlaskWatch{}
