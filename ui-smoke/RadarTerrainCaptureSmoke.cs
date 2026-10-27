@@ -169,6 +169,21 @@ internal static class RadarTerrainCaptureSmoke
             File.WriteAllBytes(dataPath, data);
             if (RadarTerrainCapture.TryLoad(metadataPath, out _))
                 throw new Exception("Radar accepted terrain with a changed packed file.");
+            data = Enumerable.Repeat((byte)0x55, 4096).ToArray();
+            data[32 * 64 + 32] = 0x51; // Cell (64,32) has the target's 1..4 ramp value.
+            File.WriteAllBytes(dataPath, data);
+            File.WriteAllText(metadataPath, Metadata("11"));
+            if (!RadarTerrainCapture.TryLoad(metadataPath, out var clipped) || clipped is null ||
+                !clipped.Renderable(64, 32) || !clipped.Renderable(40, 8) ||
+                !clipped.Renderable(88, 56) || clipped.Renderable(39, 32) ||
+                clipped.Renderable(89, 32) || clipped.Renderable(64, 7))
+                throw new Exception("Radar did not apply the 24-cell ramp bounds to candidate terrain.");
+            data[32 * 64 + 32] = 0x55;
+            File.WriteAllBytes(dataPath, data);
+            File.WriteAllText(metadataPath, Metadata("11"));
+            if (!RadarTerrainCapture.TryLoad(metadataPath, out var unclipped) || unclipped is null ||
+                !unclipped.Renderable(0, 0) || !unclipped.Renderable(127, 63))
+                throw new Exception("Radar clipped terrain without a 1..4 ramp value.");
         }
         finally
         {

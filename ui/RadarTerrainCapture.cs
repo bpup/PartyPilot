@@ -14,6 +14,7 @@ public sealed class RadarTerrainCapture
 {
     private const int MaximumPackedBytes = 64 * 1024 * 1024;
     private readonly byte[] _data;
+    private readonly (int MinX, int MinY, int MaxX, int MaxY)? _rampBounds;
 
     public int ProcessId { get; }
     public uint AreaHash { get; }
@@ -49,6 +50,7 @@ public sealed class RadarTerrainCapture
         double rawGridX, double rawGridY, IReadOnlyList<RadarTerrainRoom> rooms)
     {
         _data = data;
+        _rampBounds = FindRampBounds(data, bytesPerRow, height);
         ProcessId = processId;
         AreaHash = areaHash;
         AreaAddress = areaAddress;
@@ -68,6 +70,45 @@ public sealed class RadarTerrainCapture
             throw new ArgumentOutOfRangeException(nameof(x));
         var value = _data[y * BytesPerRow + x / 2];
         return ((x & 1) == 0 ? value & 15 : value >> 4) > 0;
+    }
+
+    // The active 0.6.17 hardware map clips its occupancy to the bounding box
+    // of terrain values 1..4 plus 24 cells. A map without these values is not clipped.
+    public bool Renderable(int x, int y)
+    {
+        if (!Walkable(x, y)) return false;
+        return _rampBounds is not { } bounds ||
+            x >= bounds.MinX && x <= bounds.MaxX &&
+            y >= bounds.MinY && y <= bounds.MaxY;
+    }
+
+    private static (int MinX, int MinY, int MaxX, int MaxY)? FindRampBounds(
+        byte[] data, int bytesPerRow, int height)
+    {
+        var minX = int.MaxValue;
+        var minY = int.MaxValue;
+        var maxX = -1;
+        var maxY = -1;
+        for (var y = 0; y < height; y++)
+        {
+            var row = y * bytesPerRow;
+            for (var byteX = 0; byteX < bytesPerRow; byteX++)
+            {
+                var packed = data[row + byteX];
+                for (var half = 0; half < 2; half++)
+                {
+                    var value = half == 0 ? packed & 15 : packed >> 4;
+                    if (value is < 1 or > 4) continue;
+                    var x = byteX * 2 + half;
+                    minX = Math.Min(minX, x);
+                    minY = Math.Min(minY, y);
+                    maxX = Math.Max(maxX, x);
+                    maxY = Math.Max(maxY, y);
+                }
+            }
+        }
+        return maxX < 0 ? null :
+            (minX - 24, minY - 24, maxX + 24, maxY + 24);
     }
 
     public bool Matches(RadarFrame frame)

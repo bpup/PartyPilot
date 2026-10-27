@@ -29,7 +29,7 @@ public static class RadarTerrainRaster
                     continue;
                 var gridX = (int)Math.Floor(rawX);
                 var gridY = (int)Math.Floor(rawY);
-                if (!capture.Walkable(gridX, gridY)) continue;
+                if (!capture.Renderable(gridX, gridY)) continue;
                 var offset = (y * width + x) * 4;
                 var key = ((long)gridY << 32) | (uint)gridX;
                 if (!boundaryByCell.TryGetValue(key, out var boundary))
@@ -57,7 +57,7 @@ public static class RadarTerrainRaster
             var neighborY = y + offsetY;
             if (neighborX < 0 || neighborX >= capture.Width ||
                 neighborY < 0 || neighborY >= capture.Height ||
-                !capture.Walkable(neighborX, neighborY)) return true;
+                !capture.Renderable(neighborX, neighborY)) return true;
         }
         return false;
     }
