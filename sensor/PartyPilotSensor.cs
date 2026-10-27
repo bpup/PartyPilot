@@ -149,7 +149,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 if (_slotCandidates is { Status: "single_slot_candidate" or "two_slot_candidate" } candidate)
                     _slotCandidates = LocalSlotMotionSampler.Capture(candidate, localAddress,
                         paths, visiblePositions, ReadCandidate, ReadMissingPath, SameAreaAndPlayer,
-                        render.Pos.X, render.Pos.Y, render.Pos.Z, now);
+                        render.Pos.X, render.Pos.Y, render.Pos.Z, now,
+                        ingameStateAddress: stateAddress);
                 _slotCandidateStatus = _slotCandidates == null ? "scan_failed" : "ok";
             }
             catch
@@ -219,7 +220,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                         catch { return null; }
                     }
                     if (LocalSlotCandidateScanner.Revalidate(candidate, localAddress, paths,
-                            ReadCandidate, address => RawCharacterPathReader.Read(address, ReadCandidate)))
+                            ReadCandidate, address => RawCharacterPathReader.Read(address, ReadCandidate),
+                            GameController.IngameState.Address))
                     {
                         var players = new List<long>();
                         foreach (var address in candidate.OrderedAddresses)
@@ -370,7 +372,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                                 }
                                 if (!LocalSlotCandidateScanner.Revalidate(slotCandidate, player?.Address ?? 0,
                                         paths, ReadCandidate,
-                                        address => RawCharacterPathReader.Read(address, ReadCandidate)))
+                                        address => RawCharacterPathReader.Read(address, ReadCandidate),
+                                        GameController.IngameState.Address))
                                     slotCandidate = null;
                             }
                             itemCards = result.Cards.Select(card =>
@@ -655,7 +658,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 captured = LocalSlotMotionSampler.Capture(candidate, localAddress, paths,
                     new Dictionary<long, (float X, float Y, float Z)>(),
                     ReadCandidate, address => RawCharacterPathReader.Read(address, ReadCandidate),
-                    SameIdentity, render.Pos.X, render.Pos.Y, render.Pos.Z, seenUtc);
+                    SameIdentity, render.Pos.X, render.Pos.Y, render.Pos.Z, seenUtc,
+                    ingameStateAddress: stateAddress);
                 if (captured == null) return; // Identity or vector changed during capture.
             }
             if (!SameIdentity()) return;

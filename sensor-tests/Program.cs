@@ -38,9 +38,16 @@ Require(two.StatePointerAreaAddress == "0x100000" && two.StatePointerMatchesData
 Require(two.CandidateAreaAddresses.SequenceEqual(["0x100000"]),
     "The candidate area address was not reported.");
 Require(two.VectorHeaderAddress == "0x1005C8" &&
+    two.SelectedAreaAddress == "0x100000" &&
     two.ContainsObservedLocal == true &&
-    LocalSlotCandidateScanner.Revalidate(two, local, paths, Read),
+    LocalSlotCandidateScanner.Revalidate(two, local, paths, Read,
+        ingameStateAddress: state),
     "The selected vector header was not revalidated.");
+memory[state + 656] = BitConverter.GetBytes(0x900000L);
+Require(!LocalSlotCandidateScanner.Revalidate(two, local, paths, Read,
+        ingameStateAddress: state),
+    "An old vector remained usable after its state-derived area pointer changed.");
+memory[state + 656] = BitConverter.GetBytes(data);
 var vectorStart = BitConverter.ToInt64(memory[data + 1408 + 72], 0);
 var third = 0x700000L;
 paths[third] = "Metadata/Characters/Player";
@@ -64,13 +71,24 @@ RawRenderPositionReader.Position? ReadSyntheticPosition(long entity, Func<long, 
     entity == other ? new(secondWorldX, 40, 5, secondWorldX / 10.869565f,
         40 / 10.869565f, "0x600000") : null;
 var motion = LocalSlotMotionSampler.Capture(two, local, paths, visiblePositions, Read,
-    _ => null, () => true, 10, 20, 5, motionSeen, ReadSyntheticPosition);
+    _ => null, () => true, 10, 20, 5, motionSeen, ReadSyntheticPosition, state);
 Require(motion?.RawPositions is { Length: 2 } &&
     motion.RawPositions[1]?.WorldX == 30 &&
     motion.RawPositionsSeenUtc == motionSeen &&
     motion.ObservedLocalPositionComparison?.WorldXYDistance == 0 &&
     motion.VisiblePositionComparisons?[1]?.WorldXYDistance == 0,
     "A complete revalidated diagnostic position frame was not captured.");
+RawRenderPositionReader.Position? SwitchPointerDuringRead(long entity,
+    Func<long, int, byte[]?> read)
+{
+    memory[state + 656] = BitConverter.GetBytes(0x900000L);
+    return ReadSyntheticPosition(entity, read);
+}
+Require(LocalSlotMotionSampler.Capture(two, local, paths, visiblePositions, Read,
+        _ => null, () => true, 10, 20, 5, motionSeen,
+        SwitchPointerDuringRead, state) == null,
+    "A frame survived an area pointer change during position capture.");
+memory[state + 656] = BitConverter.GetBytes(data);
 using (var fast = System.Text.Json.JsonDocument.Parse(FastOrderedCandidateFrame.Encode(
     101, 42, "TestArea", motion, motionSeen, motionSeen.Ticks)))
 {
@@ -184,9 +202,15 @@ memory[state + 656] = BitConverter.GetBytes(alternativeArea);
 AddVector(alternativeArea + 1408 + 72, local, other);
 var divergent = LocalSlotCandidateScanner.Scan(state, data, local, paths, Read);
 Require(divergent.Status == "two_slot_candidate" && divergent.StatePointerAreaAddress == "0x900000" &&
+    divergent.SelectedAreaAddress == "0x900000" &&
     divergent.StatePointerMatchesDataAddress == false &&
     divergent.CandidateAreaAddresses.SequenceEqual(["0x900000"]),
     "A distinct state-derived area candidate was lost or mislabeled.");
+memory[state + 656] = BitConverter.GetBytes(0xA00000L);
+Require(!LocalSlotCandidateScanner.Revalidate(divergent, local, paths, Read,
+        ingameStateAddress: state),
+    "A divergent state-derived candidate survived an area pointer change.");
+memory[state + 656] = BitConverter.GetBytes(alternativeArea);
 AddVector(data + 1408 + 72, other, local);
 var crossAreaConflict = LocalSlotCandidateScanner.Scan(state, data, local, paths, Read);
 Require(crossAreaConflict.Status == "conflicting_candidates" &&

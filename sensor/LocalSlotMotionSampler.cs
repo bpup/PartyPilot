@@ -13,11 +13,13 @@ public static class LocalSlotMotionSampler
         Func<long, int, byte[]?> read, Func<long, string?> readMissingPath,
         Func<bool> sameAreaAndPlayer,
         float observedX, float observedY, float observedZ, DateTime seenUtc,
-        Func<long, Func<long, int, byte[]?>, RawRenderPositionReader.Position?>? readPosition = null)
+        Func<long, Func<long, int, byte[]?>, RawRenderPositionReader.Position?>? readPosition = null,
+        long ingameStateAddress = 0)
     {
         if (seenUtc == default || !sameAreaAndPlayer() ||
             !LocalSlotCandidateScanner.Revalidate(candidate,
-                observedLocalAddress, visiblePaths, read, readMissingPath)) return null;
+                observedLocalAddress, visiblePaths, read, readMissingPath,
+                ingameStateAddress)) return null;
         readPosition ??= RawRenderPositionReader.Read;
         var positions = new RawRenderPositionReader.Position?[candidate.OrderedAddresses.Length];
         var comparisons = new RawRenderPositionReader.LocalComparison?[positions.Length];
@@ -40,7 +42,7 @@ public static class LocalSlotMotionSampler
         }
         if (!sameAreaAndPlayer() ||
             !LocalSlotCandidateScanner.Revalidate(candidate, observedLocalAddress,
-                visiblePaths, read, readMissingPath)) return null;
+                visiblePaths, read, readMissingPath, ingameStateAddress)) return null;
         return candidate with
         {
             RawPositions = positions,

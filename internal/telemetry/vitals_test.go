@@ -115,12 +115,20 @@ func TestLocalSlotCandidateDiagnosticCannotAssertUnobservedOrder(t *testing.T) {
 		t.Fatalf("candidate diagnostic rejected: %+v, %v", got, err)
 	}
 	withPathEvidence := strings.Replace(base, `"MatchingHeaders":1,`,
-		`"MatchingHeaders":1,"SelectedStructOffset":1408,"SelectedVectorOffset":72,`+
+		`"MatchingHeaders":1,"VectorHeaderAddress":"0x1005C8",`+
+			`"SelectedAreaAddress":"0x100000",`+
+			`"SelectedStructOffset":1408,"SelectedVectorOffset":72,`+
 			`"RawPathEntries":1,"VisiblePathEntries":1,`, 1)
 	if detailed, err := Decode([]byte(withPathEvidence)); err != nil ||
+		detailed.LocalSlotCandidates.SelectedAreaAddress != "0x100000" ||
 		detailed.LocalSlotCandidates.RawPathEntries != 1 ||
 		*detailed.LocalSlotCandidates.SelectedVectorOffset != 72 {
 		t.Fatalf("path evidence lost: %+v, %v", detailed.LocalSlotCandidates, err)
+	}
+	wrongArea := strings.Replace(withPathEvidence, `"SelectedAreaAddress":"0x100000"`,
+		`"SelectedAreaAddress":"0x900000"`, 1)
+	if _, err := Decode([]byte(wrongArea)); err == nil {
+		t.Fatal("candidate selected an area absent from the scanned anchors")
 	}
 	withoutObservedAlias := strings.Replace(base, `"0x200000","0x300000"`,
 		`"0x300000","0x400000"`, 1)

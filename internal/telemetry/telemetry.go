@@ -204,6 +204,7 @@ type LocalSlotCandidates struct {
 	StatePointerMatchesDataAddress  *bool                 `json:"StatePointerMatchesDataAddress,omitempty"`
 	CandidateAreaAddresses          []string              `json:"CandidateAreaAddresses"`
 	VectorHeaderAddress             string                `json:"VectorHeaderAddress,omitempty"`
+	SelectedAreaAddress             string                `json:"SelectedAreaAddress,omitempty"`
 	SelectedStructOffset            *int                  `json:"SelectedStructOffset,omitempty"`
 	SelectedVectorOffset            *int                  `json:"SelectedVectorOffset,omitempty"`
 	RawPathEntries                  int                   `json:"RawPathEntries,omitempty"`
@@ -628,7 +629,9 @@ func validLocalSlotCandidates(candidate *LocalSlotCandidates, scanStatus, observ
 				*candidate.SelectedVectorOffset < 0 || *candidate.SelectedVectorOffset > 256)) {
 		return false
 	}
-	if !validAddress(candidate.VectorHeaderAddress) ||
+	if !validAddress(candidate.VectorHeaderAddress) || !validAddress(candidate.SelectedAreaAddress) ||
+		(want == 0 && candidate.SelectedAreaAddress != "") ||
+		(candidate.SelectedAreaAddress != "" && candidate.VectorHeaderAddress == "") ||
 		(want == 0 && (candidate.VectorHeaderAddress != "" || len(candidate.RawPositions) != 0 ||
 			candidate.RawPositionsSeenUTC != nil)) ||
 		(len(candidate.RawPositions) != 0 && (want == 0 || len(candidate.RawPositions) != want ||
@@ -710,6 +713,9 @@ func validLocalSlotCandidates(candidate *LocalSlotCandidates, scanStatus, observ
 			return false
 		}
 		seenAreas[area] = true
+	}
+	if candidate.SelectedAreaAddress != "" && !seenAreas[candidate.SelectedAreaAddress] {
+		return false
 	}
 	seen := make(map[string]bool, want)
 	localSeen := false
