@@ -40,7 +40,17 @@ internal static class RemoteAttachSmoke
                 await ExpectBoth(target, 0, 0, 0, 0);
             }
             await ExpectBoth(target, 1167, 0, 1167, 0);
-            Console.WriteLine("Remote Client 3 attach, P5/P6 input, neutral and stop passed.");
+            using (var reattached = await Client3RuntimeAttach.AttachAsync(
+                target.Id, handle, targetExecutable, includeP6: true))
+            {
+                if (!reattached.IsReady || !reattached.Submit(
+                    new PadReport(0x2000, 0, 0, 0, 0, 0, 0),
+                    new PadReport(0x0040, 0, 0, 0, 0, 0, 0)))
+                    throw new InvalidOperationException("Remote P5/P6 reattach was not ready.");
+                await ExpectBoth(target, 0, 0x2000, 0, 0x0040);
+            }
+            await ExpectBoth(target, 1167, 0, 1167, 0);
+            Console.WriteLine("Remote Client 3 attach, P5/P6 input, neutral, stop and reattach passed.");
         }
         finally
         {
