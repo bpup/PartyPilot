@@ -308,10 +308,26 @@ internal sealed class BridgeRouter
             (!previousUp || !previousLeftTrigger);
         var sixthEdge = leftTrigger && _focusPads.ContainsKey(6) && down &&
             (!previousDown || !previousLeftTrigger);
-        var edgeCount = (leftEdge ? 1 : 0) + (rightEdge ? 1 : 0) +
-            (fifthEdge ? 1 : 0) + (sixthEdge ? 1 : 0);
-        var pressedRole = edgeCount == 1
-            ? fifthEdge ? 5 : sixthEdge ? 6 : leftEdge ? leftRole : rightRole : 0;
+        var pressedRole = 0;
+        var highestParts = 0;
+        var tied = false;
+        void Consider(bool edge, int role)
+        {
+            if (!edge) return;
+            var parts = role >= 3 ? 2 : 1;
+            if (parts > highestParts)
+            {
+                pressedRole = role;
+                highestParts = parts;
+                tied = false;
+            }
+            else if (parts == highestParts) tied = true;
+        }
+        Consider(leftEdge, leftRole);
+        Consider(rightEdge, rightRole);
+        Consider(fifthEdge, 5);
+        Consider(sixthEdge, 6);
+        if (tied) pressedRole = 0;
         // While one player has manual focus, the reserved P3–P6 chords can
         // immediately switch to another player. Repeating the active chord
         // still needs a release edge before returning to shared control.

@@ -873,18 +873,33 @@ thirdRouter.SetPhysical(new XInputGamepad { Buttons = 0x0040, LeftTrigger = 180,
 if (thirdRouter.FocusedSlot != 4 || thirdThird.X != 432 || thirdThird.Report.LeftTrigger != 0 ||
     thirdMain.Report != default)
     throw new Exception("LT+L3 did not promote P1 focus to logical P3 without waiting for debounce.");
+var priorityPads = new Dictionary<int, IPadOutput>
+    { [1] = new FakePad(), [3] = new FakePad(), [4] = new FakePad() };
+var priorityRouter = new BridgeRouter(priorityPads);
+priorityRouter.ConfigurePhysical(1, focusPads: new Dictionary<int, int>
+    { [1] = 1, [2] = 3, [3] = 4 });
+priorityRouter.SetPhysical(new XInputGamepad
+    { Buttons = 0x0040 | 0x0080, LeftTrigger = 180 }, now);
+if (priorityRouter.FocusedSlot != 4 || priorityRouter.LastManualFocusSlot != 4)
+    throw new Exception("The unique LT+L3 focus chord lost to a simultaneous lower-priority R3 edge.");
 var fourthPads = Enumerable.Range(1, 4).ToDictionary(slot => slot, _ => new FakePad());
 var fourthRouter = new BridgeRouter(fourthPads.ToDictionary(entry => entry.Key,
     entry => (IPadOutput)entry.Value));
 if (!fourthRouter.ConfigurePhysical(1,
         focusPads: new Dictionary<int, int> { [1] = 1, [2] = 2, [3] = 3, [4] = 4 }))
     throw new Exception("Four-player focus mapping was rejected.");
-fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080, LeftTrigger = 180, LeftX = 602 }, now);
+fourthRouter.SetPhysical(new XInputGamepad
+    { Buttons = 0x0040 | 0x0080, LeftTrigger = 180 }, now);
+if (fourthRouter.FocusedSlot != 1)
+    throw new Exception("Two equally ranked focus chords selected an arbitrary player.");
+fourthRouter.SetPhysical(default, now.AddMilliseconds(10));
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080, LeftTrigger = 180, LeftX = 602 },
+    now.AddMilliseconds(20));
 if (fourthRouter.FocusedSlot != 4 || fourthPads[4].X != 602 ||
     fourthPads[4].Report.LeftTrigger != 0 ||
     fourthPads.Take(3).Any(entry => entry.Value.Report != default))
     throw new Exception("LT+R3 did not isolate the fourth public pad.");
-fourthRouter.SetPhysical(default, now.AddMilliseconds(10));
+fourthRouter.SetPhysical(default, now.AddMilliseconds(30));
 fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0040, LeftTrigger = 180, LeftX = 603 },
     now.AddMilliseconds(100));
 if (fourthRouter.FocusedSlot != 3 || fourthPads[3].X != 603 || fourthPads[4].Report != default)
