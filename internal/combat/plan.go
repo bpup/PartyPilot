@@ -13,16 +13,17 @@ import (
 // World is an explicit replay input, not a projection of the current sensor.
 // Pointer booleans force the caller to provide each safety signal.
 type World struct {
-	Timestamp       time.Time      `json:"timestamp"`
-	AreaInstance    string         `json:"areaInstance"`
-	AreaID          string         `json:"areaId,omitempty"`
-	AreaLabel       string         `json:"areaLabel,omitempty"`
-	DataAgeMS       *int           `json:"dataAgeMs"`
-	SafeZone        *bool          `json:"safeZone"`
-	EmergencyActive *bool          `json:"emergencyActive"`
-	UI              UI             `json:"ui"`
-	Players         map[int]Player `json:"players"`
-	Monsters        []Monster      `json:"monsters"`
+	Timestamp        time.Time               `json:"timestamp"`
+	AreaInstance     string                  `json:"areaInstance"`
+	AreaID           string                  `json:"areaId,omitempty"`
+	AreaLabel        string                  `json:"areaLabel,omitempty"`
+	DataAgeMS        *int                    `json:"dataAgeMs"`
+	SafeZone         *bool                   `json:"safeZone"`
+	EmergencyActive  *bool                   `json:"emergencyActive"`
+	UI               UI                      `json:"ui"`
+	Players          map[int]Player          `json:"players"`
+	Monsters         []Monster               `json:"monsters"`
+	ActiveExecutions map[int]ActiveExecution `json:"activeExecutions,omitempty"`
 }
 
 type UI struct {
@@ -108,6 +109,14 @@ func (w World) Validate() error {
 			player.HealthPercent != nil && (!finite(*player.HealthPercent) ||
 				*player.HealthPercent < 0 || *player.HealthPercent > 100) {
 			return fmt.Errorf("player %d evidence is invalid", id)
+		}
+	}
+	for player, active := range w.ActiveExecutions {
+		if player < 1 || player > 6 || strings.TrimSpace(active.EncounterID) == "" ||
+			strings.TrimSpace(active.ComboID) == "" ||
+			(active.Behavior != "pack" && active.Behavior != "rare" &&
+				active.Behavior != "boss" && active.Behavior != "emergency") {
+			return fmt.Errorf("active execution for P%d is invalid", player)
 		}
 	}
 	seen := make(map[string]bool, len(w.Monsters))
@@ -353,7 +362,9 @@ func validateProfile(profile Profile) error {
 			role.Logic.FullAggressionAtHealthPercent != 10 ||
 			role.Logic.FullAggressionAtHealthPercent > role.Logic.StartHelpingAtHealthPercent ||
 			!finite(role.Logic.MaximumLeashM) || role.Logic.MaximumLeashM < 0 ||
-			role.Logic.MaximumLeashM > 400 {
+			role.Logic.MaximumLeashM > 400 ||
+			(role.Logic.TargetLock != "free" && role.Logic.TargetLock != "until-dead" &&
+				role.Logic.TargetLock != "when-invalid") {
 			return fmt.Errorf("invalid role logic for P%d", role.Player)
 		}
 		expected.Roles[index].Logic = role.Logic

@@ -33,7 +33,7 @@ type Role struct {
 }
 
 // RoleLogic mirrors the supplied resolver fields that affect default-slot
-// eligibility. Execution-only fields remain outside this read-only planner.
+// eligibility and read-only target-lock previews.
 type RoleLogic struct {
 	StartHelpingAtHealthPercent   int     `json:"startHelpingAtHealthPercent"`
 	FullAggressionAtHealthPercent int     `json:"fullAggressionAtHealthPercent"`
@@ -43,6 +43,7 @@ type RoleLogic struct {
 	AttackUnique                  bool    `json:"attackUnique"`
 	MaximumLeashM                 float64 `json:"maximumLeashM"`
 	EngageAroundMain              bool    `json:"engageAroundMain"`
+	TargetLock                    string  `json:"targetLock"`
 }
 
 func (l RoleLogic) Allows(rarity string) bool {
@@ -104,7 +105,8 @@ func DefaultProfile() Profile {
 	for index := range roles {
 		roles[index].Logic = RoleLogic{StartHelpingAtHealthPercent: 100,
 			FullAggressionAtHealthPercent: 10,
-			AttackNormal:                  true, AttackMagic: true, AttackRare: true, AttackUnique: true}
+			AttackNormal:                  true, AttackMagic: true, AttackRare: true, AttackUnique: true,
+			TargetLock: "free"}
 	}
 	skill := func(id string, slot int, condition string, min, max int) Step {
 		return Step{ID: id, Action: "skill", SkillSlot: slot, Condition: condition, DelayMin: min, DelayMax: max}

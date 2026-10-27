@@ -89,12 +89,18 @@ func main() {
 			fail(fmt.Errorf("line %d: %w", line, err))
 		}
 		targets.Assign(profile, world, plans)
+		executionPreview, err := combat.PreviewExecutions(profile, world, encounter, plans)
+		if err != nil {
+			fail(fmt.Errorf("line %d: %w", line, err))
+		}
 		result, err := json.Marshal(struct {
-			Timestamp string            `json:"timestamp"`
-			Area      string            `json:"areaInstance"`
-			Encounter *combat.Encounter `json:"encounter,omitempty"`
-			Plans     []combat.Plan     `json:"plans"`
-		}{world.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"), world.AreaInstance, encounter, plans})
+			Timestamp        string                    `json:"timestamp"`
+			Area             string                    `json:"areaInstance"`
+			Encounter        *combat.Encounter         `json:"encounter,omitempty"`
+			Plans            []combat.Plan             `json:"plans"`
+			ExecutionPreview []combat.ExecutionPreview `json:"executionPreview,omitempty"`
+		}{world.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"), world.AreaInstance, encounter,
+			plans, executionPreview})
 		if err != nil {
 			fail(err)
 		}
