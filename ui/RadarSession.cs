@@ -17,6 +17,7 @@ internal sealed class RadarSession : IAsyncDisposable
     private readonly RadarTerrainCatalog? _terrainCatalog;
     private readonly DispatcherTimer _hotkeyTimer = new() { Interval = TimeSpan.FromMilliseconds(25) };
     private RadarHotkeyBinding _hotkey;
+    private RadarRegisteredHotkey? _registeredHotkey;
     private readonly Task _receiveTask;
     private bool _disposed;
 
@@ -32,8 +33,10 @@ internal sealed class RadarSession : IAsyncDisposable
         _windows = windows;
         foreach (var pid in windows.Keys) _landmarks.Add(pid, new RadarLandmarkCache());
         _gameHandles = gameHandles;
-        _hotkey = hotkey;
         _visibility = visibility;
+        _hotkey = hotkey;
+        _registeredHotkey = RadarRegisteredHotkey.TryStart(hotkey,
+            () => Dispatcher.UIThread.Post(OnRegisteredHotkey));
         _manualTerrains = manualTerrains is null ? null : new(manualTerrains);
         _terrainCatalog = terrainCatalog;
         foreach (var window in windows.Values) window.TargetLost += OnTargetLost;
@@ -45,8 +48,19 @@ internal sealed class RadarSession : IAsyncDisposable
     internal void SetHotkey(RadarHotkeyBinding hotkey)
     {
         if (hotkey.VirtualKey == 0) throw new ArgumentException("Radar hotkey is invalid.");
+        _registeredHotkey?.Dispose();
         _hotkey = hotkey;
         _visibility.Observe(false, false);
+        _registeredHotkey = RadarRegisteredHotkey.TryStart(hotkey,
+            () => Dispatcher.UIThread.Post(OnRegisteredHotkey));
+    }
+
+    private void OnRegisteredHotkey()
+    {
+        if (_disposed) return;
+        var foreground = GetForegroundWindow();
+        _visibility.ObserveRegisteredPress(_windows.Any(item =>
+            !item.Value.TargetIsLost && _gameHandles[item.Key] == foreground));
     }
 
     private void OnHotkeyTimer(object? sender, EventArgs args)
@@ -157,6 +171,7 @@ internal sealed class RadarSession : IAsyncDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _registeredHotkey?.Dispose();
         _hotkeyTimer.Stop();
         _hotkeyTimer.Tick -= OnHotkeyTimer;
         _cancellation.Cancel();

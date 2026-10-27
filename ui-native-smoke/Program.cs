@@ -14,6 +14,27 @@ internal static class Program
             throw new PlatformNotSupportedException("Native overlay smoke requires Windows.");
 
         AppBuilder.Configure<NativeSmokeApp>().UsePlatformDetect().SetupWithoutStarting();
+        if (!RadarHotkeyBinding.TryParse("Ctrl+Alt+Shift+F23", out var hotkey))
+            throw new Exception("Native radar hotkey test binding was rejected.");
+        using (var pressed = new ManualResetEventSlim())
+        using (var registration = RadarRegisteredHotkey.TryStart(hotkey, pressed.Set) ??
+            throw new Exception("Native radar hotkey registration failed."))
+        {
+            if (!NativeMethods.PostThreadMessage(registration.ThreadId, 0x0312, 21251, 0) ||
+                !pressed.Wait(TimeSpan.FromSeconds(2)))
+                throw new Exception("Registered radar hotkey message did not reach its receiver.");
+        }
+        using (RadarRegisteredHotkey.TryStart(hotkey, () => { }) ??
+            throw new Exception("Native radar hotkey remained registered after disposal.")) { }
+        var hotkeyVisibility = new RadarVisibility();
+        hotkeyVisibility.ObserveRegisteredPress(true);
+        hotkeyVisibility.Observe(true, true);
+        if (!hotkeyVisibility.Enabled)
+            throw new Exception("Registered and polled radar presses toggled twice.");
+        hotkeyVisibility.Observe(false, false);
+        hotkeyVisibility.ObserveRegisteredPress(true);
+        if (hotkeyVisibility.Enabled)
+            throw new Exception("Radar hotkey did not rearm after release.");
         var game = new Window { Width = 640, Height = 480, Topmost = true,
             Title = "Radar native smoke target" };
         game.Position = new PixelPoint(80, 80);
@@ -84,4 +105,6 @@ static class NativeMethods
     [DllImport("user32.dll")] internal static extern bool GetWindowRect(nint handle, out NativeRect rect);
     [DllImport("user32.dll")] internal static extern nint WindowFromPoint(NativePoint point);
     [DllImport("user32.dll")] internal static extern nint GetAncestor(nint handle, uint flags);
+    [DllImport("user32.dll")] internal static extern bool PostThreadMessage(
+        uint threadId, uint message, nuint wParam, nint lParam);
 }

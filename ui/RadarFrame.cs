@@ -335,4 +335,6 @@ public sealed class RadarVisibility
         if (gameForeground && keyDown && !_keyWasDown) Enabled = !Enabled;
         _keyWasDown = keyDown;
     }
+
+    public void ObserveRegisteredPress(bool gameForeground) => Observe(gameForeground, true);
 }
