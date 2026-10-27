@@ -16,7 +16,8 @@ internal static class PackedTerrainCapture
         RawRenderPositionReader.Position position, float observedWorldX, float observedWorldY,
         Func<long, int, byte[]?> read, Func<bool> areaStillCurrent,
         string directory, int processId,
-        string areaHash, string areaAddress, string anchor, DateTime seenUtc)
+        string areaHash, string areaAddress, string anchor, DateTime seenUtc,
+        GeneratedRoomProbe.Result? generatedRooms = null)
     {
         var length = (long)source.BytesPerRow * source.Rows;
         if (source.Start < 0x10000 || source.BytesPerRow <= 0 || source.Rows <= 0 ||
@@ -96,7 +97,12 @@ internal static class PackedTerrainCapture
                 BytesPerRow = source.BytesPerRow,
                 PackedBytes = length,
                 Sha256 = digest,
-                DataFile = Path.GetFileName(dataFile)
+                DataFile = Path.GetFileName(dataFile),
+                GeneratedRoomStatus = generatedRooms?.Status,
+                GeneratedRoomAreaAddress = generatedRooms is null ? null : areaAddress,
+                GeneratedRoomAnchor = generatedRooms is null ? null : anchor,
+                GeneratedRooms = generatedRooms is { Status: "candidate_rooms_observed", AnchorsTruncated: false }
+                    ? generatedRooms.Anchors : null
             }));
             if (!areaStillCurrent())
             {

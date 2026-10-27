@@ -128,6 +128,24 @@ public sealed class RadarOverlayWindow : Window
                     Source = bitmap, Width = Bounds.Width, Height = Bounds.Height,
                     Stretch = Stretch.Fill
                 });
+                foreach (var room in _terrain.Rooms)
+                {
+                    var x = centerX + (room.GridX - _frame.GridX!.Value) * _scale * 10.869565;
+                    var y = centerY + (room.GridY - _frame.GridY!.Value) * _scale * 10.869565;
+                    if (!double.IsFinite(x) || !double.IsFinite(y) ||
+                        x < 8 || y < 8 || x > Bounds.Width - 8 || y > Bounds.Height - 8) continue;
+                    AddDot(x, y, 10, MarkerBrush(room.Category));
+                    var label = new TextBlock
+                    {
+                        Text = room.Label,
+                        Foreground = Brushes.White,
+                        Background = new SolidColorBrush(Color.FromArgb(190, 8, 12, 20)),
+                        FontSize = 12
+                    };
+                    Canvas.SetLeft(label, x + 9);
+                    Canvas.SetTop(label, y - 8);
+                    _canvas.Children.Add(label);
+                }
             }
         }
         AddDot(centerX, centerY, 12, Brushes.White);

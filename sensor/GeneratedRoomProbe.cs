@@ -17,7 +17,7 @@ internal static class GeneratedRoomProbe
 
     internal sealed record Room(string Path, int Left, int Top, int Right, int Bottom);
     internal sealed record Anchor(string Path, string Category, string Label,
-        double GridX, double GridY);
+        double GridX, double GridY, int Left, int Top, int Right, int Bottom);
     internal sealed record Result(string Status, int Graphs, int RoomsChecked,
         int ValidPaths, bool SamplesTruncated, Room[] Samples,
         int MatchedAnchors, bool AnchorsTruncated, Anchor[] Anchors);
@@ -82,7 +82,8 @@ internal static class GeneratedRoomProbe
                     matchedAnchors++;
                     if (anchors.Count < MaxAnchors)
                         anchors.Add(new Anchor(path, marker.Category, marker.Label,
-                            (left + (double)right) * 11.5, (top + (double)bottom) * 11.5));
+                            (left + (double)right) * 11.5, (top + (double)bottom) * 11.5,
+                            left, top, right, bottom));
                     else anchorsTruncated = true;
                 }
             }

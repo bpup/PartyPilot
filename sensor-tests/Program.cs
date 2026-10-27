@@ -405,9 +405,14 @@ void TestPackedTerrainProbe()
         5, 10, 20, "0x123456");
     try
     {
+        var generatedRooms = new GeneratedRoomProbe.Result("candidate_rooms_observed", 1, 2,
+            1, false, [], 1, false,
+            [new GeneratedRoomProbe.Anchor("Metadata/Terrain/Gallows/Act1/1_6/Rooms/boss_1.arm",
+                "boss", "Boss arena", 11.5, 11.5, 0, 0, 1, 1)]);
         var capture = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate!,
             capturePosition, 108.69565f, 217.3913f, Read, () => true, captureDirectory,
-            123, "test-area", anchored.Candidate!.AreaAddress, anchored.Candidate.Anchor, DateTime.UtcNow);
+            123, "test-area", anchored.Candidate!.AreaAddress, anchored.Candidate.Anchor,
+            DateTime.UtcNow, generatedRooms);
         Require(capture.Status == "captured_local" && capture.DataFile != null &&
             File.ReadAllBytes(capture.DataFile).SequenceEqual(packed) &&
             File.Exists(Path.ChangeExtension(capture.DataFile, ".json")),
@@ -416,6 +421,9 @@ void TestPackedTerrainProbe()
             File.ReadAllText(Path.ChangeExtension(capture.DataFile!, ".json")));
         Require(metadata.RootElement.GetProperty("RawGridX").GetSingle() == 10 &&
             metadata.RootElement.GetProperty("PatchRows").GetArrayLength() == 9 &&
+            metadata.RootElement.GetProperty("GeneratedRooms").GetArrayLength() == 1 &&
+            metadata.RootElement.GetProperty("GeneratedRoomAreaAddress").GetString() ==
+                anchored.Candidate.AreaAddress &&
             metadata.RootElement.GetProperty("Sha256").GetString() ==
                 Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(packed)).ToLowerInvariant(),
             "The capture lost position, patch or file integrity evidence.");

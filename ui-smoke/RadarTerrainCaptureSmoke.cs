@@ -37,12 +37,22 @@ internal static class RadarTerrainCaptureSmoke
                 PatchY = 0,
                 PatchRows = new[] { patch },
                 Sha256 = Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant(),
-                DataFile = "capture.packed"
+                DataFile = "capture.packed",
+                GeneratedRoomStatus = "candidate_rooms_observed",
+                GeneratedRoomAreaAddress = "0xABCDEF",
+                GeneratedRoomAnchor = "ingame_data_address",
+                GeneratedRooms = new[]
+                {
+                    new { Path = "Metadata/Terrain/Gallows/Act1/1_6/Rooms/boss_1.arm",
+                        Category = "boss", Label = "Boss arena", GridX = 11.5, GridY = 11.5,
+                        Left = 0, Top = 0, Right = 1, Bottom = 1 }
+                }
             });
             File.WriteAllText(metadataPath, Metadata("01"));
             if (!RadarTerrainCapture.TryLoad(metadataPath, out var capture) || capture is null ||
                 capture.ProcessId != 123 || capture.AreaHash != 42 ||
                 capture.Width != 128 || capture.Height != 64 ||
+                capture.Rooms is not [{ Category: "boss", Label: "Boss arena" }] ||
                 capture.Walkable(0, 0) || !capture.Walkable(1, 0))
                 throw new Exception("Radar rejected a valid bounded terrain capture or decoded nibble order incorrectly.");
             var matching = new RadarFrame(123, DateTime.UtcNow, 42, "0xABCDEF", 30, 30, [])
@@ -78,6 +88,8 @@ internal static class RadarTerrainCaptureSmoke
             terrainWindow.UpdateLayout();
             if (!terrainWindow.TerrainVisible ||
                 terrainWindow.GetLogicalDescendants().OfType<Image>().Count() != 1 ||
+                !terrainWindow.GetLogicalDescendants().OfType<TextBlock>()
+                    .Any(label => label.Text == "Boss arena") ||
                 terrainWindow.CaptureRenderedFrame() is null)
                 throw new Exception("Matching terrain was not drawn behind radar markers.");
             terrainWindow.Apply(matching with { AreaHash = 43 }, null);
@@ -85,6 +97,14 @@ internal static class RadarTerrainCaptureSmoke
                 terrainWindow.GetLogicalDescendants().OfType<Image>().Any())
                 throw new Exception("Radar drew candidate terrain for a different area.");
             terrainWindow.Close();
+            File.WriteAllText(metadataPath, Metadata("01").Replace("\"Category\":\"boss\"",
+                "\"Category\":\"quest\""));
+            if (RadarTerrainCapture.TryLoad(metadataPath, out _))
+                throw new Exception("Radar accepted a generated-room category that disagrees with its path.");
+            File.WriteAllText(metadataPath, Metadata("01").Replace("\"GridX\":11.5",
+                "\"GridX\":12.5"));
+            if (RadarTerrainCapture.TryLoad(metadataPath, out _))
+                throw new Exception("Radar accepted a generated-room coordinate outside its tile center.");
             File.WriteAllText(metadataPath, Metadata("10"));
             if (RadarTerrainCapture.TryLoad(metadataPath, out _))
                 throw new Exception("Radar accepted terrain whose observed patch disagrees with packed cells.");

@@ -13,5 +13,6 @@
   <ItemGroup>
     <Compile Include="../common/HybridBindingConfig.cs" Link="HybridBindingConfig.cs" />
     <Compile Include="../common/FollowerMirrorConfig.cs" Link="FollowerMirrorConfig.cs" />
+    <Compile Include="../sensor/GeneratedRoomClassifier.cs" Link="GeneratedRoomClassifier.cs" />
   </ItemGroup>
 </Project>

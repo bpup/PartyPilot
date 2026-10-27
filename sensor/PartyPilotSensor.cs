@@ -526,7 +526,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                         var capture = PackedTerrainCapture.Save(source, observation,
                             positionCandidate!, render.Pos.X, render.Pos.Y, ReadTerrain,
                             AreaStillCurrent, directory,
-                            processId, areaHash, observation.AreaAddress, observation.Anchor, now);
+                            processId, areaHash, observation.AreaAddress, observation.Anchor, now,
+                            generatedRoomProbe);
                         packedTerrainCaptureStatus = capture.Status;
                         if (capture.Status == "captured_local") _capturedTerrainKeys.Add(captureKey);
                     }

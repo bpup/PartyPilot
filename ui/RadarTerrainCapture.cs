@@ -1,11 +1,15 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
+using PartyPilot.Sensor;
 
 namespace PartyPilot.Desktop;
 
-// A capture is still a candidate until its area and coordinates are checked
-// against the live game. Loading it never authorizes movement or map display.
+public sealed record RadarTerrainRoom(string Path, string Category, string Label,
+    double GridX, double GridY);
+
+// A capture remains a candidate until its area and coordinates are checked
+// against the live game. Loading alone never authorizes movement or display.
 public sealed class RadarTerrainCapture
 {
     private const int MaximumPackedBytes = 64 * 1024 * 1024;
@@ -21,10 +25,11 @@ public sealed class RadarTerrainCapture
     public int BytesPerRow { get; }
     public double RawGridX { get; }
     public double RawGridY { get; }
+    public IReadOnlyList<RadarTerrainRoom> Rooms { get; }
 
     private RadarTerrainCapture(byte[] data, int processId, uint areaHash, string areaAddress,
         string anchor, DateTime seenUtc, int width, int height, int bytesPerRow,
-        double rawGridX, double rawGridY)
+        double rawGridX, double rawGridY, IReadOnlyList<RadarTerrainRoom> rooms)
     {
         _data = data;
         ProcessId = processId;
@@ -37,6 +42,7 @@ public sealed class RadarTerrainCapture
         BytesPerRow = bytesPerRow;
         RawGridX = rawGridX;
         RawGridY = rawGridY;
+        Rooms = rooms;
     }
 
     public bool Walkable(int x, int y)
@@ -120,8 +126,9 @@ public sealed class RadarTerrainCapture
                 }
                 rowNumber++;
             }
+            if (!TryRooms(root, areaAddress, anchor, width, height, out var rooms)) return false;
             capture = new RadarTerrainCapture(data, pid, areaHash, areaAddress, anchor,
-                seenUtc, width, height, bytesPerRow, rawGridX, rawGridY);
+                seenUtc, width, height, bytesPerRow, rawGridX, rawGridY, rooms);
             return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
@@ -136,6 +143,44 @@ public sealed class RadarTerrainCapture
         value = "";
         return root.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.String &&
             item.GetString() is { Length: > 0 } text && (value = text) != "";
+    }
+
+    private static bool TryRooms(JsonElement root, string areaAddress, string anchor,
+        int width, int height, out IReadOnlyList<RadarTerrainRoom> rooms)
+    {
+        rooms = [];
+        if (!root.TryGetProperty("GeneratedRooms", out var values) ||
+            values.ValueKind == JsonValueKind.Null) return true;
+        if (values.ValueKind != JsonValueKind.Array || values.GetArrayLength() > 64 ||
+            !Text(root, "GeneratedRoomStatus", out var status) ||
+            status != "candidate_rooms_observed" ||
+            !Text(root, "GeneratedRoomAreaAddress", out var sourceAddress) ||
+            !string.Equals(sourceAddress, areaAddress, StringComparison.OrdinalIgnoreCase) ||
+            !Text(root, "GeneratedRoomAnchor", out var sourceAnchor) || sourceAnchor != anchor)
+            return false;
+        var parsed = new List<RadarTerrainRoom>(values.GetArrayLength());
+        var seen = new HashSet<(string Path, double X, double Y)>();
+        foreach (var value in values.EnumerateArray())
+        {
+            if (value.ValueKind != JsonValueKind.Object ||
+                !Text(value, "Path", out var path) || path.Length > 255 ||
+                !Text(value, "Category", out var category) ||
+                !Text(value, "Label", out var label) ||
+                !Finite(value, "GridX", out var x) || !Finite(value, "GridY", out var y) ||
+                !Number(value, "Left", out var left) || !Number(value, "Top", out var top) ||
+                !Number(value, "Right", out var right) || !Number(value, "Bottom", out var bottom) ||
+                left < 0 || top < 0 || right <= left || bottom <= top ||
+                (long)right * 23 > width + 23L || (long)bottom * 23 > height + 23L ||
+                x != (left + (double)right) * 11.5 ||
+                y != (top + (double)bottom) * 11.5 ||
+                x < 0 || y < 0 || x >= width || y >= height ||
+                GeneratedRoomClassifier.Classify(path) is not { } expected ||
+                category != expected.Category || label != expected.Label ||
+                !seen.Add((path, x, y))) return false;
+            parsed.Add(new RadarTerrainRoom(path, category, label, x, y));
+        }
+        rooms = parsed;
+        return true;
     }
 
     private static bool Number(JsonElement root, string name, out int value)
