@@ -484,6 +484,25 @@ if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(questItemRadarText)
         questItemRadarText.Replace("Metadata/MiscellaneousObjects/WorldItem@123",
             "Metadata/MiscellaneousObjects/Waypoint")), 123, DateTime.UtcNow, out _))
     throw new Exception("Radar quest item was lost or accepted without a matching wrapper and item path.");
+var destinationRadarText = radarText.Replace(
+    "\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\"",
+    "\"Category\":\"transition\",\"Path\":\"Metadata/MiscellaneousObjects/AreaTransition_Animate\",\"Label\":\"Mausoleum of the Praetor\"");
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(destinationRadarText), 123,
+        DateTime.UtcNow, out var destinationFrame) ||
+    destinationFrame is null ||
+    RadarOverlayWindow.DisplayLabel(destinationFrame.Markers[1]) != "区域入口 · Mausoleum of the Praetor" ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        destinationRadarText.Replace("Mausoleum of the Praetor", "AreaTransition_Animate")),
+        123, DateTime.UtcNow, out _))
+    throw new Exception("Radar transition destination label was lost or accepted as metadata.");
+var portalRadarText = destinationRadarText.Replace(
+    "\"Category\":\"transition\",\"Path\":\"Metadata/MiscellaneousObjects/AreaTransition_Animate\"",
+    "\"Category\":\"portal\",\"Path\":\"Metadata/MiscellaneousObjects/Portal\"");
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(portalRadarText), 123,
+        DateTime.UtcNow, out var portalFrame) ||
+    portalFrame is null ||
+    RadarOverlayWindow.DisplayLabel(portalFrame.Markers[1]) != "传送门 · Mausoleum of the Praetor")
+    throw new Exception("Radar portal destination label was lost.");
 var bossRadarText = radarText.Replace(
     "\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\"",
     "\"Category\":\"boss\",\"Path\":\"Metadata/Monsters/HyenaMonster/Objects/BossRoomMinimapIcon\",\"Label\":\"Rathbreaker\"");

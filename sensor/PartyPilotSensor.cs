@@ -1166,6 +1166,20 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             var category = questItem ? "quest" : lootName != null ? "loot" :
                 isPlayer ? "player" : RadarClassifier.Category(path);
             if (category == null) continue;
+            string? destinationName = null;
+            if (category is "transition" or "portal")
+            {
+                try
+                {
+                    destinationName = PartyPilot.RadarDestinationName.Accept(category == "transition"
+                        ? entity.GetComponent<AreaTransition>()?.WorldArea?.Name
+                        : entity.GetComponent<Portal>()?.Area?.Name);
+                }
+                catch
+                {
+                    // Keep the location marker when destination metadata is unreadable.
+                }
+            }
             bool? monsterComponentPresent = null;
             int? monsterLifeCurrent = null;
             int? monsterLifeMaximum = null;
@@ -1212,7 +1226,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 Category = category,
                 Path = path,
                 Label = questItem ? RadarClassifier.QuestItemLabel(itemPath!, lootName!) :
-                    lootName ?? (isPlayer ? playerName : category == "quest" ? RadarClassifier.QuestLabel(path) :
+                    destinationName ?? lootName ?? (isPlayer ? playerName : category == "quest" ? RadarClassifier.QuestLabel(path) :
                     category == "boss" ? RadarClassifier.BossLabel(path) : null),
                 ItemPath = itemPath,
                 Stack = questItem ? null : lootStack,

@@ -126,8 +126,12 @@ public static class RadarFrames
                          !itemPath.StartsWith("Metadata/Items/QuestItems/", StringComparison.OrdinalIgnoreCase) ||
                          Encoding.UTF8.GetByteCount(itemPath) > 256)) ||
                      stack != null || rarity != null)) return false;
+                if (category is "transition" or "portal" &&
+                    (label != null && (PartyPilot.RadarDestinationName.Accept(label) != label ||
+                        Encoding.UTF8.GetByteCount(label) > 96))) return false;
                 if (category is not ("player" or "loot" or "quest" or "boss") &&
-                    (label != null || itemPath != null || stack != null || rarity != null)) return false;
+                    (category is not ("transition" or "portal") && label != null ||
+                     itemPath != null || stack != null || rarity != null)) return false;
                 markers.Add(new RadarMarker(id, category, path, label, itemPath, stack, rarity, x, y));
             }
             frame = new RadarFrame(pid, seenUtc, areaHash, addressValue.GetString(), playerX, playerY, markers)

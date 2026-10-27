@@ -268,6 +268,9 @@ AreaEntityMapSnapshotReaderTests.Run();
 AreaEntityMapLocatorTests.Run();
 DormantNavigationSurveyTests.Run();
 Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
+    PartyPilot.RadarDestinationName.Accept(" Mausoleum of the Praetor ") == "Mausoleum of the Praetor" &&
+    PartyPilot.RadarDestinationName.Accept("AreaTransition_Animate") == null &&
+    PartyPilot.RadarDestinationName.Accept("Data/Balance/WorldAreas.dat") == null &&
     RadarClassifier.Category("Metadata/MiscellaneousObjects/Waypoint") == "waypoint" &&
     RadarClassifier.Category("Metadata/Effects/QuestMarker") == "quest" &&
     RadarClassifier.Category("Metadata/Terrain/Gallows/Act3/Objects/MachinariumGeneratorButton") == "quest" &&

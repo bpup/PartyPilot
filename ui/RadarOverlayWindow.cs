@@ -85,8 +85,8 @@ public sealed class RadarOverlayWindow : Window
             "boss" => "首领地点 · " + marker.Label,
             "waypoint" => "传送点",
             "checkpoint" => "检查点",
-            "portal" => "传送门",
-            "transition" => "区域入口",
+            "portal" => marker.Label is { } portalName ? "传送门 · " + portalName : "传送门",
+            "transition" => marker.Label is { } areaName ? "区域入口 · " + areaName : "区域入口",
             "essence" => "精华",
             _ => marker.Path.Split('/').Last()
         };

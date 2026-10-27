@@ -8,6 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../common/PackedTerrainValueProfile.cs" Link="PackedTerrainValueProfile.cs" />
+    <Compile Include="../common/RadarDestinationName.cs" Link="RadarDestinationName.cs" />
     <Reference Include="ExileCore2">
       <HintPath>$(EXILECORE2_DIR)/ExileCore2.dll</HintPath>
       <Private>false</Private>
