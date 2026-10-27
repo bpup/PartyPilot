@@ -146,6 +146,12 @@ if (!BridgeProtocol.TryParseRecoveryAction("{\"type\":\"recovery_action\",\"slot
     BridgeProtocol.TryParseRecoveryAction("{\"type\":\"recovery_action\",\"slot\":7,\"input\":\"X\"}", out _) ||
     BridgeProtocol.TryParseRecoveryAction("{\"type\":\"recovery_action\",\"slot\":3,\"input\":\"D-pad Left\"}", out _))
     throw new Exception("Custom recovery input command validation failed.");
+if (!BridgeProtocol.TryParseAutoCast("{\"type\":\"auto_cast\",\"slot\":3,\"input\":\"A\"}", out var autoCastCommand) ||
+    autoCastCommand != new AutoCastCommand(3, "A") ||
+    BridgeProtocol.TryParseAutoCast("{\"type\":\"auto_cast\",\"slot\":3,\"input\":\"LT\"}", out _) ||
+    BridgeProtocol.TryParseAutoCast("{\"type\":\"auto_cast\",\"slot\":7,\"input\":\"Y\"}", out _) ||
+    BridgeProtocol.TryParseAutoCast("{\"type\":\"auto_cast\",\"slot\":3,\"input\":\"A\",\"extra\":true}", out _))
+    throw new Exception("Automatic cast command validation failed.");
 if (!BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_begin\"}", out var beginParty) ||
     beginParty.Type != "auto_party_begin" ||
     !BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":5,\"buttons\":4096,\"hold_ms\":80}", out var pulseParty) ||
@@ -496,12 +502,33 @@ foreach (var (input, button, leftTrigger, rightTrigger) in new (string, ushort, 
 if (recoveryRouter.PulseRecoveryAction(3, "A", now.AddSeconds(7)) ||
     recoveryRouter.PulseRecoveryAction(4, "X", now.AddSeconds(7)))
     throw new Exception("Unsupported custom recovery input or unbound pad was accepted.");
+foreach (var (input, button) in new (string, ushort)[]
+{
+    ("D-pad Up", 0x0001), ("D-pad Down", 0x0002), ("A", 0x1000), ("B", 0x2000),
+    ("X", 0x4000), ("Y", 0x8000), ("LB", 0x0100), ("RB", 0x0200)
+})
+{
+    var pulseAt = now.AddSeconds(7).AddMilliseconds(200 * (Array.IndexOf(
+        new[] { "D-pad Up", "D-pad Down", "A", "B", "X", "Y", "LB", "RB" }, input) + 1));
+    if (!recoveryRouter.PulseAutoCast(3, input, pulseAt) ||
+        recoveryPad.Report.Buttons != button)
+        throw new Exception($"Automatic cast {input} did not reach its assigned pad.");
+    recoveryRouter.Tick(pulseAt.AddMilliseconds(120));
+    if (recoveryPad.Report != default)
+        throw new Exception($"Automatic cast {input} did not release after 120 ms.");
+}
+if (recoveryRouter.PulseAutoCast(3, "LT", now.AddSeconds(9)) ||
+    recoveryRouter.PulseAutoCast(4, "A", now.AddSeconds(9)))
+    throw new Exception("Automatic cast accepted an unsupported input or unbound pad.");
 if (!recoveryRouter.PulseRecoveryAction(3, "X", now.AddSeconds(7)))
     throw new Exception("Custom recovery pulse setup failed.");
+if (!recoveryRouter.PulseAutoCast(3, "B", now.AddSeconds(7)))
+    throw new Exception("Automatic cast pulse setup failed.");
 recoveryRouter.SetMenuGuardActive(true);
 if (recoveryPad.Report != default ||
-    recoveryRouter.PulseRecoveryAction(3, "X", now.AddSeconds(7).AddMilliseconds(20)))
-    throw new Exception("Custom recovery input escaped the menu guard.");
+    recoveryRouter.PulseRecoveryAction(3, "X", now.AddSeconds(7).AddMilliseconds(20)) ||
+    recoveryRouter.PulseAutoCast(3, "B", now.AddSeconds(7).AddMilliseconds(20)))
+    throw new Exception("Custom recovery or automatic cast input escaped the menu guard.");
 recoveryRouter.SetMenuGuardActive(false);
 if (recoveryPad.Report != default)
     throw new Exception("Custom recovery input resumed after menu dismissal.");

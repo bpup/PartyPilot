@@ -473,6 +473,19 @@ internal sealed class BridgeRouter
         return true;
     }
 
+    public bool PulseAutoCast(int slot, string input, DateTime nowUtc)
+    {
+        if (!_routes.TryGetValue(slot, out var route) || !_physicalMode || !_physicalConnected ||
+            _autoPartyActive || _menuGuardActive || (_isolatedSlot != 0 && slot != _focusedSlot) ||
+            route.CombatLeaseUntilUtc > nowUtc || nowUtc.Kind != DateTimeKind.Utc ||
+            !BridgeProtocol.IsAutoCastInput(input)) return false;
+        var until = nowUtc.AddMilliseconds(120);
+        if (!route.RecoveryUntilUtc.TryGetValue(input, out var previous) || until > previous)
+            route.RecoveryUntilUtc[input] = until;
+        Render(slot, route);
+        return true;
+    }
+
     public void Tick(DateTime nowUtc)
     {
         _engageDodgeNow = nowUtc.Ticks / TimeSpan.TicksPerMillisecond;
@@ -724,6 +737,8 @@ internal sealed class BridgeRouter
         {
             switch (input)
             {
+                case "A": buttons |= 0x1000; break;
+                case "B": buttons |= 0x2000; break;
                 case "X": buttons |= 0x4000; break;
                 case "Y": buttons |= 0x8000; break;
                 case "LB": buttons |= 0x0100; break;

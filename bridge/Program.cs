@@ -237,6 +237,7 @@ if (mirrorPosition >= 0 && (!(physicalMode || hybridMode) ||
 }
 var followerMirror = requestedMirror ?? FollowerMirrorConfig.Default;
 var autoFlaskEnabled = args.Contains("--enable-auto-flask");
+var autoCastEnabled = args.Contains("--enable-auto-cast");
 var combatEnabled = args.Contains("--enable-combat");
 var rightStickFollowerOverride = args.Contains("--right-stick-follower-override");
 var engageDodgeEnabled = args.Contains("--right-stick-dodge-on-engage");
@@ -275,7 +276,7 @@ if (adoptPrivateClient3 && (client3Options is null || hybridPrelaunch))
     Console.Error.WriteLine("Client 3 mapping handoff requires a bound private game process.");
     return 2;
 }
-if (hybridMode && (physicalMode || protectedPairing || autoFlaskEnabled || combatEnabled ||
+if (hybridMode && (physicalMode || protectedPairing || autoFlaskEnabled || autoCastEnabled || combatEnabled ||
     rightStickFollowerOverride || focusPads is not null ||
     (!hybridPrelaunch && !HybridKeyboardPlan.TryParse(args, slots, out _))))
 {
@@ -285,6 +286,11 @@ if (hybridMode && (physicalMode || protectedPairing || autoFlaskEnabled || comba
 if (autoFlaskEnabled && (!physicalMode || !protectedPairing))
 {
     Console.Error.WriteLine("Automatic flask input requires physical mode and protected pairing.");
+    return 2;
+}
+if (autoCastEnabled && (!physicalMode || !protectedPairing))
+{
+    Console.Error.WriteLine("Automatic cast input requires physical mode and protected pairing.");
     return 2;
 }
 if (combatEnabled && (!physicalMode || !protectedPairing))
@@ -518,6 +524,7 @@ try
             physical_wgi = wgiMode,
             pairing_protected = protectedPairing, hidhide_preflight = physicalMode,
             auto_flask_enabled = autoFlaskEnabled,
+            auto_cast_enabled = autoCastEnabled,
             combat_enabled = combatEnabled,
             menu_guard_enabled = menuGuardEnabled,
             right_stick_follower_override = rightStickFollowerOverride,
@@ -701,6 +708,18 @@ try
                         return 1;
                     }
                     router.PulseRecoveryAction(recoveryAction.Slot, recoveryAction.Input, DateTime.UtcNow);
+                    continue;
+                }
+                if (BridgeProtocol.TryParseAutoCast(line, out var autoCast))
+                {
+                    if (!autoCastEnabled || pairingGate?.Phase != ProtectedPairingPhase.Complete ||
+                        !outputs.ContainsKey(autoCast.Slot))
+                    {
+                        router.NeutralAll();
+                        Console.Error.WriteLine("Automatic cast is not armed for this virtual pad.");
+                        return 1;
+                    }
+                    router.PulseAutoCast(autoCast.Slot, autoCast.Input, DateTime.UtcNow);
                     continue;
                 }
                 if (BridgeProtocol.TryParseCombat(line, out var combatControl))

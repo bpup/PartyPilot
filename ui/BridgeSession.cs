@@ -32,6 +32,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     private int[]? _hybridPrelaunchSlots;
 
     public bool AutoFlaskEnabled { get; }
+    internal bool AutoCastEnabled { get; }
     internal bool CombatEnabled { get; }
     internal bool IsHybridMode { get; }
     internal bool LastFocusedLeadsEnabled { get; }
@@ -63,6 +64,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     private sealed record CombatPending(string Type, int Slot, TaskCompletionSource Completion);
 
     private BridgeSession(Process process, Task<string> readError, bool autoFlaskEnabled, bool combatEnabled,
+        bool autoCastEnabled,
         bool lastFocusedLeads,
         int[] slots, int[] allSlots, bool hybridMode = false,
         IReadOnlyDictionary<int, int>? hybridOutputForRuntime = null)
@@ -70,6 +72,7 @@ internal sealed class BridgeSession : IAsyncDisposable
         _process = process;
         _readError = readError;
         AutoFlaskEnabled = autoFlaskEnabled;
+        AutoCastEnabled = autoCastEnabled;
         CombatEnabled = combatEnabled;
         IsHybridMode = hybridMode;
         LastFocusedLeadsEnabled = lastFocusedLeads;
@@ -85,7 +88,8 @@ internal sealed class BridgeSession : IAsyncDisposable
         bool autoFlaskEnabled = false, bool useWgi = false, PrivateClient3Plan? privatePlan = null,
         bool lastFocusedLeads = false, bool menuGuardEnabled = true,
         FollowerMirrorConfig? followerMirror = null, bool adoptExistingPrivate = false,
-        bool engageDodgeEnabled = false, string engageDodgeBinding = "B", bool combatEnabled = false)
+        bool engageDodgeEnabled = false, string engageDodgeBinding = "B", bool combatEnabled = false,
+        bool autoCastEnabled = false)
     {
         if (engageDodgeEnabled && (!rightStickFollowerOverride ||
             !RightStickDodgePreferenceStore.TryNormalizeBinding(engageDodgeBinding, out engageDodgeBinding)))
@@ -160,6 +164,7 @@ internal sealed class BridgeSession : IAsyncDisposable
             start.ArgumentList.Add(engageDodgeBinding);
         }
         if (autoFlaskEnabled) start.ArgumentList.Add("--enable-auto-flask");
+        if (autoCastEnabled) start.ArgumentList.Add("--enable-auto-cast");
         if (combatEnabled) start.ArgumentList.Add("--enable-combat");
         if (!menuGuardEnabled) start.ArgumentList.Add("--disable-menu-guard");
         if (followerMirror is not null)
@@ -182,11 +187,12 @@ internal sealed class BridgeSession : IAsyncDisposable
             if (readyLine is null || !IsExpectedReady(readyLine, slots, focusPadMap,
                 rightStickFollowerOverride, directRightStickSlot, autoFlaskEnabled, useWgi, privatePlan,
                 lastFocusedLeads, menuGuardEnabled, followerMirror, adoptExistingPrivate,
-                engageDodgeEnabled, engageDodgeBinding, combatEnabled))
+                engageDodgeEnabled, engageDodgeBinding, combatEnabled, autoCastEnabled))
             {
                 throw new InvalidOperationException("Virtual controller bridge did not confirm the requested pad slots.");
             }
-            return new BridgeSession(process, readError, autoFlaskEnabled, combatEnabled, lastFocusedLeads, slots,
+            return new BridgeSession(process, readError, autoFlaskEnabled, combatEnabled, autoCastEnabled,
+                lastFocusedLeads, slots,
                 partySlots.Select(item => item.RuntimePad).ToArray());
         }
         catch (Exception error)
@@ -249,7 +255,7 @@ internal sealed class BridgeSession : IAsyncDisposable
             if (!IsExpectedHybridPrelaunch(line, slots, playerPads, bindings.Encode(),
                     menuGuardEnabled, followerMirror.Encode()))
                 throw new InvalidOperationException("Keyboard bridge did not confirm prelaunch virtual pads.");
-            return new BridgeSession(process, readError, false, false, false, slots,
+            return new BridgeSession(process, readError, false, false, false, false, slots,
                 [1, ..outputForRuntime.Values], hybridMode: true,
                 hybridOutputForRuntime: outputForRuntime)
             {
@@ -411,7 +417,7 @@ internal sealed class BridgeSession : IAsyncDisposable
                     windowMap, bindings?.Encode(), menuGuardEnabled, followerMirror, privatePlan,
                     adoptExistingPrivate))
                 throw new InvalidOperationException("Keyboard bridge did not confirm its pad and window binding.");
-            return new BridgeSession(process, readError, false, false, false, slots,
+            return new BridgeSession(process, readError, false, false, false, false, slots,
                 [1, ..outputForRuntime.Values], hybridMode: true,
                 hybridOutputForRuntime: outputForRuntime);
         }
@@ -470,7 +476,8 @@ internal sealed class BridgeSession : IAsyncDisposable
         PrivateClient3Plan? privatePlan, bool lastFocusedLeads = false,
         bool menuGuardEnabled = true, FollowerMirrorConfig? followerMirror = null,
         bool adoptExistingPrivate = false, bool engageDodgeEnabled = false,
-        string engageDodgeBinding = "B", bool combatEnabled = false)
+        string engageDodgeBinding = "B", bool combatEnabled = false,
+        bool autoCastEnabled = false)
     {
         try
         {
@@ -483,6 +490,8 @@ internal sealed class BridgeSession : IAsyncDisposable
                    root.TryGetProperty("hidhide_preflight", out var preflight) && preflight.GetBoolean() &&
                    root.TryGetProperty("auto_flask_enabled", out var flaskMode) &&
                    flaskMode.GetBoolean() == autoFlaskEnabled &&
+                   (root.TryGetProperty("auto_cast_enabled", out var castMode)
+                       ? castMode.GetBoolean() == autoCastEnabled : !autoCastEnabled) &&
                    (root.TryGetProperty("combat_enabled", out var combatMode)
                        ? combatMode.GetBoolean() == combatEnabled : !combatEnabled) &&
                    root.TryGetProperty("menu_guard_enabled", out var menuGuard) &&
@@ -603,6 +612,15 @@ internal sealed class BridgeSession : IAsyncDisposable
             _stopping || _process.HasExited)
             throw new InvalidOperationException("Custom recovery input is unavailable for this pad.");
         await WriteCommandAsync(JsonSerializer.Serialize(new { type = "recovery_action", slot, input }));
+    }
+
+    internal async Task SendAutoCastAsync(int slot, string input)
+    {
+        if (!AutoCastEnabled || !_allSlots.Contains(slot) ||
+            input is not ("D-pad Up" or "D-pad Down" or "A" or "B" or "X" or "Y" or "LB" or "RB") ||
+            _stopping || _process.HasExited)
+            throw new InvalidOperationException("Automatic cast input is unavailable for this pad.");
+        await WriteCommandAsync(JsonSerializer.Serialize(new { type = "auto_cast", slot, input }));
     }
 
     internal Task BeginAutoPartyAsync(CancellationToken token) =>

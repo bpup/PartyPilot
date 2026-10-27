@@ -9,6 +9,7 @@ internal readonly record struct BridgeCommand(int Slot, short X, short Y, bool A
 internal readonly record struct PairingControl(string Type, int Slot, int Pid, long WindowHandle);
 internal readonly record struct FlaskCommand(int Slot, string Resource);
 internal readonly record struct RecoveryActionCommand(int Slot, string Input);
+internal readonly record struct AutoCastCommand(int Slot, string Input);
 internal readonly record struct AutoPartyControl(string Type, int Slot, ushort Buttons, int HoldMilliseconds);
 internal readonly record struct CombatControl(string Type, int Slot, PadReport Pulse, int HoldMilliseconds);
 internal readonly record struct HybridKeyControl(int VirtualKey, bool Down);
@@ -220,6 +221,32 @@ internal static class BridgeProtocol
 
     public static bool IsRecoveryInput(string? input) => input is
         "X" or "Y" or "LB" or "RB" or "LT" or "RT" or "D-pad Up" or "D-pad Down";
+
+    public static bool IsAutoCastInput(string? input) => input is
+        "D-pad Up" or "D-pad Down" or "A" or "B" or "X" or "Y" or "LB" or "RB";
+
+    public static bool TryParseAutoCast(string line, out AutoCastCommand command)
+    {
+        command = default;
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || root.EnumerateObject().Count() != 3 ||
+                !root.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String ||
+                type.GetString() != "auto_cast" ||
+                !root.TryGetProperty("slot", out var slot) || !slot.TryGetInt32(out var value) ||
+                value is < 1 or > 6 ||
+                !root.TryGetProperty("input", out var input) || input.ValueKind != JsonValueKind.String ||
+                !IsAutoCastInput(input.GetString())) return false;
+            command = new AutoCastCommand(value, input.GetString()!);
+            return true;
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
 
     public static bool TryParseRecoveryAction(string line, out RecoveryActionCommand command)
     {
