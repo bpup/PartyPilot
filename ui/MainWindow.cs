@@ -145,6 +145,7 @@ public sealed class MainWindow : Window
     private readonly TextBox[] _followPlayerStops = new TextBox[6];
     private readonly FollowStopPreferenceStore _followStopPreferences;
     private double?[] _configuredFollowStops = new double?[6];
+    private bool _followStopFreshProfile;
     private bool _followStopPreferenceReady;
     private bool _updatingFollowStopFields;
     private readonly TextBlock _followStopPreferenceStatus = new();
@@ -1031,6 +1032,7 @@ public sealed class MainWindow : Window
         panel.Children.Add(_followTargetPreferenceStatus);
         var loadedStops = _followStopPreferences.Load();
         _configuredFollowStops = loadedStops.Stops;
+        _followStopFreshProfile = loadedStops.FreshProfile;
         _followStopPreferenceReady = loadedStops.Success;
         _followStopPreferenceStatus.Text = loadedStops.Message;
         _followStopPreferenceStatus.Foreground = MutedBrush;
@@ -1402,11 +1404,16 @@ public sealed class MainWindow : Window
         _updatingFollowStopFields = true;
         try
         {
+            var shippingStops = _followStopFreshProfile &&
+                _selectedTopology?.Id is ("4-balanced" or "5-third-solo" or
+                    "5-main-solo" or "6-balanced")
+                    ? FollowStopPreferenceStore.CreateShippingDefaults() : null;
             for (var index = 0; index < _followPlayerStops.Length; index++)
             {
                 var slot = _selectedTopology?.Slots.FirstOrDefault(item => item.PartyPlayer == index + 1);
                 _followPlayerStops[index].Text = slot is null ? string.Empty :
-                    _configuredFollowStops[slot.RuntimePad - 1]?.ToString("R", CultureInfo.InvariantCulture) ?? string.Empty;
+                    (shippingStops?[slot.RuntimePad - 1] ?? _configuredFollowStops[slot.RuntimePad - 1])
+                        ?.ToString("R", CultureInfo.InvariantCulture) ?? string.Empty;
             }
         }
         finally
@@ -1427,11 +1434,20 @@ public sealed class MainWindow : Window
             UpdateFollowControls();
             return;
         }
-        var next = (double?[])_configuredFollowStops.Clone();
+        var current = _followStopFreshProfile && _selectedTopology.Id is ("4-balanced" or
+            "5-third-solo" or "5-main-solo" or "6-balanced")
+            ? FollowStopPreferenceStore.CreateShippingDefaults()[slot.RuntimePad - 1]
+            : _configuredFollowStops[slot.RuntimePad - 1];
+        if (_followStopPreferenceReady && value == current) return;
+        var next = _followStopFreshProfile && _selectedTopology.Id is ("4-balanced" or
+            "5-third-solo" or "5-main-solo" or "6-balanced")
+            ? FollowStopPreferenceStore.CreateShippingDefaults()
+            : (double?[])_configuredFollowStops.Clone();
         next[slot.RuntimePad - 1] = value;
         _configuredFollowStops = next;
         var saved = _followStopPreferences.Save(next);
         _followStopPreferenceReady = saved.Success;
+        if (saved.Success) _followStopFreshProfile = false;
         _followStopPreferenceStatus.Text = saved.Message;
         UpdateFollowControls();
     }

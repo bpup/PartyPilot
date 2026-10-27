@@ -967,16 +967,14 @@ var fourStop = window.GetLogicalDescendants().OfType<TextBox>()
     .Single(item => item.Name == "follow-stop-4");
 if (!fourTarget.IsEffectivelyVisible || !fourStop.IsEffectivelyVisible ||
     !fourTarget.ItemsSource!.Cast<string>().SequenceEqual(["当前主控", "P1", "P2", "P3"]) ||
-    classicSprint.IsEnabled == false)
+    fourStop.Text != "42.71758436944938" || classicSprint.IsEnabled == false)
     throw new Exception("Four-player follow choices, stop distance or sprint control were unavailable.");
 fourTarget.SelectedItem = "P1";
-fourStop.Text = "42.5";
 Dispatcher.UIThread.RunJobs();
 if (followPreferenceStore.Load() is not { Success: true, Targets: [0, 0, 0, 1, 0, 0] } ||
-    stopPreferenceStore.Load() is not { Success: true, Stops: [null, null, null, 42.5, null, null] })
-    throw new Exception("Four-player follow target or stop distance did not persist.");
+    stopPreferenceStore.Load() is not { Success: true, FreshProfile: true })
+    throw new Exception("Four-player follow target did not persist or fresh stop profile was overwritten.");
 fourTarget.SelectedItem = "当前主控";
-fourStop.Text = string.Empty;
 Dispatcher.UIThread.RunJobs();
 clientCount.SelectedIndex = 5;
 Dispatcher.UIThread.RunJobs();
@@ -986,17 +984,29 @@ var sixStop = window.GetLogicalDescendants().OfType<TextBox>()
     .Single(item => item.Name == "follow-stop-6");
 if (!sixTarget.IsEffectivelyVisible || !sixStop.IsEffectivelyVisible ||
     !sixTarget.ItemsSource!.Cast<string>().SequenceEqual(
-        ["当前主控", "P1", "P2", "P3", "P4", "P5"]))
+        ["当前主控", "P1", "P2", "P3", "P4", "P5"]) ||
+    sixStop.Text != "42.71758436944938")
     throw new Exception("Six-player follower controls were unavailable.");
 sixTarget.SelectedItem = "P5";
-sixStop.Text = "43.5";
 Dispatcher.UIThread.RunJobs();
 if (followPreferenceStore.Load() is not { Success: true, Targets: [0, 0, 0, 0, 0, 5] } ||
-    stopPreferenceStore.Load() is not { Success: true, Stops: [null, null, null, null, null, 43.5] })
-    throw new Exception("Six-player follow target or stop distance did not persist.");
+    stopPreferenceStore.Load() is not { Success: true, FreshProfile: true })
+    throw new Exception("Six-player follow target did not persist or fresh stop profile was overwritten.");
 sixTarget.SelectedItem = "当前主控";
-sixStop.Text = string.Empty;
 Dispatcher.UIThread.RunJobs();
+clientCount.SelectedIndex = 4;
+Dispatcher.UIThread.RunJobs();
+var fiveStop = window.GetLogicalDescendants().OfType<TextBox>()
+    .Single(item => item.Name == "follow-stop-5");
+if (fiveStop.Text != "37.21136767317941")
+    throw new Exception("Five-player third-client solo layout used the wrong runtime stop slot.");
+var fiveVariant = window.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(item => item.PlaceholderText == "选择角色分布");
+fiveVariant.SelectedItem = PartyTopologies.ForPlayerCount(5)
+    .Single(item => item.Id == "5-main-solo");
+Dispatcher.UIThread.RunJobs();
+if (fiveStop.Text != "42.71758436944938")
+    throw new Exception("Five-player main-client solo layout used the wrong runtime stop slot.");
 clientCount.SelectedIndex = 3;
 Dispatcher.UIThread.RunJobs();
 physicalIndex.SelectedIndex = 0;
@@ -1262,6 +1272,41 @@ if (!OperatingSystem.IsWindows())
     {
         File.Delete(fakeResource);
     }
+}
+var shippingStopDirectory = Path.Combine(Path.GetTempPath(),
+    "partypilot-shipping-stop-" + Guid.NewGuid().ToString("N"));
+try
+{
+    var shippingStopPath = Path.Combine(shippingStopDirectory, "follow-stops.json");
+    var shippingStopStore = new FollowStopPreferenceStore(shippingStopPath);
+    var shippingWindow = new MainWindow(
+        new FollowTargetPreferenceStore(Path.Combine(shippingStopDirectory, "follow-targets.json")),
+        shippingStopStore,
+        new FollowInputPreferenceStore(Path.Combine(shippingStopDirectory, "follow-input.json")));
+    shippingWindow.Show();
+    var shippingCount = shippingWindow.GetLogicalDescendants().OfType<ComboBox>()
+        .Single(item => item.PlaceholderText == "选择 1–6 人");
+    shippingCount.SelectedIndex = 3;
+    Dispatcher.UIThread.RunJobs();
+    var shippingP4 = shippingWindow.GetLogicalDescendants().OfType<TextBox>()
+        .Single(item => item.Name == "follow-stop-4");
+    if (shippingP4.Text != "42.71758436944938" || File.Exists(shippingStopPath))
+        throw new Exception("Fresh 4P stop distances were not displayed without persisting unchosen settings.");
+    shippingP4.Text = "44";
+    Dispatcher.UIThread.RunJobs();
+    if (shippingStopStore.Load() is not { Success: true, FreshProfile: false,
+            Stops: [35.257548845470694, 36.32326820603909, 37.21136767317941,
+                44, 37.21136767317941, 42.71758436944938] })
+        throw new Exception("Editing a fresh 4P stop did not preserve other shipping distances.");
+    shippingP4.Text = string.Empty;
+    Dispatcher.UIThread.RunJobs();
+    if (shippingStopStore.Load() is not { Success: true, Stops: [_, _, _, null, _, _] })
+        throw new Exception("Clearing a selected stop did not preserve the explicit global fallback.");
+    shippingWindow.Close();
+}
+finally
+{
+    if (Directory.Exists(shippingStopDirectory)) Directory.Delete(shippingStopDirectory, true);
 }
 await Task.Run(ProcessPipelineSmoke.RunAsync).ConfigureAwait(false);
 

@@ -9,8 +9,12 @@ internal static class FollowStopPreferenceSmoke
         try
         {
             var store = new FollowStopPreferenceStore(path);
-            if (store.Load() is not { Success: true, Stops: [null, null, null, null, null, null] })
-                throw new Exception("A new profile unexpectedly assigned uncalibrated stop distances.");
+            if (store.Load() is not { Success: true, FreshProfile: true,
+                    Stops: [null, null, null, null, null, null] } ||
+                !FollowStopPreferenceStore.CreateShippingDefaults().SequenceEqual<double?>(
+                    [35.257548845470694, 36.32326820603909, 37.21136767317941,
+                        42.71758436944938, 37.21136767317941, 42.71758436944938]))
+                throw new Exception("Fresh 4P/6P stop profile did not match the observed shipping values.");
             if (!store.Save([null, null, 37.25, null, null, null]).Success ||
                 store.Load() is not { Success: true, Stops: [null, null, 37.25, null, null, null] })
                 throw new Exception("Physical slot P3's stop distance did not survive reload.");
