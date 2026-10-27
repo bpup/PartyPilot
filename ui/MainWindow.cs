@@ -3638,6 +3638,30 @@ public sealed class MainWindow : Window
     private async Task<string?> PrepareAutoLoginsAfterBindingAsync(PartyTopology topology,
         IReadOnlyList<LaunchedClient> clients)
     {
+        string? result;
+        try
+        {
+            result = await PrepareAutoLoginsAfterBindingCoreAsync(topology, clients);
+        }
+        catch
+        {
+            await RestoreMainClientForegroundAsync(clients);
+            throw;
+        }
+        if (await RestoreMainClientForegroundAsync(clients)) return result;
+        return string.IsNullOrEmpty(result)
+            ? "主客户端未能恢复前台，请手动聚焦后再配对。"
+            : result + Environment.NewLine + "主客户端未能恢复前台，请手动聚焦后再配对。";
+    }
+
+    private static Task<bool> RestoreMainClientForegroundAsync(IReadOnlyList<LaunchedClient> clients) =>
+        clients.Count == 0 ? Task.FromResult(false) :
+        PoeChatInviteService.IsExactForeground(clients[0]) ? Task.FromResult(true) :
+        PoeChatInviteService.FocusExactWindowAsync(clients[0], CancellationToken.None);
+
+    private async Task<string?> PrepareAutoLoginsAfterBindingCoreAsync(PartyTopology topology,
+        IReadOnlyList<LaunchedClient> clients)
+    {
         using var cancellation = new CancellationTokenSource();
         _autoLoginFillCancellation = cancellation;
         UpdateAutoLoginControls();
@@ -3727,9 +3751,6 @@ public sealed class MainWindow : Window
                 await Task.Delay(900, cancellation.Token);
             }
             if (items.Count == 0 && manualCount == 0) return null;
-            if (items.Count > 0 && !PoeChatInviteService.IsExactForeground(clients[0]) &&
-                !await PoeChatInviteService.FocusExactWindowAsync(clients[0], cancellation.Token))
-                return $"已为 {items.Count} 个独立客户端填入账号；主客户端未能恢复前台，请手动聚焦后再配对。";
             return $"已为 {items.Count} 个独立客户端填入账号；{manualCount} 个窗口本次手动登录。配对时将重新核验已填入的登录画面。";
         }
         catch (OperationCanceledException)
