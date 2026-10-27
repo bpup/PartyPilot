@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,6 +55,38 @@ type OrderedLocalPlayer struct {
 }
 
 const unverifiedExileCoreSlotSource = "unverified_exilecore_local_slot_candidate"
+const experimentalStaticVectorSource = "experimental_static_vector_0.6.17"
+
+func validStaticVectorPointer(value string) bool {
+	if !strings.HasPrefix(value, "0x") || len(value) <= 2 {
+		return false
+	}
+	address, err := strconv.ParseUint(value[2:], 16, 64)
+	return err == nil && address >= 0x10000 && address < 0x7FFF_FFFF_FFFF
+}
+
+func validStaticVectorIdentity(frame OrderedClientFrame, roles []RoleBinding) bool {
+	if frame.PlayerOrderSource != experimentalStaticVectorSource {
+		return true
+	}
+	if frame.AreaHash == 0 || !validStaticVectorPointer(frame.AreaInstanceAddress) ||
+		!validStaticVectorPointer(frame.VectorHeaderAddress) ||
+		len(frame.OrderedAddresses) != len(roles) {
+		return false
+	}
+	seen := make(map[uint64]bool, len(frame.OrderedAddresses))
+	for _, value := range frame.OrderedAddresses {
+		if !validStaticVectorPointer(value) {
+			return false
+		}
+		address, _ := strconv.ParseUint(value[2:], 16, 64)
+		if seen[address] {
+			return false
+		}
+		seen[address] = true
+	}
+	return true
+}
 
 // DecodeOrderedClient is an explicit, opt-in transport boundary. The wire
 // claim of reliable order is not proof that its producer read the game correctly.
@@ -89,6 +122,7 @@ func (e *Engine) ObserveOrderedClient(frame OrderedClientFrame) bool {
 	if !frame.PlayerOrderReliable ||
 		strings.TrimSpace(frame.PlayerOrderSource) == "" ||
 		strings.EqualFold(strings.TrimSpace(frame.PlayerOrderSource), unverifiedExileCoreSlotSource) ||
+		!validStaticVectorIdentity(frame, roles) ||
 		len(frame.Players) != len(roles) || frame.CoordinateSpace != "world" ||
 		frame.SeenUTC.IsZero() || frame.ReceivedAt.IsZero() || frame.TickMS <= 0 {
 		e.invalidateOrderedIfCurrent(roles, frame)

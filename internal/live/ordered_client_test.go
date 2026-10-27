@@ -112,13 +112,30 @@ func TestOrderedMotionDoesNotRequireSlowVitals(t *testing.T) {
 	}
 	motion := OrderedClientFrame{ProcessID: 101, SeenUTC: now.Add(time.Millisecond),
 		ReceivedAt: now.Add(time.Millisecond), TickMS: now.UnixMilli() + 1,
-		CoordinateSpace: "world", PlayerOrderReliable: true,
+		AreaHash: 55, AreaInstanceAddress: "0x100000", VectorHeaderAddress: "0x100100",
+		OrderedAddresses: []string{"0x200000", "0x300000"},
+		CoordinateSpace:  "world", PlayerOrderReliable: true,
 		PlayerOrderSource: "experimental_static_vector_0.6.17", Players: []OrderedLocalPlayer{
 			{LocalPlayer: 1, X: 30 * worldPerGridUnit},
 			{LocalPlayer: 2, X: 0},
 		}}
 	if !engine.ObserveOrderedClient(motion) {
 		t.Fatal("position-only ordered motion was rejected")
+	}
+	missingIdentity := motion
+	missingIdentity.SeenUTC = now.Add(1500 * time.Microsecond)
+	missingIdentity.ReceivedAt = missingIdentity.SeenUTC
+	missingIdentity.TickMS++
+	missingIdentity.OrderedAddresses = []string{"0x200000", "0x200000"}
+	if engine.ObserveOrderedClient(missingIdentity) ||
+		engine.Step(missingIdentity.SeenUTC)[2].State != follow.Waiting {
+		t.Fatal("duplicate static-vector role identities kept old movement active")
+	}
+	motion.SeenUTC = now.Add(1750 * time.Microsecond)
+	motion.ReceivedAt = motion.SeenUTC
+	motion.TickMS += 2
+	if !engine.ObserveOrderedClient(motion) {
+		t.Fatal("complete static-vector identity did not recover after a rejected frame")
 	}
 	command := engine.Step(motion.SeenUTC)[2]
 	if command.State != follow.CatchingUp || command.ManualOverrideEligible {
@@ -432,7 +449,9 @@ func TestFiveRolesMixDualAndStandaloneClientPositions(t *testing.T) {
 				}
 				frame := OrderedClientFrame{ProcessID: pid, SeenUTC: now.Add(time.Millisecond),
 					ReceivedAt: now.Add(time.Millisecond), TickMS: now.UnixMilli() + 1,
-					CoordinateSpace: "world", PlayerOrderReliable: true,
+					AreaHash: 55, AreaInstanceAddress: "0x100000", VectorHeaderAddress: "0x100100",
+					OrderedAddresses: []string{"0x200000", "0x300000"},
+					CoordinateSpace:  "world", PlayerOrderReliable: true,
 					PlayerOrderSource: "experimental_static_vector_0.6.17", Players: players}
 				if !engine.ObserveOrderedClient(frame) || engine.ObserveSample(telemetry.Sample{
 					ProcessID: pid, SeenUTC: frame.SeenUTC, ReceivedAt: frame.ReceivedAt,
