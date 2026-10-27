@@ -1,3 +1,5 @@
+using PartyPilot.Common;
+
 namespace PartyPilot.Bridge;
 
 internal readonly record struct PadReport(
@@ -29,6 +31,7 @@ internal sealed class BridgeRouter
     private IReadOnlyDictionary<int, int> _focusPads = new Dictionary<int, int>();
     private bool _physicalMode;
     private HybridKeyboardState? _hybridKeyboard;
+    private HybridBindingConfig _hybridBindings = HybridBindingConfig.Default;
     private bool _hybridFocusRequested;
     private bool _hybridConfirmReleased;
     private IReadOnlyDictionary<int, int> _hybridPlayerPads = new Dictionary<int, int>();
@@ -100,6 +103,7 @@ internal sealed class BridgeRouter
         _autoPartyButtons != 0 && nowUtc.Kind == DateTimeKind.Utc &&
         nowUtc < _autoPartyButtonsUntilUtc;
     public bool HybridPairingComplete => _hybridKeyboard?.PairingComplete == true;
+    public int HybridFocusForKey(int key) => _hybridBindings.FocusForKey(key);
     public int HybridFocusedPlayer => _hybridKeyboard?.FocusedPlayer ?? 0;
     public bool HybridFocusRequested => _hybridFocusRequested;
     public bool HybridConfirmReleased => _hybridConfirmReleased;
@@ -139,13 +143,15 @@ internal sealed class BridgeRouter
         return true;
     }
 
-    public bool ConfigureHybridKeyboard(IReadOnlyDictionary<int, int> playerPads)
+    public bool ConfigureHybridKeyboard(IReadOnlyDictionary<int, int> playerPads,
+        HybridBindingConfig? bindings = null)
     {
         if (_physicalMode || playerPads.Count == 0 ||
             playerPads.Any(entry => entry.Key is < 2 or > 6 || !_routes.ContainsKey(entry.Value)) ||
             playerPads.Values.Distinct().Count() != playerPads.Count) return false;
         _hybridPlayerPads = new Dictionary<int, int>(playerPads);
-        _hybridKeyboard = new HybridKeyboardState(playerPads.Keys);
+        _hybridBindings = bindings ?? HybridBindingConfig.Default;
+        _hybridKeyboard = new HybridKeyboardState(playerPads.Keys, _hybridBindings);
         NeutralAll();
         return true;
     }
@@ -162,8 +168,8 @@ internal sealed class BridgeRouter
         _hybridFocusRequested = false;
         _hybridConfirmReleased = false;
         if (_hybridKeyboard is null || virtualKey == 0 ||
-            (HybridKeyboardInput.FocusForKey(virtualKey) == 0 &&
-             HybridKeyboardInput.ActionForKey(virtualKey) == HybridAction.None)) return false;
+            (HybridKeyboardInput.FocusForKey(virtualKey, _hybridBindings) == 0 &&
+             HybridKeyboardInput.ActionForKey(virtualKey, _hybridBindings) == HybridAction.None)) return false;
         if (_autoPartyActive)
         {
             _hybridKeyboard.Handle(virtualKey, down, gameForeground: false);

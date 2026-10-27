@@ -1,4 +1,5 @@
 using System.Text.Json;
+using PartyPilot.Common;
 
 namespace PartyPilot.Bridge;
 
@@ -27,7 +28,8 @@ internal static class BridgeProtocol
         catch (JsonException) { return false; }
     }
 
-    public static bool TryParseHybridKey(string line, out HybridKeyControl command)
+    public static bool TryParseHybridKey(string line, out HybridKeyControl command,
+        HybridBindingConfig? bindings = null)
     {
         command = default;
         try
@@ -40,8 +42,7 @@ internal static class BridgeProtocol
                 !root.TryGetProperty("key", out var key) || !key.TryGetInt32(out var virtualKey) ||
                 !root.TryGetProperty("down", out var down) ||
                 down.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
-                (HybridKeyboardInput.FocusForKey(virtualKey) == 0 &&
-                 HybridKeyboardInput.ActionForKey(virtualKey) == HybridAction.None)) return false;
+                !(bindings ?? HybridBindingConfig.Default).ContainsKey(virtualKey)) return false;
             command = new HybridKeyControl(virtualKey, down.GetBoolean());
             return true;
         }

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using PartyPilot.Desktop;
+using PartyPilot.Common;
 
 internal static class HybridBridgePipelineSmoke
 {
@@ -36,7 +37,8 @@ internal static class HybridBridgePipelineSmoke
                 "if value('--hybrid-player-pads') != '2:2' or value('--hybrid-window-map') != '1:101:201,2:102:202': sys.exit(2)\n" +
                 "games=[sys.argv[i+1] for i,arg in enumerate(sys.argv[:-1]) if arg=='--game-exe']\n" +
                 $"if games != [{JsonSerializer.Serialize(gameA)},{JsonSerializer.Serialize(gameB)}]: sys.exit(2)\n" +
-                "print('{\"event\":\"ready\",\"slots\":[1,2],\"physical_mode\":false,\"hybrid_mode\":true,\"hybrid_player_pads\":\"2:2\",\"hybrid_window_map\":\"1:101:201,2:102:202\"}', flush=True)\n" +
+                "keys=value('--hybrid-binding-keys')\nif keys is None: sys.exit(2)\n" +
+                "print(json.dumps({'event':'ready','slots':[1,2],'physical_mode':False,'hybrid_mode':True,'hybrid_player_pads':'2:2','hybrid_window_map':'1:101:201,2:102:202','hybrid_binding_keys':keys}), flush=True)\n" +
                 $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(inputLog)}, 'a') as out: out.write(line)\n    message=json.loads(line)\n    if message.get('type') == 'hybrid_pairing_complete': print('{{\"event\":\"hybrid_pairing_complete\"}}', flush=True)\n    if message.get('type','').startswith('auto_party_'): print(json.dumps({{'event':'auto_party_control','type':message['type'],'slot':message.get('slot',0),'buttons':message.get('buttons',0)}}), flush=True)\n");
             File.WriteAllText(followExecutable, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '-roster' not in sys.argv or sys.argv[sys.argv.index('-roster')+1] != '1:101,2:102': sys.exit(2)\n" +
@@ -50,21 +52,27 @@ internal static class HybridBridgePipelineSmoke
                 new LaunchedClient(101, 201, gameA),
                 new LaunchedClient(102, 202, gameB)
             };
-            await using var bridge = await BridgeSession.StartHybridAsync(executable, topology.Slots, clients);
+            var customKeys = HybridBindingConfig.Definitions.Select(item => item.DefaultKey).ToArray();
+            customKeys[6] = 73;
+            if (!HybridBindingConfig.TryCreate(customKeys, out var bindings) || bindings is null)
+                throw new Exception("Fake bridge could not create a custom keyboard map.");
+            await using var bridge = await BridgeSession.StartHybridAsync(executable, topology.Slots,
+                clients, bindings);
             if (!bridge.IsHybridMode || !bridge.IsRunning)
                 throw new Exception("Desktop rejected a ready keyboard bridge.");
             bridge.StartReading();
             Exception? sendError = null;
             await using var input = new HybridKeyEventPublisher(bridge.SendHybridKeyAsync,
                 error => sendError = error);
-            if (!input.TryPublish(0x57, true) || !input.TryPublish(0x57, false))
+            if (!input.TryPublish(0x49, true) || !input.TryPublish(0x49, false))
                 throw new Exception("Desktop could not queue keyboard events for the bridge.");
             var deadline = DateTime.UtcNow.AddSeconds(3);
             while (DateTime.UtcNow < deadline && (!File.Exists(inputLog) || File.ReadAllLines(inputLog).Length < 2))
                 await Task.Delay(20);
             if (sendError is not null || !File.Exists(inputLog) || File.ReadAllLines(inputLog).Length != 2 ||
                 File.ReadAllLines(inputLog).Select(line => JsonDocument.Parse(line).RootElement.GetProperty("down").GetBoolean())
-                    .SequenceEqual([true, false]) == false)
+                    .SequenceEqual([true, false]) == false ||
+                File.ReadAllLines(inputLog).Any(line => JsonDocument.Parse(line).RootElement.GetProperty("key").GetInt32() != 73))
                 throw new Exception("Keyboard bridge did not receive ordered key down/up events.");
             await bridge.EnableHybridMainFollowMirrorAsync();
             if (!File.ReadAllLines(inputLog).Any(line =>

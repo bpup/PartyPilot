@@ -7,6 +7,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
+using PartyPilot.Common;
 
 namespace PartyPilot.Desktop;
 
@@ -75,6 +76,10 @@ public sealed class MainWindow : Window
     private readonly TextBlock _autoPartyStatus = new();
     private readonly TextBlock _status = new();
     private readonly ComboBox _inputMode = new();
+    private readonly Button _hybridBindingsButton = new();
+    private readonly TextBlock _hybridBindingsStatus = new();
+    private readonly HybridBindingPreferenceStore _hybridBindingPreferences = new();
+    private HybridBindingConfig _hybridBindings = HybridBindingConfig.Default;
     private readonly ComboBox _physicalIndex = new();
     private readonly TextBox _physicalDevice = new();
     private readonly CheckBox _isolationConfirmed = new();
@@ -223,6 +228,11 @@ public sealed class MainWindow : Window
 
         shell.Children.Add(new ScrollViewer { Content = content });
         Content = shell;
+        var hybridPreference = _hybridBindingPreferences.Load();
+        _hybridBindings = hybridPreference.Bindings;
+        _hybridBindingsStatus.Text = hybridPreference.Success
+            ? "键鼠按键映射已加载；更改后将在下一次桥接会话生效。"
+            : "键鼠映射文件无效或无法读取；当前使用目标版默认按键，请重新保存。";
         var keyPreference = _autoPartyKeyPreferences.Load();
         _autoPartyKeyValue = keyPreference.Success ? keyPreference.Key : "None";
         _autoPartyKey.SelectedItem = _autoPartyKeyValue;
@@ -369,6 +379,13 @@ public sealed class MainWindow : Window
             UpdateBridgeControls();
         };
         panel.Children.Add(_inputMode);
+        _hybridBindingsButton.Content = "设置键鼠按键映射";
+        _hybridBindingsButton.HorizontalAlignment = HorizontalAlignment.Left;
+        _hybridBindingsButton.Click += async (_, _) => await EditHybridBindingsAsync();
+        panel.Children.Add(_hybridBindingsButton);
+        _hybridBindingsStatus.Foreground = MutedBrush;
+        _hybridBindingsStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_hybridBindingsStatus);
         _physicalIndex.PlaceholderText = "实体手柄 XInput 编号";
         _physicalIndex.ItemsSource = Enumerable.Range(0, 4).Select(index => $"XInput {index}").ToArray();
         _physicalIndex.Width = 190;
@@ -1605,6 +1622,7 @@ public sealed class MainWindow : Window
         _topologyVariant.IsEnabled = _bridge is null && !_busy;
         _inputMode.IsEnabled = _bridge is null && !_busy;
         _physicalIndex.IsEnabled = !HybridSelected && _bridge is null && !_busy && !useWgi;
+        _hybridBindingsButton.IsEnabled = _bridge is null && !_busy;
         _physicalDevice.IsEnabled = !HybridSelected && _bridge is null && !_busy;
         _isolationConfirmed.IsEnabled = !HybridSelected && _bridge is null && !_busy;
         _rightStickFollowerOverride.IsEnabled = !HybridSelected && _bridge is null && !_busy;
@@ -1661,7 +1679,7 @@ public sealed class MainWindow : Window
         _autoPartyKeyValue = selected;
         ApplyGameShortcutKeys();
         _autoPartyKeyStatus.Text = _bridge?.IsHybridMode == true &&
-            GameKeyboardShortcutHook.IsHybridVirtualKey(AutoPartyKeyBinding.VirtualKey(selected))
+            _hybridBindings.ContainsKey(AutoPartyKeyBinding.VirtualKey(selected))
             ? "自动组队快捷键与键鼠操作冲突，本次会话已禁用；仍可使用按钮。"
             : OperatingSystem.IsWindows() &&
             _gameHotkeys is { IsStarted: false }
@@ -1695,7 +1713,7 @@ public sealed class MainWindow : Window
         _followPauseKeyValue = selected;
         ApplyGameShortcutKeys();
         _followPauseKeyStatus.Text = _bridge?.IsHybridMode == true &&
-            GameKeyboardShortcutHook.IsHybridVirtualKey(AutoPartyKeyBinding.VirtualKey(selected))
+            _hybridBindings.ContainsKey(AutoPartyKeyBinding.VirtualKey(selected))
             ? "暂停键与键鼠操作冲突，本次会话已禁用；仍可使用按钮。"
             : OperatingSystem.IsWindows() &&
             _gameHotkeys is { IsStarted: false }
@@ -1711,10 +1729,27 @@ public sealed class MainWindow : Window
         var followPauseKey = AutoPartyKeyBinding.VirtualKey(_followPauseKeyValue);
         if (_bridge?.IsHybridMode == true)
         {
-            if (GameKeyboardShortcutHook.IsHybridVirtualKey(autoPartyKey)) autoPartyKey = 0;
-            if (GameKeyboardShortcutHook.IsHybridVirtualKey(followPauseKey)) followPauseKey = 0;
+            if (_hybridBindings.ContainsKey(autoPartyKey)) autoPartyKey = 0;
+            if (_hybridBindings.ContainsKey(followPauseKey)) followPauseKey = 0;
         }
         _gameHotkeys?.SetKeys(autoPartyKey, followPauseKey);
+    }
+
+    private async Task EditHybridBindingsAsync()
+    {
+        if (_bridge is not null || _busy) return;
+        var selected = await new HybridBindingDialog(_hybridBindings)
+            .ShowDialog<HybridBindingConfig?>(this);
+        if (selected is null) return;
+        if (!_hybridBindingPreferences.Save(selected))
+        {
+            _hybridBindingsStatus.Text = "键鼠映射保存失败；仍使用原有按键。";
+            return;
+        }
+        _hybridBindings = selected;
+        _gameHotkeys?.SetHybridBindings(selected);
+        _hybridBindingsStatus.Text = "键鼠按键映射已保存；下一次准备桥接时生效。";
+        ApplyGameShortcutKeys();
     }
 
     private bool RadarKeyConflicts(RadarHotkeyBinding binding) =>
@@ -2046,6 +2081,12 @@ public sealed class MainWindow : Window
             _pairingStatus.Text = "键鼠模式需要已绑定的游戏窗口与可用的键鼠监听；当前尚未就绪。";
             return;
         }
+        if (_hybridBindings.KeyAt(0) == 0 || _hybridBindings.KeyAt(11) == 0 ||
+            Enumerable.Range(1, topology.PlayerCount - 1).Any(index => _hybridBindings.KeyAt(index) == 0))
+        {
+            _pairingStatus.Text = "当前布局配对需要 P1、每位跟随者的聚焦键以及 A 确认键；请先在键鼠映射中分配。";
+            return;
+        }
         var executable = BridgeSession.FindExecutable();
         if (executable is null)
         {
@@ -2057,7 +2098,8 @@ public sealed class MainWindow : Window
         _pairingStatus.Text = "正在核对键鼠模式的游戏窗口和虚拟手柄…";
         try
         {
-            var session = await BridgeSession.StartHybridAsync(executable, topology.Slots, clients);
+            var session = await BridgeSession.StartHybridAsync(executable, topology.Slots, clients,
+                _hybridBindings);
             Volatile.Write(ref _hybridFocusedPlayer, 1);
             Volatile.Write(ref _hybridFocusTransition, 0);
             _hybridFocusKeysDown.Clear();
@@ -2076,11 +2118,10 @@ public sealed class MainWindow : Window
                     _pairingStatus.Text = $"键鼠输入通道已停止：{error.Message}";
                 }));
             ApplyGameShortcutKeys();
-            if (GameKeyboardShortcutHook.IsHybridVirtualKey(
-                    AutoPartyKeyBinding.VirtualKey(_autoPartyKeyValue)))
+            _gameHotkeys.SetHybridBindings(_hybridBindings);
+            if (_hybridBindings.ContainsKey(AutoPartyKeyBinding.VirtualKey(_autoPartyKeyValue)))
                 _autoPartyKeyStatus.Text = "自动组队快捷键与键鼠操作冲突，本次会话已禁用；仍可使用按钮。";
-            if (GameKeyboardShortcutHook.IsHybridVirtualKey(
-                    AutoPartyKeyBinding.VirtualKey(_followPauseKeyValue)))
+            if (_hybridBindings.ContainsKey(AutoPartyKeyBinding.VirtualKey(_followPauseKeyValue)))
                 _followPauseKeyStatus.Text = "暂停键与键鼠操作冲突，本次会话已禁用；仍可使用按钮。";
             _gameHotkeys.SetHybridHandler(HandleHybridKey);
             session.StartReading();
@@ -2103,7 +2144,7 @@ public sealed class MainWindow : Window
         var session = _bridge;
         var topology = _selectedTopology;
         if (session?.IsHybridMode != true || topology is null ||
-            !GameKeyboardShortcutHook.IsHybridVirtualKey(key)) return false;
+            !_hybridBindings.ContainsKey(key)) return false;
         if (Volatile.Read(ref _autoPartyRunning))
         {
             if (_hybridPublisher?.TryPublish(key, down) != true)
@@ -2115,7 +2156,7 @@ public sealed class MainWindow : Window
                 });
             return gameForeground;
         }
-        var focusPlayer = key is >= 0x70 and <= 0x75 ? key - 0x6F : 0;
+        var focusPlayer = _hybridBindings.FocusForKey(key);
         if (focusPlayer > topology.PlayerCount) return false;
         if (down && !gameForeground) return false;
         var pairing = _hybridPairing;
@@ -2195,7 +2236,7 @@ public sealed class MainWindow : Window
         else if (_hybridPairing?.Phase == HybridPairingPhase.Complete)
             _pairingStatus.Text = player == 1
                 ? "已返回 P1 游戏窗口；键鼠配对由用户确认，可准备实时跟随。"
-                : $"P{player} 游戏窗口已在前台；按 F1 返回 P1 后可启动实时跟随。";
+                : $"P{player} 游戏窗口已在前台；按 {HybridKeyLabel(0)} 返回 P1 后可启动实时跟随。";
         UpdateFollowControls();
     }
 
@@ -2224,15 +2265,18 @@ public sealed class MainWindow : Window
             HybridPairingPhase.AwaitNativeMain =>
                 "P1 使用鼠标登录和选角；进入游戏后点击“P1 已进入游戏”。此步由用户确认，尚无游戏内身份验证。",
             HybridPairingPhase.AwaitFollowerFocus =>
-                $"在游戏窗口按 F{guide.CurrentPlayer}，切换到 P{guide.CurrentPlayer} 的客户端。",
+                $"在游戏窗口按 {HybridKeyLabel(guide.CurrentPlayer - 1)}，切换到 P{guide.CurrentPlayer} 的客户端。",
             HybridPairingPhase.AwaitConfirmRelease =>
-                $"P{guide.CurrentPlayer} 窗口已前台；使用 WASD 选角，按 E 发送虚拟手柄 A。",
+                $"P{guide.CurrentPlayer} 窗口已前台；使用 {HybridKeyLabel(6)}/{HybridKeyLabel(7)}/{HybridKeyLabel(8)}/{HybridKeyLabel(9)} 选角，按 {HybridKeyLabel(11)} 发送虚拟手柄 A。",
             HybridPairingPhase.AwaitUserConfirmation =>
                 $"已观察到 P{guide.CurrentPlayer} 的虚拟 A 键松开；请确认该角色确已进入游戏，再点击“已在游戏内确认此角色”。",
-            _ => "所有角色已由用户逐个确认。按 F1 返回 P1；仍须在游戏中核对虚拟手柄隔离与实际组队。"
+            _ => $"所有角色已由用户逐个确认。按 {HybridKeyLabel(0)} 返回 P1；仍须在游戏中核对虚拟手柄隔离与实际组队。"
         };
         UpdateBridgeControls();
     }
+
+    private string HybridKeyLabel(int index) => AutoPartyKeyBinding.Options.FirstOrDefault(option =>
+        AutoPartyKeyBinding.VirtualKey(option) == _hybridBindings.KeyAt(index)) ?? "未绑定";
 
     private void ActivateBridge(BridgeSession session, PartyTopology topology)
     {

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Collections.Concurrent;
 using System.Text.Json;
+using PartyPilot.Common;
 using System.Text.Json.Nodes;
 using Avalonia.Threading;
 
@@ -172,7 +173,8 @@ internal sealed class BridgeSession : IAsyncDisposable
     }
 
     internal static async Task<BridgeSession> StartHybridAsync(string executable,
-        IReadOnlyList<PartySlot> partySlots, IReadOnlyList<LaunchedClient> clients)
+        IReadOnlyList<PartySlot> partySlots, IReadOnlyList<LaunchedClient> clients,
+        HybridBindingConfig? bindings = null)
     {
         if (partySlots.Count is < 2 or > 3 || clients.Count != 2 ||
             !partySlots.Select(slot => slot.PartyPlayer).SequenceEqual(Enumerable.Range(1, partySlots.Count)) ||
@@ -200,6 +202,11 @@ internal sealed class BridgeSession : IAsyncDisposable
             "--enable-controller", "--hybrid-keyboard", "--slots", string.Join(',', slots),
             "--hybrid-player-pads", playerPads, "--hybrid-window-map", windowMap
         }) start.ArgumentList.Add(argument);
+        if (bindings is not null)
+        {
+            start.ArgumentList.Add("--hybrid-binding-keys");
+            start.ArgumentList.Add(bindings.Encode());
+        }
         foreach (var client in clients)
         {
             start.ArgumentList.Add("--game-exe");
@@ -211,7 +218,8 @@ internal sealed class BridgeSession : IAsyncDisposable
         try
         {
             var readyLine = await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15));
-            if (readyLine is null || !IsExpectedHybridReady(readyLine, slots, playerPads, windowMap))
+            if (readyLine is null || !IsExpectedHybridReady(readyLine, slots, playerPads,
+                    windowMap, bindings?.Encode()))
                 throw new InvalidOperationException("Keyboard bridge did not confirm its pad and window binding.");
             return new BridgeSession(process, readError, false, false, slots, slots, hybridMode: true);
         }
@@ -227,7 +235,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     }
 
     internal static bool IsExpectedHybridReady(string line, int[] slots,
-        string playerPads, string windowMap)
+        string playerPads, string windowMap, string? bindingKeys = null)
     {
         try
         {
@@ -239,7 +247,9 @@ internal sealed class BridgeSession : IAsyncDisposable
                 root.TryGetProperty("slots", out var selected) &&
                 selected.EnumerateArray().Select(value => value.GetInt32()).SequenceEqual(slots.Order()) &&
                 root.TryGetProperty("hybrid_player_pads", out var pads) && pads.GetString() == playerPads &&
-                root.TryGetProperty("hybrid_window_map", out var windows) && windows.GetString() == windowMap;
+                root.TryGetProperty("hybrid_window_map", out var windows) && windows.GetString() == windowMap &&
+                (bindingKeys is null || root.TryGetProperty("hybrid_binding_keys", out var keys) &&
+                 keys.GetString() == bindingKeys);
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException)
         {

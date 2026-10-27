@@ -133,6 +133,15 @@ if (window.GetLogicalDescendants().OfType<TextBox>().Count(field =>
     throw new Exception("The desktop did not expose per-client process selection for attachment.");
 if (args.Contains("--ui-controls-only"))
 {
+    if (window.GetLogicalDescendants().OfType<Button>().Count(button =>
+            button.Content?.ToString() == "设置键鼠按键映射") != 1)
+        throw new Exception("The desktop did not expose the target-version keyboard map editor.");
+    var bindings = new HybridBindingDialog(PartyPilot.Common.HybridBindingConfig.Default);
+    bindings.Show(window);
+    if (bindings.GetLogicalDescendants().OfType<ComboBox>().Count() !=
+        PartyPilot.Common.HybridBindingConfig.Definitions.Length)
+        throw new Exception("The keyboard map editor omitted a focus or controller action.");
+    bindings.Close();
     var sample = new LoginCalibrationDialog(1,
         new LoginCalibrationFrame(new byte[320 * 240 * 4], 320, 240), "sample-layout");
     sample.Show(window);

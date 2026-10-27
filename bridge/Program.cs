@@ -4,6 +4,7 @@ using Nefarius.ViGEm.Client;
 using Nefarius.ViGEm.Client.Targets;
 using Nefarius.ViGEm.Client.Targets.Xbox360;
 using PartyPilot.Bridge;
+using PartyPilot.Common;
 
 if (args.Length > 0 && args[0] == "--prepare-private-client3")
 {
@@ -200,6 +201,17 @@ if (!args.Contains("--enable-controller") || !BridgeSlots.TryParse(args, out var
     return 2;
 }
 var hybridMode = args.Contains("--hybrid-keyboard");
+var hybridKeysPosition = Array.IndexOf(args, "--hybrid-binding-keys");
+HybridBindingConfig? configuredBindings = null;
+if (hybridKeysPosition >= 0 && (!hybridMode ||
+    args.Count(arg => arg == "--hybrid-binding-keys") != 1 ||
+    hybridKeysPosition + 1 >= args.Length ||
+    !HybridBindingConfig.TryParse(args[hybridKeysPosition + 1], out configuredBindings)))
+{
+    Console.Error.WriteLine("Keyboard bindings must contain 26 distinct supported virtual keys.");
+    return 2;
+}
+var hybridBindings = configuredBindings ?? HybridBindingConfig.Default;
 var wgiMode = args.Contains("--physical-wgi");
 var physicalMode = wgiMode || args.Contains("--physical-index") || args.Contains("--main-slot") ||
     args.Contains("--physical-hidden-confirmed") || args.Contains("--right-stick-follower-override");
@@ -383,7 +395,7 @@ try
         if (physicalMode && !router.ConfigurePhysical(mainSlot, rightStickFollowerOverride, focusPads,
             directRightStickSlot, lastFocusedLeads))
             throw new InvalidOperationException("Focus pad mapping does not match the connected virtual controllers.");
-        if (hybridPlan is not null && !router.ConfigureHybridKeyboard(hybridPlan.PlayerPads))
+        if (hybridPlan is not null && !router.ConfigureHybridKeyboard(hybridPlan.PlayerPads, hybridBindings))
             throw new InvalidOperationException("Keyboard player mapping does not match the connected virtual controllers.");
         var pairingSignals = new PairingSignalTracker();
         var pairingGate = protectedPairing ? new ProtectedPairingGate() : null;
@@ -409,6 +421,7 @@ try
         long pairingTargetWindow = 0;
         Console.WriteLine(JsonSerializer.Serialize(new { @event = "ready", slots, physical_mode = physicalMode,
             hybrid_mode = hybridMode,
+            hybrid_binding_keys = hybridMode ? hybridBindings.Encode() : "",
             hybrid_player_pads = hybridPlan is null ? "" : string.Join(',', hybridPlan.PlayerPads
                 .OrderBy(entry => entry.Key).Select(entry => $"{entry.Key}:{entry.Value}")),
             hybrid_window_map = hybridPlan is null ? "" : string.Join(',', hybridPlan.PlayerWindows
@@ -440,10 +453,11 @@ try
                 var line = await pendingLine;
                 if (line is null) break;
                 pendingLine = Console.In.ReadLineAsync();
-                if (hybridPlan is not null && BridgeProtocol.TryParseHybridKey(line, out var hybridKey))
+                if (hybridPlan is not null && BridgeProtocol.TryParseHybridKey(line, out var hybridKey,
+                        hybridBindings))
                 {
                     var previousPlayer = router.HybridFocusedPlayer;
-                    var focusKey = HybridKeyboardInput.FocusForKey(hybridKey.VirtualKey) != 0;
+                    var focusKey = router.HybridFocusForKey(hybridKey.VirtualKey) != 0;
                     var eventForeground = focusKey
                         ? hybridPlan.PlayerWindows.Values.Any(window =>
                             ForegroundWindowProbe.IsExpectedForeground(window.Pid, window.Handle))

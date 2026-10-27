@@ -10,4 +10,7 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../common/HybridBindingConfig.cs" Link="HybridBindingConfig.cs" />
+  </ItemGroup>
 </Project>

@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../common/HybridBindingConfig.cs" Link="HybridBindingConfig.cs" />
     <Compile Include="../BridgeProtocol.cs" Link="BridgeProtocol.cs" />
     <Compile Include="../BridgeSlots.cs" Link="BridgeSlots.cs" />
     <Compile Include="../ControllerDeviceId.cs" Link="ControllerDeviceId.cs" />

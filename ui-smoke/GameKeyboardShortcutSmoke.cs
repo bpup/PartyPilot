@@ -1,4 +1,5 @@
 using PartyPilot.Desktop;
+using PartyPilot.Common;
 
 internal static class GameKeyboardShortcutSmoke
 {
@@ -12,6 +13,14 @@ internal static class GameKeyboardShortcutSmoke
             GameKeyboardShortcutHook.IsHybridVirtualKey(65540))
             throw new Exception("The desktop keyboard hook did not match the hybrid input set.");
         using var hook = new GameKeyboardShortcutHook(() => true, () => { }, () => { });
+        var customKeys = HybridBindingConfig.Definitions.Select(item => item.DefaultKey).ToArray();
+        customKeys[6] = 73;
+        if (!HybridBindingConfig.TryCreate(customKeys, out var custom) || custom is null)
+            throw new Exception("Custom keyboard map could not be created.");
+        hook.SetHybridBindings(custom);
+        if (!hook.IsMappedHybridKey(73) || hook.IsMappedHybridKey(87) ||
+            !hook.IsMappedHybridKey(18))
+            throw new Exception("The desktop hook ignored the configured keyboard map or modifier alias.");
         if (hook.SetKeys(0x77, 0x77) || !hook.SetKeys(0x77, 0x76) ||
             hook.HandleKey(0x77, true, false) != (false, false, false) ||
             hook.HandleKey(0x77, true, true) != (true, true, false) ||

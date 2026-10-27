@@ -1,3 +1,5 @@
+using PartyPilot.Common;
+
 namespace PartyPilot.Bridge;
 
 [Flags]
@@ -16,23 +18,28 @@ internal enum HybridAction : uint
 
 internal static class HybridKeyboardInput
 {
-    // Win32 virtual keys; 65538 is the right mouse button in the desktop hook.
-    internal static HybridAction ActionForKey(int key) => key switch
-    {
-        0x57 => HybridAction.Up, 0x41 => HybridAction.Left,
-        0x53 => HybridAction.Down, 0x44 => HybridAction.Right,
-        0xA4 or 0x12 => HybridAction.Precision, 0x45 => HybridAction.Confirm,
-        0x51 => HybridAction.Cancel, 0x20 => HybridAction.AlternateCancel,
-        0x31 => HybridAction.X, 0x32 => HybridAction.Y,
-        0x33 => HybridAction.LeftBumper, 0x34 => HybridAction.RightBumper,
-        0xA0 or 0x10 => HybridAction.LeftTrigger, 65538 => HybridAction.RightTrigger,
-        0x26 => HybridAction.DpadUp, 0x28 => HybridAction.DpadDown,
-        0x25 => HybridAction.DpadLeft, 0x27 => HybridAction.DpadRight,
-        0x0D => HybridAction.Start, 0x08 => HybridAction.View,
-        _ => HybridAction.None
-    };
+    private static readonly HybridAction[] BoundActions =
+    [
+        HybridAction.Up, HybridAction.Left, HybridAction.Down, HybridAction.Right,
+        HybridAction.Precision, HybridAction.Confirm, HybridAction.Cancel,
+        HybridAction.AlternateCancel, HybridAction.X, HybridAction.Y,
+        HybridAction.LeftBumper, HybridAction.RightBumper,
+        HybridAction.LeftTrigger, HybridAction.RightTrigger,
+        HybridAction.DpadUp, HybridAction.DpadDown,
+        HybridAction.DpadLeft, HybridAction.DpadRight,
+        HybridAction.Start, HybridAction.View
+    ];
 
-    internal static int FocusForKey(int key) => key is >= 0x70 and <= 0x75 ? key - 0x6F : 0;
+    internal static HybridAction ActionForKey(int key, HybridBindingConfig? bindings = null)
+    {
+        bindings ??= HybridBindingConfig.Default;
+        for (var index = 0; index < BoundActions.Length; index++)
+            if (HybridBindingConfig.Matches(bindings.KeyAt(index + 6), key)) return BoundActions[index];
+        return HybridAction.None;
+    }
+
+    internal static int FocusForKey(int key, HybridBindingConfig? bindings = null) =>
+        (bindings ?? HybridBindingConfig.Default).FocusForKey(key);
 
     internal static PadReport Map(HybridAction actions)
     {
@@ -76,6 +83,7 @@ internal readonly record struct HybridKeyboardSnapshot(int FocusedPlayer, PadRep
 
 internal sealed class HybridKeyboardState
 {
+    private readonly HybridBindingConfig _bindings;
     private readonly HashSet<int> _availablePlayers;
     private readonly HashSet<int> _pressed = [];
     private readonly HashSet<int> _blockedUntilRelease = [];
@@ -84,8 +92,9 @@ internal sealed class HybridKeyboardState
     private bool _mainMirrorEnabled;
     private bool _mainExplicitFocus;
 
-    internal HybridKeyboardState(IEnumerable<int> availablePlayers)
+    internal HybridKeyboardState(IEnumerable<int> availablePlayers, HybridBindingConfig? bindings = null)
     {
+        _bindings = bindings ?? HybridBindingConfig.Default;
         _availablePlayers = [.. availablePlayers.Where(player => player is >= 2 and <= 6)];
     }
 
@@ -101,7 +110,7 @@ internal sealed class HybridKeyboardState
             var actions = HybridAction.None;
             foreach (var key in _pressed)
                 if (!_blockedUntilRelease.Contains(key) && !_mainMirrorBlockedUntilRelease.Contains(key))
-                    actions |= HybridKeyboardInput.ActionForKey(key);
+                    actions |= HybridKeyboardInput.ActionForKey(key, _bindings);
             return HybridKeyboardInput.MapMainFollowMirror(actions, true, false).Buttons;
         }
     }
@@ -121,7 +130,7 @@ internal sealed class HybridKeyboardState
         {
             var confirmReleased = _gameForeground && FocusedPlayer > 1 &&
                 _pressed.Contains(virtualKey) && !_blockedUntilRelease.Contains(virtualKey) &&
-                HybridKeyboardInput.ActionForKey(virtualKey) == HybridAction.Confirm;
+                HybridKeyboardInput.ActionForKey(virtualKey, _bindings) == HybridAction.Confirm;
             _pressed.Remove(virtualKey);
             _blockedUntilRelease.Remove(virtualKey);
             _mainMirrorBlockedUntilRelease.Remove(virtualKey);
@@ -136,7 +145,7 @@ internal sealed class HybridKeyboardState
         }
         if (!_pressed.Add(virtualKey)) return Snapshot();
         if (_blockedUntilRelease.Contains(virtualKey)) return Snapshot();
-        var focus = HybridKeyboardInput.FocusForKey(virtualKey);
+        var focus = HybridKeyboardInput.FocusForKey(virtualKey, _bindings);
         if (focus != 0 && (focus == 1 || _availablePlayers.Contains(focus)))
         {
             _mainExplicitFocus = focus == 1 && (FocusedPlayer != 1 || !_mainExplicitFocus);
@@ -167,7 +176,7 @@ internal sealed class HybridKeyboardState
         if (!_gameForeground || FocusedPlayer == 1) return new(FocusedPlayer, default);
         var actions = HybridAction.None;
         foreach (var key in _pressed)
-            if (!_blockedUntilRelease.Contains(key)) actions |= HybridKeyboardInput.ActionForKey(key);
+            if (!_blockedUntilRelease.Contains(key)) actions |= HybridKeyboardInput.ActionForKey(key, _bindings);
         return new(FocusedPlayer, HybridKeyboardInput.Map(actions));
     }
 
@@ -177,6 +186,6 @@ internal sealed class HybridKeyboardState
             if (IsMainMirrorAction(key)) _mainMirrorBlockedUntilRelease.Add(key);
     }
 
-    private static bool IsMainMirrorAction(int key) =>
-        HybridKeyboardInput.ActionForKey(key) is HybridAction.Confirm or HybridAction.Cancel;
+    private bool IsMainMirrorAction(int key) =>
+        HybridKeyboardInput.ActionForKey(key, _bindings) is HybridAction.Confirm or HybridAction.Cancel;
 }

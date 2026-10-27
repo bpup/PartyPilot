@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using PartyPilot.Common;
 
 namespace PartyPilot.Desktop;
 
@@ -27,6 +28,7 @@ internal sealed class GameKeyboardShortcutHook : IDisposable
     private int _autoPartyKey = 0x77;
     private int _followPauseKey = 0x76;
     private Func<int, bool, bool, bool>? _hybridInput;
+    private HybridBindingConfig _hybridBindings = HybridBindingConfig.Default;
     private nint _handle;
     private nint _mouseHandle;
     internal bool IsStarted => _handle != 0 && _mouseHandle != 0;
@@ -69,14 +71,11 @@ internal sealed class GameKeyboardShortcutHook : IDisposable
     internal void SetHybridHandler(Func<int, bool, bool, bool>? handler) =>
         _hybridInput = handler;
 
-    internal static bool IsHybridVirtualKey(int key) => key switch
-    {
-        >= 0x70 and <= 0x75 or 0x57 or 0x41 or 0x53 or 0x44 or
-        0xA4 or 0x12 or 0x45 or 0x51 or 0x20 or
-        0x31 or 0x32 or 0x33 or 0x34 or 0xA0 or 0x10 or 65538 or
-        0x26 or 0x28 or 0x25 or 0x27 or 0x0D or 0x08 => true,
-        _ => false
-    };
+    internal void SetHybridBindings(HybridBindingConfig bindings) => _hybridBindings = bindings;
+
+    internal bool IsMappedHybridKey(int key) => _hybridBindings.ContainsKey(key);
+
+    internal static bool IsHybridVirtualKey(int key) => HybridBindingConfig.Default.ContainsKey(key);
 
     internal (bool Consume, bool AutoParty, bool FollowPause) HandleKey(
         int key, bool isDown, bool gameForeground)
@@ -129,14 +128,14 @@ internal sealed class GameKeyboardShortcutHook : IDisposable
             var mouseData = Marshal.ReadInt32(data, 8);
             var key = MouseVirtualKey(eventId, mouseData);
             if (key != _autoPartyKey && key != _followPauseKey &&
-                (_hybridInput is null || !IsHybridVirtualKey(key)))
+                (_hybridInput is null || !IsMappedHybridKey(key)))
                 return CallNextHookEx(_mouseHandle, code, message, data);
             var foreground = _gameForeground();
             var down = eventId is RightDown or MiddleDown or XDown;
             var result = HandleMouse(eventId, mouseData, foreground);
             if (result.AutoParty) _autoPartyPressed();
             if (result.FollowPause) _followPausePressed();
-            if (result.Consume || (_hybridInput is not null && IsHybridVirtualKey(key) &&
+            if (result.Consume || (_hybridInput is not null && IsMappedHybridKey(key) &&
                 _hybridInput(key, down, foreground))) return 1;
         }
         catch
@@ -156,14 +155,14 @@ internal sealed class GameKeyboardShortcutHook : IDisposable
         try
         {
             if (key != _autoPartyKey && key != _followPauseKey &&
-                (_hybridInput is null || !IsHybridVirtualKey(key)))
+                (_hybridInput is null || !IsMappedHybridKey(key)))
                 return CallNextHookEx(_handle, code, message, data);
             var foreground = _gameForeground();
             var down = (long)message is KeyDown or SysKeyDown;
             var result = HandleKey(key, down, foreground);
             if (result.AutoParty) _autoPartyPressed();
             if (result.FollowPause) _followPausePressed();
-            if (result.Consume || (_hybridInput is not null && IsHybridVirtualKey(key) &&
+            if (result.Consume || (_hybridInput is not null && IsMappedHybridKey(key) &&
                 _hybridInput(key, down, foreground))) return 1;
         }
         catch

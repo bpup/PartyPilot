@@ -1,4 +1,5 @@
 using PartyPilot.Bridge;
+using PartyPilot.Common;
 
 internal static class HybridKeyboardInputTests
 {
@@ -47,6 +48,34 @@ internal static class HybridKeyboardInputTests
             HybridKeyboardInput.ActionForKey(0x12) != HybridAction.Precision ||
             HybridKeyboardInput.ActionForKey(0x10) != HybridAction.LeftTrigger)
             throw new Exception("Default focus or mouse binding changed.");
+
+        var customKeys = HybridBindingConfig.Definitions.Select(item => item.DefaultKey).ToArray();
+        customKeys[1] = 120; // P2 focus: F9
+        customKeys[6] = 73; // Move up: I
+        customKeys[11] = 82; // Confirm: R
+        if (!HybridBindingConfig.TryCreate(customKeys, out var custom) || custom is null ||
+            !HybridBindingConfig.TryParse(custom.Encode(), out var roundTrip) ||
+            roundTrip?.Encode() != custom.Encode() ||
+            custom.FocusForKey(120) != 2 || custom.FocusForKey(113) != 0 ||
+            HybridKeyboardInput.ActionForKey(73, custom) != HybridAction.Up ||
+            HybridKeyboardInput.ActionForKey(87, custom) != HybridAction.None ||
+            !BridgeProtocol.TryParseHybridKey("{\"type\":\"hybrid_key\",\"key\":73,\"down\":true}",
+                out _, custom) ||
+            BridgeProtocol.TryParseHybridKey("{\"type\":\"hybrid_key\",\"key\":87,\"down\":true}",
+                out _, custom) ||
+            HybridBindingConfig.TryCreate(customKeys.Select((key, index) =>
+                index == 1 ? customKeys[0] : key).ToArray(), out _) ||
+            HybridBindingConfig.TryParse("1,2", out _))
+            throw new Exception("Custom Hybrid bindings were not validated and routed exactly.");
+        var customState = new HybridKeyboardState([2], custom);
+        customState.Handle(120, true, true);
+        customState.Handle(120, false, true);
+        customState.Handle(73, true, true);
+        customState.Handle(82, true, true);
+        var customReport = customState.Snapshot().Report;
+        if (customState.FocusedPlayer != 2 || customReport.LeftY != 32767 ||
+            customReport.Buttons != 0x1000)
+            throw new Exception("Custom Hybrid keys did not control the selected follower.");
 
         var diagonal = HybridKeyboardInput.Map(HybridAction.Up | HybridAction.Right);
         if (diagonal.LeftX is < 23169 or > 23171 || diagonal.LeftY != diagonal.LeftX)

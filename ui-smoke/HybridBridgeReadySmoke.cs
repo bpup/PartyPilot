@@ -1,4 +1,5 @@
 using PartyPilot.Desktop;
+using PartyPilot.Common;
 
 internal static class HybridBridgeReadySmoke
 {
@@ -16,5 +17,24 @@ internal static class HybridBridgeReadySmoke
             BridgeSession.IsExpectedHybridReady(ready, [1, 2, 3, 4], "2:3,3:4",
                 "1:10:100,2:21:200,3:20:200"))
             throw new Exception("Desktop accepted a keyboard bridge with mismatched windows or physical mode.");
+
+        var bindings = HybridBindingConfig.Default;
+        var confirmed = ready[..^1] + ",\"hybrid_binding_keys\":\"" + bindings.Encode() + "\"}";
+        if (!BridgeSession.IsExpectedHybridReady(confirmed, [1, 2, 3, 4], "2:3,3:4",
+                "1:10:100,2:20:200,3:20:200", bindings.Encode()) ||
+            BridgeSession.IsExpectedHybridReady(ready, [1, 2, 3, 4], "2:3,3:4",
+                "1:10:100,2:20:200,3:20:200", bindings.Encode()) ||
+            BridgeSession.IsExpectedHybridReady(confirmed, [1, 2, 3, 4], "2:3,3:4",
+                "1:10:100,2:20:200,3:20:200", bindings.Encode() + ",0"))
+            throw new Exception("Desktop did not require the exact configured Hybrid key map.");
+        var path = Path.Combine(Path.GetTempPath(), $"partypilot-hybrid-{Guid.NewGuid():N}.json");
+        try
+        {
+            var store = new HybridBindingPreferenceStore(path);
+            if (!store.Save(bindings) || !store.Load().Success ||
+                store.Load().Bindings.Encode() != bindings.Encode())
+                throw new Exception("Hybrid binding preference did not round-trip.");
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
     }
 }
