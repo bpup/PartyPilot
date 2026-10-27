@@ -125,7 +125,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     {
         if (clients.Count != topology.ClientCount || clients.Any(client => client.Pid <= 0))
             throw new ArgumentException("Live roster needs a process for every client.");
-        if (topology.Id is "4-balanced" or "6-balanced")
+        if (topology.Id is "4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced")
             return ["-experimental-ordered-input", .. topology.Slots.SelectMany(slot =>
                 new[] { "-role-bind",
                     $"{slot.PartyPlayer}:{slot.Client}:{slot.LocalPlayer}:{clients[slot.Client - 1].Pid}" })];
@@ -140,7 +140,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     {
         if (clients.Count != topology.ClientCount)
             throw new ArgumentException("Live log sources need one process per client.");
-        if (topology.Id is "4-balanced" or "6-balanced")
+        if (topology.Id is "4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced")
             return [.. clients.SelectMany((client, index) =>
                 new[] { "-exe", $"{index + 1}={client.Executable}" })];
         return [.. topology.Slots.SelectMany(slot =>
@@ -198,8 +198,9 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         var customRuleCount = flaskCustomFile is null ? 0 : ReadCustomRuleCount(flaskCustomFile);
         if (closeRangeMirror && closeMirrorDuration is < 50 or > 5000)
             throw new ArgumentOutOfRangeException(nameof(closeMirrorDuration));
-        var orderedTopology = topology.Id is "4-balanced" or "6-balanced";
-        if (topology.Id is not ("2-split" or "3-three-singles" or "4-balanced" or "6-balanced") ||
+        var orderedTopology = topology.Id is "4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced";
+        if (topology.Id is not ("2-split" or "3-three-singles" or "4-balanced" or
+                "5-third-solo" or "5-main-solo" or "6-balanced") ||
             clients.Count != topology.ClientCount ||
             (!orderedTopology && (topology.Slots.Count != topology.ClientCount ||
                 topology.Slots.Any(slot => slot.LocalPlayer != 1))))

@@ -453,6 +453,30 @@ func applyMenuInput(session *live.FlaskSession, engine *live.Engine, input <-cha
 	}
 }
 
+// In ordered mode only a client with exactly one bound role may consume this
+// ordinary sensor sample. ObserveSample enforces that process-to-role mapping.
+func decodeStandaloneSample(data []byte) (telemetry.Sample, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return telemetry.Sample{}, err
+	}
+	if fields == nil {
+		return telemetry.Sample{}, telemetry.ErrInvalidSample
+	}
+	for field := range fields {
+		if strings.EqualFold(field, "Kind") || strings.EqualFold(field, "Players") ||
+			strings.EqualFold(field, "PlayerOrderReliable") {
+			return telemetry.Sample{}, telemetry.ErrInvalidSample
+		}
+	}
+	for _, field := range []string{"ProcessId", "SeenUtc", "TickMs", "CoordinateSpace", "X", "Y", "Z"} {
+		if _, exists := fields[field]; !exists {
+			return telemetry.Sample{}, telemetry.ErrInvalidSample
+		}
+	}
+	return telemetry.Decode(data)
+}
+
 func run(address string, roster map[int]int, paths map[int]string, leader int, engine *live.Engine,
 	flasks *live.FlaskSession, menuInput <-chan menuInput, ordered, allowFollowPause bool) error {
 	endpoint, err := net.ResolveUDPAddr("udp", address)
@@ -509,6 +533,14 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 						activations, err = flasks.ObserveOrderedVitals(vitalFrame, receivedAt)
 						if err != nil {
 							return fail("ordered flask decision failed", err)
+						}
+					}
+				} else if sample, sampleErr := decodeStandaloneSample(data[:count]); sampleErr == nil {
+					sample.ReceivedAt = receivedAt
+					if engine.ObserveSample(sample) && flasks != nil {
+						activations, err = flasks.ObserveSample(sample, receivedAt)
+						if err != nil {
+							return fail("standalone flask decision failed", err)
 						}
 					}
 				}

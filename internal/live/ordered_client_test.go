@@ -388,6 +388,68 @@ func TestSixRolesAcrossThreeDualLocalClients(t *testing.T) {
 	}
 }
 
+func TestFiveRolesMixDualAndStandaloneClientPositions(t *testing.T) {
+	for _, layout := range []struct {
+		name     string
+		bindings []RoleBinding
+	}{
+		{"third-solo", []RoleBinding{{1, 1, 1, 101}, {2, 1, 2, 101},
+			{3, 2, 1, 202}, {4, 2, 2, 202}, {5, 3, 1, 303}}},
+		{"main-solo", []RoleBinding{{1, 1, 1, 101}, {2, 2, 1, 202},
+			{3, 2, 2, 202}, {4, 3, 1, 303}, {5, 3, 2, 303}}},
+	} {
+		t.Run(layout.name, func(t *testing.T) {
+			now := time.Now().UTC()
+			engine, err := NewWithBindings(layout.bindings, 1, follow.Config{
+				StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10,
+				MaxAge: time.Second}, time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer engine.Close()
+			for _, pid := range []int{101, 202, 303} {
+				if !engine.ObserveClientArea(pid, arealog.Signal{AreaID: "G2_4", Seed: 123,
+					ObservedAt: now, Origin: "live"}) {
+					t.Fatalf("client %d area rejected", pid)
+				}
+			}
+			for _, pid := range []int{101, 202, 303} {
+				roles := engine.pidToRoles[pid]
+				if len(roles) == 1 {
+					role := roles[0]
+					sample := telemetry.Sample{ProcessID: pid, SeenUTC: now.Add(time.Millisecond),
+						ReceivedAt: now.Add(time.Millisecond), TickMS: now.UnixMilli() + 1,
+						CoordinateSpace: "world", X: float64(60-role.Slot*10) * worldPerGridUnit}
+					if !engine.ObserveSample(sample) {
+						t.Fatalf("solo client %d position rejected", pid)
+					}
+					continue
+				}
+				players := make([]OrderedLocalPlayer, 0, len(roles))
+				for _, role := range roles {
+					players = append(players, OrderedLocalPlayer{LocalPlayer: role.LocalPlayer,
+						X: float64(60-role.Slot*10) * worldPerGridUnit})
+				}
+				frame := OrderedClientFrame{ProcessID: pid, SeenUTC: now.Add(time.Millisecond),
+					ReceivedAt: now.Add(time.Millisecond), TickMS: now.UnixMilli() + 1,
+					CoordinateSpace: "world", PlayerOrderReliable: true,
+					PlayerOrderSource: "experimental_static_vector_0.6.17", Players: players}
+				if !engine.ObserveOrderedClient(frame) || engine.ObserveSample(telemetry.Sample{
+					ProcessID: pid, SeenUTC: frame.SeenUTC, ReceivedAt: frame.ReceivedAt,
+					TickMS: frame.TickMS, CoordinateSpace: "world"}) {
+					t.Fatalf("dual client %d accepted ordinary position or rejected ordered frame", pid)
+				}
+			}
+			commands := engine.Step(now.Add(time.Millisecond))
+			for slot := 2; slot <= 5; slot++ {
+				if commands[slot].State != follow.CatchingUp {
+					t.Fatalf("P%d did not follow in mixed layout: %+v", slot, commands[slot])
+				}
+			}
+		})
+	}
+}
+
 func TestOrderedClientRejectsUnverifiedAndAmbiguousBindings(t *testing.T) {
 	config := follow.Config{StopDistance: 2, ResumeDistance: 3,
 		CatchUpDistance: 10, MaxAge: time.Second}

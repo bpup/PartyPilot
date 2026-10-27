@@ -57,6 +57,12 @@ internal static class PrivateClient3PlanSmoke
         const string bridgeReady = """
         {"event":"ready","slots":[1,2,3,4],"physical_mode":true,"physical_wgi":true,"pairing_protected":true,"hidhide_preflight":true,"menu_guard_enabled":true,"last_focused_leads":false,"auto_flask_enabled":false,"right_stick_follower_override":false,"direct_right_stick_slot":0,"focus_pad_map":"1:1,2:2,3:3,4:4,5:5,6:6","private_client3_pid":103,"private_client3_window_handle":203,"private_client3_slots":[5,6]}
         """;
+        var fiveThird = PartyTopologies.ForPlayerCount(5).Single(item => item.Id == "5-third-solo");
+        if (!PrivateClient3Plan.TryCreate(fiveThird, clients, out var fivePlan) || fivePlan is null ||
+            !BridgeSession.IsExpectedReady(bridgeReady.Replace("5:5,6:6", "5:5")
+                    .Replace("\"private_client3_slots\":[5,6]", "\"private_client3_slots\":[5]"),
+                [1, 2, 3, 4], "1:1,2:2,3:3,4:4,5:5", false, 0, false, true, fivePlan))
+            throw new Exception("Five-player Client 3 standalone bridge receipt was unavailable.");
         var autoCastReady = bridgeReady.Replace("\"auto_flask_enabled\":false",
             "\"auto_flask_enabled\":false,\"auto_cast_enabled\":true");
         if (BridgeSession.IsExpectedReady(bridgeReady, [1, 2, 3, 4], focusMap,

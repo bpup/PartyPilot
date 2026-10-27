@@ -7,8 +7,9 @@ internal static class LiveTerrainSelection
     {
         bindings = new Dictionary<int, string>();
         error = "";
-        var orderedTopology = topology.Id is "4-balanced" or "6-balanced";
-        if (topology.Id is not ("2-split" or "3-three-singles" or "4-balanced" or "6-balanced") ||
+        var orderedTopology = topology.Id is "4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced";
+        if (topology.Id is not ("2-split" or "3-three-singles" or "4-balanced" or
+                "5-third-solo" or "5-main-solo" or "6-balanced") ||
             (!orderedTopology && topology.ClientCount != topology.Slots.Count) ||
             paths.Count < topology.ClientCount)
         {

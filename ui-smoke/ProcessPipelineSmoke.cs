@@ -83,6 +83,31 @@ internal static class ProcessPipelineSmoke
             throw new Exception("Four-player follow accepted a missing P4 command.");
         }
         catch (InvalidDataException) { }
+        foreach (var id in new[] { "5-third-solo", "5-main-solo" })
+        {
+            var five = PartyTopologies.ForPlayerCount(5).Single(item => item.Id == id);
+            var fiveClients = new[]
+            {
+                new LaunchedClient(101, 201, "C:/GameA.exe"),
+                new LaunchedClient(102, 202, "D:/GameB.exe"),
+                new LaunchedClient(103, 203, "E:/GameC.exe")
+            };
+            var expectedRoster = new[] { "-experimental-ordered-input" }.Concat(
+                five.Slots.SelectMany(slot => new[] { "-role-bind",
+                    $"{slot.PartyPlayer}:{slot.Client}:{slot.LocalPlayer}:{fiveClients[slot.Client - 1].Pid}" }));
+            if (!LiveFollowSession.RosterArguments(five, fiveClients).SequenceEqual(expectedRoster) ||
+                !LiveFollowSession.ExecutableArguments(five, fiveClients).SequenceEqual(
+                    ["-exe", "1=C:/GameA.exe", "-exe", "2=D:/GameB.exe", "-exe", "3=E:/GameC.exe"]))
+                throw new Exception($"Five-player {id} did not bind each role and client log.");
+            var fiveFrame = LiveFollowSession.ParseFrame(
+                "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0}," +
+                "\"3\":{\"state\":\"waiting\"},\"4\":{\"state\":\"waiting\"}," +
+                "\"5\":{\"state\":\"following\",\"x\":0,\"y\":1}}}",
+                five, lastFocusedLeads: false);
+            if (!fiveFrame.PadCommands.Select(command => command.Player).SequenceEqual([2, 3, 4, 5]) ||
+                fiveFrame.PadCommands.Last().Pad != (id == "5-third-solo" ? 5 : 6))
+                throw new Exception($"Five-player {id} lost the Client 3 follower pad.");
+        }
         var six = PartyTopologies.ForPlayerCount(6).Single(item => item.Id == "6-balanced");
         var sixRoster = LiveFollowSession.RosterArguments(six,
             [new LaunchedClient(101, 201, "C:/GameA.exe"),

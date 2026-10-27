@@ -2374,7 +2374,8 @@ public sealed class MainWindow : Window
         if (_closeRangeMirror.IsEnabled && _closeRangeMirror.IsChecked == true)
             valid &= int.TryParse(_closeMirrorDuration.Text, NumberStyles.None,
                 CultureInfo.InvariantCulture, out var duration) && duration is >= 50 and <= 5000;
-        if (_selectedTopology?.Id is "2-split" or "3-three-singles" or "4-balanced" or "6-balanced")
+        if (_selectedTopology?.Id is "2-split" or "3-three-singles" or "4-balanced" or
+            "5-third-solo" or "5-main-solo" or "6-balanced")
         {
             valid &= _selectedTopology.Slots.All(slot =>
                 FollowPlayerStop.TryRead(_followPlayerStops[slot.PartyPlayer - 1].Text, out _));
@@ -2394,7 +2395,8 @@ public sealed class MainWindow : Window
             _bridge is not null && _pairingSettled &&
             (!_bridge.IsHybridMode || _hybridPairing?.Phase == HybridPairingPhase.Complete &&
              Volatile.Read(ref _hybridFocusedPlayer) == 1 && Volatile.Read(ref _hybridFocusTransition) == 0) &&
-            (_selectedTopology?.Id is "2-split" or "3-three-singles" or "4-balanced" or "6-balanced") &&
+            (_selectedTopology?.Id is "2-split" or "3-three-singles" or "4-balanced" or
+                "5-third-solo" or "5-main-solo" or "6-balanced") &&
             _launchedClients.Count == _selectedTopology.ClientCount && valid &&
             (_bridge.AutoFlaskEnabled != true ||
              _flaskSupportPreferences.Load(_selectedTopology.PlayerCount).Success &&
@@ -3204,7 +3206,8 @@ public sealed class MainWindow : Window
             _followStatus.Text = "跟随已暂停；所有自动方向已回中，恢复后仍需新鲜位置与区域证据。";
             return;
         }
-        if (_selectedTopology?.Id is "3-three-singles" or "4-balanced" or "6-balanced" &&
+        if (_selectedTopology?.Id is "3-three-singles" or "4-balanced" or
+            "5-third-solo" or "5-main-solo" or "6-balanced" &&
             frame.Reason is not ("party disbanded" or "local client left party" or "followed member left party"))
         {
             var states = string.Join(" · ", frame.PadCommands.Select(command =>

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,7 +11,30 @@ import (
 	"partypilot/internal/arealog"
 	"partypilot/internal/follow"
 	"partypilot/internal/live"
+	"partypilot/internal/telemetry"
 )
+
+func TestOrderedModeAcceptsOnlyOrdinarySingleClientSamples(t *testing.T) {
+	now := time.Now().UTC()
+	packet, err := json.Marshal(telemetry.Sample{ProcessID: 303, SeenUTC: now,
+		TickMS: now.UnixMilli(), CoordinateSpace: "world", X: 10, Y: 20, Z: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sample, err := decodeStandaloneSample(packet)
+	if err != nil || sample.ProcessID != 303 || sample.X != 10 {
+		t.Fatalf("single-client sample was rejected: %+v %v", sample, err)
+	}
+	for _, invalid := range [][]byte{
+		append([]byte(`{"Kind":"ordered_client",`), packet[1:]...),
+		append([]byte(`{"kind":"ordered_client",`), packet[1:]...),
+		[]byte(`{"ProcessId":303,"SeenUtc":"2026-10-27T00:00:00Z","TickMs":1,"CoordinateSpace":"world"}`),
+	} {
+		if _, err := decodeStandaloneSample(invalid); err == nil {
+			t.Fatalf("ordered or incomplete packet impersonated a solo sensor: %s", invalid)
+		}
+	}
+}
 
 func TestSourcesAndRoster(t *testing.T) {
 	roster, err := parseRoster("1:101,2:202")
