@@ -25,6 +25,7 @@ FollowInputPreferenceSmoke.Run();
 MenuGuardPreferenceSmoke.Run();
 RightStickDodgePreferenceSmoke.Run();
 FollowerMirrorPreferenceSmoke.Run();
+FlaskSupportPreferenceSmoke.Run();
 AutoPartyCoordinatorSmoke.Run();
 AutoPartyHotkeySmoke.Run();
 AutoPartyKeyPreferenceSmoke.Run();
@@ -130,6 +131,33 @@ if (chosenMirror is null || chosenMirror.ForPlayer(1) != (PartyPilot.Common.Foll
     chosenMirror.ForPlayer(2) != (PartyPilot.Common.FollowerMirrorConfig.All & ~4) ||
     chosenMirror.ForPlayer(3) != PartyPilot.Common.FollowerMirrorConfig.All)
     throw new Exception("Follower profile editor changed another player or lost the selected setting.");
+var drinkerDialog = new FlaskSupportDialog(3, []);
+var drinkerResult = drinkerDialog.ShowDialog<FlaskSupportBinding[]?>(window);
+var drinkerPicker = drinkerDialog.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(box => box.ItemsSource?.OfType<int>().SequenceEqual([1, 2, 3]) == true);
+drinkerPicker.SelectedItem = 2;
+drinkerDialog.GetLogicalDescendants().OfType<CheckBox>()
+    .Single(box => box.Content?.ToString()?.StartsWith("此角色使用 Flask Support", StringComparison.Ordinal) == true)
+    .IsChecked = true;
+drinkerDialog.GetLogicalDescendants().OfType<CheckBox>()
+    .Single(box => box.Content?.ToString() == "监测 P1").IsChecked = true;
+drinkerDialog.GetLogicalDescendants().OfType<ComboBox>()
+    .First(box => box.ItemsSource?.OfType<string>().Contains("Life AND Mana") == true)
+    .SelectedItem = "Life AND Mana";
+drinkerDialog.GetLogicalDescendants().OfType<TextBox>().First().Text = "45";
+drinkerDialog.GetLogicalDescendants().OfType<ComboBox>()
+    .First(box => box.ItemsSource?.OfType<string>().Contains("Both") == true)
+    .SelectedItem = "Both";
+drinkerDialog.GetLogicalDescendants().OfType<Button>()
+    .Single(button => button.Content?.ToString() == "保存")
+    .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+var chosenDrinker = await drinkerResult;
+var watched = chosenDrinker?.SingleOrDefault(item => item.DrinkerPlayer == 2 &&
+    item.Monitor.TargetPlayer == 1);
+if (watched is not { SupportBuild: true,
+        Monitor: { Enabled: true, MonitorResource: "Life AND Mana", TriggerPercent: 45,
+            FlaskResource: "Both" } })
+    throw new Exception("Drinker editor did not retain selected player monitoring rules.");
 var inputMode = window.GetLogicalDescendants().OfType<ComboBox>()
     .SingleOrDefault(box => box.ItemsSource?.OfType<string>()
         .Contains("Keyboard and mouse · 键鼠") == true);

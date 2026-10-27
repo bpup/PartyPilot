@@ -90,6 +90,9 @@ public sealed class MainWindow : Window
     private readonly RightStickDodgePreferenceStore _engageDodgePreferences = new();
     private bool _engageDodgePreferenceReady;
     private readonly CheckBox _autoFlask = new();
+    private readonly Button _flaskSupportButton = new();
+    private readonly TextBlock _flaskSupportStatus = new();
+    private readonly FlaskSupportPreferenceStore _flaskSupportPreferences;
     private readonly CheckBox _menuGuard = new();
     private readonly TextBlock _menuGuardStatus = new();
     private readonly MenuGuardPreferenceStore _menuGuardPreferences = new();
@@ -223,11 +226,13 @@ public sealed class MainWindow : Window
 
     internal MainWindow(FollowTargetPreferenceStore followTargetPreferences,
         FollowStopPreferenceStore? followStopPreferences = null,
-        FollowInputPreferenceStore? followInputPreferences = null)
+        FollowInputPreferenceStore? followInputPreferences = null,
+        FlaskSupportPreferenceStore? flaskSupportPreferences = null)
     {
         _followTargetPreferences = followTargetPreferences;
         _followStopPreferences = followStopPreferences ?? new FollowStopPreferenceStore();
         _followInputPreferences = followInputPreferences ?? new FollowInputPreferenceStore();
+        _flaskSupportPreferences = flaskSupportPreferences ?? new FlaskSupportPreferenceStore();
         Title = "PartyPilot · Play";
         Width = 1120;
         Height = 800;
@@ -491,6 +496,13 @@ public sealed class MainWindow : Window
         panel.Children.Add(_engageDodgeStatus);
         _autoFlask.Content = "随实时跟随启用自动药剂（双/三客户端各一名角色；生命/魔力须绑定手柄十字键左/右）";
         panel.Children.Add(_autoFlask);
+        _flaskSupportButton.Content = "设置共享药剂 · Drinker";
+        _flaskSupportButton.HorizontalAlignment = HorizontalAlignment.Left;
+        _flaskSupportButton.Click += async (_, _) => await EditFlaskSupportAsync();
+        panel.Children.Add(_flaskSupportButton);
+        _flaskSupportStatus.Foreground = MutedBrush;
+        _flaskSupportStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_flaskSupportStatus);
         var menuPreference = _menuGuardPreferences.Load();
         _menuGuardPreferenceReady = menuPreference.Success;
         _menuGuard.Content = "启用菜单保护";
@@ -1190,6 +1202,10 @@ public sealed class MainWindow : Window
             _ = StopAllResourcesAsync();
         }
         _selectedTopology = selection;
+        if (topologyChanged)
+            _flaskSupportStatus.Text = selection?.Id is "2-split" or "3-three-singles"
+                ? _flaskSupportPreferences.Load(selection.PlayerCount).Message
+                : "当前布局尚不能发送实时共享药剂请求。";
         if (topologyChanged && HybridSelected && _bridge is null && selection is not null)
             _pairingStatus.Text = selection.PlayerCount == 1
                 ? "单人模式由 P1 原生键鼠操作；无需准备虚拟手柄。"
@@ -2249,6 +2265,8 @@ public sealed class MainWindow : Window
 
     private void UpdateFollowControls()
     {
+        _flaskSupportButton.IsEnabled = _follow is null && !_busy &&
+            _selectedTopology?.Id is ("2-split" or "3-three-singles");
         foreach (var choice in _followTargets)
             if (choice is not null) choice.IsEnabled = _follow is null && !_busy;
         foreach (var stop in _followPlayerStops)
@@ -2301,7 +2319,9 @@ public sealed class MainWindow : Window
             (!_bridge.IsHybridMode || _hybridPairing?.Phase == HybridPairingPhase.Complete &&
              Volatile.Read(ref _hybridFocusedPlayer) == 1 && Volatile.Read(ref _hybridFocusTransition) == 0) &&
             (_selectedTopology?.Id is "2-split" or "3-three-singles") &&
-            _launchedClients.Count == _selectedTopology.ClientCount && valid;
+            _launchedClients.Count == _selectedTopology.ClientCount && valid &&
+            (_bridge.AutoFlaskEnabled != true ||
+             _flaskSupportPreferences.Load(_selectedTopology.PlayerCount).Success);
         _stopFollow.IsEnabled = _follow is not null;
         _pauseFollow.IsEnabled = _follow is not null && !_followStopping;
         _pauseFollow.Content = _follow?.Paused == true ? "恢复跟随" : "暂停跟随";
@@ -2964,6 +2984,19 @@ public sealed class MainWindow : Window
         }
     }
 
+    private async Task EditFlaskSupportAsync()
+    {
+        if (_selectedTopology?.Id is not ("2-split" or "3-three-singles") ||
+            _follow is not null || _busy) return;
+        var current = _flaskSupportPreferences.Load(_selectedTopology.PlayerCount);
+        var dialog = new FlaskSupportDialog(_selectedTopology.PlayerCount, current.Bindings);
+        var edited = await dialog.ShowDialog<FlaskSupportBinding[]?>(this);
+        if (edited is null) return;
+        var saved = _flaskSupportPreferences.Save(_selectedTopology.PlayerCount, edited);
+        _flaskSupportStatus.Text = saved.Message;
+        UpdateFollowControls();
+    }
+
     private async Task StartFollowAsync()
     {
         if (_bridge is null || !_pairingSettled || _selectedTopology is null || _follow is not null || _followStopping ||
@@ -2994,6 +3027,9 @@ public sealed class MainWindow : Window
         _followStatus.Text = "正在核对进程、日志与传感器输入…";
         try
         {
+            var flaskSupport = _flaskSupportPreferences.Load(_selectedTopology.PlayerCount);
+            if (_bridge.AutoFlaskEnabled && !flaskSupport.Success)
+                throw new InvalidOperationException(flaskSupport.Message);
             if (!LiveTerrainSelection.TryCreate(_selectedTopology,
                     _terrainBindingPaths.Select(box => box?.Text).ToArray(),
                     _classicCollisionDodge.IsChecked == true && _sprintCatchUp.IsChecked == true,
@@ -3036,7 +3072,8 @@ public sealed class MainWindow : Window
                 relayMainInput: !_bridge.IsHybridMode,
                 closeRangeMirror: enableCloseMirror,
                 closeMirrorDuration: int.Parse(_closeMirrorDuration.Text!, CultureInfo.InvariantCulture),
-                followerMirror: _followerMirror);
+                followerMirror: _followerMirror,
+                flaskSupportFile: _bridge.AutoFlaskEnabled ? flaskSupport.RuntimeFile : null);
             session.StatusChanged += FollowStatusChanged;
             session.Ended += FollowEnded;
             _follow = session;

@@ -120,11 +120,14 @@ internal static class ProcessPipelineSmoke
                 "    break\n");
             File.WriteAllText(followExe, "#!/usr/bin/env python3\nimport sys,json\n" +
                 "if '-auto-flask' not in sys.argv: sys.exit(2)\n" +
+                "if '-flask-support-file' not in sys.argv: sys.exit(2)\n" +
+                "support=json.load(open(sys.argv[sys.argv.index('-flask-support-file')+1]))\n" +
+                "if support['bindings'][0]['drinker_player'] != 2 or support['bindings'][0]['monitor']['target_player'] != 1: sys.exit(2)\n" +
                 "if '-classic-sprint-catchup' in sys.argv: sys.exit(2)\n" +
                 "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"reason\":\"missing position\"}}}', flush=True)\n" +
                 "states = [json.loads(sys.stdin.readline()) for _ in range(2)]\n" +
                 "if {(s['slot'],s['state']) for s in states} != {(1,'clear'),(2,'clear')}: sys.exit(2)\n" +
-                "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0,\"manual_override_eligible\":true,\"sprint_down\":true}},\"flasks\":[{\"player\":2,\"resource\":\"life\",\"percent\":30,\"reason\":\"threshold\"}]}', flush=True)\n" +
+                "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0,\"manual_override_eligible\":true,\"sprint_down\":true}},\"flasks\":[{\"player\":2,\"resource\":\"life\",\"percent\":30,\"reason\":\"support\"}]}', flush=True)\n" +
                 "for line in sys.stdin:\n    control=json.loads(line)\n    if control.get('type')!='follow_pause': sys.exit(2)\n    if control.get('state')=='paused': print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"reason\":\"follow paused\"}}}', flush=True)\n    elif control.get('state')=='following': print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0}}}', flush=True)\n    else: sys.exit(2)\n");
             var terrainClient1 = Path.Combine(directory, "terrain-client-1.json");
             var terrainClient2 = Path.Combine(directory, "terrain-client-2.json");
@@ -326,7 +329,14 @@ internal static class ProcessPipelineSmoke
             }
             Console.WriteLine("Attack direction subscribed without close-range mirroring.");
             Console.WriteLine("Pipeline smoke: starting fake follow.");
-            await using (var follow = await LiveFollowSession.StartAsync(followExe, topology, clients, bridge, plan))
+            var supportFile = new FlaskSupportPreferenceStore(directory).Save(2,
+                [FlaskSupportPreferenceStore.Default(2, 1) with
+                {
+                    SupportBuild = true,
+                    Monitor = new FlaskSupportMonitor(true, 1, "Life", 50, "Life", false)
+                }]).RuntimeFile ?? throw new Exception("Drinker test file was not saved.");
+            await using (var follow = await LiveFollowSession.StartAsync(followExe, topology, clients, bridge, plan,
+                flaskSupportFile: supportFile))
             {
                 Console.WriteLine("Pipeline smoke: fake follow ready.");
                 follow.StartReading();
