@@ -32,7 +32,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     private CancellationTokenSource? _entryAttemptCancellation;
     private Task _entryTask = Task.CompletedTask;
     private readonly TransitionInteractionBudget _entryBudget = new();
-    private FollowHandoffRequest? _attemptedWarp;
+    private readonly HashSet<FollowHandoffRequest> _attemptedWarps = [];
+    private FollowHandoffRequest? _activeWarp;
     private int _inputSubscriptionActive;
     private readonly SemaphoreSlim _controlSignal = new(0);
     private readonly CancellationTokenSource _controlCancellation = new();
@@ -552,16 +553,31 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     {
         if (!_experimentalWarpClick || _stopping) return;
         var visualRoute = PartyWarpRoutes.FromFrame(frame, _topology);
-        var controllerRoute = PartyWarpControllerPlan.FromFrame(frame, _topology);
-        var request = visualRoute?.Request ?? controllerRoute?.Request;
-        if (request is null || Paused)
+        var controllerRoutes = PartyWarpControllerPlan.FromFrameAll(frame, _topology);
+        var available = visualRoute is null
+            ? controllerRoutes.Select(route => route.Request).ToHashSet()
+            : new HashSet<FollowHandoffRequest> { visualRoute.Request };
+        if (available.Count == 0 || Paused)
         {
             _warpAttemptCancellation?.Cancel();
-            _attemptedWarp = null;
+            _attemptedWarps.Clear();
+            _activeWarp = null;
             return;
         }
-        if (_attemptedWarp == request || !_warpTask.IsCompleted) return;
-        _attemptedWarp = request;
+        _attemptedWarps.IntersectWith(available);
+        if (!_warpTask.IsCompleted)
+        {
+            if (_activeWarp is { } active && !available.Contains(active))
+                _warpAttemptCancellation?.Cancel();
+            return;
+        }
+        var controllerRoute = controllerRoutes.FirstOrDefault(route =>
+            !_attemptedWarps.Contains(route.Request));
+        var request = visualRoute is { } visual && !_attemptedWarps.Contains(visual.Request)
+            ? visual.Request : controllerRoute?.Request;
+        if (request is null) return;
+        _attemptedWarps.Add(request);
+        _activeWarp = request;
         _warpAttemptCancellation?.Dispose();
         _warpAttemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             _warpCancellation.Token);

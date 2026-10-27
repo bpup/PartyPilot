@@ -7,17 +7,21 @@ internal sealed record PartyWarpControllerRoute(FollowHandoffRequest Request,
 internal static class PartyWarpControllerPlan
 {
     internal static PartyWarpControllerRoute? FromFrame(FollowBridgeFrame frame,
-        PartyTopology topology)
+        PartyTopology topology) => FromFrameAll(frame, topology).FirstOrDefault();
+
+    internal static IReadOnlyList<PartyWarpControllerRoute> FromFrameAll(
+        FollowBridgeFrame frame, PartyTopology topology)
     {
         if (topology.Id is not ("5-third-solo" or "5-main-solo" or "6-balanced") ||
-            frame.Handoffs.Count is < 1 or > 2) return null;
+            frame.Handoffs.Count is < 1 or > 2) return [];
         var targets = frame.Handoffs.Select(request => topology.Slots.FirstOrDefault(slot =>
             slot.PartyPlayer == request.TargetPlayer)?.Client ?? 0).Distinct().ToArray();
-        if (targets.Length != 1 || targets[0] == 0) return null;
+        if (targets.Length != 1 || targets[0] == 0) return [];
         var targetAuthority = topology.Slots.First(slot => slot.Client == targets[0] &&
             slot.LocalPlayer == 1);
         var rosterIndex = topology.Slots.ToList().FindIndex(slot =>
             slot.PartyPlayer == targetAuthority.PartyPlayer);
+        var routes = new List<PartyWarpControllerRoute>();
         foreach (var request in frame.Handoffs.OrderBy(item => item.DestinationClient))
         {
             var driver = topology.Slots.FirstOrDefault(slot =>
@@ -30,10 +34,10 @@ internal static class PartyWarpControllerPlan
                 .ToArray();
             if (commands.Length != sourcePlayers.Count ||
                 commands.Any(command => command.Status != "waiting")) continue;
-            return new PartyWarpControllerRoute(request, driver.RuntimePad, rosterIndex,
-                topology.PlayerCount);
+            routes.Add(new PartyWarpControllerRoute(request, driver.RuntimePad, rosterIndex,
+                topology.PlayerCount));
         }
-        return null;
+        return routes;
     }
 
     // The supplied build uses active topology order for this roster index;

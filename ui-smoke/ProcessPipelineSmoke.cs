@@ -43,11 +43,22 @@ internal static class ProcessPipelineSmoke
             Handoffs = [new FollowHandoffRequest(2, 3, 1),
                 new FollowHandoffRequest(3, 5, 1)]
         };
+        var twoSourceRoutes = PartyWarpControllerPlan.FromFrameAll(twoSourceWarp,
+            warpSixTopology);
         if (thirdRoute is null || thirdRoute.DriverPad != 5 || thirdRoute.RosterIndex != 0 ||
+            twoSourceRoutes.Count != 2 || twoSourceRoutes[0].DriverPad != 3 ||
+            twoSourceRoutes[1].DriverPad != 5 ||
             PartyWarpControllerPlan.FromFrame(twoSourceWarp, warpSixTopology)?.DriverPad != 3 ||
+            PartyWarpControllerPlan.FromFrameAll(twoSourceWarp with
+                { PadCommands = [Waiting(2), Waiting(3) with { Status = "following" },
+                    Waiting(4), Waiting(5), Waiting(6)] }, warpSixTopology).Select(route =>
+                    route.DriverPad).SingleOrDefault() != 5 ||
             PartyWarpControllerPlan.FromFrame(twoSourceWarp with
                 { PadCommands = [Waiting(2), Waiting(3) with { Status = "following" },
                     Waiting(4), Waiting(5), Waiting(6)] }, warpSixTopology)?.DriverPad != 5 ||
+            PartyWarpControllerPlan.FromFrameAll(twoSourceWarp with
+                { Handoffs = [new FollowHandoffRequest(2, 3, 1),
+                    new FollowHandoffRequest(3, 5, 3)] }, warpSixTopology).Count != 0 ||
             PartyWarpControllerPlan.FromFrame(twoSourceWarp with
                 { Handoffs = [new FollowHandoffRequest(2, 3, 1),
                     new FollowHandoffRequest(3, 5, 3)] }, warpSixTopology) is not null ||
