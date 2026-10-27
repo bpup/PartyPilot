@@ -87,6 +87,8 @@ GOOS=windows GOARCH=amd64 go build -o PartyPilot.exe ./cmd/partypilot
 实时内核还可把同一游戏进程的单份 `Client.txt` 区域生成及离队记录作用到其两名本地角色；该路径已用合成日志行验证，双角色实时命令行与游戏内行为仍未接入或验收。
 
 开启 `DiagnoseLocalSlotCandidates` 时，诊断现会按所提供版本的公开默认偏移尝试读取候选角色的原始三维坐标，放在 `LocalSlotCandidates.RawPositions` 中；读不到的位置为 `null`。同一诊断还给出当前角色的 ExileCore2 坐标到原始世界/网格 XY 的两种数值距离，不自动判断哪种坐标系正确。这不是经游戏验证的第二角色位置，也不会进入自动跟随或输入，具体边界见[同窗口角色身份核对](SAME_CLIENT_RESEARCH.md)。
+
+可将 `PartyPilot-SensorLog.exe` 的输出保存为 JSONL，再运行 `PartyPilot-SlotAudit.exe -input sensorlog.jsonl` 查看每个进程的双槽完整帧、坐标差距、顺序变化、换区与每槽运动次数。该报告只帮助实机取证，不会启用自动控制。
 同一帧还按地址逐槽对照当前可见的 ExileCore2 玩家实体，`VisiblePositionComparisons` 中不可见的槽位为 `null`。这帮助检查第二角色的坐标关系；未在游戏中采样验证，也不改变跟随准入。
 
 传感器在读到本地角色 `Render` 组件时，还会向 `127.0.0.1:47619` 发送不含角色名的隐私渲染样本。桌面端的实验性“自动姓名牌遮挡”需要这个按进程核对的新鲜样本，并对该窗口截图寻找目标版色板中的姓名样式像素。它不等同于目标版的有序双角色位置证据；Windows/PoE2 的识别与叠层效果仍需实测。

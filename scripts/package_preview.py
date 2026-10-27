@@ -18,6 +18,7 @@ REQUIRED = {
     "release/PartyPilot.Sensor.dll",
     "release/PartyPilot.Sensor.deps.json",
     "release/PartyPilot-SensorLog.exe",
+    "release/PartyPilot-SlotAudit.exe",
     "release/PartyPilot-CombatReplay.exe",
     "release/skillbind/PartyPilot.SkillBind.exe",
     "release/native/PartyPilot.PrivateSlots.dll",
