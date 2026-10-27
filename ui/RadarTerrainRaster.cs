@@ -48,13 +48,16 @@ public static class RadarTerrainRaster
                     boundary = IsBoundary(capture, gridX, gridY);
                     boundaryByCell.Add(key, boundary);
                 }
-                // Keep the unobserved background transparent. Render both the
-                // boundary and the faint interior of observed walkable cells.
-                // WriteableBitmap uses premultiplied BGRA.
-                pixels[offset] = boundary ? (byte)174 : (byte)9;
-                pixels[offset + 1] = boundary ? (byte)184 : (byte)7;
-                pixels[offset + 2] = boundary ? (byte)184 : (byte)5;
-                pixels[offset + 3] = boundary ? (byte)224 : (byte)38;
+                if (!boundary) continue;
+                // RadarFeedPump prepares the bitmap injected into RadarCanvas.
+                // Its default mapBackgroundOpacity is zero, so the active
+                // overlay path keeps interior cells transparent even though
+                // RadarCanvas.BuildTerrainBitmap has a faint fill.
+                // Convert the visible border to premultiplied BGRA.
+                pixels[offset] = 174;
+                pixels[offset + 1] = 184;
+                pixels[offset + 2] = 184;
+                pixels[offset + 3] = 224;
             }
         }
         return pixels;
