@@ -409,6 +409,10 @@ try
         long pairingTargetWindow = 0;
         Console.WriteLine(JsonSerializer.Serialize(new { @event = "ready", slots, physical_mode = physicalMode,
             hybrid_mode = hybridMode,
+            hybrid_player_pads = hybridPlan is null ? "" : string.Join(',', hybridPlan.PlayerPads
+                .OrderBy(entry => entry.Key).Select(entry => $"{entry.Key}:{entry.Value}")),
+            hybrid_window_map = hybridPlan is null ? "" : string.Join(',', hybridPlan.PlayerWindows
+                .OrderBy(entry => entry.Key).Select(entry => $"{entry.Key}:{entry.Value.Pid}:{entry.Value.Handle}")),
             physical_wgi = wgiMode,
             pairing_protected = protectedPairing, hidhide_preflight = physicalMode,
             auto_flask_enabled = autoFlaskEnabled,
@@ -447,7 +451,7 @@ try
                           ForegroundWindowProbe.IsExpectedForeground(expectedWindow.Pid, expectedWindow.Handle);
                     router.ApplyHybridKey(hybridKey.VirtualKey, hybridKey.Down, eventForeground);
                     var focusedPlayer = router.HybridFocusedPlayer;
-                    if (focusedPlayer != previousPlayer)
+                    if (router.HybridFocusRequested)
                     {
                         var target = hybridPlan.PlayerWindows[focusedPlayer];
                         router.SetHybridForeground(ForegroundWindowProbe.IsExpectedForeground(target.Pid, target.Handle));

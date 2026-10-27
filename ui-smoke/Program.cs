@@ -21,6 +21,7 @@ AutoPartyCoordinatorSmoke.Run();
 AutoPartyHotkeySmoke.Run();
 AutoPartyKeyPreferenceSmoke.Run();
 GameKeyboardShortcutSmoke.Run();
+HybridBridgeReadySmoke.Run();
 RadarHotkeySmoke.Run();
 AutoPartyInviteSmoke.Run();
 AutoPartyRecoverySmoke.Run();
@@ -47,6 +48,12 @@ if (args.Contains("--pipeline-only"))
     await ProcessPipelineSmoke.RunAsync();
     return;
 }
+if (args.Contains("--hybrid-pipeline-only"))
+{
+    await HybridBridgePipelineSmoke.RunAsync();
+    Console.WriteLine("Keyboard bridge process pipeline checked.");
+    return;
+}
 
 AppBuilder.Configure<SmokeApp>()
     .UseSkia()
@@ -61,6 +68,16 @@ var stopPreferenceStore = new FollowStopPreferenceStore(Path.Combine(
 var window = new MainWindow(followPreferenceStore, stopPreferenceStore);
 window.Show();
 window.UpdateLayout();
+var inputMode = window.GetLogicalDescendants().OfType<ComboBox>()
+    .SingleOrDefault(box => box.ItemsSource?.OfType<string>()
+        .Contains("Keyboard and mouse · 键鼠") == true);
+if (inputMode is null || inputMode.SelectedIndex != 0)
+    throw new Exception("The desktop did not offer the observed keyboard and mouse input mode.");
+inputMode.SelectedIndex = 1;
+if (window.GetLogicalDescendants().OfType<Button>()
+        .Single(button => button.Content?.ToString() == "准备键鼠虚拟手柄").IsEnabled)
+    throw new Exception("Keyboard virtual pads became available without bound game windows.");
+inputMode.SelectedIndex = 0;
 if (window.GetLogicalDescendants().OfType<TextBox>().Count(field =>
         field.Watermark?.ToString() == "PoE 账号邮箱") != 3 ||
     window.GetLogicalDescendants().OfType<TextBox>().Count(field =>

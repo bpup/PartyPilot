@@ -4,6 +4,13 @@ internal static class GameKeyboardShortcutSmoke
 {
     internal static void Run()
     {
+        if (!GameKeyboardShortcutHook.IsHybridVirtualKey(0x70) ||
+            !GameKeyboardShortcutHook.IsHybridVirtualKey(0x75) ||
+            !GameKeyboardShortcutHook.IsHybridVirtualKey(0x57) ||
+            !GameKeyboardShortcutHook.IsHybridVirtualKey(65538) ||
+            GameKeyboardShortcutHook.IsHybridVirtualKey(0x76) ||
+            GameKeyboardShortcutHook.IsHybridVirtualKey(65540))
+            throw new Exception("The desktop keyboard hook did not match the hybrid input set.");
         using var hook = new GameKeyboardShortcutHook(() => true, () => { }, () => { });
         if (hook.SetKeys(0x77, 0x77) || !hook.SetKeys(0x77, 0x76) ||
             hook.HandleKey(0x77, true, false) != (false, false, false) ||

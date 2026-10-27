@@ -79,9 +79,13 @@ internal static class HybridKeyboardInputTests
         if (state.Handle(0x57, true, true).Report.LeftY != 32767)
             throw new Exception("A released key did not become available again.");
         state.Handle(0x70, false, true);
-        if (state.Handle(0x70, true, true).FocusedPlayer != 1 ||
+        if (state.Handle(0x70, true, true) is not { FocusedPlayer: 1, FocusRequested: true } ||
             state.Snapshot().Report != default)
             throw new Exception("F1 did not restore native keyboard focus.");
+        state.Handle(0x70, false, true);
+        if (!state.Handle(0x70, true, true).FocusRequested ||
+            state.Handle(0x70, true, true).FocusRequested)
+            throw new Exception("A fresh F1 press did not request its window or autorepeat retriggered it.");
 
         var pad2 = new FakePad();
         var pad3 = new FakePad();
@@ -112,7 +116,11 @@ internal static class HybridKeyboardInputTests
             throw new Exception("Hybrid output was not neutralized after game focus loss.");
         router.ApplyHybridKey(0x57, false, true);
         router.ApplyHybridKey(0x70, true, true);
-        if (router.HybridFocusedPlayer != 1 || pad2.X != 32767)
+        if (router.HybridFocusedPlayer != 1 || !router.HybridFocusRequested || pad2.X != 32767)
             throw new Exception("F1 did not restore normal follower automation.");
+        router.ApplyHybridKey(0x70, false, true);
+        router.ApplyHybridKey(0x70, true, true);
+        if (!router.HybridFocusRequested)
+            throw new Exception("A fresh F1 press did not request the native window again.");
     }
 }

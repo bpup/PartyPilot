@@ -71,7 +71,8 @@ internal static class HybridKeyboardInput
         (int)MathF.Round(Math.Clamp(value, -1f, 1f) * 32767f), -32768, 32767);
 }
 
-internal readonly record struct HybridKeyboardSnapshot(int FocusedPlayer, PadReport Report);
+internal readonly record struct HybridKeyboardSnapshot(int FocusedPlayer, PadReport Report,
+    bool FocusRequested = false);
 
 internal sealed class HybridKeyboardState
 {
@@ -106,11 +107,11 @@ internal sealed class HybridKeyboardState
         if (!_pressed.Add(virtualKey)) return Snapshot();
         if (_blockedUntilRelease.Contains(virtualKey)) return Snapshot();
         var focus = HybridKeyboardInput.FocusForKey(virtualKey);
-        if (focus != 0 && (focus == 1 || _availablePlayers.Contains(focus)) &&
-            focus != FocusedPlayer)
+        if (focus != 0 && (focus == 1 || _availablePlayers.Contains(focus)))
         {
             FocusedPlayer = focus;
             _blockedUntilRelease.UnionWith(_pressed);
+            return Snapshot() with { FocusRequested = true };
         }
         return Snapshot();
     }

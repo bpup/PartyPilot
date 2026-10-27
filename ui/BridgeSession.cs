@@ -21,6 +21,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     private bool _stopping;
 
     public bool AutoFlaskEnabled { get; }
+    internal bool IsHybridMode { get; }
     internal bool LastFocusedLeadsEnabled { get; }
     internal int LastFocusedSlot => Volatile.Read(ref _lastFocusedSlot);
     internal int LastManualFocusedSlot => Volatile.Read(ref _lastManualFocusedSlot);
@@ -41,17 +42,19 @@ internal sealed class BridgeSession : IAsyncDisposable
     public event Action<string>? Ended;
     public event Action? AutoPartyExpired;
     public event Action<int>? ManualFocusChanged;
+    public event Action<int, int, long>? HybridFocusChanged;
 
     private sealed record AutoPartyPending(string Type, int Slot, ushort Buttons,
         TaskCompletionSource Completion);
 
     private BridgeSession(Process process, Task<string> readError, bool autoFlaskEnabled,
         bool lastFocusedLeads,
-        int[] slots, int[] allSlots)
+        int[] slots, int[] allSlots, bool hybridMode = false)
     {
         _process = process;
         _readError = readError;
         AutoFlaskEnabled = autoFlaskEnabled;
+        IsHybridMode = hybridMode;
         LastFocusedLeadsEnabled = lastFocusedLeads;
         _slots = slots.ToHashSet();
         _allSlots = allSlots.ToHashSet();
@@ -165,6 +168,84 @@ internal sealed class BridgeSession : IAsyncDisposable
         _readEvents = ReadEventsAsync();
     }
 
+    internal static async Task<BridgeSession> StartHybridAsync(string executable,
+        IReadOnlyList<PartySlot> partySlots, IReadOnlyList<LaunchedClient> clients)
+    {
+        if (partySlots.Count is < 2 or > 4 || clients.Count is < 1 or > 2 ||
+            !partySlots.Select(slot => slot.PartyPlayer).SequenceEqual(Enumerable.Range(1, partySlots.Count)) ||
+            partySlots.Any(slot => slot.Client < 1 || slot.Client > clients.Count) ||
+            partySlots[0].Client != 1 ||
+            clients.Any(client => client.Pid <= 0 || client.WindowHandle <= 0 ||
+                string.IsNullOrWhiteSpace(client.Executable) || !Path.IsPathFullyQualified(client.Executable)))
+            throw new ArgumentException("Keyboard bridge requires bound game windows for P1 and every follower.");
+        var followers = partySlots.Skip(1).ToArray();
+        var slots = followers.Select(slot => slot.RuntimePad).ToArray();
+        if (slots.Any(slot => slot is < 1 or > 4) || slots.Distinct().Count() != slots.Length)
+            throw new ArgumentException("Keyboard bridge needs one public virtual pad per follower.");
+        var playerPads = string.Join(',', followers.Select(slot => $"{slot.PartyPlayer}:{slot.RuntimePad}"));
+        var windowMap = string.Join(',', partySlots.Select(slot =>
+            $"{slot.PartyPlayer}:{clients[slot.Client - 1].Pid}:{clients[slot.Client - 1].WindowHandle}"));
+        var start = new ProcessStartInfo(executable)
+        {
+            WorkingDirectory = Path.GetDirectoryName(executable)!,
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        foreach (var argument in new[]
+        {
+            "--enable-controller", "--hybrid-keyboard", "--slots", string.Join(',', slots),
+            "--hybrid-player-pads", playerPads, "--hybrid-window-map", windowMap
+        }) start.ArgumentList.Add(argument);
+        foreach (var client in clients)
+        {
+            start.ArgumentList.Add("--game-exe");
+            start.ArgumentList.Add(client.Executable);
+        }
+        var process = Process.Start(start) ??
+            throw new InvalidOperationException("Keyboard virtual controller bridge did not start.");
+        var readError = process.StandardError.ReadToEndAsync();
+        try
+        {
+            var readyLine = await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            if (readyLine is null || !IsExpectedHybridReady(readyLine, slots, playerPads, windowMap))
+                throw new InvalidOperationException("Keyboard bridge did not confirm its pad and window binding.");
+            return new BridgeSession(process, readError, false, false, slots, slots, hybridMode: true);
+        }
+        catch (Exception error)
+        {
+            await StopProcessAsync(process);
+            var diagnostics = (await readError).Trim();
+            process.Dispose();
+            if (diagnostics.Length > 500) diagnostics = diagnostics[..500];
+            throw new InvalidOperationException(
+                string.IsNullOrEmpty(diagnostics) ? error.Message : $"{error.Message} {diagnostics}", error);
+        }
+    }
+
+    internal static bool IsExpectedHybridReady(string line, int[] slots,
+        string playerPads, string windowMap)
+    {
+        try
+        {
+            using var json = JsonDocument.Parse(line);
+            var root = json.RootElement;
+            return root.TryGetProperty("event", out var kind) && kind.GetString() == "ready" &&
+                root.TryGetProperty("hybrid_mode", out var hybrid) && hybrid.GetBoolean() &&
+                root.TryGetProperty("physical_mode", out var physical) && !physical.GetBoolean() &&
+                root.TryGetProperty("slots", out var selected) &&
+                selected.EnumerateArray().Select(value => value.GetInt32()).SequenceEqual(slots.Order()) &&
+                root.TryGetProperty("hybrid_player_pads", out var pads) && pads.GetString() == playerPads &&
+                root.TryGetProperty("hybrid_window_map", out var windows) && windows.GetString() == windowMap;
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException)
+        {
+            return false;
+        }
+    }
+
     internal static bool IsExpectedReady(string line, int[] slots, string focusPadMap,
         bool rightStickFollowerOverride, int directRightStickSlot, bool autoFlaskEnabled, bool useWgi,
         PrivateClient3Plan? privatePlan, bool lastFocusedLeads = false)
@@ -233,6 +314,16 @@ internal sealed class BridgeSession : IAsyncDisposable
         if (_stopping || _process.HasExited)
             throw new InvalidOperationException("Virtual controller bridge is no longer running.");
         await WriteCommandAsync(command);
+    }
+
+    internal Task SendHybridKeyAsync(int virtualKey, bool down)
+    {
+        if (!IsHybridMode || _stopping || _process.HasExited)
+            throw new InvalidOperationException("Keyboard bridge is not running.");
+        return WriteCommandAsync(JsonSerializer.Serialize(new
+        {
+            type = "hybrid_key", key = virtualKey, down
+        }));
     }
 
     internal string GetMenuGuardState(int slot) => _menuStates.TryGetValue(slot, out var state) ? state : "clear";
@@ -361,6 +452,14 @@ internal sealed class BridgeSession : IAsyncDisposable
                         // stall a controller process that is waiting for the focus command.
                         ManualFocusChanged?.Invoke(manualPad);
                     }
+                    else if (kind.GetString() == "hybrid_focus_changed" && IsHybridMode &&
+                        root.TryGetProperty("player", out var hybridPlayer) &&
+                        hybridPlayer.TryGetInt32(out var player) && player is >= 1 and <= 6 &&
+                        root.TryGetProperty("pid", out var hybridPid) &&
+                        hybridPid.TryGetInt32(out var hybridPidValue) && hybridPidValue > 0 &&
+                        root.TryGetProperty("window_handle", out var hybridWindow) &&
+                        hybridWindow.TryGetInt64(out var hybridHandleValue) && hybridHandleValue > 0)
+                        Dispatcher.UIThread.Post(() => HybridFocusChanged?.Invoke(player, hybridPidValue, hybridHandleValue));
                     else if (kind.GetString() == "login_status" &&
                         root.TryGetProperty("source", out var source) && source.ValueKind == JsonValueKind.String &&
                         source.GetString() is { } sourceName &&
