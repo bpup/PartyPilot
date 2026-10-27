@@ -104,6 +104,7 @@ internal sealed class RadarSession : IAsyncDisposable
 
     private async Task ReceiveLoopAsync()
     {
+        var lastQueued = new Dictionary<int, DateTime>();
         try
         {
             while (!_cancellation.IsCancellationRequested)
@@ -114,6 +115,9 @@ internal sealed class RadarSession : IAsyncDisposable
                 {
                     if (!RadarFrames.TryParse(packet.Buffer, pid, DateTime.UtcNow, out var frame) || frame == null)
                         continue;
+                    if (lastQueued.TryGetValue(pid, out var previous) && frame.SeenUtc < previous)
+                        break;
+                    lastQueued[pid] = frame.SeenUtc;
                     RadarTerrainCapture? terrain = null;
                     if (_manualTerrains is not null && _manualTerrains.TryGetValue(pid, out var manual) &&
                         manual.Matches(frame))
