@@ -435,6 +435,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         PackedTerrainProbe.Observation? packedTerrainProbe = null;
         string? packedTerrainStatus = null;
         string? packedTerrainCaptureStatus = null;
+        GeneratedRoomProbe.Result? generatedRoomProbe = null;
         if (Settings.DiagnoseTerrain.Value)
         {
             try
@@ -492,28 +493,36 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                     var areaHash = $"{GameController.IngameState.Data.CurrentAreaHash}";
                     var processId = GameController.Window.Process.Id;
                     var captureKey = $"{processId}:{areaHash}:{observation.AreaAddress}:{source.Start}:{source.BytesPerRow}:{source.Rows}";
+                    bool AreaStillCurrent()
+                    {
+                        if ($"{GameController.IngameState.Data.CurrentAreaHash}" != areaHash ||
+                            GameController.IngameState.Address != stateAddress)
+                            return false;
+                        long currentAddress;
+                        if (observation.Anchor == "state_pointer_static_656")
+                        {
+                            var pointer = ReadTerrain(stateAddress + 656, 8);
+                            currentAddress = pointer is { Length: 8 } ? BitConverter.ToInt64(pointer) : 0;
+                        }
+                        else currentAddress = GameController.IngameState.Data.Address;
+                        return currentAddress > 0 &&
+                            $"0x{currentAddress:X}".Equals(observation.AreaAddress,
+                                StringComparison.OrdinalIgnoreCase);
+                    }
+                    if (AreaStillCurrent() && long.TryParse(observation.AreaAddress.AsSpan(2),
+                            System.Globalization.NumberStyles.HexNumber,
+                            System.Globalization.CultureInfo.InvariantCulture, out var roomArea))
+                    {
+                        var roomResult = GeneratedRoomProbe.Scan(roomArea, observation.Width,
+                            observation.Height, ReadTerrain);
+                        if (AreaStillCurrent()) generatedRoomProbe = roomResult;
+                    }
                     if (_capturedTerrainKeys.Contains(captureKey))
                         packedTerrainCaptureStatus = "already_captured";
                     else
                     {
                         var directory = Path.Combine(Environment.GetFolderPath(
                             Environment.SpecialFolder.LocalApplicationData), "PartyPilot", "terrain");
-                        bool AreaStillCurrent()
-                        {
-                            if ($"{GameController.IngameState.Data.CurrentAreaHash}" != areaHash ||
-                                GameController.IngameState.Address != stateAddress)
-                                return false;
-                            long currentAddress;
-                            if (observation.Anchor == "state_pointer_static_656")
-                            {
-                                var pointer = ReadTerrain(stateAddress + 656, 8);
-                                currentAddress = pointer is { Length: 8 } ? BitConverter.ToInt64(pointer) : 0;
-                            }
-                            else currentAddress = GameController.IngameState.Data.Address;
-                            return currentAddress > 0 &&
-                                $"0x{currentAddress:X}".Equals(observation.AreaAddress,
-                                    StringComparison.OrdinalIgnoreCase);
-                        }
                         var capture = PackedTerrainCapture.Save(source, observation,
                             positionCandidate!, render.Pos.X, render.Pos.Y, ReadTerrain,
                             AreaStillCurrent, directory,
@@ -616,6 +625,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             PackedTerrainProbe = packedTerrainProbe,
             PackedTerrainStatus = packedTerrainStatus,
             PackedTerrainCaptureStatus = packedTerrainCaptureStatus,
+            GeneratedRoomProbe = generatedRoomProbe,
             VisiblePlayers = visiblePlayers,
             VisiblePlayersStatus = visiblePlayersStatus
         });

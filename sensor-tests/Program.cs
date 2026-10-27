@@ -219,6 +219,7 @@ Require(crossAreaConflict.Status == "conflicting_candidates" &&
 TestRawRenderPositionReader();
 TestTerrainDiagnostic();
 TestPackedTerrainProbe();
+TestGeneratedRoomProbe();
 TestSkillBindTable();
 SkillBindSourceScannerTests.Run();
 Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
@@ -498,6 +499,53 @@ void TestPackedTerrainProbe()
             : Read(address, size);
     Require(PackedTerrainProbe.Scan(area, 10, 20, ReadAmbiguous).Status == "ambiguous_candidates",
         "Two plausible memory layouts were silently selected.");
+}
+void TestGeneratedRoomProbe()
+{
+    const long area = 0x100000;
+    const long graphsAddress = 0x200000;
+    const long roomsAddress = 0x300000;
+    const long assetAddress = 0x400000;
+    const long pathAddress = 0x500000;
+    var vector = new byte[24];
+    BitConverter.GetBytes(graphsAddress).CopyTo(vector, 0);
+    BitConverter.GetBytes(graphsAddress + 152).CopyTo(vector, 8);
+    BitConverter.GetBytes(graphsAddress + 152).CopyTo(vector, 16);
+    var graphs = new byte[152];
+    BitConverter.GetBytes(roomsAddress).CopyTo(graphs, 88);
+    BitConverter.GetBytes(roomsAddress + 112).CopyTo(graphs, 96);
+    BitConverter.GetBytes(roomsAddress + 112).CopyTo(graphs, 104);
+    var rooms = new byte[112];
+    BitConverter.GetBytes(assetAddress).CopyTo(rooms, 0);
+    BitConverter.GetBytes(1).CopyTo(rooms, 8);
+    BitConverter.GetBytes(1).CopyTo(rooms, 12);
+    BitConverter.GetBytes(2).CopyTo(rooms, 16);
+    BitConverter.GetBytes(3).CopyTo(rooms, 20);
+    BitConverter.GetBytes(assetAddress).CopyTo(rooms, 56);
+    BitConverter.GetBytes(999).CopyTo(rooms, 56 + 16); // outside the observed grid
+    var asset = new byte[16];
+    BitConverter.GetBytes(pathAddress).CopyTo(asset, 8);
+    var path = new byte[512];
+    System.Text.Encoding.Unicode.GetBytes("Metadata/Terrain/Gallows/Act1/Rooms/boss_1.arm")
+        .CopyTo(path, 0);
+    var segments = new Dictionary<long, byte[]>
+    {
+        [area + 1216] = vector, [graphsAddress] = graphs,
+        [roomsAddress] = rooms, [assetAddress] = asset, [pathAddress] = path
+    };
+    byte[]? Read(long address, int size) => segments.TryGetValue(address, out var bytes) &&
+        bytes.Length == size ? bytes : null;
+    var result = GeneratedRoomProbe.Scan(area, 92, 92, Read);
+    Require(result.Status == "candidate_rooms_observed" && result.Graphs == 1 &&
+        result.RoomsChecked == 2 && result.ValidPaths == 1 && !result.SamplesTruncated &&
+        result.Samples is [{ Left: 1, Top: 1, Right: 2, Bottom: 3 }] &&
+        result.Samples[0].Path.EndsWith("boss_1.arm", StringComparison.Ordinal),
+        "Generated-room candidate path or bounded tile rectangle changed.");
+    Require(GeneratedRoomProbe.Scan(area, 92, 92, (_, _) => null).Status ==
+        "graph_vector_unreadable", "An unreadable room graph was accepted.");
+    BitConverter.GetBytes(graphsAddress + 151).CopyTo(vector, 8);
+    Require(GeneratedRoomProbe.Scan(area, 92, 92, Read).Status == "not_ready",
+        "A partial graph record was accepted.");
 }
 var largeLoot = Enumerable.Range(1, 96).Select(index => (object)new
 {
