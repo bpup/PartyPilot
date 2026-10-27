@@ -30,6 +30,8 @@ public sealed record LiveFollowPlan(double Stop, double Catchup,
 public sealed record FlaskBridgeRequest(int Player, string Resource, string? DirectInput = null);
 public sealed record FollowPadCommand(int Player, int Pad, string Command, string Status, string? Reason);
 public sealed record FollowHandoffRequest(int DestinationClient, int DriverPlayer, int TargetPlayer);
+public sealed record FollowPositionWitness(int Player, int ProcessId, uint AreaHash,
+    DateTime SeenUtc, double X, double Y);
 
 public sealed record FollowBridgeFrame(string Command, string Status, string? Reason)
 {
@@ -38,10 +40,43 @@ public sealed record FollowBridgeFrame(string Command, string Status, string? Re
     public int FollowerPad { get; init; }
     public IReadOnlyList<FollowPadCommand> PadCommands { get; init; } = [];
     public IReadOnlyList<FollowHandoffRequest> Handoffs { get; init; } = [];
+    public IReadOnlyList<FollowPositionWitness> Positions { get; init; } = [];
 }
 
 public static class LiveFollowFrame
 {
+    public static IReadOnlyList<FollowPositionWitness> ParsePositions(string json,
+        PartyTopology topology)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        if (!root.TryGetProperty("positions", out var value)) return [];
+        if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() > topology.PlayerCount)
+            throw new InvalidDataException("Live follow returned an invalid position witness list.");
+        var result = new List<FollowPositionWitness>();
+        var players = new HashSet<int>();
+        foreach (var item in value.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object || item.EnumerateObject().Count() != 6 ||
+                !item.TryGetProperty("slot", out var playerValue) ||
+                !playerValue.TryGetInt32(out var player) || !players.Add(player) ||
+                !topology.Slots.Any(slot => slot.PartyPlayer == player) ||
+                !item.TryGetProperty("process_id", out var processValue) ||
+                !processValue.TryGetInt32(out var processId) || processId <= 0 ||
+                !item.TryGetProperty("area_hash", out var areaValue) ||
+                !areaValue.TryGetUInt32(out var areaHash) || areaHash == 0 ||
+                !item.TryGetProperty("seen_utc", out var seenValue) ||
+                !seenValue.TryGetDateTime(out var seenUtc) || seenUtc.Kind != DateTimeKind.Utc ||
+                !item.TryGetProperty("x", out var xValue) ||
+                !xValue.TryGetDouble(out var x) || !double.IsFinite(x) ||
+                !item.TryGetProperty("y", out var yValue) ||
+                !yValue.TryGetDouble(out var y) || !double.IsFinite(y))
+                throw new InvalidDataException("Live follow returned an invalid position witness.");
+            result.Add(new FollowPositionWitness(player, processId, areaHash, seenUtc, x, y));
+        }
+        return result;
+    }
+
     public static IReadOnlyList<FollowHandoffRequest> ParseHandoffs(string json,
         PartyTopology topology)
     {

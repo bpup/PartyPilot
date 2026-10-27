@@ -193,7 +193,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             ? LiveFollowFrame.ParseDynamic(json, topology, customRuleCount)
             : LiveFollowFrame.Parse(json, 2, topology.Slots[1].RuntimePad,
                 customRuleCount: customRuleCount);
-        return parsed with { Handoffs = LiveFollowFrame.ParseHandoffs(json, topology) };
+        return parsed with { Handoffs = LiveFollowFrame.ParseHandoffs(json, topology),
+            Positions = LiveFollowFrame.ParsePositions(json, topology) };
     }
 
     public static async Task<LiveFollowSession> StartAsync(string executable, PartyTopology topology,

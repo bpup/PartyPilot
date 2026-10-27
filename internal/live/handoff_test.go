@@ -95,6 +95,20 @@ func TestCrossAreaRequestUsesFirstLocalPlayerAsDriver(t *testing.T) {
 	if got := engine.CrossAreaRequests(now.Add(time.Millisecond)); !reflect.DeepEqual(got, want) {
 		t.Fatalf("dual-role client requested the wrong driver: %+v", got)
 	}
+	positions := engine.CurrentPositions(now.Add(time.Millisecond))
+	if len(positions) != 4 || positions[2].Slot != 3 || positions[2].ProcessID != 202 ||
+		positions[2].AreaHash != 202 || positions[2].X != 100 ||
+		positions[3].Slot != 4 || positions[3].ProcessID != 202 || positions[3].X != 90 {
+		t.Fatalf("dual-role positions were not exported as distinct current witnesses: %+v", positions)
+	}
+	if got := engine.CurrentPositions(now.Add(2 * time.Second)); len(got) != 0 {
+		t.Fatalf("stale dual-role positions were exported: %+v", got)
+	}
+	engine.SetFollowPaused(true)
+	if got := engine.CurrentPositions(now.Add(time.Millisecond)); len(got) != 0 {
+		t.Fatalf("paused dual-role positions were exported: %+v", got)
+	}
+	engine.SetFollowPaused(false)
 	if err := engine.SetFollowTarget(4, 2); err != nil {
 		t.Fatal(err)
 	}

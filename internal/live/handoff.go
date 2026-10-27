@@ -18,6 +18,39 @@ type HandoffRequest struct {
 	State             string `json:"state"`
 }
 
+// PositionWitness exposes only a current, log-bound player position to the
+// local desktop coordinator. A coordinate alone does not authorize input.
+type PositionWitness struct {
+	Slot      int       `json:"slot"`
+	ProcessID int       `json:"process_id"`
+	AreaHash  uint32    `json:"area_hash"`
+	SeenUTC   time.Time `json:"seen_utc"`
+	X         float64   `json:"x"`
+	Y         float64   `json:"y"`
+}
+
+func (e *Engine) CurrentPositions(now time.Time) []PositionWitness {
+	if e.stopped != "" || e.followPaused {
+		return nil
+	}
+	var positions []PositionWitness
+	for _, slot := range e.slots {
+		motion, found := e.samples[slot]
+		if !found || motion.CoordinateSpace != "world" ||
+			!finitePosition(motion.X) || !finitePosition(motion.Y) ||
+			motion.AreaHash == 0 {
+			continue
+		}
+		if _, confirmed := e.confirmedArea(slot, now); !confirmed {
+			continue
+		}
+		positions = append(positions, PositionWitness{Slot: slot,
+			ProcessID: motion.ProcessID, AreaHash: motion.AreaHash,
+			SeenUTC: motion.SeenUTC, X: motion.X, Y: motion.Y})
+	}
+	return positions
+}
+
 // CrossAreaRequests reports only confirmed differences between fresh,
 // log-bound client observations. It does not infer a route or click a portrait.
 func (e *Engine) CrossAreaRequests(now time.Time) []HandoffRequest {

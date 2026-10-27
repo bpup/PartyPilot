@@ -91,6 +91,46 @@ internal static class TransitionAnchorEvidenceSmoke
         if (TransitionApproachPlan.BuildInteraction(live, topology, evidence, true,
                 false, now) is not null)
             throw new Exception("Dual-character destination was allowed to interact without partner position.");
+        var dualEvidence = new TransitionAnchorEvidence();
+        dualEvidence.Observe(1, Frame(101, now.AddMilliseconds(-400), 41,
+            100, 100, entrance));
+        dualEvidence.Observe(2, Frame(202, now.AddMilliseconds(-300), 42,
+            200, 200, entrance with { Id = 20, X = 205, Y = 201 }));
+        dualEvidence.Observe(1, Frame(101, now.AddMilliseconds(-100), 43,
+            300, 300));
+        var positions = new FollowPositionWitness[]
+        {
+            new(3, 202, 42, now.AddMilliseconds(-200), 200, 200),
+            new(4, 202, 42, now.AddMilliseconds(-200), 205, 202)
+        };
+        if (TransitionApproachPlan.BuildInteraction(live with { Positions = positions },
+                topology, dualEvidence, true, false, now)?.DriverPlayer != 3 ||
+            TransitionApproachPlan.BuildInteraction(live with
+            {
+                Positions = [positions[0], positions[1] with { AreaHash = 99 }]
+            }, topology, dualEvidence, true, false, now) is not null ||
+            TransitionApproachPlan.BuildInteraction(live with
+            {
+                Positions = [positions[0], positions[1] with { X = 1000 }]
+            }, topology, dualEvidence, true, false, now) is not null)
+            throw new Exception("Dual-character entry did not require a fresh, same-area nearby partner.");
+        var positionsJson = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            positions = positions.Select(item => new
+            {
+                slot = item.Player, process_id = item.ProcessId,
+                area_hash = item.AreaHash, seen_utc = item.SeenUtc,
+                x = item.X, y = item.Y
+            })
+        });
+        static bool RejectsPositions(string json, PartyTopology topology)
+        {
+            try { LiveFollowFrame.ParsePositions(json, topology); return false; }
+            catch (InvalidDataException) { return true; }
+        }
+        if (LiveFollowFrame.ParsePositions(positionsJson, topology).Count != 2 ||
+            !RejectsPositions(positionsJson.Replace("\"slot\":4", "\"slot\":3"), topology))
+            throw new Exception("Dual-character position witness parsing failed.");
         var singles = PartyTopologies.ForPlayerCount(3).Single(item =>
             item.Id == "3-three-singles");
         var singleEvidence = new TransitionAnchorEvidence();

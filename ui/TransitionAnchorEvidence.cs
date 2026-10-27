@@ -2,6 +2,7 @@ namespace PartyPilot.Desktop;
 
 internal sealed record TransitionAnchorMatch(int SourceClient, int DestinationClient,
     string Identity, double DestinationX, double DestinationY, double PlayerX, double PlayerY,
+    int DestinationProcessId, uint DestinationAreaHash,
     DateTime DestinationSeenUtc, DateTime SourceChangedUtc);
 
 // Read-only evidence from visible radar entities. A matching path and label
@@ -63,6 +64,7 @@ internal sealed class TransitionAnchorEvidence
             var nearest = matches[0];
             return new TransitionAnchorMatch(source, destinationClient,
                 used.Identity, nearest.X, nearest.Y, destination.PlayerX, destination.PlayerY,
+                destination.ProcessId, destination.AreaHash,
                 destination.SeenUtc, used.ChangedUtc);
         }
     }

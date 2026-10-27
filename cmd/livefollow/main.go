@@ -370,10 +370,11 @@ func verifyProcessBindings(roster map[int]int, paths map[int]string) error {
 }
 
 type frame struct {
-	Focused  int                    `json:"focused"`
-	Commands map[int]follow.Command `json:"commands"`
-	Flasks   []flask.Activation     `json:"flasks,omitempty"`
-	Handoffs []live.HandoffRequest  `json:"handoffs,omitempty"`
+	Focused   int                    `json:"focused"`
+	Commands  map[int]follow.Command `json:"commands"`
+	Flasks    []flask.Activation     `json:"flasks,omitempty"`
+	Handoffs  []live.HandoffRequest  `json:"handoffs,omitempty"`
+	Positions []live.PositionWitness `json:"positions,omitempty"`
 }
 
 type menuInput struct {
@@ -617,7 +618,8 @@ func run(address string, roster map[int]int, paths map[int]string, offsets logSt
 		}
 		commands := engine.Step(now)
 		if err := encoder.Encode(frame{Focused: engine.Leader(), Commands: commands,
-			Flasks: activations, Handoffs: engine.CrossAreaRequests(now)}); err != nil {
+			Flasks: activations, Handoffs: engine.CrossAreaRequests(now),
+			Positions: engine.CurrentPositions(now)}); err != nil {
 			return err
 		}
 	}

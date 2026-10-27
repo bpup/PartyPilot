@@ -77,7 +77,7 @@ internal static class TransitionApproachPlan
                 topology.Slots.FirstOrDefault(slot => slot.PartyPlayer == command.Player)
                     is not { LocalPlayer: 1 } driver ||
                 command.Pad != driver.RuntimePad ||
-                driver.Client == leader.Client || topology.Clients[driver.Client - 1].Count != 1)
+                driver.Client == leader.Client)
                 continue;
             var match = evidence.Match(leader.Client, driver.Client, nowUtc);
             if (match is null || !match.Identity.StartsWith("transition|",
@@ -87,10 +87,34 @@ internal static class TransitionApproachPlan
             var distance = Math.Sqrt(Math.Pow(match.DestinationX - match.PlayerX, 2) +
                 Math.Pow(match.DestinationY - match.PlayerY, 2)) /
                 RadarProjection.WorldUnitsPerGridUnit;
-            if (double.IsFinite(distance) && distance <= 7)
+            if (double.IsFinite(distance) && distance <= 7 &&
+                (topology.Clients[driver.Client - 1].Count == 1 ||
+                 PairReady(frame.Positions, topology, driver, match, nowUtc)))
                 return new TransitionInteractionCandidate(driver.PartyPlayer,
                     driver.RuntimePad, driver.Client, match.SourceChangedUtc);
         }
         return null;
+    }
+
+    private static bool PairReady(IReadOnlyList<FollowPositionWitness> positions,
+        PartyTopology topology, PartySlot driver, TransitionAnchorMatch match, DateTime nowUtc)
+    {
+        var partner = topology.Slots.FirstOrDefault(slot =>
+            slot.Client == driver.Client && slot.LocalPlayer == 2);
+        if (partner is null) return false;
+        var first = positions.FirstOrDefault(item => item.Player == driver.PartyPlayer);
+        var second = positions.FirstOrDefault(item => item.Player == partner.PartyPlayer);
+        if (first is null || second is null || first.ProcessId != match.DestinationProcessId ||
+            second.ProcessId != first.ProcessId || first.AreaHash != match.DestinationAreaHash ||
+            second.AreaHash != first.AreaHash || first.SeenUtc != second.SeenUtc ||
+            first.SeenUtc > nowUtc || nowUtc - first.SeenUtc > TimeSpan.FromMilliseconds(750))
+            return false;
+        var worldPerGrid = RadarProjection.WorldUnitsPerGridUnit;
+        var radarMismatch = Math.Sqrt(Math.Pow(first.X - match.PlayerX, 2) +
+            Math.Pow(first.Y - match.PlayerY, 2)) / worldPerGrid;
+        var partnerDistance = Math.Sqrt(Math.Pow(second.X - match.DestinationX, 2) +
+            Math.Pow(second.Y - match.DestinationY, 2)) / worldPerGrid;
+        return double.IsFinite(radarMismatch) && radarMismatch <= 8 &&
+            double.IsFinite(partnerDistance) && partnerDistance <= 55;
     }
 }
