@@ -44,6 +44,7 @@ internal static class ProcessPipelineSmoke
         var client3BridgeExe = Path.Combine(directory, "fake-client3-bridge");
         var followExe = Path.Combine(directory, "fake-follow");
         var terrainFollowExe = Path.Combine(directory, "fake-terrain-follow");
+        var disabledClassicExe = Path.Combine(directory, "fake-disabled-classic-follow");
         var aggressiveFollowExe = Path.Combine(directory, "fake-aggressive-follow");
         var dynamicBridgeExe = Path.Combine(directory, "fake-dynamic-bridge");
         var dynamicFollowExe = Path.Combine(directory, "fake-dynamic-follow");
@@ -101,8 +102,14 @@ internal static class ProcessPipelineSmoke
                 "if bindings != expected or '-classic-sprint-catchup' not in sys.argv or '-classic-collision-dodge' not in sys.argv: sys.exit(2)\n" +
                 "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}}}', flush=True)\n" +
                 "for line in sys.stdin: pass\n");
+            File.WriteAllText(disabledClassicExe, "#!/usr/bin/env python3\nimport sys\n" +
+                "if '-disable-sprint-catchup' not in sys.argv or '-classic-sprint-catchup' not in sys.argv: sys.exit(2)\n" +
+                "if '-classic-collision-dodge' in sys.argv or '-terrain-binding' in sys.argv: sys.exit(2)\n" +
+                "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}}}', flush=True)\n" +
+                "for line in sys.stdin: pass\n");
             File.WriteAllText(aggressiveFollowExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '-aggressive-blink-catchup' not in sys.argv or '-classic-sprint-catchup' in sys.argv: sys.exit(2)\n" +
+                "if '-disable-sprint-catchup' not in sys.argv: sys.exit(2)\n" +
                 "if '-aggressive-sprint-retry-delay-ms' not in sys.argv or sys.argv[sys.argv.index('-aggressive-sprint-retry-delay-ms')+1] != '900': sys.exit(2)\n" +
                 "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}}}', flush=True)\n" +
                 "for line in sys.stdin: pass\n");
@@ -179,6 +186,7 @@ internal static class ProcessPipelineSmoke
             File.SetUnixFileMode(mainInputFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(followExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(terrainFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(disabledClassicExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(aggressiveFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(dynamicBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(dynamicFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -279,6 +287,13 @@ internal static class ProcessPipelineSmoke
                 throw new Exception("Collision dodge started without terrain bindings.");
             }
             catch (ArgumentException) { }
+            await using (var disabledClassic = await LiveFollowSession.StartAsync(disabledClassicExe,
+                topology, clients, bridge, plan, classicCollisionDodge: true,
+                classicSprintCatchUp: true, sprintCatchUp: false))
+            {
+                if (disabledClassic.Current.FocusedPlayer != 1)
+                    throw new Exception("Disabled sprint still required terrain for inactive collision recovery.");
+            }
             await using (var terrainFollow = await LiveFollowSession.StartAsync(terrainFollowExe,
                 topology, clients, bridge, plan,
                 terrainBindings: new Dictionary<int, string>
@@ -291,13 +306,13 @@ internal static class ProcessPipelineSmoke
             }
             Console.WriteLine("Desktop terrain bindings and collision option reached the live process.");
             await using (var aggressiveFollow = await LiveFollowSession.StartAsync(aggressiveFollowExe,
-                topology, clients, bridge, plan, aggressiveBlinkCatchUp: true,
+                topology, clients, bridge, plan, sprintCatchUp: false, aggressiveBlinkCatchUp: true,
                 aggressiveSprintRetryDelay: 900))
             {
                 if (aggressiveFollow.Current.FocusedPlayer != 1)
                     throw new Exception("Aggressive sprint options did not reach the live process.");
             }
-            Console.WriteLine("Desktop aggressive sprint options reached the live process.");
+            Console.WriteLine("Desktop sprint master switch and aggressive options reached the live process.");
             await using (var dynamicBridge = await BridgeSession.StartAsync(dynamicBridgeExe, topology.Slots, 0,
                 @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"], false,
                 lastFocusedLeads: true))

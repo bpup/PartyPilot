@@ -447,6 +447,8 @@ func main() {
 	lastFocusedLeads := flag.Bool("last-focused-leads", false, "use manually focused player as the current follow MAIN")
 	classicSprintCatchUp := flag.Bool("classic-sprint-catchup", false,
 		"use the classic sprint controller instead of the distributed client's normal sprint mode")
+	disableSprintCatchUp := flag.Bool("disable-sprint-catchup", false,
+		"keep catch-up movement but never press the sprint button")
 	aggressiveBlinkCatchUp := flag.Bool("aggressive-blink-catchup", false,
 		"enable the optional dodge-to-sprint retry controller")
 	aggressiveRetryDelay := flag.Int("aggressive-sprint-retry-delay-ms", 800,
@@ -494,7 +496,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	if err := validateClassicCollisionBindings(*classicCollisionDodge, roster, terrainBindings); err != nil {
+	if err := validateClassicCollisionBindings(*classicCollisionDodge && !*disableSprintCatchUp, roster, terrainBindings); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
@@ -515,6 +517,7 @@ func main() {
 	config := follow.Config{StopDistance: *stop, ResumeDistance: *stop + 3, CatchUpDistance: *catchup,
 		MaxAge: *maxAge, TargetTrail: true, AsyncTargetPath: true,
 		NormalSprintCatchUp:        !*classicSprintCatchUp,
+		DisableSprintCatchUp:       *disableSprintCatchUp,
 		ClassicCollisionDodge:      *classicCollisionDodge,
 		AggressiveBlinkCatchUp:     *aggressiveBlinkCatchUp,
 		AggressiveSprintRetryDelay: time.Duration(*aggressiveRetryDelay) * time.Millisecond}

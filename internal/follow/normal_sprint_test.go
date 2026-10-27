@@ -31,6 +31,35 @@ func TestNormalSprintNeedsStableDirectDirectionAndReleasesBeforeStop(t *testing.
 	}
 }
 
+func TestDisabledSprintPreservesCatchUpMovementWithoutButton(t *testing.T) {
+	for _, classic := range []bool{false, true} {
+		at := time.Unix(205, 0)
+		engine, ok := New(Config{StopDistance: 9, ResumeDistance: 12,
+			CatchUpDistance: 20, MaxAge: time.Second, TargetTrail: true,
+			NormalSprintCatchUp: !classic, DisableSprintCatchUp: true})
+		if !ok {
+			t.Fatal("invalid disabled sprint config")
+		}
+		position := func(x float64) Position {
+			return Position{X: x, Area: "instance", Seen: at, Valid: true}
+		}
+		if got := engine.Step(at, position(40), position(0)); got.State != CatchingUp ||
+			got.X <= 0 || got.SprintDown {
+			t.Fatalf("disabled sprint lost catch-up movement, classic=%t: %+v", classic, got)
+		}
+		at = at.Add(250 * time.Millisecond)
+		if got := engine.Step(at, position(40), position(0)); got.State != CatchingUp ||
+			got.X <= 0 || got.SprintDown {
+			t.Fatalf("disabled sprint pressed B, classic=%t: %+v", classic, got)
+		}
+		at = at.Add(100 * time.Millisecond)
+		if got := engine.Step(at, position(40), position(28)); got.State != Following ||
+			got.SprintDown {
+			t.Fatalf("disabled sprint used classic release distance, classic=%t: %+v", classic, got)
+		}
+	}
+}
+
 func TestNormalSprintDoesNotPressOnTerrainDetour(t *testing.T) {
 	at := time.Unix(202, 0)
 	grid := &navigation.Grid{Area: "instance", CellSize: 1, Width: 60, Height: 40,

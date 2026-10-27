@@ -49,6 +49,7 @@ type Config struct {
 	TargetTrail                bool
 	AsyncTargetPath            bool
 	NormalSprintCatchUp        bool
+	DisableSprintCatchUp       bool
 	ClassicCollisionDodge      bool
 	AggressiveBlinkCatchUp     bool
 	AggressiveSprintRetryDelay time.Duration
@@ -272,7 +273,7 @@ func (e *Engine) StepWithTerrainCloseFollow(now time.Time, leader, follower Posi
 		entryDistance = math.Max(entryDistance, 20)
 	}
 	releaseDistance := e.config.StopDistance
-	if e.config.NormalSprintCatchUp {
+	if e.config.NormalSprintCatchUp || e.config.DisableSprintCatchUp {
 		releaseDistance = math.Max(releaseDistance, entryDistance*0.65)
 	}
 	if jump && distance > releaseDistance {
@@ -419,7 +420,13 @@ func (e *Engine) StepWithTerrainCloseFollow(now time.Time, leader, follower Posi
 			observedAt = follower.Seen
 		}
 		if observedAt.After(e.lastSprintObservation) {
-			if e.config.AggressiveBlinkCatchUp {
+			if e.config.DisableSprintCatchUp {
+				e.sprint.Reset()
+				e.aggressive.Reset()
+				e.normalSprintDirection = point{}
+				e.normalSprintSince = time.Time{}
+				e.sprintDown = false
+			} else if e.config.AggressiveBlinkCatchUp {
 				e.sprint.Reset()
 				e.normalSprintDirection = point{}
 				e.normalSprintSince = time.Time{}

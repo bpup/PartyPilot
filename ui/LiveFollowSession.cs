@@ -113,6 +113,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         IReadOnlyDictionary<int, string>? terrainBindings = null,
         bool classicCollisionDodge = false,
         bool classicSprintCatchUp = false,
+        bool sprintCatchUp = true,
         bool aggressiveBlinkCatchUp = false,
         int aggressiveSprintRetryDelay = 800,
         bool relayMainInput = false,
@@ -140,7 +141,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
               terrain.Keys.Any(player => !topology.Slots.Any(slot => slot.PartyPlayer == player)) ||
               terrain.Values.Any(path => !Path.IsPathFullyQualified(path) || !File.Exists(path)) ||
               terrain.Values.Distinct(StringComparer.OrdinalIgnoreCase).Count() != terrain.Count)) ||
-            (classicCollisionDodge && terrain.Count != topology.ClientCount))
+            (classicCollisionDodge && sprintCatchUp && terrain.Count != topology.ClientCount))
             throw new ArgumentException("Live terrain requires one distinct binding file per client.");
         var start = new ProcessStartInfo(executable)
         {
@@ -208,6 +209,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             start.ArgumentList.Add($"{player}={path}");
         }
         if (classicSprintCatchUp) start.ArgumentList.Add("-classic-sprint-catchup");
+        if (!sprintCatchUp) start.ArgumentList.Add("-disable-sprint-catchup");
         if (aggressiveBlinkCatchUp)
         {
             start.ArgumentList.Add("-aggressive-blink-catchup");
@@ -228,7 +230,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             var allowed = string.Join(',', players);
             start.ArgumentList.Add(allowed.Length == 0 ? "none" : allowed);
         }
-        if (classicCollisionDodge) start.ArgumentList.Add("-classic-collision-dodge");
+        if (classicCollisionDodge && sprintCatchUp) start.ArgumentList.Add("-classic-collision-dodge");
         if (bridge.AutoFlaskEnabled) start.ArgumentList.Add("-auto-flask");
         if (bridge.LastFocusedLeadsEnabled) start.ArgumentList.Add("-last-focused-leads");
         start.ArgumentList.Add("-allow-follow-pause");

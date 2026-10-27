@@ -116,6 +116,7 @@ public sealed class MainWindow : Window
     private readonly TextBox[] _terrainBindingPaths = new TextBox[3];
     private readonly StackPanel[] _terrainBindingRows = new StackPanel[3];
     private readonly CheckBox _classicSprintCatchUp = new();
+    private readonly CheckBox _sprintCatchUp = new();
     private readonly CheckBox _aggressiveBlinkCatchUp = new();
     private readonly TextBox _aggressiveSprintRetryDelay = new();
     private readonly CheckBox _closeRangeMirror = new();
@@ -836,6 +837,10 @@ public sealed class MainWindow : Window
             box.TextChanged += (_, _) => UpdateFollowControls();
             panel.Children.Add(box);
         }
+        _sprintCatchUp.Content = "追赶时自动冲刺（目标版默认开启）";
+        _sprintCatchUp.IsChecked = true;
+        _sprintCatchUp.IsCheckedChanged += (_, _) => UpdateFollowControls();
+        panel.Children.Add(_sprintCatchUp);
         _classicSprintCatchUp.Content = "启用经典冲刺追赶（0.6.17 分布式客户端默认关闭）";
         _classicSprintCatchUp.IsCheckedChanged += (_, _) =>
         {
@@ -2182,6 +2187,7 @@ public sealed class MainWindow : Window
             if (binding is not null) binding.IsEnabled = _follow is null && !_busy;
         _classicSprintCatchUp.IsEnabled = _follow is null && !_busy &&
             _selectedTopology?.Id is ("2-split" or "3-three-singles");
+        _sprintCatchUp.IsEnabled = _classicSprintCatchUp.IsEnabled;
         _aggressiveBlinkCatchUp.IsEnabled = _classicSprintCatchUp.IsEnabled;
         _aggressiveSprintRetryDelay.IsEnabled = _aggressiveBlinkCatchUp.IsEnabled &&
             _aggressiveBlinkCatchUp.IsChecked == true;
@@ -2206,7 +2212,8 @@ public sealed class MainWindow : Window
                 FollowPlayerStop.TryRead(_followPlayerStops[slot.PartyPlayer - 1].Text, out _));
             var terrainValid = LiveTerrainSelection.TryCreate(_selectedTopology,
                 _terrainBindingPaths.Select(box => box?.Text).ToArray(),
-                _classicCollisionDodge.IsChecked == true, out var terrain, out var terrainError);
+                _classicCollisionDodge.IsChecked == true && _sprintCatchUp.IsChecked == true,
+                out var terrain, out var terrainError);
             valid &= terrainValid;
             _terrainBindingStatus.Text = terrainValid
                 ? terrain.Count == 0 ? "未使用候选地形；碰撞闪避保持关闭。" :
@@ -2912,7 +2919,8 @@ public sealed class MainWindow : Window
         {
             if (!LiveTerrainSelection.TryCreate(_selectedTopology,
                     _terrainBindingPaths.Select(box => box?.Text).ToArray(),
-                    _classicCollisionDodge.IsChecked == true, out var terrain, out var terrainError))
+                    _classicCollisionDodge.IsChecked == true && _sprintCatchUp.IsChecked == true,
+                    out var terrain, out var terrainError))
                 throw new InvalidOperationException(terrainError);
             var followTargets = new Dictionary<int, int>();
             var playerStops = new Dictionary<int, double>();
@@ -2942,6 +2950,7 @@ public sealed class MainWindow : Window
                 _launchedClients, _bridge, plan, memberNames, followTargets, playerStops,
                 terrain, _classicCollisionDodge.IsChecked == true,
                 _classicSprintCatchUp.IsChecked == true,
+                sprintCatchUp: _sprintCatchUp.IsChecked == true,
                 aggressiveBlinkCatchUp: _aggressiveBlinkCatchUp.IsChecked == true,
                 aggressiveSprintRetryDelay: _aggressiveBlinkCatchUp.IsChecked == true
                     ? int.Parse(_aggressiveSprintRetryDelay.Text!, CultureInfo.InvariantCulture) : 800,
