@@ -343,6 +343,44 @@ if (!RadarFrames.TryParse(radarPayload, 123, DateTime.UtcNow, out var radarFrame
 var radarText = System.Text.Encoding.UTF8.GetString(radarPayload);
 var gridRadarText = radarText.Replace("\"AreaHash\":42,",
     "\"AreaHash\":42,\"RadarStateAreaAddress\":\"0x123456\",\"RadarGridX\":3,\"RadarGridY\":4,");
+using var dormantRadarSource = System.Text.Json.JsonDocument.Parse(gridRadarText);
+var dormantSeenText = dormantRadarSource.RootElement.GetProperty("RadarSeenUtc").GetString();
+var dormantRadarText = gridRadarText[..^1] +
+    ",\"DormantAreaMap\":{\"SeenUtc\":\"" + dormantSeenText +
+    "\",\"Status\":\"candidate_unverified_build\",\"AreaAddress\":\"0x123456\",\"EntityListOffset\":1776,\"AwakeCount\":1,\"SleepingCount\":1,\"LocalPosition\":{\"WorldX\":100,\"WorldY\":200},\"NavigationCandidates\":[{\"EntityId\":40,\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\",\"Label\":null,\"X\":110,\"Y\":205}]}}";
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(dormantRadarText), 123, DateTime.UtcNow,
+        out var dormantRadarFrame) || dormantRadarFrame?.Markers.Count != 5 ||
+    dormantRadarFrame.DormantCandidates.Count != 1 ||
+    RadarOverlayWindow.DisplayLabel(dormantRadarFrame.DormantCandidates[0], true) != "候选 · 传送点" ||
+    !RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        dormantRadarText.Replace("\"AreaAddress\":\"0x123456\"", "\"AreaAddress\":\"0x123458\"")),
+        123, DateTime.UtcNow, out var wrongAreaDormant) ||
+    wrongAreaDormant?.Markers.Count != 5 || wrongAreaDormant.DormantCandidates.Count != 0 ||
+    !RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        dormantRadarText.Replace("\"WorldX\":100", "\"WorldX\":110")),
+        123, DateTime.UtcNow, out var wrongPositionDormant) ||
+    wrongPositionDormant?.Markers.Count != 5 || wrongPositionDormant.DormantCandidates.Count != 0 ||
+    !RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        dormantRadarText.Replace("\"EntityId\":40", "\"EntityId\":8")),
+        123, DateTime.UtcNow, out var duplicateDormant) ||
+    duplicateDormant?.Markers.Count != 5 || duplicateDormant.DormantCandidates.Count != 0 ||
+    !RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        dormantRadarText.Replace("\"SeenUtc\":\"" + dormantSeenText + "\"",
+            "\"SeenUtc\":\"" + dormantRadarSource.RootElement.GetProperty("RadarSeenUtc")
+                .GetDateTime().AddSeconds(-4).ToString("O") + "\"")),
+        123, DateTime.UtcNow, out var staleDormant) ||
+    staleDormant?.Markers.Count != 5 || staleDormant.DormantCandidates.Count != 0)
+    throw new Exception("Dormant candidate identity, coordinate, duplicate, or label guard failed.");
+var dormantCache = new RadarLandmarkCache();
+dormantCache.Apply(dormantRadarFrame with
+{
+    SeenUtc = dormantRadarFrame.SeenUtc.AddMilliseconds(-1),
+    DormantCandidates = [],
+    Markers = [new RadarMarker(40, "waypoint", "Metadata/MiscellaneousObjects/Waypoint",
+        null, null, null, null, 110, 205)]
+});
+if (dormantCache.Apply(dormantRadarFrame).Markers.Count != 5)
+    throw new Exception("A retained visible waypoint duplicated its current dormant candidate.");
 if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(gridRadarText), 123, DateTime.UtcNow, out var gridRadarFrame) ||
     gridRadarFrame?.GridX != 3 || gridRadarFrame.GridY != 4 ||
     gridRadarFrame.StateAreaAddress != "0x123456" ||
@@ -429,6 +467,15 @@ bossWindow.UpdateLayout();
 if (!bossWindow.GetLogicalDescendants().OfType<TextBlock>().Any(label => label.Text == "首领地点 · Rathbreaker"))
     throw new Exception("Radar did not draw the named boss room marker.");
 bossWindow.Close();
+var dormantWindow = new RadarOverlayWindow(new LaunchedClient(123, 1, "C:/Game.exe"),
+    2, new RadarVisibility(), renderOnly: true);
+dormantWindow.Show();
+dormantWindow.Apply(dormantRadarFrame);
+dormantWindow.UpdateLayout();
+if (!dormantWindow.GetLogicalDescendants().OfType<TextBlock>()
+        .Any(label => label.Text == "候选 · 传送点"))
+    throw new Exception("Radar did not draw the guarded dormant waypoint candidate.");
+dormantWindow.Close();
 var questCache = new RadarLandmarkCache();
 questCache.Apply(questRadarFrame);
 if (questCache.Apply(questRadarFrame with

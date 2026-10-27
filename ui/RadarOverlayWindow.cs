@@ -73,18 +73,22 @@ public sealed class RadarOverlayWindow : Window
         else Dispatcher.UIThread.Post(Draw);
     }
 
-    public static string DisplayLabel(RadarMarker marker) => marker.Category switch
+    public static string DisplayLabel(RadarMarker marker, bool dormantCandidate = false)
     {
-        "player" => NamePrivacy.Mask(marker.Label),
-        "loot" => marker.Label ?? string.Empty,
-        "quest" => "任务线索 · " + marker.Label,
-        "boss" => "首领地点 · " + marker.Label,
-        "waypoint" => "传送点",
-        "checkpoint" => "检查点",
-        "portal" => "传送门",
-        "transition" => "区域入口",
-        _ => marker.Path.Split('/').Last()
-    };
+        var label = marker.Category switch
+        {
+            "player" => NamePrivacy.Mask(marker.Label),
+            "loot" => marker.Label ?? string.Empty,
+            "quest" => "任务线索 · " + marker.Label,
+            "boss" => "首领地点 · " + marker.Label,
+            "waypoint" => "传送点",
+            "checkpoint" => "检查点",
+            "portal" => "传送门",
+            "transition" => "区域入口",
+            _ => marker.Path.Split('/').Last()
+        };
+        return dormantCandidate ? "候选 · " + label : label;
+    }
 
     public void Apply(RadarFrame frame)
     {
@@ -154,18 +158,20 @@ public sealed class RadarOverlayWindow : Window
             }
         }
         AddDot(centerX, centerY, 12, Brushes.White);
-        foreach (var marker in _frame.Markers)
+        foreach (var marker in _frame.Markers.Concat(_frame.DormantCandidates))
         {
+            var dormantCandidate = _frame.DormantCandidates.Contains(marker);
             var (x, y) = RadarProjection.Project(_frame.PlayerX, _frame.PlayerY,
                 marker, centerX, centerY, _scale);
             if (!double.IsFinite(x) || !double.IsFinite(y) ||
                 x < 8 || y < 8 || x > Bounds.Width - 8 || y > Bounds.Height - 8) continue;
-            AddDot(x, y, marker.Category == "monster" ? 7 : 10, MarkerBrush(marker.Category));
+            AddDot(x, y, marker.Category == "monster" ? 7 : 10,
+                dormantCandidate ? Brushes.Orange : MarkerBrush(marker.Category));
             if (marker.Category is "checkpoint" or "waypoint" or "portal" or "transition" or "player" or "loot" or "quest" or "boss")
             {
                 var label = new TextBlock
                 {
-                    Text = DisplayLabel(marker),
+                    Text = DisplayLabel(marker, dormantCandidate),
                     Foreground = Brushes.White,
                     Background = new SolidColorBrush(Color.FromArgb(190, 8, 12, 20)),
                     FontSize = 12

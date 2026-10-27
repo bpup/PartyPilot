@@ -321,14 +321,44 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                         Path = RawMetadataPathReader.Read(entry.Address, ReadMap),
                         Position = RawRenderPositionReader.Read(entry.Address, ReadMap)
                     }).ToArray();
+                    var navigation = new List<object>();
+                    foreach (var entry in map.Sleeping.Take(256))
+                    {
+                        try
+                        {
+                            var path = RawMetadataPathReader.Read(entry.Address, ReadMap);
+                            var category = RadarClassifier.Category(path);
+                            if (path == null || category == null || !RadarClassifier.IsNavigation(category))
+                                continue;
+                            var candidatePosition = RawRenderPositionReader.Read(entry.Address, ReadMap);
+                            if (candidatePosition == null) continue;
+                            navigation.Add(new
+                            {
+                                EntityId = entry.Id,
+                                Category = category,
+                                Path = path,
+                                Label = category == "quest" ? RadarClassifier.QuestLabel(path) :
+                                    category == "boss" ? RadarClassifier.BossLabel(path) : null,
+                                X = candidatePosition.WorldX,
+                                Y = candidatePosition.WorldY,
+                                Z = candidatePosition.WorldZ
+                            });
+                            if (navigation.Count == 24) break;
+                        }
+                        catch { /* A malformed entity cannot become a navigation marker. */ }
+                    }
                     _dormantMapObservation = new
                     {
+                        SeenUtc = now,
                         map.Status,
                         map.AreaAddress,
                         map.EntityListOffset,
                         map.AwakeCount,
                         SleepingCount = map.Sleeping.Length,
-                        Samples = samples
+                        Samples = samples,
+                        LocalPosition = RawRenderPositionReader.Read(frameLocalAddress, ReadMap),
+                        NavigationCandidates = navigation,
+                        NavigationScanTruncated = map.Sleeping.Length > 256
                     };
                     if (!SameAreaAndPlayer())
                         _dormantMapObservation = new { Status = "game_identity_changed" };
@@ -354,7 +384,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                     _monsterTrackerAreaHash = areaHash;
                 }
                 radarEntities = ReadRadarEntities(player!.Id, render.Pos.X, render.Pos.Y);
-                if (Settings.DiagnoseTerrain.Value)
+                if (Settings.DiagnoseTerrain.Value || Settings.DiagnoseDormantAreaMap.Value)
                 {
                     try
                     {
@@ -363,7 +393,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                             try { return GameController.IngameState.Data.M.ReadMem(address, size); }
                             catch { return null; }
                         }
-                        var raw = RawRenderPositionReader.Read(frameLocalAddress, ReadRadarTerrain);
+                        var raw = Settings.DiagnoseTerrain.Value
+                            ? RawRenderPositionReader.Read(frameLocalAddress, ReadRadarTerrain) : null;
                         if (raw is not null)
                         {
                             radarGridX = raw.GridX;

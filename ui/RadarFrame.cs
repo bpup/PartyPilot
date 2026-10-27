@@ -14,6 +14,7 @@ public sealed record RadarFrame(int ProcessId, DateTime SeenUtc, uint AreaHash, 
     public string? StateAreaAddress { get; init; }
     public double? GridX { get; init; }
     public double? GridY { get; init; }
+    public IReadOnlyList<RadarMarker> DormantCandidates { get; init; } = [];
 }
 
 public static class RadarFrames
@@ -127,13 +128,86 @@ public static class RadarFrames
                 markers.Add(new RadarMarker(id, category, path, label, itemPath, stack, rarity, x, y));
             }
             frame = new RadarFrame(pid, seenUtc, areaHash, addressValue.GetString(), playerX, playerY, markers)
-            { StateAreaAddress = stateAreaAddress, GridX = gridX, GridY = gridY };
+            {
+                StateAreaAddress = stateAreaAddress,
+                GridX = gridX,
+                GridY = gridY,
+                DormantCandidates = ParseDormantCandidates(root, stateAreaAddress, seenUtc,
+                    playerX, playerY, ids)
+            };
             return true;
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException)
         {
             return false;
         }
+    }
+
+    private static IReadOnlyList<RadarMarker> ParseDormantCandidates(JsonElement root,
+        string? stateAreaAddress, DateTime frameSeenUtc, double playerX, double playerY,
+        HashSet<uint> visibleIds)
+    {
+        try { return ParseDormantCandidatesCore(root, stateAreaAddress, frameSeenUtc,
+            playerX, playerY, visibleIds); }
+        catch (Exception exception) when (exception is InvalidOperationException or FormatException)
+        { return []; }
+    }
+
+    private static IReadOnlyList<RadarMarker> ParseDormantCandidatesCore(JsonElement root,
+        string? stateAreaAddress, DateTime frameSeenUtc, double playerX, double playerY,
+        HashSet<uint> visibleIds)
+    {
+        if (stateAreaAddress == null ||
+            !root.TryGetProperty("DormantAreaMap", out var map) || map.ValueKind != JsonValueKind.Object ||
+            !map.TryGetProperty("Status", out var status) || status.GetString() != "candidate_unverified_build" ||
+            !map.TryGetProperty("SeenUtc", out var mapSeenValue) ||
+            !mapSeenValue.TryGetDateTime(out var mapSeenUtc) ||
+            mapSeenUtc.Kind != DateTimeKind.Utc || mapSeenUtc > frameSeenUtc ||
+            frameSeenUtc - mapSeenUtc > TimeSpan.FromSeconds(3) ||
+            !map.TryGetProperty("AreaAddress", out var area) ||
+            area.GetString() != stateAreaAddress ||
+            !map.TryGetProperty("EntityListOffset", out var offsetValue) ||
+            !offsetValue.TryGetInt32(out var offset) ||
+            offset is not (1752 or 1776 or 2808 or 2896) ||
+            !map.TryGetProperty("AwakeCount", out var awakeValue) ||
+            !awakeValue.TryGetInt32(out var awakeCount) || awakeCount < 1 ||
+            !map.TryGetProperty("SleepingCount", out var sleepingValue) ||
+            !sleepingValue.TryGetInt32(out var sleepingCount) || sleepingCount < 1 ||
+            !map.TryGetProperty("LocalPosition", out var local) || local.ValueKind != JsonValueKind.Object ||
+            !TryFinite(local, "WorldX", out var rawX) || !TryFinite(local, "WorldY", out var rawY) ||
+            Math.Abs(rawX - playerX) > 3 || Math.Abs(rawY - playerY) > 3 ||
+            !map.TryGetProperty("NavigationCandidates", out var candidates) ||
+            candidates.ValueKind != JsonValueKind.Array || candidates.GetArrayLength() > 24 ||
+            candidates.GetArrayLength() > sleepingCount)
+            return [];
+        var result = new List<RadarMarker>();
+        var ids = new HashSet<uint>(visibleIds);
+        foreach (var item in candidates.EnumerateArray())
+        {
+            if (!item.TryGetProperty("EntityId", out var idValue) || !idValue.TryGetUInt32(out var id) ||
+                id == 0 || !ids.Add(id) ||
+                !item.TryGetProperty("Path", out var pathValue) || pathValue.GetString() is not string path ||
+                !path.StartsWith("Metadata/", StringComparison.Ordinal) ||
+                Encoding.UTF8.GetByteCount(path) > 256 ||
+                !item.TryGetProperty("Category", out var categoryValue) ||
+                categoryValue.GetString() is not string category ||
+                category is not ("waypoint" or "checkpoint" or "portal" or "transition" or "quest" or "boss") ||
+                !TryFinite(item, "X", out var x) || !TryFinite(item, "Y", out var y))
+                return [];
+            string? label = null;
+            if (item.TryGetProperty("Label", out var labelValue) && labelValue.ValueKind != JsonValueKind.Null)
+            {
+                if (labelValue.ValueKind != JsonValueKind.String) return [];
+                label = labelValue.GetString();
+            }
+            if ((category is "quest" or "boss") != !string.IsNullOrWhiteSpace(label) ||
+                (label != null && Encoding.UTF8.GetByteCount(label) > 96) ||
+                (category == "boss" &&
+                 (path != "Metadata/Monsters/HyenaMonster/Objects/BossRoomMinimapIcon" ||
+                  label != "Rathbreaker"))) return [];
+            result.Add(new RadarMarker(id, category, path, label, null, null, null, x, y));
+        }
+        return result;
     }
 
     private static bool TryFinite(JsonElement element, string name, out double value)
@@ -180,7 +254,7 @@ public sealed class RadarLandmarkCache
     public RadarFrame Apply(RadarFrame frame)
     {
         if (_lastSeenUtc != default && frame.SeenUtc < _lastSeenUtc)
-            return frame with { Markers = [] };
+            return frame with { Markers = [], DormantCandidates = [] };
         if (frame.AreaHash == 0 || frame.AreaAddress == null)
         {
             _landmarks.Clear();
@@ -207,7 +281,8 @@ public sealed class RadarLandmarkCache
                 _landmarks.Remove(_landmarks.Keys.First());
             _landmarks[marker.Id] = marker;
         }
-        var visibleIds = frame.Markers.Select(marker => marker.Id).ToHashSet();
+        var visibleIds = frame.Markers.Concat(frame.DormantCandidates)
+            .Select(marker => marker.Id).ToHashSet();
         return frame with { Markers = frame.Markers.Concat(_landmarks.Values.Where(marker =>
             !visibleIds.Contains(marker.Id))).ToArray() };
     }
