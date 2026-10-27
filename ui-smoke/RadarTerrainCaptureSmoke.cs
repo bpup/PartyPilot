@@ -107,23 +107,22 @@ internal static class RadarTerrainCaptureSmoke
                 {
                     var cellX = (int)Math.Floor(gridX);
                     var cellY = (int)Math.Floor(gridY);
-                    if (capture.Renderable(cellX, cellY) &&
-                        neighbors.Any(delta => cellX + delta.X < 0 || cellY + delta.Y < 0 ||
+                    if (capture.Renderable(cellX, cellY))
+                        expected = neighbors.Any(delta => cellX + delta.X < 0 || cellY + delta.Y < 0 ||
                                 cellX + delta.X >= capture.Width ||
                                 cellY + delta.Y >= capture.Height ||
-                                !capture.Renderable(cellX + delta.X, cellY + delta.Y)))
-                        expected = 224;
+                                !capture.Renderable(cellX + delta.X, cellY + delta.Y)) ? 224 : 38;
                 }
                 if (projected[(y * 64 + x) * 4 + 3] != expected)
                     throw new Exception($"Incremental radar projection changed pixel ({x},{y}).");
             }
             var interior = RadarTerrainRaster.Render(capture, matching, 1, 1, 1);
-            if (interior[3] != 0)
-                throw new Exception("Radar terrain showed visited-style fill with zero background opacity.");
+            if (interior[3] != 38)
+                throw new Exception("Radar terrain lost the faint walkable interior fill.");
             var diagonal = RadarTerrainRaster.Render(capture,
                 matching with { GridX = 1, GridY = 1 }, 1, 1, 1);
-            if (diagonal[3] != 0)
-                throw new Exception("A diagonal blocked cell incorrectly became a wall edge.");
+            if (diagonal[3] != 38)
+                throw new Exception("A diagonal interior cell incorrectly became a wall edge.");
             var autoDirectory = Path.Combine(directory, "auto");
             Directory.CreateDirectory(autoDirectory);
             var catalog = new RadarTerrainCatalog(autoDirectory);
