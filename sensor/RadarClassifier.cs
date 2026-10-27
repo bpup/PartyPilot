@@ -8,6 +8,7 @@ public static class RadarClassifier
     {
         if (string.IsNullOrWhiteSpace(path) ||
             !path.StartsWith("Metadata/", StringComparison.OrdinalIgnoreCase)) return null;
+        if (QuestLabel(path) != null) return "quest";
         if (path.StartsWith("Metadata/Effects/", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("Metadata/Projectiles/", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("Metadata/Items/", StringComparison.OrdinalIgnoreCase)) return null;
@@ -28,7 +29,34 @@ public static class RadarClassifier
     }
 
     public static bool IsNavigation(string category) =>
-        category is "checkpoint" or "waypoint" or "portal" or "transition";
+        category is "checkpoint" or "waypoint" or "portal" or "transition" or "quest";
+
+    // Explicit markers and named objectives observed in the supplied 0.6.17
+    // rules. A path match is a location hint, not proof of active quest state.
+    public static string? QuestLabel(string path)
+    {
+        if (!path.StartsWith("Metadata/", StringComparison.OrdinalIgnoreCase)) return null;
+        if (path.Contains("QuestMarker", StringComparison.OrdinalIgnoreCase) ||
+            path.Contains("/QuestMarkers/", StringComparison.OrdinalIgnoreCase)) return "Quest marker";
+        if (path.StartsWith("Metadata/Effects/", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("Metadata/Projectiles/", StringComparison.OrdinalIgnoreCase)) return null;
+        if (path.Contains("MachinariumGeneratorButton", StringComparison.OrdinalIgnoreCase)) return "Soul Core Generator";
+        if (path.Contains("VaalKeyGemMedium", StringComparison.OrdinalIgnoreCase)) return "Medium Soul Core";
+        if (path.Contains("VaalKeyGem", StringComparison.OrdinalIgnoreCase)) return "Small Soul Core";
+        if (path.Contains("VaalSoulGem", StringComparison.OrdinalIgnoreCase)) return "Large Soul Core";
+        if (path.Contains("TheRustKingInert", StringComparison.OrdinalIgnoreCase)) return "Obelisk of Rust";
+        if (path.Contains("BookOfSpecialisation", StringComparison.OrdinalIgnoreCase)) return "Book of Specialisation";
+        if (path.Contains("SacrificialHeart", StringComparison.OrdinalIgnoreCase)) return "Sacrificial Heart";
+        if (path.Contains("MistShroudedTome", StringComparison.OrdinalIgnoreCase)) return "Mist-shrouded Tome";
+        if (path.Contains("TattooOfHinekora", StringComparison.OrdinalIgnoreCase)) return "Tattoo of Hinekora";
+        if (path.Contains("WardensLedger", StringComparison.OrdinalIgnoreCase)) return "Warden's Ledger";
+        if (path.Contains("GembloomSkull", StringComparison.OrdinalIgnoreCase)) return "Gembloom Skull (Spirit)";
+        if (path.Contains("GemrotSkull", StringComparison.OrdinalIgnoreCase)) return "Gemrot Skull (Spirit)";
+        if (path.Contains("UnaLute", StringComparison.OrdinalIgnoreCase)) return "Una's Lute (Skill Points)";
+        if (path.Contains("SuicideNote", StringComparison.OrdinalIgnoreCase)) return "Final Letter (Skill Points)";
+        if (path.Contains("Crowbell", StringComparison.OrdinalIgnoreCase)) return "The Crowbell (Skill Points)";
+        return null;
+    }
 
     public static bool IsPlayerPath(string path) =>
         path.StartsWith("Metadata/Characters/", StringComparison.OrdinalIgnoreCase);

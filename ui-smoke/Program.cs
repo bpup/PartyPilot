@@ -356,6 +356,15 @@ if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
     oldLootFrame is not { } parsedOldLoot ||
     parsedOldLoot.Markers.Last().Stack != null || parsedOldLoot.Markers.Last().Rarity != null)
     throw new Exception("Radar rejected loot without optional metadata.");
+var questRadarText = radarText.Replace(
+    "\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\"",
+    "\"Category\":\"quest\",\"Path\":\"Metadata/Effects/QuestMarker\",\"Label\":\"Quest marker\"");
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(questRadarText), 123, DateTime.UtcNow, out var questRadarFrame) ||
+    questRadarFrame?.Markers[1].Category != "quest" ||
+    RadarOverlayWindow.DisplayLabel(questRadarFrame.Markers[1]) != "Quest marker" ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        questRadarText.Replace("\"Label\":\"Quest marker\"", "\"Label\":null")), 123, DateTime.UtcNow, out _))
+    throw new Exception("Radar quest marker parsing or display failed.");
 var projected = RadarProjection.Project(radarFrame.PlayerX, radarFrame.PlayerY,
     radarFrame.Markers[0], 400, 300, radarScale);
 if (projected != (406d, 296d)) throw new Exception("Radar marker projection changed unexpectedly.");

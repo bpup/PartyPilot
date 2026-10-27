@@ -223,6 +223,10 @@ TestSkillBindTable();
 SkillBindSourceScannerTests.Run();
 Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
     RadarClassifier.Category("Metadata/MiscellaneousObjects/Waypoint") == "waypoint" &&
+    RadarClassifier.Category("Metadata/Effects/QuestMarker") == "quest" &&
+    RadarClassifier.Category("Metadata/Terrain/Gallows/Act3/Objects/MachinariumGeneratorButton") == "quest" &&
+    RadarClassifier.QuestLabel("Metadata/Terrain/Gallows/Act3/Objects/MachinariumGeneratorButton") == "Soul Core Generator" &&
+    RadarClassifier.Category("Metadata/Effects/PermanentEffect") == null &&
     RadarClassifier.Category("Metadata/Effects/PortalFlash") == null &&
     RadarClassifier.Category("Metadata/Items/ChestPiece") == null &&
     RadarClassifier.Category("Metadata/Monsters/PortalGuardian") == "monster" &&
@@ -235,7 +239,7 @@ Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
     RadarClassifier.Category("Metadata/Characters/Player") == null &&
     RadarClassifier.IsWorldItemWrapperPath("Metadata/MiscellaneousObjects/WorldItem@123") &&
     !RadarClassifier.IsWorldItemWrapperPath("Metadata/Items/Weapons/Sword") &&
-    RadarClassifier.IsNavigation("waypoint") && !RadarClassifier.IsNavigation("monster"),
+    RadarClassifier.IsNavigation("waypoint") && RadarClassifier.IsNavigation("quest") && !RadarClassifier.IsNavigation("monster"),
     "Path-only radar categories admitted unsupported entities or lost navigation markers.");
 
 void TestSkillBindTable()

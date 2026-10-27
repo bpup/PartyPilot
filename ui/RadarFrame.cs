@@ -81,7 +81,10 @@ public static class RadarFrames
                      Encoding.UTF8.GetByteCount(itemPath) > 256 ||
                      stack is < 1 or > 999_999 ||
                      (rarity != null && rarity is not ("normal" or "magic" or "rare" or "unique")))) return false;
-                if (category is not ("player" or "loot") &&
+                if (category == "quest" &&
+                    (string.IsNullOrWhiteSpace(label) || Encoding.UTF8.GetByteCount(label) > 96 ||
+                     itemPath != null || stack != null || rarity != null)) return false;
+                if (category is not ("player" or "loot" or "quest") &&
                     (label != null || itemPath != null || stack != null || rarity != null)) return false;
                 markers.Add(new RadarMarker(id, category, path, label, itemPath, stack, rarity, x, y));
             }
@@ -101,7 +104,7 @@ public static class RadarFrames
     }
 
     private static bool KnownCategory(string value) => value is
-        "monster" or "checkpoint" or "waypoint" or "portal" or "transition" or "npc" or "chest" or "shrine" or "player" or "league" or "loot";
+        "monster" or "checkpoint" or "waypoint" or "portal" or "transition" or "npc" or "chest" or "shrine" or "player" or "league" or "loot" or "quest";
 
     private static bool WorldItemWrapperPath(string path)
     {

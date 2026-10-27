@@ -872,7 +872,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 EntityId = entity.Id,
                 Category = category,
                 Path = path,
-                Label = lootName ?? (isPlayer ? playerName : null),
+                Label = lootName ?? (isPlayer ? playerName : category == "quest" ? RadarClassifier.QuestLabel(path) : null),
                 ItemPath = itemPath,
                 Stack = lootStack,
                 Rarity = lootRarity,
