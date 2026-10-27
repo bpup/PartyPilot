@@ -316,6 +316,9 @@ func (e *Engine) ObserveArea(signal arealog.Signal) bool {
 		(signal.ObservedAt.After(previous.ObservedAt) ||
 			!strings.EqualFold(previous.AreaID, signal.AreaID) || previous.Seed != signal.Seed) {
 		e.coordinator.ResetFollow()
+		// A new log generation permits a fresh ordered vector even if the game
+		// reuses the same area address and hash. In-generation reorder still stops.
+		delete(e.orderedIdentities, e.slotToPID[signal.Slot])
 		delete(e.terrainStable, signal.Slot)
 		delete(e.vitals, signal.Slot)
 		delete(e.strictVitals, signal.Slot)

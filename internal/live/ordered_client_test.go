@@ -281,6 +281,28 @@ func TestExperimentalOrderedRolesStopOnSameAreaReorder(t *testing.T) {
 	if !engine.ObserveOrderedClient(swapped) {
 		t.Fatal("new area instance could not establish its own ordered addresses")
 	}
+	if !engine.ObserveClientArea(101, arealog.Signal{AreaID: "G2_4", Seed: 789,
+		ObservedAt: now.Add(6 * time.Millisecond), Origin: "live"}) {
+		t.Fatal("new log generation with a recycled area address was rejected")
+	}
+	reusedArea := frame
+	reusedArea.SeenUTC = now.Add(7 * time.Millisecond)
+	reusedArea.ReceivedAt = reusedArea.SeenUTC
+	reusedArea.TickMS += 7
+	reusedArea.AreaHash = swapped.AreaHash
+	reusedArea.AreaInstanceAddress = swapped.AreaInstanceAddress
+	if !engine.ObserveOrderedClient(reusedArea) ||
+		engine.Step(reusedArea.SeenUTC)[2].State != follow.CatchingUp {
+		t.Fatal("new generation could not resume following at a reused area address")
+	}
+	reorderedAgain := swapped
+	reorderedAgain.SeenUTC = now.Add(8 * time.Millisecond)
+	reorderedAgain.ReceivedAt = reorderedAgain.SeenUTC
+	reorderedAgain.TickMS += 7
+	if engine.ObserveOrderedClient(reorderedAgain) ||
+		engine.Step(reorderedAgain.SeenUTC)[2].State != follow.Waiting {
+		t.Fatal("new generation allowed same-generation role reorder to drive movement")
+	}
 }
 
 func TestUnverifiedSlotCandidateCannotBePromotedByReliableFlag(t *testing.T) {
