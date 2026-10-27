@@ -515,6 +515,8 @@ var idleMirror = LiveFollowFrame.Parse(
     "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":0,\"y\":0,\"mirror_idle\":true}}}", 2, 3);
 var potion = LiveFollowFrame.Parse(
     "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}},\"flasks\":[{\"player\":2,\"resource\":\"life\",\"percent\":30,\"reason\":\"threshold\"}]}", 2, 3);
+var supportPotion = LiveFollowFrame.Parse(
+    "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}},\"flasks\":[{\"player\":2,\"resource\":\"life\",\"percent\":40,\"reason\":\"support\"}]}", 2, 3);
 if (!movement.Command.Contains("\"slot\":3") || movement.Status != "following" ||
     !sprintMovement.Command.Contains("\"sprint_down\":true") ||
     !waiting.Command.Contains("\"slot\":3") || waiting.Status != "waiting" ||
@@ -523,7 +525,8 @@ if (!movement.Command.Contains("\"slot\":3") || movement.Status != "following" |
     !mirrored.Command.Contains("\"mirror_movement\":true") || !mirrored.Command.Contains("\"slot\":3") ||
     !suppressedB.Command.Contains("\"suppress_mirrored_b\":true") ||
     !idleMirror.Command.Contains("\"mirror_idle\":true") ||
-    potion.Flasks.Count != 1 || potion.Flasks[0] != new FlaskBridgeRequest(2, "life"))
+    potion.Flasks.Count != 1 || potion.Flasks[0] != new FlaskBridgeRequest(2, "life") ||
+    supportPotion.Flasks.Count != 1 || supportPotion.Flasks[0] != new FlaskBridgeRequest(2, "life"))
     throw new Exception("Live follow did not map P2 to the second client's system pad.");
 var splitTopology = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-split");
 var switchedMain = LiveFollowFrame.ParseDynamic(

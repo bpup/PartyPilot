@@ -42,6 +42,24 @@ func TestSourcesAndRoster(t *testing.T) {
 	}
 }
 
+func TestFlaskSupportFileNeedsExplicitBinding(t *testing.T) {
+	bindings, err := loadFlaskSupportBindings("../../testdata/flask-support-live.json")
+	if err != nil || len(bindings) != 1 || bindings[0].DrinkerPlayer != 2 ||
+		bindings[0].Monitor.TargetPlayer != 1 {
+		t.Fatalf("support fixture did not load: %+v %v", bindings, err)
+	}
+	path := filepath.Join(t.TempDir(), "support.json")
+	for _, contents := range []string{"{}", "{\"bindings\":[],\"unknown\":true}",
+		"{\"bindings\":[]}{}"} {
+		if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadFlaskSupportBindings(path); err == nil {
+			t.Fatalf("invalid support file accepted: %s", contents)
+		}
+	}
+}
+
 func TestClassicCollisionDodgeRequiresAllBoundTerrain(t *testing.T) {
 	roster := map[int]int{1: 101, 2: 202}
 	if err := validateClassicCollisionBindings(false, roster, nil); err != nil {

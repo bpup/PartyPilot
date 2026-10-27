@@ -34,6 +34,30 @@ type stopDistances map[int]float64
 
 type roleBindings []live.RoleBinding
 
+func loadFlaskSupportBindings(path string) ([]live.FlaskSupportBinding, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	var document struct {
+		Bindings []live.FlaskSupportBinding `json:"bindings"`
+	}
+	decoder := json.NewDecoder(file)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&document); err != nil {
+		return nil, err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return nil, errors.New("support file has trailing data")
+	}
+	if len(document.Bindings) == 0 {
+		return nil, errors.New("support file needs at least one binding")
+	}
+	return document.Bindings, nil
+}
+
 func parseMirrorBPlayers(value string, roster map[int]int) (map[int]bool, error) {
 	allowed := make(map[int]bool)
 	if value == "none" {
@@ -458,6 +482,7 @@ func main() {
 	classicCollisionDodge := flag.Bool("classic-collision-dodge", false,
 		"opt into terrain-backed classic sprint collision recovery")
 	autoFlask := flag.Bool("auto-flask", false, "enable life and mana flask decisions for explicitly bound clients")
+	flaskSupportFile := flag.String("flask-support-file", "", "explicit Drinker support rules in a JSON file; requires -auto-flask")
 	allowFollowPause := flag.Bool("allow-follow-pause", false, "accept explicit pause/resume controls on stdin")
 	acceptMainInput := flag.Bool("accept-main-input", false, "accept bound main-controller samples without enabling mirror output")
 	mirrorAttackDirection := flag.Bool("mirror-attack-direction", false,
@@ -481,6 +506,10 @@ func main() {
 	flag.Var(&targets, "follow-target", "SLOT=TARGET; 0 means Current MAIN")
 	flag.Var(&playerStops, "stop-player", "SLOT=VALUE; individual stop distance from 0 to 200")
 	flag.Parse()
+	if *flaskSupportFile != "" && !*autoFlask {
+		fmt.Fprintln(os.Stderr, "flask support requires -auto-flask")
+		os.Exit(2)
+	}
 	if *mirrorAttackDirection && !*acceptMainInput {
 		fmt.Fprintln(os.Stderr, "attack direction requires main-controller input")
 		os.Exit(2)
@@ -605,6 +634,17 @@ func main() {
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
+		}
+		if *flaskSupportFile != "" {
+			bindingRules, readErr := loadFlaskSupportBindings(*flaskSupportFile)
+			if readErr != nil {
+				fmt.Fprintln(os.Stderr, readErr)
+				os.Exit(2)
+			}
+			if err := flaskSession.ConfigureSupport(bindingRules); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
 		}
 	}
 	if *autoFlask || *lastFocusedLeads || *allowFollowPause || *acceptMainInput {

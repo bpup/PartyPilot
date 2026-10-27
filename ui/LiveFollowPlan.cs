@@ -156,7 +156,7 @@ public static class LiveFollowFrame
                     !item.TryGetProperty("percent", out var percentValue) || !percentValue.TryGetDouble(out var percent) ||
                     !double.IsFinite(percent) || percent is < 0 or > 100 ||
                     !item.TryGetProperty("reason", out var flaskReasonValue) || flaskReasonValue.ValueKind != JsonValueKind.String ||
-                    flaskReasonValue.GetString() is not ("threshold" or "emergency" or "sustained" or "ward_break"))
+                    flaskReasonValue.GetString() is not ("threshold" or "emergency" or "sustained" or "ward_break" or "support"))
                     throw new InvalidDataException("Live follow returned an invalid flask request.");
                 var resource = resourceValue.GetString()!;
                 if (flasks.Any(existing => existing.Player == player && existing.Resource == resource))

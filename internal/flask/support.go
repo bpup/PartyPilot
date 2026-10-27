@@ -26,6 +26,21 @@ type supportKey struct {
 	flask   string
 }
 
+func ValidateSupportMonitor(monitor SupportMonitor) error {
+	if monitor.TargetPlayer < 1 || monitor.TargetPlayer > 6 ||
+		math.IsNaN(monitor.TriggerPercent) || math.IsInf(monitor.TriggerPercent, 0) ||
+		monitor.TriggerPercent < 1 || monitor.TriggerPercent > 99 {
+		return errors.New("invalid support target or threshold")
+	}
+	if _, ok := canonicalWatch(monitor.MonitorResource); !ok {
+		return errors.New("unknown support monitor resource")
+	}
+	if _, ok := canonicalFlask(monitor.FlaskResource); !ok {
+		return errors.New("unknown support flask resource")
+	}
+	return nil
+}
+
 // StepSupport returns decisions for the drinker's flask while observing a
 // different player. It shares the drinker's life/mana cooldowns with Step.
 func (engine *Engine) StepSupport(drinker int, now time.Time, targetVitals Vitals,
@@ -33,10 +48,11 @@ func (engine *Engine) StepSupport(drinker int, now time.Time, targetVitals Vital
 	if drinker < 1 || drinker > 6 || monitor.TargetPlayer < 1 || monitor.TargetPlayer > 6 ||
 		now.IsZero() || !validRule(rules.Life) || !validRule(rules.Mana) ||
 		!validPool(targetVitals.Life) || !validPool(targetVitals.Mana) ||
-		!validPool(targetVitals.EnergyShield) ||
-		math.IsNaN(monitor.TriggerPercent) || math.IsInf(monitor.TriggerPercent, 0) ||
-		monitor.TriggerPercent < 1 || monitor.TriggerPercent > 99 {
+		!validPool(targetVitals.EnergyShield) {
 		return nil, errors.New("invalid support player, time, rule, or vitals")
+	}
+	if err := ValidateSupportMonitor(monitor); err != nil {
+		return nil, err
 	}
 	watch, ok := canonicalWatch(monitor.MonitorResource)
 	if !ok {

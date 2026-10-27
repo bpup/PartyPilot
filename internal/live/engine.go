@@ -546,6 +546,17 @@ func (e *Engine) flaskActionReady(slot int, now time.Time) bool {
 	return true
 }
 
+func (e *Engine) flaskSupportPairReady(drinker, target int, now time.Time) bool {
+	if drinker == target || !e.flaskActionReady(drinker, now) ||
+		!e.flaskActionReady(target, now) {
+		return false
+	}
+	drinkerArea := e.areas[drinker]
+	targetArea := e.areas[target]
+	return strings.EqualFold(drinkerArea.AreaID, targetArea.AreaID) &&
+		drinkerArea.Seed == targetArea.Seed
+}
+
 // orderedVitalActionReady requires a fresh, area-bound motion and resource
 // observation for every local role before a slow frame can request input.
 func (e *Engine) orderedVitalActionReady(processID int, now time.Time) bool {
