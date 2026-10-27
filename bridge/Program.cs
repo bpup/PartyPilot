@@ -691,6 +691,18 @@ try
                     router.PulseFlask(flaskCommand.Slot, flaskCommand.Resource, DateTime.UtcNow);
                     continue;
                 }
+                if (BridgeProtocol.TryParseRecoveryAction(line, out var recoveryAction))
+                {
+                    if (!autoFlaskEnabled || pairingGate?.Phase != ProtectedPairingPhase.Complete ||
+                        !outputs.ContainsKey(recoveryAction.Slot))
+                    {
+                        router.NeutralAll();
+                        Console.Error.WriteLine("Custom recovery action is not armed for this virtual pad.");
+                        return 1;
+                    }
+                    router.PulseRecoveryAction(recoveryAction.Slot, recoveryAction.Input, DateTime.UtcNow);
+                    continue;
+                }
                 if (BridgeProtocol.TryParseCombat(line, out var combatControl))
                 {
                     if (!combatEnabled || pairingGate?.Phase != ProtectedPairingPhase.Complete ||

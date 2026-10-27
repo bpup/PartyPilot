@@ -596,6 +596,15 @@ internal sealed class BridgeSession : IAsyncDisposable
         await WriteCommandAsync(JsonSerializer.Serialize(new { type = "flask", slot, resource }));
     }
 
+    internal async Task SendRecoveryActionAsync(int slot, string input)
+    {
+        if (!AutoFlaskEnabled || !_allSlots.Contains(slot) ||
+            input is not ("X" or "Y" or "LB" or "RB" or "LT" or "RT" or "D-pad Up" or "D-pad Down") ||
+            _stopping || _process.HasExited)
+            throw new InvalidOperationException("Custom recovery input is unavailable for this pad.");
+        await WriteCommandAsync(JsonSerializer.Serialize(new { type = "recovery_action", slot, input }));
+    }
+
     internal Task BeginAutoPartyAsync(CancellationToken token) =>
         SendAutoPartyControlAsync("auto_party_begin", 0, 0, 0, token);
 

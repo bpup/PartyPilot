@@ -140,6 +140,12 @@ if (!BridgeProtocol.TryParseFlask("{\"type\":\"flask\",\"slot\":3,\"resource\":\
     BridgeProtocol.TryParseFlask("{\"type\":\"flask\",\"slot\":7,\"resource\":\"life\"}", out _) ||
     BridgeProtocol.TryParseFlask("{\"type\":\"flask\",\"slot\":3,\"resource\":\"skill\"}", out _))
     throw new Exception("Automatic flask command validation failed.");
+if (!BridgeProtocol.TryParseRecoveryAction("{\"type\":\"recovery_action\",\"slot\":3,\"input\":\"X\"}", out var recoveryCommand) ||
+    recoveryCommand != new RecoveryActionCommand(3, "X") ||
+    BridgeProtocol.TryParseRecoveryAction("{\"type\":\"recovery_action\",\"slot\":3,\"input\":\"A\"}", out _) ||
+    BridgeProtocol.TryParseRecoveryAction("{\"type\":\"recovery_action\",\"slot\":7,\"input\":\"X\"}", out _) ||
+    BridgeProtocol.TryParseRecoveryAction("{\"type\":\"recovery_action\",\"slot\":3,\"input\":\"D-pad Left\"}", out _))
+    throw new Exception("Custom recovery input command validation failed.");
 if (!BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_begin\"}", out var beginParty) ||
     beginParty.Type != "auto_party_begin" ||
     !BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":5,\"buttons\":4096,\"hold_ms\":80}", out var pulseParty) ||
@@ -461,6 +467,48 @@ if (privateFlaskPad.Report != default ||
 privateFlaskRouter.PhysicalDisconnected();
 if (privateFlaskPad.Report != default)
     throw new Exception("P5 private flask output survived disconnect.");
+var recoveryPad = new FakePad();
+var recoveryRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
+    { [1] = new FakePad(), [3] = recoveryPad });
+if (!recoveryRouter.ConfigurePhysical(1, focusPads: new Dictionary<int, int>
+        { [1] = 1, [2] = 3 }))
+    throw new Exception("Custom recovery test focus mapping was rejected.");
+recoveryRouter.SetPhysical(default, now.AddSeconds(5));
+foreach (var (input, button, leftTrigger, rightTrigger) in new (string, ushort, byte, byte)[]
+{
+    ("X", 0x4000, 0, 0), ("Y", 0x8000, 0, 0),
+    ("LB", 0x0100, 0, 0), ("RB", 0x0200, 0, 0),
+    ("LT", 0, 255, 0), ("RT", 0, 0, 255),
+    ("D-pad Up", 0x0001, 0, 0), ("D-pad Down", 0x0002, 0, 0)
+})
+{
+    var pulseAt = now.AddSeconds(5).AddMilliseconds(200 * (Array.IndexOf(
+        new[] { "X", "Y", "LB", "RB", "LT", "RT", "D-pad Up", "D-pad Down" }, input) + 1));
+    if (!recoveryRouter.PulseRecoveryAction(3, input, pulseAt) ||
+        recoveryPad.Report.Buttons != button ||
+        recoveryPad.Report.LeftTrigger != leftTrigger ||
+        recoveryPad.Report.RightTrigger != rightTrigger)
+        throw new Exception($"Custom recovery input {input} did not reach its assigned pad.");
+    recoveryRouter.Tick(pulseAt.AddMilliseconds(120));
+    if (recoveryPad.Report != default)
+        throw new Exception($"Custom recovery input {input} did not release after 120 ms.");
+}
+if (recoveryRouter.PulseRecoveryAction(3, "A", now.AddSeconds(7)) ||
+    recoveryRouter.PulseRecoveryAction(4, "X", now.AddSeconds(7)))
+    throw new Exception("Unsupported custom recovery input or unbound pad was accepted.");
+if (!recoveryRouter.PulseRecoveryAction(3, "X", now.AddSeconds(7)))
+    throw new Exception("Custom recovery pulse setup failed.");
+recoveryRouter.SetMenuGuardActive(true);
+if (recoveryPad.Report != default ||
+    recoveryRouter.PulseRecoveryAction(3, "X", now.AddSeconds(7).AddMilliseconds(20)))
+    throw new Exception("Custom recovery input escaped the menu guard.");
+recoveryRouter.SetMenuGuardActive(false);
+if (recoveryPad.Report != default)
+    throw new Exception("Custom recovery input resumed after menu dismissal.");
+recoveryRouter.PhysicalDisconnected();
+if (recoveryPad.Report != default ||
+    recoveryRouter.PulseRecoveryAction(3, "X", now.AddSeconds(8)))
+    throw new Exception("Custom recovery input survived physical disconnect.");
 if (!router.ApplyLine("{\"type\":\"focus\",\"slot\":3}", now) ||
     pad3.Report.Buttons != 0x1000 || pad2.Report.Buttons != 0)
     throw new Exception("Focus did not move physical input.");

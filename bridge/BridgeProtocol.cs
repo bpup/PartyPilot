@@ -8,6 +8,7 @@ internal readonly record struct BridgeCommand(int Slot, short X, short Y, bool A
     bool CatchUpPriority = false);
 internal readonly record struct PairingControl(string Type, int Slot, int Pid, long WindowHandle);
 internal readonly record struct FlaskCommand(int Slot, string Resource);
+internal readonly record struct RecoveryActionCommand(int Slot, string Input);
 internal readonly record struct AutoPartyControl(string Type, int Slot, ushort Buttons, int HoldMilliseconds);
 internal readonly record struct CombatControl(string Type, int Slot, PadReport Pulse, int HoldMilliseconds);
 internal readonly record struct HybridKeyControl(int VirtualKey, bool Down);
@@ -209,6 +210,32 @@ internal static class BridgeProtocol
                 resource.GetString() is not ("life" or "mana"))
                 return false;
             command = new FlaskCommand(value, resource.GetString()!);
+            return true;
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    public static bool IsRecoveryInput(string? input) => input is
+        "X" or "Y" or "LB" or "RB" or "LT" or "RT" or "D-pad Up" or "D-pad Down";
+
+    public static bool TryParseRecoveryAction(string line, out RecoveryActionCommand command)
+    {
+        command = default;
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String ||
+                type.GetString() != "recovery_action" ||
+                !root.TryGetProperty("slot", out var slot) || !slot.TryGetInt32(out var value) ||
+                value is < 1 or > 6 ||
+                !root.TryGetProperty("input", out var input) || input.ValueKind != JsonValueKind.String ||
+                !IsRecoveryInput(input.GetString())) return false;
+            command = new RecoveryActionCommand(value, input.GetString()!);
             return true;
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException)
