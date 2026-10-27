@@ -61,8 +61,15 @@ public sealed class MainWindow : Window
     private readonly ComboBox _autoPartyKey = new();
     private readonly Button _saveAutoPartyKey = new();
     private readonly TextBlock _autoPartyKeyStatus = new();
-    private readonly AutoPartyKeyPreferenceStore _autoPartyKeyPreferences = new();
+    private readonly GameShortcutPreferenceStore _autoPartyKeyPreferences =
+        new("F8", "auto-party-key.json");
     private string _autoPartyKeyValue = "F8";
+    private readonly ComboBox _followPauseKey = new();
+    private readonly Button _saveFollowPauseKey = new();
+    private readonly TextBlock _followPauseKeyStatus = new();
+    private readonly GameShortcutPreferenceStore _followPauseKeyPreferences =
+        new("F7", "follow-pause-key.json");
+    private string _followPauseKeyValue = "F7";
     private readonly Button _watchPartyLog = new();
     private readonly TextBlock _autoPartyStatus = new();
     private readonly TextBlock _status = new();
@@ -152,8 +159,9 @@ public sealed class MainWindow : Window
     private CancellationTokenSource? _autoLoginFillCancellation;
     private PartyLeaveLogMonitor? _partyLogMonitor;
     private bool _autoPartyRunning;
-    private AutoPartyKeyboardHook? _autoPartyHotkey;
+    private GameKeyboardShortcutHook? _gameHotkeys;
     private bool _restoringAutoPartyKey;
+    private bool _restoringFollowPauseKey;
     private bool _closing;
     private string _loginStatus = "waiting";
     private bool _busy;
@@ -208,6 +216,18 @@ public sealed class MainWindow : Window
             ? $"自动组队快捷键：{_autoPartyKeyValue}；仅在已绑定游戏窗口前台生效。"
             : "快捷键设置文件无效或无法读取；请选择按键重新保存。";
         _autoPartyKey.SelectionChanged += (_, _) => SaveAutoPartyKeySelection();
+        var followKeyPreference = _followPauseKeyPreferences.Load();
+        _followPauseKeyValue = followKeyPreference.Success ? followKeyPreference.Key : "None";
+        if (_followPauseKeyValue != "None" && _followPauseKeyValue == _autoPartyKeyValue)
+        {
+            _followPauseKeyValue = "None";
+            _followPauseKeyStatus.Text = "暂停键与自动组队键冲突；已禁用暂停快捷键，请重新选择并保存。";
+        }
+        else _followPauseKeyStatus.Text = followKeyPreference.Success
+            ? $"暂停跟随快捷键：{_followPauseKeyValue}；仅在已绑定游戏窗口前台生效。"
+            : "暂停键设置文件无效或无法读取；请选择按键重新保存。";
+        _followPauseKey.SelectedItem = _followPauseKeyValue;
+        _followPauseKey.SelectionChanged += (_, _) => SaveFollowPauseKeySelection();
         _playerCount.SelectionChanged += (_, _) => UpdateTopologyOptions();
         _topologyVariant.SelectionChanged += (_, _) => UpdateClientRows();
         _applyLayout.IsCheckedChanged += (_, _) => UpdateLayoutControls();
@@ -217,23 +237,31 @@ public sealed class MainWindow : Window
         Opened += (_, _) =>
         {
             if (!OperatingSystem.IsWindows()) return;
-            _autoPartyHotkey ??= new AutoPartyKeyboardHook(
+            _gameHotkeys ??= new GameKeyboardShortcutHook(
                 () => _launchedClients.Any(PoeChatInviteService.IsExactForeground),
                 () => Dispatcher.UIThread.Post(() =>
                 {
                     if (_closing) return;
                     if (_autoPartyRunning) _autoPartyCancellation?.Cancel();
                     else if (_runAutoParty.IsEnabled) _ = RunAutoPartyAsync();
+                }),
+                () => Dispatcher.UIThread.Post(() =>
+                {
+                    if (!_closing) ToggleFollowPause();
                 }));
-            _autoPartyHotkey.SetKey(AutoPartyKeyBinding.VirtualKey(_autoPartyKeyValue));
-            if (!_autoPartyHotkey.Start())
+            _gameHotkeys.SetKeys(AutoPartyKeyBinding.VirtualKey(_autoPartyKeyValue),
+                AutoPartyKeyBinding.VirtualKey(_followPauseKeyValue));
+            if (!_gameHotkeys.Start())
+            {
                 _autoPartyKeyStatus.Text = "快捷键监听未能启用；仍可使用自动组队按钮。";
+                _followPauseKeyStatus.Text = "快捷键监听未能启用；仍可使用暂停跟随按钮。";
+            }
         };
         Closed += async (_, _) =>
         {
             NamePrivacy.Changed -= UpdateNamePrivacy;
             _closing = true;
-            _autoPartyHotkey?.Dispose();
+            _gameHotkeys?.Dispose();
             await StopAllResourcesAsync();
             await StopRadarAsync();
             StopPrivacy();
@@ -691,6 +719,17 @@ public sealed class MainWindow : Window
         _followStopPreferenceStatus.Foreground = MutedBrush;
         _followStopPreferenceStatus.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(_followStopPreferenceStatus);
+        panel.Children.Add(Label("暂停/恢复跟随快捷键（目标版默认 F7；None 关闭）", 12, MutedBrush));
+        _followPauseKey.ItemsSource = AutoPartyKeyBinding.Options;
+        _followPauseKey.Width = 190;
+        _followPauseKey.HorizontalAlignment = HorizontalAlignment.Left;
+        panel.Children.Add(_followPauseKey);
+        _saveFollowPauseKey.Content = "保存暂停快捷键";
+        _saveFollowPauseKey.Click += (_, _) => SaveFollowPauseKeySelection(force: true);
+        panel.Children.Add(_saveFollowPauseKey);
+        _followPauseKeyStatus.Foreground = MutedBrush;
+        _followPauseKeyStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_followPauseKeyStatus);
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
         _startFollow.Content = "开始跟随";
         _startFollow.Click += async (_, _) => await StartFollowAsync();
@@ -1521,6 +1560,14 @@ public sealed class MainWindow : Window
     {
         if (_restoringAutoPartyKey || _autoPartyKey.SelectedItem is not string selected ||
             selected == _autoPartyKeyValue && !force) return;
+        if (selected != "None" && selected == _followPauseKeyValue)
+        {
+            _autoPartyKeyStatus.Text = "该按键已用于暂停跟随；请选择不同按键。";
+            _restoringAutoPartyKey = true;
+            try { _autoPartyKey.SelectedItem = _autoPartyKeyValue; }
+            finally { _restoringAutoPartyKey = false; }
+            return;
+        }
         if (!_autoPartyKeyPreferences.Save(selected))
         {
             _autoPartyKeyStatus.Text = "快捷键保存失败；已恢复上一个按键。";
@@ -1530,13 +1577,45 @@ public sealed class MainWindow : Window
             return;
         }
         _autoPartyKeyValue = selected;
-        _autoPartyHotkey?.SetKey(AutoPartyKeyBinding.VirtualKey(selected));
+        _gameHotkeys?.SetKeys(AutoPartyKeyBinding.VirtualKey(selected),
+            AutoPartyKeyBinding.VirtualKey(_followPauseKeyValue));
         _autoPartyKeyStatus.Text = OperatingSystem.IsWindows() &&
-            _autoPartyHotkey is { IsStarted: false }
+            _gameHotkeys is { IsStarted: false }
             ? "快捷键已保存，但键盘监听未能启用；仍可使用自动组队按钮。"
             : selected == "None"
             ? "自动组队快捷键已关闭。"
             : $"自动组队快捷键：{selected}；仅在已绑定游戏窗口前台生效。";
+    }
+
+    private void SaveFollowPauseKeySelection(bool force = false)
+    {
+        if (_restoringFollowPauseKey || _followPauseKey.SelectedItem is not string selected ||
+            selected == _followPauseKeyValue && !force) return;
+        if (selected != "None" && selected == _autoPartyKeyValue)
+        {
+            _followPauseKeyStatus.Text = "该按键已用于自动组队；请选择不同按键。";
+            _restoringFollowPauseKey = true;
+            try { _followPauseKey.SelectedItem = _followPauseKeyValue; }
+            finally { _restoringFollowPauseKey = false; }
+            return;
+        }
+        if (!_followPauseKeyPreferences.Save(selected))
+        {
+            _followPauseKeyStatus.Text = "暂停快捷键保存失败；已恢复上一个按键。";
+            _restoringFollowPauseKey = true;
+            try { _followPauseKey.SelectedItem = _followPauseKeyValue; }
+            finally { _restoringFollowPauseKey = false; }
+            return;
+        }
+        _followPauseKeyValue = selected;
+        _gameHotkeys?.SetKeys(AutoPartyKeyBinding.VirtualKey(_autoPartyKeyValue),
+            AutoPartyKeyBinding.VirtualKey(selected));
+        _followPauseKeyStatus.Text = OperatingSystem.IsWindows() &&
+            _gameHotkeys is { IsStarted: false }
+            ? "暂停键已保存，但键盘监听未能启用；仍可使用暂停跟随按钮。"
+            : selected == "None"
+                ? "暂停跟随快捷键已关闭。"
+                : $"暂停跟随快捷键：{selected}；仅在已绑定游戏窗口前台生效。";
     }
 
     private void UpdateAutoPartyControls()
@@ -2119,7 +2198,11 @@ public sealed class MainWindow : Window
 
     private void ToggleFollowPause()
     {
-        if (_follow is not { } session || _followStopping) return;
+        if (_follow is not { } session || _followStopping)
+        {
+            _followStatus.Text = "实时跟随尚未运行；请先完成配对并开始跟随。";
+            return;
+        }
         try
         {
             session.SetPaused(!session.Paused);

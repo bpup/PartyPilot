@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace PartyPilot.Desktop;
 
 // A low-level hook avoids taking the chosen key from unrelated applications.
-internal sealed class AutoPartyKeyboardHook : IDisposable
+internal sealed class GameKeyboardShortcutHook : IDisposable
 {
     private const int HookKeyboardLowLevel = 13;
     private const int KeyDown = 0x100;
@@ -11,17 +11,22 @@ internal sealed class AutoPartyKeyboardHook : IDisposable
     private const int SysKeyDown = 0x104;
     private const int SysKeyUp = 0x105;
     private readonly Func<bool> _gameForeground;
-    private readonly Action _pressed;
+    private readonly Action _autoPartyPressed;
+    private readonly Action _followPausePressed;
     private readonly HookProcedure _procedure;
-    private readonly AutoPartyHotkeyGate _gate = new();
-    private int _virtualKey = 0x77;
+    private readonly AutoPartyHotkeyGate _autoPartyGate = new();
+    private readonly AutoPartyHotkeyGate _followPauseGate = new();
+    private int _autoPartyKey = 0x77;
+    private int _followPauseKey = 0x76;
     private nint _handle;
     internal bool IsStarted => _handle != 0;
 
-    internal AutoPartyKeyboardHook(Func<bool> gameForeground, Action pressed)
+    internal GameKeyboardShortcutHook(Func<bool> gameForeground,
+        Action autoPartyPressed, Action followPausePressed)
     {
         _gameForeground = gameForeground;
-        _pressed = pressed;
+        _autoPartyPressed = autoPartyPressed;
+        _followPausePressed = followPausePressed;
         _procedure = Callback;
     }
 
@@ -34,22 +39,46 @@ internal sealed class AutoPartyKeyboardHook : IDisposable
         return _handle != 0;
     }
 
-    internal void SetKey(int virtualKey)
+    internal bool SetKeys(int autoPartyKey, int followPauseKey)
     {
-        _virtualKey = virtualKey;
-        _gate.Reset();
+        if (autoPartyKey != 0 && autoPartyKey == followPauseKey) return false;
+        _autoPartyKey = autoPartyKey;
+        _followPauseKey = followPauseKey;
+        _autoPartyGate.Reset();
+        _followPauseGate.Reset();
+        return true;
+    }
+
+    internal (bool Consume, bool AutoParty, bool FollowPause) HandleKey(
+        int key, bool isDown, bool gameForeground)
+    {
+        if (key == 0) return default;
+        if (key == _autoPartyKey)
+        {
+            var result = _autoPartyGate.Handle(isDown, gameForeground);
+            return (result.Consume, result.Trigger, false);
+        }
+        if (key == _followPauseKey)
+        {
+            var result = _followPauseGate.Handle(isDown, gameForeground);
+            return (result.Consume, false, result.Trigger);
+        }
+        return default;
     }
 
     private nint Callback(int code, nint message, nint data)
     {
-        if (code < 0 || (long)message is not (KeyDown or KeyUp or SysKeyDown or SysKeyUp) ||
-            _virtualKey == 0 || Marshal.ReadInt32(data) != _virtualKey)
+        if (code < 0 || (long)message is not (KeyDown or KeyUp or SysKeyDown or SysKeyUp))
             return CallNextHookEx(_handle, code, message, data);
+        var key = Marshal.ReadInt32(data);
         try
         {
-            var result = _gate.Handle((long)message is KeyDown or SysKeyDown,
+            if (key != _autoPartyKey && key != _followPauseKey)
+                return CallNextHookEx(_handle, code, message, data);
+            var result = HandleKey(key, (long)message is KeyDown or SysKeyDown,
                 _gameForeground());
-            if (result.Trigger) _pressed();
+            if (result.AutoParty) _autoPartyPressed();
+            if (result.FollowPause) _followPausePressed();
             if (result.Consume) return 1;
         }
         catch

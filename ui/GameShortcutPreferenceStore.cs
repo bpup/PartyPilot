@@ -2,14 +2,21 @@ using System.Text.Json;
 
 namespace PartyPilot.Desktop;
 
-internal sealed class AutoPartyKeyPreferenceStore
+internal sealed class GameShortcutPreferenceStore
 {
     private sealed record StoredPreference(string Key);
     private readonly string _path;
+    private readonly string _defaultKey;
 
-    internal AutoPartyKeyPreferenceStore(string? path = null) =>
+    internal GameShortcutPreferenceStore(string defaultKey, string fileName, string? path = null)
+    {
+        if (AutoPartyKeyBinding.Normalize(defaultKey) != defaultKey ||
+            Path.GetFileName(fileName) != fileName || !fileName.EndsWith(".json", StringComparison.Ordinal))
+            throw new ArgumentException("Invalid shortcut store configuration.");
+        _defaultKey = defaultKey;
         _path = path ?? Path.Combine(Environment.GetFolderPath(
-            Environment.SpecialFolder.ApplicationData), "PartyPilot", "auto-party-key.json");
+            Environment.SpecialFolder.ApplicationData), "PartyPilot", fileName);
+    }
 
     internal (bool Success, string Key) Load()
     {
@@ -19,13 +26,13 @@ internal sealed class AutoPartyKeyPreferenceStore
             if (json.RootElement.ValueKind != JsonValueKind.Object ||
                 !json.RootElement.TryGetProperty(nameof(StoredPreference.Key), out var key) ||
                 key.ValueKind != JsonValueKind.String || AutoPartyKeyBinding.Normalize(key.GetString()) is not { } value)
-                return (false, "F8");
+                return (false, _defaultKey);
             return (true, value);
         }
-        catch (FileNotFoundException) { return (true, "F8"); }
-        catch (DirectoryNotFoundException) { return (true, "F8"); }
+        catch (FileNotFoundException) { return (true, _defaultKey); }
+        catch (DirectoryNotFoundException) { return (true, _defaultKey); }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
-        { return (false, "F8"); }
+        { return (false, _defaultKey); }
     }
 
     internal bool Save(string key)

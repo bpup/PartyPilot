@@ -20,6 +20,7 @@ LeadershipPreferenceSmoke.Run();
 AutoPartyCoordinatorSmoke.Run();
 AutoPartyHotkeySmoke.Run();
 AutoPartyKeyPreferenceSmoke.Run();
+GameKeyboardShortcutSmoke.Run();
 AutoPartyInviteSmoke.Run();
 AutoPartyRecoverySmoke.Run();
 await AutoPartyRecoverySchedulerSmoke.RunAsync();
@@ -70,6 +71,9 @@ if (window.GetLogicalDescendants().OfType<CheckBox>().Count(box =>
 if (window.GetLogicalDescendants().OfType<Button>().Count(button =>
         button.Content?.ToString() == "保存快捷键") != 1)
     throw new Exception("The desktop did not expose the Auto Party key setting.");
+if (window.GetLogicalDescendants().OfType<Button>().Count(button =>
+        button.Content?.ToString() == "保存暂停快捷键") != 1)
+    throw new Exception("The desktop did not expose the follow pause key setting.");
 if (window.GetLogicalDescendants().OfType<Button>().Count(button =>
         button.Content?.ToString() == "暂停跟随") != 1)
     throw new Exception("The desktop did not expose temporary follow pause.");
