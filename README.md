@@ -94,7 +94,7 @@ GOOS=windows GOARCH=amd64 go build -o PartyPilot.exe ./cmd/partypilot
 
 可将 `PartyPilot-SensorLog.exe` 的输出保存为 JSONL，再运行 `PartyPilot-SlotAudit.exe -input sensorlog.jsonl` 查看每个进程的双槽完整帧、坐标差距、顺序变化、换区与每槽运动次数。该报告只帮助实机取证，不会启用自动控制。
 
-若要录制更密的同窗口双角色候选运动，在 ExileCore2 插件中同时开启 `DiagnoseLocalSlotCandidates` 与 `DiagnoseFastOrderedMotion`，运行 `PartyPilot-OrderedMotionLog.exe` 并保存输出。它监听独立本机端口 47620，报文固定声明顺序未验证；真实采样频率取决于游戏渲染回调。日志可用于人工对照 P1/P2 单独移动、切区等场景，不会进入自动跟随。详见[同窗口角色身份核对](SAME_CLIENT_RESEARCH.md)。
+若要录制更密的同窗口双角色候选运动，在 ExileCore2 插件中同时开启 `DiagnoseLocalSlotCandidates` 与 `DiagnoseFastOrderedMotion`，运行 `PartyPilot-OrderedMotionLog.exe` 并保存输出。它监听独立本机端口 47620，报文固定声明顺序未验证；真实采样频率取决于游戏渲染回调。随后运行 `PartyPilot-SlotAudit.exe -input sensorlog.jsonl -fast-input orderedmotionlog.jsonl`，可在 `fastMotion` 中查看快速帧、逐槽运动、换区、时间倒退、与普通日志最近样本的时间间隔及当前角色坐标差。配对只按进程、区域哈希和最近时间进行，报告中的坐标差必须连同时间间隔解读；它不验证 P1/P2 身份，也不会进入自动跟随。详见[同窗口角色身份核对](SAME_CLIENT_RESEARCH.md)。
 同一帧还按地址逐槽对照当前可见的 ExileCore2 玩家实体，`VisiblePositionComparisons` 中不可见的槽位为 `null`。这帮助检查第二角色的坐标关系；未在游戏中采样验证，也不改变跟随准入。
 
 传感器在读到本地角色 `Render` 组件时，还会向 `127.0.0.1:47619` 发送不含角色名的隐私渲染样本。桌面端的实验性“自动姓名牌遮挡”需要这个按进程核对的新鲜样本，并对该窗口截图寻找目标版色板中的姓名样式像素。它不等同于目标版的有序双角色位置证据；Windows/PoE2 的识别与叠层效果仍需实测。

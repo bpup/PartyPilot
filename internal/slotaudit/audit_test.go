@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"partypilot/internal/live"
 	"partypilot/internal/telemetry"
 )
 
@@ -32,5 +33,38 @@ func TestTracksOrderAreaAndMovementWithoutVerdict(t *testing.T) {
 		r.AreaChanges != 1 || r.SourceTimeRegressed != 1 || r.SlotMovementFrames != [2]int{1, 0} ||
 		r.LocalWorldErrorMax != 0.25 || r.LocalGridErrorMax != 12 {
 		t.Fatalf("wrong audit report: %+v", r)
+	}
+}
+
+func TestFastCandidateCorrelationStaysDiagnostic(t *testing.T) {
+	now := time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC)
+	a := New()
+	a.Observe(telemetry.Sample{ProcessID: 17, SeenUTC: now, AreaHash: 8,
+		CoordinateSpace: "world", X: 10, Y: 20, ObservedLocalAddress: "0x2",
+		LocalSlotCandidates: &telemetry.LocalSlotCandidates{
+			Status: "two_slot_candidate", OrderedAddresses: []string{"0x1", "0x2"}}})
+	frame := func(at time.Time, area uint32, first float64) live.OrderedClientFrame {
+		return live.OrderedClientFrame{ProcessID: 17, SeenUTC: at, TickMS: at.UnixMilli(),
+			AreaHash: area, CoordinateSpace: "world",
+			PlayerOrderSource: "unverified_exilecore_local_slot_candidate",
+			Players: []live.OrderedLocalPlayer{{LocalPlayer: 1, X: first},
+				{LocalPlayer: 2, X: 13, Y: 20}}}
+	}
+	if !a.ObserveFast(frame(now.Add(20*time.Millisecond), 8, 1)) ||
+		!a.ObserveFast(frame(now.Add(40*time.Millisecond), 8, 2)) ||
+		!a.ObserveFast(frame(now.Add(60*time.Millisecond), 9, 3)) {
+		t.Fatal("valid candidate rejected")
+	}
+	trusted := frame(now, 8, 0)
+	trusted.PlayerOrderReliable = true
+	if a.ObserveFast(trusted) {
+		t.Fatal("trusted-looking frame accepted")
+	}
+	r := a.Reports()[0].FastMotion
+	if r == nil || r.Frames != 3 || r.CompleteFrames != 3 || r.AreaChanges != 1 ||
+		r.SlotMovementFrames != [2]int{1, 0} || r.OrdinaryMatches != 2 ||
+		r.UnmappedLocalFrames != 1 || r.NearestGapMax != 40*time.Millisecond ||
+		r.ObservedWorldErrorMax != 3 {
+		t.Fatalf("wrong fast diagnostic report: %+v", r)
 	}
 }
