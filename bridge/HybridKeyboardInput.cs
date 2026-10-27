@@ -72,7 +72,7 @@ internal static class HybridKeyboardInput
 }
 
 internal readonly record struct HybridKeyboardSnapshot(int FocusedPlayer, PadReport Report,
-    bool FocusRequested = false);
+    bool FocusRequested = false, bool ConfirmReleased = false);
 
 internal sealed class HybridKeyboardState
 {
@@ -94,9 +94,12 @@ internal sealed class HybridKeyboardState
         SetForeground(gameForeground);
         if (!down)
         {
+            var confirmReleased = _gameForeground && FocusedPlayer > 1 &&
+                _pressed.Contains(virtualKey) && !_blockedUntilRelease.Contains(virtualKey) &&
+                HybridKeyboardInput.ActionForKey(virtualKey) == HybridAction.Confirm;
             _pressed.Remove(virtualKey);
             _blockedUntilRelease.Remove(virtualKey);
-            return Snapshot();
+            return Snapshot() with { ConfirmReleased = confirmReleased };
         }
         if (!_gameForeground)
         {

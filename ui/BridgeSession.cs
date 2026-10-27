@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Avalonia.Threading;
 
 namespace PartyPilot.Desktop;
@@ -43,6 +44,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     public event Action? AutoPartyExpired;
     public event Action<int>? ManualFocusChanged;
     public event Action<int, int, long>? HybridFocusChanged;
+    public event Action<int, int, long>? HybridConfirmReleased;
 
     private sealed record AutoPartyPending(string Type, int Slot, ushort Buttons,
         TaskCompletionSource Completion);
@@ -171,18 +173,16 @@ internal sealed class BridgeSession : IAsyncDisposable
     internal static async Task<BridgeSession> StartHybridAsync(string executable,
         IReadOnlyList<PartySlot> partySlots, IReadOnlyList<LaunchedClient> clients)
     {
-        if (partySlots.Count is < 2 or > 4 || clients.Count is < 1 or > 2 ||
+        if (partySlots.Count is < 2 or > 3 || clients.Count != 2 ||
             !partySlots.Select(slot => slot.PartyPlayer).SequenceEqual(Enumerable.Range(1, partySlots.Count)) ||
-            partySlots.Any(slot => slot.Client < 1 || slot.Client > clients.Count) ||
-            partySlots[0].Client != 1 ||
+            partySlots[0].Client != 1 || partySlots.Skip(1).Any(slot => slot.Client != 2) ||
             clients.Any(client => client.Pid <= 0 || client.WindowHandle <= 0 ||
                 string.IsNullOrWhiteSpace(client.Executable) || !Path.IsPathFullyQualified(client.Executable)))
             throw new ArgumentException("Keyboard bridge requires bound game windows for P1 and every follower.");
         var followers = partySlots.Skip(1).ToArray();
-        var slots = followers.Select(slot => slot.RuntimePad).ToArray();
-        if (slots.Any(slot => slot is < 1 or > 4) || slots.Distinct().Count() != slots.Length)
-            throw new ArgumentException("Keyboard bridge needs one public virtual pad per follower.");
-        var playerPads = string.Join(',', followers.Select(slot => $"{slot.PartyPlayer}:{slot.RuntimePad}"));
+        var slots = followers.Length == 1 ? new[] { 1, 2 } : new[] { 1, 2, 3, 4 };
+        var playerPads = string.Join(',', followers.Select((slot, index) =>
+            $"{slot.PartyPlayer}:{(followers.Length == 1 ? 2 : index + 3)}"));
         var windowMap = string.Join(',', partySlots.Select(slot =>
             $"{slot.PartyPlayer}:{clients[slot.Client - 1].Pid}:{clients[slot.Client - 1].WindowHandle}"));
         var start = new ProcessStartInfo(executable)
@@ -313,6 +313,15 @@ internal sealed class BridgeSession : IAsyncDisposable
     {
         if (_stopping || _process.HasExited)
             throw new InvalidOperationException("Virtual controller bridge is no longer running.");
+        if (IsHybridMode && _slots.Count == 2)
+        {
+            var message = JsonNode.Parse(command)?.AsObject();
+            if (message is not null && message["slot"]?.GetValue<int>() == 3)
+            {
+                message["slot"] = 2;
+                command = message.ToJsonString();
+            }
+        }
         await WriteCommandAsync(command);
     }
 
@@ -460,6 +469,15 @@ internal sealed class BridgeSession : IAsyncDisposable
                         root.TryGetProperty("window_handle", out var hybridWindow) &&
                         hybridWindow.TryGetInt64(out var hybridHandleValue) && hybridHandleValue > 0)
                         Dispatcher.UIThread.Post(() => HybridFocusChanged?.Invoke(player, hybridPidValue, hybridHandleValue));
+                    else if (kind.GetString() == "hybrid_confirm_released" && IsHybridMode &&
+                        root.TryGetProperty("player", out var confirmPlayer) &&
+                        confirmPlayer.TryGetInt32(out var confirmedPlayer) && confirmedPlayer is >= 2 and <= 6 &&
+                        root.TryGetProperty("pid", out var confirmPid) &&
+                        confirmPid.TryGetInt32(out var confirmedPid) && confirmedPid > 0 &&
+                        root.TryGetProperty("window_handle", out var confirmWindow) &&
+                        confirmWindow.TryGetInt64(out var confirmedHandle) && confirmedHandle > 0)
+                        Dispatcher.UIThread.Post(() => HybridConfirmReleased?.Invoke(
+                            confirmedPlayer, confirmedPid, confirmedHandle));
                     else if (kind.GetString() == "login_status" &&
                         root.TryGetProperty("source", out var source) && source.ValueKind == JsonValueKind.String &&
                         source.GetString() is { } sourceName &&

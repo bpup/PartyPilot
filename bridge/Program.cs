@@ -458,6 +458,12 @@ try
                         Console.WriteLine(JsonSerializer.Serialize(new { @event = "hybrid_focus_changed",
                             player = focusedPlayer, pid = target.Pid, window_handle = target.Handle }));
                     }
+                    if (router.HybridConfirmReleased)
+                    {
+                        var target = hybridPlan.PlayerWindows[focusedPlayer];
+                        Console.WriteLine(JsonSerializer.Serialize(new { @event = "hybrid_confirm_released",
+                            player = focusedPlayer, pid = target.Pid, window_handle = target.Handle }));
+                    }
                     continue;
                 }
                 if (pairingGate is not null && BridgeProtocol.TryParsePairingControl(line, out var control))

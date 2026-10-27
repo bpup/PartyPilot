@@ -5,12 +5,16 @@ internal static class HybridKeyboardInputTests
     internal static void Run()
     {
         if (!HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:3,3:4",
-                "--hybrid-window-map", "1:10:100,2:20:200,3:20:200"], [3, 4], out var plan) ||
+                "--hybrid-window-map", "1:10:100,2:20:200,3:20:200"], [1, 2, 3, 4], out var plan) ||
             plan?.PlayerPads[2] != 3 || plan.PlayerWindows[3] != new HybridGameWindow(20, 200) ||
             HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:3,3:3",
-                "--hybrid-window-map", "1:10:100,2:20:200,3:20:200"], [3, 4], out _) ||
+                "--hybrid-window-map", "1:10:100,2:20:200,3:20:200"], [1, 2, 3, 4], out _) ||
             HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:3",
-                "--hybrid-window-map", "2:20:200"], [3], out _))
+                "--hybrid-window-map", "2:20:200"], [1, 2], out _) ||
+            !HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:2",
+                "--hybrid-window-map", "1:10:100,2:20:200"], [1, 2], out _) ||
+            HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:3",
+                "--hybrid-window-map", "1:10:100,2:20:200"], [1, 3], out _))
             throw new Exception("Hybrid player-to-pad or exact window map was accepted ambiguously.");
         var gameA = Path.GetFullPath("PoE2.exe");
         var gameB = Path.GetFullPath("PoE2B.exe");
@@ -67,6 +71,10 @@ internal static class HybridKeyboardInputTests
         state.Handle(0x57, false, true);
         if (state.Handle(0x57, true, true).Report.LeftY != 32767)
             throw new Exception("Fresh follower movement did not reach the virtual stick.");
+        state.Handle(0x45, true, true);
+        if (!state.Handle(0x45, false, true).ConfirmReleased ||
+            state.Handle(0x45, false, true).ConfirmReleased)
+            throw new Exception("A fresh virtual A release was not reported once.");
         if (state.Handle(0x72, true, true).FocusedPlayer != 3 ||
             state.Snapshot().Report != default)
             throw new Exception("Held follower input leaked across focus change.");
@@ -105,6 +113,10 @@ internal static class HybridKeyboardInputTests
         router.ApplyHybridKey(0x57, true, true);
         if (router.HybridFocusedPlayer != 2 || pad2.Y != 32767 || pad3.Report != default)
             throw new Exception("Hybrid P2 manual input did not isolate the other virtual pad.");
+        router.ApplyHybridKey(0x45, true, true);
+        router.ApplyHybridKey(0x45, false, true);
+        if (!router.HybridConfirmReleased)
+            throw new Exception("Hybrid router did not expose a real P2 confirm release.");
         router.ApplyHybridKey(0x72, true, true);
         if (router.HybridFocusedPlayer != 3 || pad2.Report != default || pad3.Report != default)
             throw new Exception("Hybrid focus change retained a stale movement report.");
@@ -122,5 +134,19 @@ internal static class HybridKeyboardInputTests
         router.ApplyHybridKey(0x70, true, true);
         if (!router.HybridFocusRequested)
             throw new Exception("A fresh F1 press did not request the native window again.");
+
+        var neutralP1 = new FakePad();
+        var splitFollower = new FakePad();
+        var splitRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
+        {
+            [1] = neutralP1, [2] = splitFollower
+        });
+        if (!splitRouter.ConfigureHybridKeyboard(new Dictionary<int, int> { [2] = 2 }) ||
+            splitRouter.ApplyLine("{\"slot\":1,\"state\":\"following\",\"x\":1,\"y\":0}", now) ||
+            neutralP1.Report != default)
+            throw new Exception("Reserved native P1 virtual pad accepted movement.");
+        if (!splitRouter.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", now) ||
+            splitFollower.X != 32767 || neutralP1.Report != default)
+            throw new Exception("Split follower or reserved neutral pad routed incorrectly.");
     }
 }

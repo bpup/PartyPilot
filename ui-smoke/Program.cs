@@ -22,6 +22,8 @@ AutoPartyHotkeySmoke.Run();
 AutoPartyKeyPreferenceSmoke.Run();
 GameKeyboardShortcutSmoke.Run();
 HybridBridgeReadySmoke.Run();
+HybridTopologySmoke.Run();
+HybridPairingGuideSmoke.Run();
 RadarHotkeySmoke.Run();
 AutoPartyInviteSmoke.Run();
 AutoPartyRecoverySmoke.Run();
@@ -77,7 +79,20 @@ inputMode.SelectedIndex = 1;
 if (window.GetLogicalDescendants().OfType<Button>()
         .Single(button => button.Content?.ToString() == "准备键鼠虚拟手柄").IsEnabled)
     throw new Exception("Keyboard virtual pads became available without bound game windows.");
+var playerCountChoice = window.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(box => box.ItemsSource?.OfType<string>().Contains("2 人") == true);
+playerCountChoice.SelectedIndex = 1;
+var launchButton = window.GetLogicalDescendants().OfType<Button>()
+    .Single(button => button.Content?.ToString() == "启动游戏窗口");
+if (launchButton.IsEnabled)
+    throw new Exception("Keyboard mode exposed a couch layout with P2 on native Client 1.");
+var topologyChoice = window.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(box => box.ItemsSource?.OfType<PartyTopology>().Any() == true);
+topologyChoice.SelectedItem = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-split");
+if (!launchButton.IsEnabled)
+    throw new Exception("Keyboard mode hid the supported two-client native P1 layout.");
 inputMode.SelectedIndex = 0;
+playerCountChoice.SelectedIndex = -1;
 if (window.GetLogicalDescendants().OfType<TextBox>().Count(field =>
         field.Watermark?.ToString() == "PoE 账号邮箱") != 3 ||
     window.GetLogicalDescendants().OfType<TextBox>().Count(field =>

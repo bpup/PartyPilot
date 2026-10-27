@@ -42,7 +42,16 @@ internal sealed record HybridKeyboardPlan(
                 !int.TryParse(values[1], out var slot) || player is < 2 or > 6 ||
                 !slots.Contains(slot) || !pads.TryAdd(player, slot)) return false;
         }
-        if (pads.Count != slots.Count || pads.Values.Distinct().Count() != slots.Count)
+        var expectedSlots = pads.Count switch
+        {
+            1 => new[] { 1, 2 },
+            2 => new[] { 1, 2, 3, 4 },
+            _ => []
+        };
+        var expectedFollowerSlots = pads.Count == 1 ? new[] { 2 } : new[] { 3, 4 };
+        if (!slots.Order().SequenceEqual(expectedSlots) ||
+            !pads.Keys.Order().SequenceEqual(Enumerable.Range(2, pads.Count)) ||
+            !pads.Values.Order().SequenceEqual(expectedFollowerSlots))
             return false;
         var windows = new Dictionary<int, HybridGameWindow>();
         foreach (var entry in args[windowIndex + 1].Split(','))

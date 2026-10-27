@@ -151,6 +151,7 @@ public sealed class MainWindow : Window
     private RadarSession? _radar;
     private PrivacyMaskSession? _privacy;
     private PairingGuide? _pairing;
+    private HybridPairingGuide? _hybridPairing;
     private IReadOnlyList<LaunchedClient> _launchedClients = [];
     private bool _pairingHasStarted;
     private bool _armRequested;
@@ -363,7 +364,7 @@ public sealed class MainWindow : Window
         _inputMode.SelectionChanged += (_, _) =>
         {
             _pairingStatus.Text = HybridSelected
-                ? "先启动或绑定最多两个游戏客户端，再准备键鼠虚拟手柄。P1 使用原生键鼠。"
+                ? "键鼠模式要求客户端 1 仅有 P1。选择双客户端受支持布局并绑定窗口后，可准备虚拟手柄。"
                 : "实体手柄模式需要确认 HidHide 隔离与输入设备。";
             UpdateBridgeControls();
         };
@@ -973,6 +974,12 @@ public sealed class MainWindow : Window
             _ = StopAllResourcesAsync();
         }
         _selectedTopology = selection;
+        if (topologyChanged && HybridSelected && _bridge is null && selection is not null)
+            _pairingStatus.Text = selection.PlayerCount == 1
+                ? "单人模式由 P1 原生键鼠操作；无需准备虚拟手柄。"
+                : HybridTopologySupport.CanBridge(selection)
+                    ? "客户端 1 仅有 P1；绑定两个游戏窗口后可准备键鼠虚拟手柄。"
+                    : "目标版键鼠模式要求客户端 1 仅有 P1；此布局的键鼠桥接尚未接入。";
         if (_bridge is null && topologyChanged) _autoFlask.IsChecked = selection?.Id is "2-split" or "3-three-singles";
         var count = _selectedTopology?.ClientCount ?? 0;
         _assignment.Text = _selectedTopology is null
@@ -1556,13 +1563,14 @@ public sealed class MainWindow : Window
             PrivateClient3Plan.TryCreate(_selectedTopology, _launchedClients, out _);
         var supported = slots.All(slot => slot is >= 1 and <= 4) &&
             (slots.Length is >= 1 and <= 3 || useWgi) && privateReady;
-        var hybridSupported = _selectedTopology is { ClientCount: <= 2, PlayerCount: >= 2 } &&
-            _selectedTopology.Slots.Skip(1).All(slot => slot.RuntimePad is >= 1 and <= 4) &&
+        var hybridSupported = _selectedTopology is not null &&
+            HybridTopologySupport.CanBridge(_selectedTopology) &&
             _launchedClients.Count == _selectedTopology.ClientCount;
         var gamePathsReady = _selectedTopology is not null &&
             Enumerable.Range(0, _selectedTopology.ClientCount)
                 .All(index => !string.IsNullOrWhiteSpace(_paths[index]?.Text));
-        _prepareBridge.Content = HybridSelected ? "准备键鼠虚拟手柄" : "准备虚拟手柄";
+        _prepareBridge.Content = HybridSelected && _selectedTopology?.PlayerCount == 1
+            ? "单人原生键鼠无需桥接" : HybridSelected ? "准备键鼠虚拟手柄" : "准备虚拟手柄";
         _prepareBridge.IsEnabled = !_busy && _bridge is null && gamePathsReady &&
             (HybridSelected ? hybridSupported && _gameHotkeys?.IsStarted == true :
                 supported && _leadershipPreferenceReady && _lastFocusedLeads.IsChecked is bool &&
@@ -1587,7 +1595,12 @@ public sealed class MainWindow : Window
                     ? "核验已填账号并检测登录画面"
                     : "填入账号并检测登录画面"
                 : "开始检测当前登录画面";
-        _confirmRole.IsEnabled = !HybridSelected && _bridge is not null && _pairing?.AReleased == true;
+        _confirmRole.Content = HybridSelected && _hybridPairing?.Phase == HybridPairingPhase.AwaitNativeMain
+            ? "P1 已进入游戏" : "已在游戏内确认此角色";
+        _confirmRole.IsEnabled = HybridSelected
+            ? _bridge?.IsHybridMode == true && (_hybridPairing?.Phase is
+                HybridPairingPhase.AwaitNativeMain or HybridPairingPhase.AwaitUserConfirmation)
+            : _bridge is not null && _pairing?.AReleased == true;
         _playerCount.IsEnabled = _bridge is null && !_busy;
         _topologyVariant.IsEnabled = _bridge is null && !_busy;
         _inputMode.IsEnabled = _bridge is null && !_busy;
@@ -1597,9 +1610,11 @@ public sealed class MainWindow : Window
         _rightStickFollowerOverride.IsEnabled = !HybridSelected && _bridge is null && !_busy;
         _lastFocusedLeads.IsEnabled = !HybridSelected && _bridge is null && !_busy;
         _autoFlask.IsEnabled = !HybridSelected && _bridge is null && !_busy &&
-            _selectedTopology?.Id is "2-split" or "3-three-singles";
+            (_selectedTopology?.Id is "2-split" or "3-three-singles");
         _check.IsEnabled = !_busy && !_pairingHasStarted && _bridge is null && _selectedTopology is not null;
-        _launch.IsEnabled = _check.IsEnabled && (!HybridSelected || _selectedTopology?.ClientCount <= 2);
+        _launch.IsEnabled = _check.IsEnabled && (!HybridSelected || _selectedTopology is not null &&
+            (_selectedTopology.PlayerCount == 1 && HybridTopologySupport.HasNativeP1(_selectedTopology) ||
+             HybridTopologySupport.CanBridge(_selectedTopology)));
         _attach.IsEnabled = _launch.IsEnabled;
         UpdateAutoLoginControls();
         UpdateLoginCalibrationControls();
@@ -1750,7 +1765,8 @@ public sealed class MainWindow : Window
             _selectedTopology, _inviteNames.Take(_selectedTopology.PlayerCount)
                 .Select(box => box?.Text).ToArray(), out _);
         var ready = OperatingSystem.IsWindows() && !_busy && !_inviteBusy && !_autoPartyRunning &&
-            _bridge is not null && _pairingSettled && _selectedTopology is { ClientCount: > 1 } &&
+            _bridge is not null && !_bridge.IsHybridMode && _pairingSettled &&
+            _selectedTopology is { ClientCount: > 1 } &&
             _launchedClients.Count == _selectedTopology.ClientCount &&
             _inviteTarget.SelectedIndex is >= 0 && namesReady;
         _sendInvite.IsEnabled = ready;
@@ -1933,7 +1949,9 @@ public sealed class MainWindow : Window
                 FollowPlayerStop.TryRead(_followPlayerStops[slot.PartyPlayer - 1].Text, out _));
         _startFollow.IsEnabled = OperatingSystem.IsWindows() && !_busy && !_followStopping && _follow is null &&
             _followTargetPreferenceReady && _followStopPreferenceReady && _bridge is not null && _pairingSettled &&
-            _selectedTopology?.Id is "2-split" or "3-three-singles" &&
+            (!_bridge.IsHybridMode || _hybridPairing?.Phase == HybridPairingPhase.Complete &&
+             Volatile.Read(ref _hybridFocusedPlayer) == 1 && Volatile.Read(ref _hybridFocusTransition) == 0) &&
+            (_selectedTopology?.Id is "2-split" or "3-three-singles") &&
             _launchedClients.Count == _selectedTopology.ClientCount && valid;
         _stopFollow.IsEnabled = _follow is not null;
         _pauseFollow.IsEnabled = _follow is not null && !_followStopping;
@@ -2005,7 +2023,7 @@ public sealed class MainWindow : Window
     {
         var topology = _selectedTopology;
         var clients = _launchedClients.ToArray();
-        if (topology is null || topology.ClientCount > 2 || topology.PlayerCount < 2 ||
+        if (topology is null || !HybridTopologySupport.CanBridge(topology) ||
             clients.Length != topology.ClientCount || _gameHotkeys?.IsStarted != true)
         {
             _pairingStatus.Text = "键鼠模式需要已绑定的游戏窗口与可用的键鼠监听；当前尚未就绪。";
@@ -2028,8 +2046,10 @@ public sealed class MainWindow : Window
             _hybridFocusKeysDown.Clear();
             _bridge = session;
             _pairing = null;
+            _hybridPairing = new HybridPairingGuide(topology);
             _pairingSettled = false;
             session.HybridFocusChanged += HybridFocusChanged;
+            session.HybridConfirmReleased += HybridConfirmReleased;
             session.Ended += BridgeEnded;
             _hybridPublisher = new HybridKeyEventPublisher(session.SendHybridKeyAsync, error =>
                 Dispatcher.UIThread.Post(async () =>
@@ -2038,10 +2058,16 @@ public sealed class MainWindow : Window
                     await StopBridgeAsync();
                     _pairingStatus.Text = $"键鼠输入通道已停止：{error.Message}";
                 }));
-            _gameHotkeys.SetKeys(0, 0);
+            var pauseKey = AutoPartyKeyBinding.VirtualKey(_followPauseKeyValue);
+            if (GameKeyboardShortcutHook.IsHybridVirtualKey(pauseKey))
+            {
+                pauseKey = 0;
+                _followPauseKeyStatus.Text = "暂停键与键鼠模式按键冲突，本次键鼠会话已禁用暂停快捷键；仍可使用按钮。";
+            }
+            _gameHotkeys.SetKeys(0, pauseKey);
             _gameHotkeys.SetHybridHandler(HandleHybridKey);
             session.StartReading();
-            _pairingStatus.Text = "实验性键鼠桥接已连接。P1 使用原生键鼠；按 F2–F6 切换已配置角色，F1 返回 P1。请在游戏中核对虚拟手柄是否只被目标客户端识别，以及选角与配对结果。";
+            ShowHybridPairingStep();
             UpdateClientRows();
         }
         catch (Exception error)
@@ -2064,6 +2090,15 @@ public sealed class MainWindow : Window
         var focusPlayer = key is >= 0x70 and <= 0x75 ? key - 0x6F : 0;
         if (focusPlayer > topology.PlayerCount) return false;
         if (down && !gameForeground) return false;
+        var pairing = _hybridPairing;
+        if (pairing is not null && pairing.Phase != HybridPairingPhase.Complete)
+        {
+            if (focusPlayer > 1 &&
+                (pairing.Phase == HybridPairingPhase.AwaitNativeMain ||
+                 focusPlayer != pairing.CurrentPlayer)) return gameForeground;
+            if (focusPlayer == 0 && Volatile.Read(ref _hybridFocusedPlayer) > 1 &&
+                pairing.Phase == HybridPairingPhase.AwaitFollowerFocus) return gameForeground;
+        }
         if (focusPlayer != 0 && !down) _hybridFocusKeysDown.Remove(key);
         if (down && focusPlayer != 0 && _hybridFocusKeysDown.Add(key))
         {
@@ -2128,9 +2163,47 @@ public sealed class MainWindow : Window
         Volatile.Write(ref _hybridFocusedPlayer, player);
         Volatile.Write(ref _hybridFocusTransition, 0);
         Interlocked.Increment(ref _hybridFocusGeneration);
-        _pairingStatus.Text = player == 1
-            ? "已返回 P1 游戏窗口，使用原生键鼠。"
-            : $"P{player} 游戏窗口已在前台；键鼠按键映射到该角色的虚拟手柄。";
+        if (_hybridPairing?.ObserveFocus(player) == true) ShowHybridPairingStep();
+        else if (_hybridPairing?.Phase == HybridPairingPhase.Complete)
+            _pairingStatus.Text = player == 1
+                ? "已返回 P1 游戏窗口；键鼠配对由用户确认，可准备实时跟随。"
+                : $"P{player} 游戏窗口已在前台；按 F1 返回 P1 后可启动实时跟随。";
+        UpdateFollowControls();
+    }
+
+    private async void HybridConfirmReleased(int player, int pid, long handle)
+    {
+        var session = _bridge;
+        if (session?.IsHybridMode != true) return;
+        var assignment = _selectedTopology?.Slots.FirstOrDefault(slot => slot.PartyPlayer == player);
+        var client = assignment is null || assignment.Client > _launchedClients.Count
+            ? null : _launchedClients[assignment.Client - 1];
+        if (client is null || client.Pid != pid || client.WindowHandle != handle)
+        {
+            await StopBridgeAsync();
+            _pairingStatus.Text = "键鼠确认键来自非当前绑定窗口，桥接已停止。";
+            return;
+        }
+        if (_hybridPairing?.ObserveConfirmRelease(player) == true) ShowHybridPairingStep();
+    }
+
+    private void ShowHybridPairingStep()
+    {
+        var guide = _hybridPairing;
+        if (guide is null) return;
+        _pairingStatus.Text = guide.Phase switch
+        {
+            HybridPairingPhase.AwaitNativeMain =>
+                "P1 使用鼠标登录和选角；进入游戏后点击“P1 已进入游戏”。此步由用户确认，尚无游戏内身份验证。",
+            HybridPairingPhase.AwaitFollowerFocus =>
+                $"在游戏窗口按 F{guide.CurrentPlayer}，切换到 P{guide.CurrentPlayer} 的客户端。",
+            HybridPairingPhase.AwaitConfirmRelease =>
+                $"P{guide.CurrentPlayer} 窗口已前台；使用 WASD 选角，按 E 发送虚拟手柄 A。",
+            HybridPairingPhase.AwaitUserConfirmation =>
+                $"已观察到 P{guide.CurrentPlayer} 的虚拟 A 键松开；请确认该角色确已进入游戏，再点击“已在游戏内确认此角色”。",
+            _ => "所有角色已由用户逐个确认。按 F1 返回 P1；仍须在游戏中核对虚拟手柄隔离与实际组队。"
+        };
+        UpdateBridgeControls();
     }
 
     private void ActivateBridge(BridgeSession session, PartyTopology topology)
@@ -2283,6 +2356,11 @@ public sealed class MainWindow : Window
 
     private async Task ConfirmRoleAsync()
     {
+        if (_bridge?.IsHybridMode == true)
+        {
+            ConfirmHybridRole();
+            return;
+        }
         if (_bridge is null || _pairing?.AReleased != true) return;
         try
         {
@@ -2301,6 +2379,25 @@ public sealed class MainWindow : Window
             _pairingStatus.Text = $"无法切换下一角色：{error.Message}";
         }
         UpdateBridgeControls();
+    }
+
+    private void ConfirmHybridRole()
+    {
+        var guide = _hybridPairing;
+        if (_bridge?.IsHybridMode != true || guide is null) return;
+        var advanced = guide.Phase switch
+        {
+            HybridPairingPhase.AwaitNativeMain => guide.ConfirmNativeMain(),
+            HybridPairingPhase.AwaitUserConfirmation => guide.ConfirmFollowerJoined(),
+            _ => false
+        };
+        if (!advanced) return;
+        _pairingHasStarted = true;
+        _pairingSettled = guide.Phase == HybridPairingPhase.Complete;
+        ShowHybridPairingStep();
+        UpdateClientRows();
+        UpdateFollowControls();
+        UpdateAutoPartyControls();
     }
 
     private void ShowCurrentPairingStep()
@@ -2326,12 +2423,15 @@ public sealed class MainWindow : Window
 
     private async Task StopBridgeAsync()
     {
+        var wasHybrid = _bridge?.IsHybridMode == true;
         _gameHotkeys?.SetHybridHandler(null);
         var publisher = _hybridPublisher;
         _hybridPublisher = null;
         if (publisher is not null) await publisher.DisposeAsync();
         _gameHotkeys?.SetKeys(AutoPartyKeyBinding.VirtualKey(_autoPartyKeyValue),
             AutoPartyKeyBinding.VirtualKey(_followPauseKeyValue));
+        if (wasHybrid)
+            _followPauseKeyStatus.Text = $"暂停跟随快捷键：{_followPauseKeyValue}；仅在已绑定游戏窗口前台生效。";
         Volatile.Write(ref _hybridFocusedPlayer, 1);
         Volatile.Write(ref _hybridFocusTransition, 0);
         _hybridFocusKeysDown.Clear();
@@ -2344,6 +2444,7 @@ public sealed class MainWindow : Window
         var session = _bridge;
         _bridge = null;
         _pairing = null;
+        _hybridPairing = null;
         _pairingHasStarted = false;
         _armRequested = false;
         _pairingSettling = false;
@@ -2357,14 +2458,19 @@ public sealed class MainWindow : Window
         session.PairingCompleted -= BridgePairingCompleted;
         session.LoginStatusChanged -= BridgeLoginStatusChanged;
         session.HybridFocusChanged -= HybridFocusChanged;
+        session.HybridConfirmReleased -= HybridConfirmReleased;
         session.Ended -= BridgeEnded;
         await session.DisposeAsync();
-        _pairingStatus.Text = "手柄桥接已停止，虚拟手柄已释放。";
+        _pairingStatus.Text = wasHybrid
+            ? "键鼠桥接已停止，虚拟手柄已释放。"
+            : "手柄桥接已停止，虚拟手柄已释放。";
     }
 
     private async Task StartFollowAsync()
     {
         if (_bridge is null || !_pairingSettled || _selectedTopology is null || _follow is not null || _followStopping ||
+            _bridge.IsHybridMode && (_hybridPairing?.Phase != HybridPairingPhase.Complete ||
+                Volatile.Read(ref _hybridFocusedPlayer) != 1 || Volatile.Read(ref _hybridFocusTransition) != 0) ||
             !_followTargetPreferenceReady || !_followStopPreferenceReady ||
             !LiveFollowPlan.TryCreate(_followStop.Text, _followCatchup.Text,
                 _followMaxAge.Text, _followLogAge.Text, _followLeaderName.Text, out var plan) || plan is null) return;
@@ -2516,9 +2622,11 @@ public sealed class MainWindow : Window
 
     private async Task RunLauncherAsync(ClientAction action)
     {
-        if (HybridSelected && _selectedTopology?.ClientCount > 2)
+        if (HybridSelected && _selectedTopology is not null &&
+            !HybridTopologySupport.CanBridge(_selectedTopology) &&
+            !(_selectedTopology.PlayerCount == 1 && HybridTopologySupport.HasNativeP1(_selectedTopology)))
         {
-            _status.Text = "当前键鼠桥接尚不能为第三客户端创建私有虚拟手柄；请选择最多双客户端的布局。";
+            _status.Text = "目标版键鼠模式要求客户端 1 只有 P1；当前独立版暂不支持此布局的键鼠桥接。";
             return;
         }
         var reusePreparedBridge = action == ClientAction.Start && _bridge is not null &&

@@ -30,6 +30,7 @@ internal sealed class BridgeRouter
     private bool _physicalMode;
     private HybridKeyboardState? _hybridKeyboard;
     private bool _hybridFocusRequested;
+    private bool _hybridConfirmReleased;
     private IReadOnlyDictionary<int, int> _hybridPlayerPads = new Dictionary<int, int>();
     private bool _menuGuardActive;
     private bool _rightStickFollowerOverride;
@@ -96,6 +97,7 @@ internal sealed class BridgeRouter
     public bool AutoPartyActive => _autoPartyActive;
     public int HybridFocusedPlayer => _hybridKeyboard?.FocusedPlayer ?? 0;
     public bool HybridFocusRequested => _hybridFocusRequested;
+    public bool HybridConfirmReleased => _hybridConfirmReleased;
 
     public BridgeRouter(IReadOnlyDictionary<int, IPadOutput> outputs, IReportBatch? reportBatch = null)
     {
@@ -136,8 +138,7 @@ internal sealed class BridgeRouter
     {
         if (_physicalMode || playerPads.Count == 0 ||
             playerPads.Any(entry => entry.Key is < 2 or > 6 || !_routes.ContainsKey(entry.Value)) ||
-            playerPads.Values.Distinct().Count() != playerPads.Count ||
-            playerPads.Count != _routes.Count) return false;
+            playerPads.Values.Distinct().Count() != playerPads.Count) return false;
         _hybridPlayerPads = new Dictionary<int, int>(playerPads);
         _hybridKeyboard = new HybridKeyboardState(playerPads.Keys);
         NeutralAll();
@@ -147,10 +148,13 @@ internal sealed class BridgeRouter
     public bool ApplyHybridKey(int virtualKey, bool down, bool gameForeground)
     {
         _hybridFocusRequested = false;
+        _hybridConfirmReleased = false;
         if (_hybridKeyboard is null || virtualKey == 0 ||
             (HybridKeyboardInput.FocusForKey(virtualKey) == 0 &&
              HybridKeyboardInput.ActionForKey(virtualKey) == HybridAction.None)) return false;
-        _hybridFocusRequested = _hybridKeyboard.Handle(virtualKey, down, gameForeground).FocusRequested;
+        var sample = _hybridKeyboard.Handle(virtualKey, down, gameForeground);
+        _hybridFocusRequested = sample.FocusRequested;
+        _hybridConfirmReleased = sample.ConfirmReleased;
         RenderAll();
         return true;
     }
@@ -187,7 +191,8 @@ internal sealed class BridgeRouter
             return true;
         }
         if (!BridgeProtocol.TryParse(line, out var command) ||
-            !_routes.TryGetValue(command.Slot, out var route))
+            !_routes.TryGetValue(command.Slot, out var route) ||
+            (_hybridKeyboard is not null && !_hybridPlayerPads.Values.Contains(command.Slot)))
         {
             NeutralAll();
             return false;
@@ -422,6 +427,7 @@ internal sealed class BridgeRouter
     public void NeutralAll()
     {
         _hybridFocusRequested = false;
+        _hybridConfirmReleased = false;
         _hybridKeyboard?.SetForeground(false);
         _autoPartyActive = false;
         _autoPartyExpiresUtc = default;
@@ -467,6 +473,11 @@ internal sealed class BridgeRouter
 
     private void Render(int slot, PadRoute route)
     {
+        if (_hybridKeyboard is not null && !_hybridPlayerPads.Values.Contains(slot))
+        {
+            route.Output.SetReport(default);
+            return;
+        }
         if (_hybridKeyboard is not null && _hybridKeyboard.FocusedPlayer != 1)
         {
             var focused = _hybridPlayerPads[_hybridKeyboard.FocusedPlayer];
