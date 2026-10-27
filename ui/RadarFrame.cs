@@ -126,12 +126,12 @@ public static class RadarProjection
 
 public sealed class RadarVisibility
 {
-    private bool _tabWasDown;
+    private bool _keyWasDown;
     public bool Enabled { get; private set; } = true;
 
-    public void Observe(bool gameForeground, bool tabDown)
+    public void Observe(bool gameForeground, bool keyDown)
     {
-        if (gameForeground && tabDown && !_tabWasDown) Enabled = !Enabled;
-        _tabWasDown = gameForeground && tabDown;
+        if (gameForeground && keyDown && !_keyWasDown) Enabled = !Enabled;
+        _keyWasDown = keyDown;
     }
 }

@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -111,6 +112,11 @@ public sealed class MainWindow : Window
     private readonly Button _stopFollow = new();
     private readonly TextBlock _followStatus = new();
     private readonly TextBox _radarScale = new();
+    private readonly TextBox _radarHotkeyText = new();
+    private readonly TextBlock _radarHotkeyStatus = new();
+    private readonly RadarHotkeyPreferenceStore _radarHotkeyPreferences = new();
+    private RadarHotkeyBinding _radarHotkey;
+    private bool _capturingRadarHotkey;
     private readonly Button _startRadar = new();
     private readonly Button _stopRadar = new();
     private readonly TextBlock _radarStatus = new();
@@ -228,6 +234,14 @@ public sealed class MainWindow : Window
             : "暂停键设置文件无效或无法读取；请选择按键重新保存。";
         _followPauseKey.SelectedItem = _followPauseKeyValue;
         _followPauseKey.SelectionChanged += (_, _) => SaveFollowPauseKeySelection();
+        var radarPreference = _radarHotkeyPreferences.Load();
+        _radarHotkey = radarPreference.Binding;
+        _radarHotkeyText.Text = _radarHotkey.DisplayText;
+        _radarHotkeyStatus.Text = !radarPreference.Success
+            ? "雷达快捷键设置无效；当前使用 Tab，请重新保存。"
+            : RadarKeyConflicts(_radarHotkey)
+                ? "雷达快捷键与自动组队或暂停跟随冲突；请重新设置。"
+                : $"雷达显隐快捷键：{_radarHotkey.DisplayText}；仅在已绑定游戏窗口前台生效。";
         _playerCount.SelectionChanged += (_, _) => UpdateTopologyOptions();
         _topologyVariant.SelectionChanged += (_, _) => UpdateClientRows();
         _applyLayout.IsCheckedChanged += (_, _) => UpdateLayoutControls();
@@ -751,6 +765,27 @@ public sealed class MainWindow : Window
     private Border BuildRadarStep()
     {
         var panel = Step("5", "RADAR · 雷达", "在已绑定游戏窗口上显示只读实体标记；请在对应 ExileCore2 实例中启用传感器的雷达诊断。坐标方向与比例仍需游戏内校准。");
+        panel.Children.Add(Label("雷达显隐快捷键（如 Tab、Ctrl+R、Shift+F9）", 12, MutedBrush));
+        var hotkeyRow = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
+        _radarHotkeyText.Width = 190;
+        _radarHotkeyText.Watermark = "Tab";
+        _radarHotkeyText.KeyDown += CaptureRadarHotkey;
+        hotkeyRow.Children.Add(_radarHotkeyText);
+        var captureHotkey = new Button { Content = "录入快捷键" };
+        captureHotkey.Click += (_, _) =>
+        {
+            _capturingRadarHotkey = true;
+            _radarHotkeyStatus.Text = "请按快捷键；只按 Ctrl、Alt 或 Shift 会继续等待，Esc 取消。";
+            _radarHotkeyText.Focus();
+        };
+        hotkeyRow.Children.Add(captureHotkey);
+        var saveHotkey = new Button { Content = "保存雷达快捷键" };
+        saveHotkey.Click += (_, _) => SaveRadarHotkey();
+        hotkeyRow.Children.Add(saveHotkey);
+        panel.Children.Add(hotkeyRow);
+        _radarHotkeyStatus.Foreground = MutedBrush;
+        _radarHotkeyStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_radarHotkeyStatus);
         panel.Children.Add(Label("每个游戏坐标单位对应的屏幕像素（需明确填写）", 12, MutedBrush));
         _radarScale.Watermark = "像素/坐标单位";
         _radarScale.Width = 190;
@@ -1417,9 +1452,14 @@ public sealed class MainWindow : Window
         if (_radar is not null || _busy || _radarStopping || !OperatingSystem.IsWindows() ||
             _selectedTopology is null || _launchedClients.Count != _selectedTopology.ClientCount ||
             !RadarProjection.TryScale(_radarScale.Text, out var scale)) return;
+        if (RadarKeyConflicts(_radarHotkey))
+        {
+            _radarHotkeyStatus.Text = "雷达快捷键与自动组队或暂停跟随冲突；请重新设置。";
+            return;
+        }
         try
         {
-            var session = RadarSession.Start(_launchedClients, scale);
+            var session = RadarSession.Start(_launchedClients, scale, _radarHotkey);
             session.Ended += RadarEnded;
             session.FrameReceived += RadarFrameReceived;
             _radar = session;
@@ -1560,9 +1600,10 @@ public sealed class MainWindow : Window
     {
         if (_restoringAutoPartyKey || _autoPartyKey.SelectedItem is not string selected ||
             selected == _autoPartyKeyValue && !force) return;
-        if (selected != "None" && selected == _followPauseKeyValue)
+        if (selected != "None" && (selected == _followPauseKeyValue ||
+            AutoPartyKeyBinding.VirtualKey(selected) == _radarHotkey.VirtualKey))
         {
-            _autoPartyKeyStatus.Text = "该按键已用于暂停跟随；请选择不同按键。";
+            _autoPartyKeyStatus.Text = "该按键已用于暂停跟随或雷达；请选择不同按键。";
             _restoringAutoPartyKey = true;
             try { _autoPartyKey.SelectedItem = _autoPartyKeyValue; }
             finally { _restoringAutoPartyKey = false; }
@@ -1591,9 +1632,10 @@ public sealed class MainWindow : Window
     {
         if (_restoringFollowPauseKey || _followPauseKey.SelectedItem is not string selected ||
             selected == _followPauseKeyValue && !force) return;
-        if (selected != "None" && selected == _autoPartyKeyValue)
+        if (selected != "None" && (selected == _autoPartyKeyValue ||
+            AutoPartyKeyBinding.VirtualKey(selected) == _radarHotkey.VirtualKey))
         {
-            _followPauseKeyStatus.Text = "该按键已用于自动组队；请选择不同按键。";
+            _followPauseKeyStatus.Text = "该按键已用于自动组队或雷达；请选择不同按键。";
             _restoringFollowPauseKey = true;
             try { _followPauseKey.SelectedItem = _followPauseKeyValue; }
             finally { _restoringFollowPauseKey = false; }
@@ -1616,6 +1658,64 @@ public sealed class MainWindow : Window
             : selected == "None"
                 ? "暂停跟随快捷键已关闭。"
                 : $"暂停跟随快捷键：{selected}；仅在已绑定游戏窗口前台生效。";
+    }
+
+    private bool RadarKeyConflicts(RadarHotkeyBinding binding) =>
+        binding.VirtualKey == AutoPartyKeyBinding.VirtualKey(_autoPartyKeyValue) ||
+        binding.VirtualKey == AutoPartyKeyBinding.VirtualKey(_followPauseKeyValue);
+
+    private void SaveRadarHotkey()
+    {
+        if (!RadarHotkeyBinding.TryParse(_radarHotkeyText.Text, out var binding))
+        {
+            _radarHotkeyStatus.Text = "雷达快捷键无效；请使用键盘按键，可加 Ctrl、Alt 或 Shift。";
+            return;
+        }
+        if (RadarKeyConflicts(binding))
+        {
+            _radarHotkeyStatus.Text = "雷达快捷键与自动组队或暂停跟随冲突；请选不同按键。";
+            return;
+        }
+        if (!_radarHotkeyPreferences.Save(binding))
+        {
+            _radarHotkeyStatus.Text = "雷达快捷键保存失败，继续使用原设置。";
+            return;
+        }
+        _radarHotkey = binding;
+        _radarHotkeyText.Text = binding.DisplayText;
+        _radar?.SetHotkey(binding);
+        _radarHotkeyStatus.Text = $"雷达显隐快捷键：{binding.DisplayText}；仅在已绑定游戏窗口前台生效。";
+    }
+
+    private void CaptureRadarHotkey(object? sender, KeyEventArgs e)
+    {
+        if (!_capturingRadarHotkey) return;
+        e.Handled = true;
+        if (e.Key == Key.Escape)
+        {
+            _capturingRadarHotkey = false;
+            _radarHotkeyText.Text = _radarHotkey.DisplayText;
+            _radarHotkeyStatus.Text = "已取消录入，原有雷达快捷键保持生效。";
+            return;
+        }
+        if (e.Key is Key.None or Key.LWin or Key.RWin or Key.LeftShift or Key.RightShift or
+            Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.System)
+            return;
+        var prefix = string.Join('+', new[]
+        {
+            e.KeyModifiers.HasFlag(KeyModifiers.Control) ? "Ctrl" : null,
+            e.KeyModifiers.HasFlag(KeyModifiers.Alt) ? "Alt" : null,
+            e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? "Shift" : null
+        }.Where(value => value != null));
+        var input = prefix.Length == 0 ? e.Key.ToString() : prefix + "+" + e.Key;
+        if (!RadarHotkeyBinding.TryParse(input, out var binding))
+        {
+            _radarHotkeyStatus.Text = "该按键不支持；请使用字母、数字、功能键、方向键或常见键盘按键。";
+            return;
+        }
+        _capturingRadarHotkey = false;
+        _radarHotkeyText.Text = binding.DisplayText;
+        SaveRadarHotkey();
     }
 
     private void UpdateAutoPartyControls()

@@ -21,6 +21,7 @@ AutoPartyCoordinatorSmoke.Run();
 AutoPartyHotkeySmoke.Run();
 AutoPartyKeyPreferenceSmoke.Run();
 GameKeyboardShortcutSmoke.Run();
+RadarHotkeySmoke.Run();
 AutoPartyInviteSmoke.Run();
 AutoPartyRecoverySmoke.Run();
 await AutoPartyRecoverySchedulerSmoke.RunAsync();
@@ -74,6 +75,9 @@ if (window.GetLogicalDescendants().OfType<Button>().Count(button =>
 if (window.GetLogicalDescendants().OfType<Button>().Count(button =>
         button.Content?.ToString() == "保存暂停快捷键") != 1)
     throw new Exception("The desktop did not expose the follow pause key setting.");
+if (window.GetLogicalDescendants().OfType<Button>().Count(button =>
+        button.Content?.ToString() == "保存雷达快捷键") != 1)
+    throw new Exception("The desktop did not expose the radar hotkey setting.");
 if (window.GetLogicalDescendants().OfType<Button>().Count(button =>
         button.Content?.ToString() == "暂停跟随") != 1)
     throw new Exception("The desktop did not expose temporary follow pause.");
@@ -158,7 +162,8 @@ if (!radarVisibility.Enabled) throw new Exception("A second Tab press did not re
 radarVisibility.Observe(false, false);
 radarVisibility.Observe(false, true);
 if (!radarVisibility.Enabled) throw new Exception("Tab outside the game changed radar visibility.");
-var radarWindow = new RadarOverlayWindow(new LaunchedClient(123, 1, "C:/Game.exe"), radarScale);
+var radarWindow = new RadarOverlayWindow(new LaunchedClient(123, 1, "C:/Game.exe"), radarScale,
+    radarVisibility);
 radarWindow.Show();
 radarWindow.Apply(radarFrame);
 radarWindow.UpdateLayout();

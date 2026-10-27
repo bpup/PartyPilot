@@ -16,7 +16,7 @@ public sealed class RadarOverlayWindow : Window
     private static readonly nint ToolWindow = 0x80;
     private readonly LaunchedClient _client;
     private readonly double _scale;
-    private readonly RadarVisibility _visibility = new();
+    private readonly RadarVisibility _visibility;
     private readonly Canvas _canvas = new();
     private readonly DispatcherTimer _positionTimer = new() { Interval = TimeSpan.FromMilliseconds(50) };
     private RadarFrame? _frame;
@@ -24,10 +24,11 @@ public sealed class RadarOverlayWindow : Window
 
     public event Action? TargetLost;
 
-    public RadarOverlayWindow(LaunchedClient client, double scale)
+    public RadarOverlayWindow(LaunchedClient client, double scale, RadarVisibility visibility)
     {
         _client = client;
         _scale = scale;
+        _visibility = visibility;
         Title = $"PartyPilot Radar · {client.Pid}";
         SystemDecorations = SystemDecorations.None;
         ShowInTaskbar = false;
@@ -161,7 +162,6 @@ public sealed class RadarOverlayWindow : Window
         Width = (rect.Right - rect.Left) / scaling;
         Height = (rect.Bottom - rect.Top) / scaling;
         var foreground = GetForegroundWindow() == handle;
-        _visibility.Observe(foreground, GetAsyncKeyState(0x09) < 0);
         Opacity = foreground && _visibility.Enabled ? 1 : 0;
         if (_frame != null && DateTime.UtcNow - _frame.SeenUtc > TimeSpan.FromSeconds(2))
         {
@@ -194,7 +194,6 @@ public sealed class RadarOverlayWindow : Window
     [DllImport("user32.dll")] private static extern bool GetClientRect(nint handle, out NativeRect rect);
     [DllImport("user32.dll")] private static extern bool ClientToScreen(nint handle, ref NativePoint point);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
-    [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int virtualKey);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)] private static extern nint GetWindowLongPtr(nint handle, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)] private static extern nint SetWindowLongPtr(nint handle, int index, nint value);
 }

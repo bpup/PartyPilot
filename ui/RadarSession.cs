@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using Avalonia.Threading;
 
 namespace PartyPilot.Desktop;
@@ -9,38 +10,70 @@ internal sealed class RadarSession : IAsyncDisposable
     private readonly UdpClient _receiver;
     private readonly CancellationTokenSource _cancellation = new();
     private readonly Dictionary<int, RadarOverlayWindow> _windows;
+    private readonly Dictionary<int, nint> _gameHandles;
+    private readonly RadarVisibility _visibility;
+    private readonly DispatcherTimer _hotkeyTimer = new() { Interval = TimeSpan.FromMilliseconds(25) };
+    private RadarHotkeyBinding _hotkey;
     private readonly Task _receiveTask;
     private bool _disposed;
 
     public event Action<string>? Ended;
     public event Action<int, int>? FrameReceived;
 
-    private RadarSession(UdpClient receiver, Dictionary<int, RadarOverlayWindow> windows)
+    private RadarSession(UdpClient receiver, Dictionary<int, RadarOverlayWindow> windows,
+        Dictionary<int, nint> gameHandles, RadarHotkeyBinding hotkey, RadarVisibility visibility)
     {
         _receiver = receiver;
         _windows = windows;
+        _gameHandles = gameHandles;
+        _hotkey = hotkey;
+        _visibility = visibility;
         foreach (var window in windows.Values) window.TargetLost += OnTargetLost;
+        _hotkeyTimer.Tick += OnHotkeyTimer;
+        _hotkeyTimer.Start();
         _receiveTask = ReceiveLoopAsync();
     }
 
-    public static RadarSession Start(IReadOnlyList<LaunchedClient> clients, double scale)
+    internal void SetHotkey(RadarHotkeyBinding hotkey)
+    {
+        if (hotkey.VirtualKey == 0) throw new ArgumentException("Radar hotkey is invalid.");
+        _hotkey = hotkey;
+        _visibility.Observe(false, false);
+    }
+
+    private void OnHotkeyTimer(object? sender, EventArgs args)
+    {
+        if (_disposed) return;
+        var foreground = GetForegroundWindow();
+        var gameForeground = _windows.Any(item => !item.Value.TargetIsLost &&
+            _gameHandles[item.Key] == foreground);
+        _visibility.Observe(gameForeground,
+            _hotkey.IsDown(key => GetAsyncKeyState(key) < 0));
+    }
+
+    public static RadarSession Start(IReadOnlyList<LaunchedClient> clients, double scale,
+        RadarHotkeyBinding hotkey)
     {
         if (!OperatingSystem.IsWindows() || clients.Count is < 1 or > 3 ||
             clients.Any(client => client.Pid <= 0 || client.WindowHandle == 0) ||
             clients.Select(client => client.Pid).Distinct().Count() != clients.Count ||
             !double.IsFinite(scale) || scale <= 0)
             throw new InvalidOperationException("Radar requires 1–3 bound game windows and an explicit scale.");
+        if (hotkey.VirtualKey == 0) throw new ArgumentException("Radar hotkey is invalid.");
         var receiver = new UdpClient(new IPEndPoint(IPAddress.Loopback, 47618));
         var windows = new Dictionary<int, RadarOverlayWindow>();
+        var visibility = new RadarVisibility();
         RadarSession? session = null;
         try
         {
             foreach (var client in clients)
             {
-                var window = new RadarOverlayWindow(client, scale);
+                var window = new RadarOverlayWindow(client, scale, visibility);
                 windows.Add(client.Pid, window);
             }
-            session = new RadarSession(receiver, windows);
+            session = new RadarSession(receiver, windows,
+                clients.ToDictionary(client => client.Pid, client => (nint)client.WindowHandle),
+                hotkey, visibility);
             foreach (var window in windows.Values) window.Show();
             if (windows.Values.Any(window => window.TargetIsLost))
                 throw new InvalidOperationException("A bound game window disappeared before radar startup completed.");
@@ -94,6 +127,8 @@ internal sealed class RadarSession : IAsyncDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _hotkeyTimer.Stop();
+        _hotkeyTimer.Tick -= OnHotkeyTimer;
         _cancellation.Cancel();
         _receiver.Dispose();
         await _receiveTask;
@@ -104,4 +139,7 @@ internal sealed class RadarSession : IAsyncDisposable
         }
         _cancellation.Dispose();
     }
+
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int virtualKey);
 }
