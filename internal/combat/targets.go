@@ -98,6 +98,33 @@ func (c *TargetCoordinator) Assign(profile Profile, world World, plans []Plan) {
 		}
 		c.record(plan.Player, plan.TargetID, alive, world.Timestamp)
 	}
+	combos := make(map[string]Combo, len(profile.Combos))
+	for _, combo := range profile.Combos {
+		combos[combo.ID] = combo
+	}
+	for i := range plans {
+		plan := &plans[i]
+		if plan.Status != "planned_only" || plan.TargetID != "" ||
+			!requiresSpecificTarget(combos[plan.ComboID]) {
+			continue
+		}
+		bestDistance := math.Inf(1)
+		for _, monster := range alive {
+			if distance, ok := monster.DistanceByPlayer[plan.Player]; ok && distance < bestDistance {
+				bestDistance, plan.TargetID = distance, monster.ID
+			}
+		}
+	}
+}
+
+func requiresSpecificTarget(combo Combo) bool {
+	for _, step := range combo.Steps {
+		switch step.Condition {
+		case "target-alive", "finisher-condition":
+			return true
+		}
+	}
+	return false
 }
 
 func (c *TargetCoordinator) existing(player int, allowed []Monster) string {
