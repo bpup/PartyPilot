@@ -316,6 +316,7 @@ if (args.Contains("--ui-controls-only"))
     window.Close();
     return;
 }
+RadarTerrainCaptureSmoke.Run();
 var radarPayload = System.Text.Encoding.UTF8.GetBytes(
     "{\"ProcessId\":123,\"AreaHash\":42,\"RadarAreaAddress\":\"0xABCDEF\",\"RadarStatus\":\"ok\",\"RadarSeenUtc\":\"" + DateTime.UtcNow.ToString("O") +
     "\",\"X\":100,\"Y\":200,\"RadarEntities\":[" +
