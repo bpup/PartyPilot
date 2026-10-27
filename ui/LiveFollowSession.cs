@@ -113,11 +113,17 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         IReadOnlyDictionary<int, string>? terrainBindings = null,
         bool classicCollisionDodge = false,
         bool classicSprintCatchUp = false,
+        bool aggressiveBlinkCatchUp = false,
+        int aggressiveSprintRetryDelay = 800,
         bool relayMainInput = false,
         bool closeRangeMirror = false,
         int closeMirrorDuration = 400,
         FollowerMirrorConfig? followerMirror = null)
     {
+        if (aggressiveBlinkCatchUp && classicSprintCatchUp)
+            throw new ArgumentException("Classic and aggressive sprint modes cannot be combined.");
+        if (aggressiveBlinkCatchUp && aggressiveSprintRetryDelay is < 500 or > 1500)
+            throw new ArgumentOutOfRangeException(nameof(aggressiveSprintRetryDelay));
         if (closeRangeMirror && !relayMainInput)
             throw new ArgumentException("Close-range mirror requires main-controller input.");
         if (closeRangeMirror && closeMirrorDuration is < 50 or > 5000)
@@ -202,6 +208,12 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             start.ArgumentList.Add($"{player}={path}");
         }
         if (classicSprintCatchUp) start.ArgumentList.Add("-classic-sprint-catchup");
+        if (aggressiveBlinkCatchUp)
+        {
+            start.ArgumentList.Add("-aggressive-blink-catchup");
+            start.ArgumentList.Add("-aggressive-sprint-retry-delay-ms");
+            start.ArgumentList.Add(aggressiveSprintRetryDelay.ToString(CultureInfo.InvariantCulture));
+        }
         if (relayMainInput) start.ArgumentList.Add("-accept-main-input");
         if (closeRangeMirror) start.ArgumentList.Add("-close-range-mirror");
         if (closeRangeMirror)

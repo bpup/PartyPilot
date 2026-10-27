@@ -447,6 +447,10 @@ func main() {
 	lastFocusedLeads := flag.Bool("last-focused-leads", false, "use manually focused player as the current follow MAIN")
 	classicSprintCatchUp := flag.Bool("classic-sprint-catchup", false,
 		"use the classic sprint controller instead of the distributed client's normal sprint mode")
+	aggressiveBlinkCatchUp := flag.Bool("aggressive-blink-catchup", false,
+		"enable the optional dodge-to-sprint retry controller")
+	aggressiveRetryDelay := flag.Int("aggressive-sprint-retry-delay-ms", 800,
+		"aggressive sprint retry delay in milliseconds (500–1500)")
 	classicCollisionDodge := flag.Bool("classic-collision-dodge", false,
 		"opt into terrain-backed classic sprint collision recovery")
 	autoFlask := flag.Bool("auto-flask", false, "enable life and mana flask decisions for explicitly bound clients")
@@ -469,6 +473,11 @@ func main() {
 	flag.Var(&targets, "follow-target", "SLOT=TARGET; 0 means Current MAIN")
 	flag.Var(&playerStops, "stop-player", "SLOT=VALUE; individual stop distance from 0 to 200")
 	flag.Parse()
+	if *aggressiveBlinkCatchUp && *classicSprintCatchUp ||
+		*aggressiveBlinkCatchUp && (*aggressiveRetryDelay < 500 || *aggressiveRetryDelay > 1500) {
+		fmt.Fprintln(os.Stderr, "aggressive sprint requires normal sprint and a retry delay from 500 to 1500 ms")
+		os.Exit(2)
+	}
 	if *orderedInput != (len(bindings) > 0) || *orderedInput && *rosterText != "" ||
 		!(*orderedInput) && *rosterText == "" {
 		fmt.Fprintln(os.Stderr, "choose either -roster or -experimental-ordered-input with -role-bind")
@@ -505,8 +514,10 @@ func main() {
 	}
 	config := follow.Config{StopDistance: *stop, ResumeDistance: *stop + 3, CatchUpDistance: *catchup,
 		MaxAge: *maxAge, TargetTrail: true, AsyncTargetPath: true,
-		NormalSprintCatchUp:   !*classicSprintCatchUp,
-		ClassicCollisionDodge: *classicCollisionDodge}
+		NormalSprintCatchUp:        !*classicSprintCatchUp,
+		ClassicCollisionDodge:      *classicCollisionDodge,
+		AggressiveBlinkCatchUp:     *aggressiveBlinkCatchUp,
+		AggressiveSprintRetryDelay: time.Duration(*aggressiveRetryDelay) * time.Millisecond}
 	var engine *live.Engine
 	if *orderedInput {
 		engine, err = live.NewWithBindings(bindings, *leader, config, *logAge)

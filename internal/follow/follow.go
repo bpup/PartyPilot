@@ -39,17 +39,19 @@ type Command struct {
 }
 
 type Config struct {
-	StopDistance          float64
-	ResumeDistance        float64
-	CatchUpDistance       float64
-	MaxAge                time.Duration
-	TrailSpacing          float64
-	TrailMaxStep          float64
-	RequireTerrain        bool
-	TargetTrail           bool
-	AsyncTargetPath       bool
-	NormalSprintCatchUp   bool
-	ClassicCollisionDodge bool
+	StopDistance               float64
+	ResumeDistance             float64
+	CatchUpDistance            float64
+	MaxAge                     time.Duration
+	TrailSpacing               float64
+	TrailMaxStep               float64
+	RequireTerrain             bool
+	TargetTrail                bool
+	AsyncTargetPath            bool
+	NormalSprintCatchUp        bool
+	ClassicCollisionDodge      bool
+	AggressiveBlinkCatchUp     bool
+	AggressiveSprintRetryDelay time.Duration
 }
 
 func (c Config) Valid() bool {
@@ -62,6 +64,9 @@ func (c Config) Valid() bool {
 		c.ResumeDistance > c.StopDistance &&
 		c.CatchUpDistance > 0 &&
 		c.MaxAge > 0 && (!c.AsyncTargetPath || c.TargetTrail) &&
+		(!c.AggressiveBlinkCatchUp || (c.NormalSprintCatchUp &&
+			c.AggressiveSprintRetryDelay >= 500*time.Millisecond &&
+			c.AggressiveSprintRetryDelay <= 1500*time.Millisecond)) &&
 		((c.TrailSpacing == 0 && c.TrailMaxStep == 0) ||
 			(c.TrailSpacing > 0 && c.TrailMaxStep > c.TrailSpacing))
 }
@@ -83,6 +88,7 @@ func (e *Engine) Reset() {
 	e.heldTarget = point{}
 	e.stopBubbleHolding = false
 	e.sprint.Reset()
+	e.aggressive.Reset()
 	e.lastSprintObservation = time.Time{}
 	e.sprintDown = false
 	e.normalSprintDirection = point{}
@@ -117,6 +123,7 @@ type Engine struct {
 	heldTarget            point
 	stopBubbleHolding     bool
 	sprint                classicSprint
+	aggressive            aggressiveSprint
 	lastSprintObservation time.Time
 	sprintDown            bool
 	normalSprintDirection point
@@ -249,6 +256,7 @@ func (e *Engine) StepWithTerrainCloseFollow(now time.Time, leader, follower Posi
 		e.holdingTarget = false
 		e.heldTarget = point{}
 		e.sprint.Reset()
+		e.aggressive.Reset()
 		e.sprintDown = false
 		e.lastSprintObservation = time.Time{}
 		e.normalSprintDirection = point{}
@@ -329,6 +337,7 @@ func (e *Engine) StepWithTerrainCloseFollow(now time.Time, leader, follower Posi
 			e.catchingUp = false
 			e.teleportRecovery = false
 			e.sprint.Reset()
+			e.aggressive.Reset()
 			e.sprintDown = false
 			e.lastSprintObservation = time.Time{}
 			e.normalSprintDirection = point{}
@@ -410,12 +419,29 @@ func (e *Engine) StepWithTerrainCloseFollow(now time.Time, leader, follower Posi
 			observedAt = follower.Seen
 		}
 		if observedAt.After(e.lastSprintObservation) {
-			if e.config.NormalSprintCatchUp {
+			if e.config.AggressiveBlinkCatchUp {
+				e.sprint.Reset()
+				e.normalSprintDirection = point{}
+				e.normalSprintSince = time.Time{}
+				segmentSafe := directTrailClear
+				if !segmentSafe && terrain != nil && len(e.route) > 0 {
+					waypoint := e.route[0]
+					segmentSafe = math.Hypot(waypoint.X-follower.X, waypoint.Y-follower.Y) >= 18 &&
+						terrain.HasLineOfSightAvoid(follower.X, follower.Y, waypoint.X, waypoint.Y,
+							leader.X, leader.Y, 5, 1)
+				}
+				e.sprintDown = e.aggressive.Update(e.catchingUp &&
+					math.Hypot(targetX-follower.X, targetY-follower.Y) > 30,
+					segmentSafe, point{dx, dy}, point{follower.X, follower.Y},
+					distance, observedAt, e.config.AggressiveSprintRetryDelay)
+			} else if e.config.NormalSprintCatchUp {
+				e.aggressive.Reset()
 				e.sprint.Reset()
 				e.sprintDown = e.updateNormalSprint(dx, dy,
 					e.catchingUp && directTrailClear &&
 						math.Hypot(targetX-follower.X, targetY-follower.Y) > 30, observedAt)
 			} else {
+				e.aggressive.Reset()
 				e.normalSprintDirection = point{}
 				e.normalSprintSince = time.Time{}
 				collisionImminent := e.config.ClassicCollisionDodge && terrain != nil &&

@@ -116,6 +116,8 @@ public sealed class MainWindow : Window
     private readonly TextBox[] _terrainBindingPaths = new TextBox[3];
     private readonly StackPanel[] _terrainBindingRows = new StackPanel[3];
     private readonly CheckBox _classicSprintCatchUp = new();
+    private readonly CheckBox _aggressiveBlinkCatchUp = new();
+    private readonly TextBox _aggressiveSprintRetryDelay = new();
     private readonly CheckBox _closeRangeMirror = new();
     private readonly TextBox _closeMirrorDuration = new();
     private readonly CheckBox _classicCollisionDodge = new();
@@ -837,10 +839,24 @@ public sealed class MainWindow : Window
         _classicSprintCatchUp.Content = "启用经典冲刺追赶（0.6.17 分布式客户端默认关闭）";
         _classicSprintCatchUp.IsCheckedChanged += (_, _) =>
         {
+            if (_classicSprintCatchUp.IsChecked == true) _aggressiveBlinkCatchUp.IsChecked = false;
             if (_classicSprintCatchUp.IsChecked != true) _classicCollisionDodge.IsChecked = false;
             UpdateFollowControls();
         };
         panel.Children.Add(_classicSprintCatchUp);
+        _aggressiveBlinkCatchUp.Content = "激进闪避转冲刺追赶（目标版默认关闭）";
+        _aggressiveBlinkCatchUp.IsCheckedChanged += (_, _) =>
+        {
+            if (_aggressiveBlinkCatchUp.IsChecked == true) _classicSprintCatchUp.IsChecked = false;
+            UpdateFollowControls();
+        };
+        panel.Children.Add(_aggressiveBlinkCatchUp);
+        panel.Children.Add(Label("激进冲刺重试间隔（毫秒，500–1500；目标版默认 800）", 12, MutedBrush));
+        _aggressiveSprintRetryDelay.Text = "800";
+        _aggressiveSprintRetryDelay.Width = 190;
+        _aggressiveSprintRetryDelay.HorizontalAlignment = HorizontalAlignment.Left;
+        _aggressiveSprintRetryDelay.TextChanged += (_, _) => UpdateFollowControls();
+        panel.Children.Add(_aggressiveSprintRetryDelay);
         _closeRangeMirror.Content = "近距离镜像跟随（实体手柄；目标版默认关闭）";
         _closeRangeMirror.IsCheckedChanged += (_, _) => UpdateFollowControls();
         panel.Children.Add(_closeRangeMirror);
@@ -2166,6 +2182,9 @@ public sealed class MainWindow : Window
             if (binding is not null) binding.IsEnabled = _follow is null && !_busy;
         _classicSprintCatchUp.IsEnabled = _follow is null && !_busy &&
             _selectedTopology?.Id is ("2-split" or "3-three-singles");
+        _aggressiveBlinkCatchUp.IsEnabled = _classicSprintCatchUp.IsEnabled;
+        _aggressiveSprintRetryDelay.IsEnabled = _aggressiveBlinkCatchUp.IsEnabled &&
+            _aggressiveBlinkCatchUp.IsChecked == true;
         _closeRangeMirror.IsEnabled = _follow is null && !_busy &&
             _selectedTopology?.Id is ("2-split" or "3-three-singles") &&
             _bridge is { IsHybridMode: false };
@@ -2175,6 +2194,9 @@ public sealed class MainWindow : Window
             _classicSprintCatchUp.IsChecked == true;
         var valid = LiveFollowPlan.TryCreate(_followStop.Text, _followCatchup.Text,
             _followMaxAge.Text, _followLogAge.Text, _followLeaderName.Text, out _);
+        if (_aggressiveBlinkCatchUp.IsChecked == true)
+            valid &= int.TryParse(_aggressiveSprintRetryDelay.Text, NumberStyles.None,
+                CultureInfo.InvariantCulture, out var retryDelay) && retryDelay is >= 500 and <= 1500;
         if (_closeRangeMirror.IsEnabled && _closeRangeMirror.IsChecked == true)
             valid &= int.TryParse(_closeMirrorDuration.Text, NumberStyles.None,
                 CultureInfo.InvariantCulture, out var duration) && duration is >= 50 and <= 5000;
@@ -2920,6 +2942,9 @@ public sealed class MainWindow : Window
                 _launchedClients, _bridge, plan, memberNames, followTargets, playerStops,
                 terrain, _classicCollisionDodge.IsChecked == true,
                 _classicSprintCatchUp.IsChecked == true,
+                aggressiveBlinkCatchUp: _aggressiveBlinkCatchUp.IsChecked == true,
+                aggressiveSprintRetryDelay: _aggressiveBlinkCatchUp.IsChecked == true
+                    ? int.Parse(_aggressiveSprintRetryDelay.Text!, CultureInfo.InvariantCulture) : 800,
                 relayMainInput: enableCloseMirror,
                 closeRangeMirror: enableCloseMirror,
                 closeMirrorDuration: int.Parse(_closeMirrorDuration.Text!, CultureInfo.InvariantCulture),
