@@ -39,12 +39,20 @@ type Engine struct {
 	memberNames      map[int]string
 	stopped          string
 	followPaused     bool
+	mainInput        MainInput
+	mainInputValid   bool
+	acceptMainInput  bool
 }
 
 // SetFollowPaused temporarily releases movement without discarding process,
 // area, or player observations. A latched party stop still takes precedence.
-func (e *Engine) SetFollowPaused(paused bool) { e.followPaused = paused }
-func (e *Engine) FollowPaused() bool          { return e.followPaused }
+func (e *Engine) SetFollowPaused(paused bool) {
+	e.followPaused = paused
+	if paused {
+		e.mainInputValid = false
+	}
+}
+func (e *Engine) FollowPaused() bool { return e.followPaused }
 
 // Target 0.6.17 uses grid coordinates for follow distances. Its distributed
 // core maps grid deltas to world deltas with this factor. Render.Pos from the
@@ -102,6 +110,7 @@ func (e *Engine) ObserveManualFocus(slot int) error {
 	}
 	e.leader = slot
 	e.leaderName = e.memberNames[slot]
+	e.mainInputValid = false
 	return nil
 }
 
@@ -111,6 +120,7 @@ func (e *Engine) Stop(reason string) {
 	}
 	e.coordinator.ResetFollow()
 	e.terrainStable = make(map[int]terrainStability)
+	e.mainInputValid = false
 }
 
 // ObserveParty latches a stop. A later position or area update cannot resume

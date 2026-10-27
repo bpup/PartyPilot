@@ -37,6 +37,8 @@ internal static class ProcessPipelineSmoke
         var log = Path.Combine(directory, "bridge-input.jsonl");
         var bridgeExe = Path.Combine(directory, "fake-bridge");
         var mainInputBridgeExe = Path.Combine(directory, "fake-main-input-bridge");
+        var mainInputFollowExe = Path.Combine(directory, "fake-main-input-follow");
+        var mainInputLog = Path.Combine(directory, "main-input-control.jsonl");
         var couchBridgeExe = Path.Combine(directory, "fake-couch-bridge");
         var wgiBridgeExe = Path.Combine(directory, "fake-wgi-bridge");
         var client3BridgeExe = Path.Combine(directory, "fake-client3-bridge");
@@ -69,6 +71,15 @@ internal static class ProcessPipelineSmoke
                 "    if enabled:\n" +
                 "        print('{\"event\":\"main_input\",\"slot\":1,\"left_x\":40000,\"left_y\":0,\"b_down\":true,\"blocked\":false}', flush=True)\n" +
                 "        print('{\"event\":\"main_input\",\"slot\":1,\"left_x\":1234,\"left_y\":-2345,\"b_down\":true,\"blocked\":false}', flush=True)\n");
+            File.WriteAllText(mainInputFollowExe, "#!/usr/bin/env python3\nimport sys,json,time\n" +
+                "if '-accept-main-input' not in sys.argv: sys.exit(2)\n" +
+                "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}}}', flush=True)\n" +
+                "for line in sys.stdin:\n" +
+                "    control=json.loads(line)\n" +
+                "    if control.get('type') == 'main_input':\n" +
+                "        if control.get('slot') != 1 or abs(control.get('left_x',0)-1234/32767) > 0.0001 or abs(control.get('left_y',0)+2345/32767) > 0.0001 or not control.get('b_down') or control.get('blocked') or control.get('observed_at_unix_ms',0) <= 0: sys.exit(2)\n" +
+                $"        open({JsonSerializer.Serialize(mainInputLog)}, 'w').write(line)\n" +
+                "        time.sleep(0.5)\n        break\n");
             File.WriteAllText(followExe, "#!/usr/bin/env python3\nimport sys,json\n" +
                 "if '-auto-flask' not in sys.argv: sys.exit(2)\n" +
                 "if '-classic-sprint-catchup' in sys.argv: sys.exit(2)\n" +
@@ -157,6 +168,7 @@ internal static class ProcessPipelineSmoke
                 "for line in sys.stdin: pass\n");
             File.SetUnixFileMode(bridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(mainInputBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(mainInputFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(followExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(terrainFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(dynamicBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -197,6 +209,20 @@ internal static class ProcessPipelineSmoke
             };
             if (!LiveFollowPlan.TryCreate("2", "10", "750ms", "30m", null, out var plan) || plan is null)
                 throw new Exception("The pipeline test plan is invalid.");
+            await using (var inputBridge = await BridgeSession.StartAsync(mainInputBridgeExe,
+                topology.Slots, 0, @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"], false))
+            {
+                inputBridge.StartReading();
+                await using var inputFollow = await LiveFollowSession.StartAsync(mainInputFollowExe,
+                    topology, clients, inputBridge, plan, relayMainInput: true);
+                inputFollow.StartReading();
+                var inputDeadline = DateTime.UtcNow.AddSeconds(3);
+                while (!File.Exists(mainInputLog) && DateTime.UtcNow < inputDeadline)
+                    await Task.Delay(20);
+                if (!File.Exists(mainInputLog))
+                    throw new Exception("Main controller sample did not reach the live follow process.");
+            }
+            Console.WriteLine("Main controller input passed through bridge, desktop, and live process fakes.");
             Console.WriteLine("Pipeline smoke: starting fake follow.");
             await using (var follow = await LiveFollowSession.StartAsync(followExe, topology, clients, bridge, plan))
             {

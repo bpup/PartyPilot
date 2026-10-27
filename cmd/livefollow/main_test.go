@@ -210,3 +210,35 @@ func TestFollowPauseControlRequiresOptInAndExplicitState(t *testing.T) {
 		t.Fatalf("explicit resume was lost: %v", err)
 	}
 }
+
+func TestMainInputControlRequiresOptInAndCurrentLeader(t *testing.T) {
+	engine, err := live.New(map[int]int{1: 101, 2: 202}, 1,
+		follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10,
+			MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	at := time.Now().UTC()
+	input := make(chan menuInput, 1)
+	control := menuInput{Type: "main_input", Slot: 1, LeftX: 0.5,
+		LeftY: -0.25, BDown: true, ObservedAtMS: at.UnixMilli()}
+	input <- control
+	if err := applyMenuInput(nil, engine, input, false); err == nil {
+		t.Fatal("main controller sample bypassed opt-in")
+	}
+	engine.SetAcceptMainInput(true)
+	input <- control
+	if err := applyMenuInput(nil, engine, input, false); err != nil {
+		t.Fatalf("bound main controller sample was rejected: %v", err)
+	}
+	if got, ok := engine.CurrentMainInput(time.Now().UTC()); !ok ||
+		got.Slot != 1 || got.LeftX != 0.5 || !got.BDown {
+		t.Fatalf("accepted input was not retained: %+v %v", got, ok)
+	}
+	control.Slot = 2
+	input <- control
+	if err := applyMenuInput(nil, engine, input, false); err == nil {
+		t.Fatal("follower sample was accepted as main input")
+	}
+}

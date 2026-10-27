@@ -224,10 +224,15 @@ type frame struct {
 }
 
 type menuInput struct {
-	Type  string `json:"type"`
-	Slot  int    `json:"slot"`
-	State string `json:"state"`
-	Err   error  `json:"-"`
+	Type         string  `json:"type"`
+	Slot         int     `json:"slot"`
+	State        string  `json:"state"`
+	LeftX        float64 `json:"left_x"`
+	LeftY        float64 `json:"left_y"`
+	BDown        bool    `json:"b_down"`
+	Blocked      bool    `json:"blocked"`
+	ObservedAtMS int64   `json:"observed_at_unix_ms"`
+	Err          error   `json:"-"`
 }
 
 func readMenuInput(reader io.Reader, output chan<- menuInput) {
@@ -237,7 +242,7 @@ func readMenuInput(reader io.Reader, output chan<- menuInput) {
 		var input menuInput
 		if err := json.Unmarshal(scanner.Bytes(), &input); err != nil ||
 			(input.Type != "menu_guard" && input.Type != "manual_focus" &&
-				input.Type != "follow_pause") {
+				input.Type != "follow_pause" && input.Type != "main_input") {
 			output <- menuInput{Err: errors.New("invalid live control command")}
 			return
 		}
@@ -263,6 +268,14 @@ func applyMenuInput(session *live.FlaskSession, engine *live.Engine, input <-cha
 				return command.Err
 			}
 			switch command.Type {
+			case "main_input":
+				if command.ObservedAtMS <= 0 || !engine.ObserveMainInput(live.MainInput{
+					Slot: command.Slot, LeftX: command.LeftX, LeftY: command.LeftY,
+					BDown: command.BDown, Blocked: command.Blocked,
+					ObservedAt: time.UnixMilli(command.ObservedAtMS).UTC(),
+				}, time.Now().UTC()) {
+					return errors.New("invalid main input control")
+				}
 			case "menu_guard":
 				if session == nil {
 					return errors.New("menu guard is not enabled")
@@ -404,6 +417,7 @@ func main() {
 		"opt into terrain-backed classic sprint collision recovery")
 	autoFlask := flag.Bool("auto-flask", false, "enable life and mana flask decisions for explicitly bound clients")
 	allowFollowPause := flag.Bool("allow-follow-pause", false, "accept explicit pause/resume controls on stdin")
+	acceptMainInput := flag.Bool("accept-main-input", false, "accept bound main-controller samples without enabling mirror output")
 	address := flag.String("listen", "127.0.0.1:47617", "loopback sensor address")
 	var logs, exes, terrainBindings sources
 	var names memberNames
@@ -486,6 +500,7 @@ func main() {
 		}
 	}
 	engine.SetLastFocusedLeads(*lastFocusedLeads)
+	engine.SetAcceptMainInput(*acceptMainInput)
 	for slot, target := range targets {
 		if err := engine.SetFollowTarget(slot, target); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -511,7 +526,7 @@ func main() {
 			os.Exit(2)
 		}
 	}
-	if *autoFlask || *lastFocusedLeads || *allowFollowPause {
+	if *autoFlask || *lastFocusedLeads || *allowFollowPause || *acceptMainInput {
 		commands := make(chan menuInput, 16)
 		menuCommands = commands
 		go readMenuInput(os.Stdin, commands)

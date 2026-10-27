@@ -17,6 +17,10 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     private readonly ConcurrentQueue<(int Player, string State)> _pendingMenu = new();
     private readonly ConcurrentQueue<int> _pendingFocus = new();
     private readonly ConcurrentQueue<bool> _pendingPause = new();
+    private readonly object _mainInputGate = new();
+    private MainInputSample? _pendingMainInput;
+    private readonly bool _relayMainInput;
+    private int _inputSubscriptionActive;
     private readonly SemaphoreSlim _controlSignal = new(0);
     private readonly CancellationTokenSource _controlCancellation = new();
     private readonly Task<string> _readError;
@@ -31,7 +35,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     public event Action<string>? Ended;
 
     private LiveFollowSession(Process process, BridgeSession bridge, PartyTopology topology,
-        Task<string> readError, FollowBridgeFrame initialFrame)
+        Task<string> readError, FollowBridgeFrame initialFrame, bool relayMainInput)
     {
         _process = process;
         _bridge = bridge;
@@ -40,6 +44,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         _padToPlayer = topology.Slots.ToDictionary(slot => slot.RuntimePad, slot => slot.PartyPlayer);
         _playerToPad = topology.Slots.ToDictionary(slot => slot.PartyPlayer, slot => slot.RuntimePad);
         _readError = readError;
+        _relayMainInput = relayMainInput;
         Current = initialFrame;
         if (bridge.AutoFlaskEnabled)
         {
@@ -58,6 +63,19 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 _controlSignal.Release();
             }
         }
+        if (relayMainInput) bridge.MainInputChanged += OnMainInputChanged;
+    }
+
+    private void OnMainInputChanged(MainInputSample sample)
+    {
+        if (_stopping || !_padToPlayer.ContainsKey(sample.Pad)) return;
+        bool signal;
+        lock (_mainInputGate)
+        {
+            signal = _pendingMainInput is null;
+            _pendingMainInput = sample;
+        }
+        if (signal) _controlSignal.Release();
     }
 
     private void OnMenuGuardChanged(int pad, string state)
@@ -93,7 +111,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         IReadOnlyDictionary<int, double>? playerStops = null,
         IReadOnlyDictionary<int, string>? terrainBindings = null,
         bool classicCollisionDodge = false,
-        bool classicSprintCatchUp = false)
+        bool classicSprintCatchUp = false,
+        bool relayMainInput = false)
     {
         if (topology.Id is not ("2-split" or "3-three-singles") ||
             clients.Count != topology.ClientCount ||
@@ -175,6 +194,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             start.ArgumentList.Add($"{player}={path}");
         }
         if (classicSprintCatchUp) start.ArgumentList.Add("-classic-sprint-catchup");
+        if (relayMainInput) start.ArgumentList.Add("-accept-main-input");
         if (classicCollisionDodge) start.ArgumentList.Add("-classic-collision-dodge");
         if (bridge.AutoFlaskEnabled) start.ArgumentList.Add("-auto-flask");
         if (bridge.LastFocusedLeadsEnabled) start.ArgumentList.Add("-last-focused-leads");
@@ -182,6 +202,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         var process = Process.Start(start) ?? throw new InvalidOperationException("Live follow did not start.");
         var readError = process.StandardError.ReadToEndAsync();
         FollowBridgeFrame? initialFrame = null;
+        LiveFollowSession? session = null;
         try
         {
             var initialLeader = bridge.LastFocusedLeadsEnabled
@@ -215,10 +236,25 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                     await bridge.SendFlaskAsync(pad, request.Resource);
                 }
             }
-            return new LiveFollowSession(process, bridge, topology, readError, frame);
+            session = new LiveFollowSession(process, bridge, topology, readError, frame, relayMainInput);
+            if (relayMainInput)
+            {
+                await bridge.SetMainInputSubscriptionAsync(true);
+                Volatile.Write(ref session._inputSubscriptionActive, 1);
+            }
+            return session;
         }
         catch (Exception error)
         {
+            if (session is not null)
+            {
+                bridge.MainInputChanged -= session.OnMainInputChanged;
+                if (relayMainInput && bridge.IsRunning)
+                {
+                    try { await bridge.SetMainInputSubscriptionAsync(false); }
+                    catch (Exception stopError) when (stopError is IOException or InvalidOperationException or TimeoutException) { }
+                }
+            }
             if (initialFrame is not null)
             {
                 foreach (var pad in initialFrame.PadCommands.Select(command => command.Pad))
@@ -302,6 +338,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         finally
         {
             _controlCancellation.Cancel();
+            await StopMainInputAsync();
             if (!_stopping)
             {
                 if (!_process.HasExited) _process.Kill();
@@ -334,7 +371,32 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 type = "menu_guard", slot = item.Player, state = item.State
             }));
         }
+        MainInputSample? input;
+        lock (_mainInputGate)
+        {
+            input = _pendingMainInput;
+            _pendingMainInput = null;
+        }
+        if (input is { } sample && _padToPlayer.TryGetValue(sample.Pad, out var inputPlayer) &&
+            DateTime.UtcNow - sample.ReceivedAtUtc <= TimeSpan.FromMilliseconds(400))
+            await _process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new
+            {
+                type = "main_input", slot = inputPlayer,
+                left_x = Math.Clamp(sample.LeftX / 32767.0, -1.0, 1.0),
+                left_y = Math.Clamp(sample.LeftY / 32767.0, -1.0, 1.0),
+                b_down = sample.BDown, blocked = sample.Blocked,
+                observed_at_unix_ms = new DateTimeOffset(sample.ReceivedAtUtc).ToUnixTimeMilliseconds()
+            }));
         await _process.StandardInput.FlushAsync();
+    }
+
+    private async Task StopMainInputAsync()
+    {
+        if (!_relayMainInput) return;
+        _bridge.MainInputChanged -= OnMainInputChanged;
+        if (Interlocked.Exchange(ref _inputSubscriptionActive, 0) == 0 || !_bridge.IsRunning) return;
+        try { await _bridge.SetMainInputSubscriptionAsync(false); }
+        catch (Exception error) when (error is IOException or InvalidOperationException or TimeoutException) { }
     }
 
     public async ValueTask DisposeAsync()
@@ -342,6 +404,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         _stopping = true;
         _bridge.MenuGuardChanged -= OnMenuGuardChanged;
         _bridge.ManualFocusChanged -= OnManualFocusChanged;
+        await StopMainInputAsync();
         _controlCancellation.Cancel();
         if (!_process.HasExited) _process.Kill();
         await _process.WaitForExitAsync();
