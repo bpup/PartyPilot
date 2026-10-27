@@ -34,6 +34,7 @@ type Engine struct {
 	vitals                map[int]telemetry.Sample
 	strictVitals          map[int]bool
 	areas                 map[int]arealog.Signal
+	areaHashes            map[int]uint32
 	terrains              map[int]boundTerrain
 	terrainStable         map[int]terrainStability
 	leaderName            string
@@ -264,7 +265,7 @@ func NewWithBindings(bindings []RoleBinding, leader int, config follow.Config,
 		orderedIdentities: make(map[int]orderedIdentity), slotToPID: slotToPID,
 		slots: slots, samples: make(map[int]telemetry.Sample),
 		vitals: make(map[int]telemetry.Sample), strictVitals: make(map[int]bool),
-		areas: make(map[int]arealog.Signal)}, nil
+		areas: make(map[int]arealog.Signal), areaHashes: make(map[int]uint32)}, nil
 }
 
 func (e *Engine) ObserveSample(sample telemetry.Sample) bool {
@@ -322,6 +323,7 @@ func (e *Engine) ObserveArea(signal arealog.Signal) bool {
 		delete(e.terrainStable, signal.Slot)
 		delete(e.vitals, signal.Slot)
 		delete(e.strictVitals, signal.Slot)
+		delete(e.areaHashes, signal.Slot)
 	}
 	e.areas[signal.Slot] = signal
 	return true
@@ -383,7 +385,7 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 			delete(e.terrainStable, slot)
 			continue
 		}
-		if area.Origin != "live" || area.ObservedAt.After(now) || now.Sub(area.ObservedAt) > e.logAge {
+		if !e.areaCurrent(slot, sample, area, now) {
 			delete(e.terrainStable, slot)
 			continue
 		}
@@ -516,6 +518,28 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 	return commands
 }
 
+// The log generation identifies the current area until a newer generation.
+// The configured log age limits its first confirmation, not the time a party
+// may spend in one map. A changed sensor area hash then waits for a new log.
+func (e *Engine) areaCurrent(slot int, motion telemetry.Sample, area arealog.Signal,
+	now time.Time) bool {
+	if area.Origin != "live" || area.ObservedAt.After(now) ||
+		motion.SeenUTC.Before(area.ObservedAt) || motion.SeenUTC.After(now) ||
+		motion.ReceivedAt.After(now) || now.Sub(motion.ReceivedAt) > e.sampleAge {
+		return false
+	}
+	if pinned, confirmed := e.areaHashes[slot]; confirmed {
+		return motion.AreaHash != 0 && motion.AreaHash == pinned
+	}
+	if now.Sub(area.ObservedAt) > e.logAge {
+		return false
+	}
+	if motion.AreaHash != 0 {
+		e.areaHashes[slot] = motion.AreaHash
+	}
+	return true
+}
+
 func (e *Engine) currentLife(slot int, motion telemetry.Sample, area arealog.Signal,
 	now time.Time) *float64 {
 	vital, exists := e.vitals[slot]
@@ -538,10 +562,8 @@ func (e *Engine) flaskActionReady(slot int, now time.Time) bool {
 	motion, hasMotion := e.samples[slot]
 	vital, hasVital := e.vitals[slot]
 	area, hasArea := e.areas[slot]
-	if !hasMotion || !hasVital || !hasArea || area.Origin != "live" ||
-		area.ObservedAt.After(now) || now.Sub(area.ObservedAt) > e.logAge ||
-		motion.SeenUTC.Before(area.ObservedAt) || motion.SeenUTC.After(now) ||
-		motion.ReceivedAt.After(now) || now.Sub(motion.ReceivedAt) > e.sampleAge ||
+	if !hasMotion || !hasVital || !hasArea ||
+		!e.areaCurrent(slot, motion, area, now) ||
 		vital.SeenUTC.Before(area.ObservedAt) || vital.SeenUTC.After(now) ||
 		vital.ReceivedAt.After(now) || now.Sub(vital.ReceivedAt) > e.sampleAge ||
 		motion.AreaHash == 0 || vital.AreaHash == 0 ||
@@ -573,10 +595,8 @@ func (e *Engine) orderedVitalActionReady(processID int, now time.Time) bool {
 		motion, hasMotion := e.samples[role.Slot]
 		vital, hasVital := e.vitals[role.Slot]
 		area, hasArea := e.areas[role.Slot]
-		if !hasMotion || !hasVital || !hasArea || area.Origin != "live" ||
-			area.ObservedAt.After(now) || now.Sub(area.ObservedAt) > e.logAge ||
-			motion.SeenUTC.Before(area.ObservedAt) || motion.SeenUTC.After(now) ||
-			motion.ReceivedAt.After(now) || now.Sub(motion.ReceivedAt) > e.sampleAge ||
+		if !hasMotion || !hasVital || !hasArea ||
+			!e.areaCurrent(role.Slot, motion, area, now) ||
 			vital.SeenUTC.Before(area.ObservedAt) || vital.SeenUTC.After(now) ||
 			vital.ReceivedAt.After(now) || now.Sub(vital.ReceivedAt) > e.sampleAge ||
 			motion.AreaHash == 0 || vital.AreaHash == 0 ||

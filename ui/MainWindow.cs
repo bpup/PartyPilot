@@ -918,7 +918,7 @@ public sealed class MainWindow : Window
         {
             (_followStop, "停止距离（0.6.17 静态值 9）"),
             (_followCatchup, "追赶距离（0.6.17 静态值 90）"),
-            (_followMaxAge, "位置有效期（ms/s/m/h）"), (_followLogAge, "区域日志有效期（ms/s/m/h）")
+            (_followMaxAge, "位置有效期（ms/s/m/h）"), (_followLogAge, "区域首次核对时限（ms/s/m/h）")
         };
         foreach (var (box, label) in fields)
         {

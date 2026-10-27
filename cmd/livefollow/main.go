@@ -622,7 +622,7 @@ func main() {
 	stop := flag.Float64("stop", -1, "stop distance")
 	catchup := flag.Float64("catchup", -1, "catch-up distance")
 	maxAge := flag.Duration("max-age", 0, "maximum sensor age")
-	logAge := flag.Duration("log-max-age", 0, "maximum area-log signal age")
+	logAge := flag.Duration("log-max-age", 0, "maximum time to first confirm area log with a fresh sensor hash")
 	leaderName := flag.String("leader-name", "", "configured character name of the followed leader, for departure detection")
 	lastFocusedLeads := flag.Bool("last-focused-leads", false, "use manually focused player as the current follow MAIN")
 	classicSprintCatchUp := flag.Bool("classic-sprint-catchup", false,
