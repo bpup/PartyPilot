@@ -472,11 +472,11 @@ if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(questRadarText), 12
     throw new Exception("Radar quest marker parsing or display failed.");
 var questItemRadarText = radarText.Replace(
     "\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\"",
-    "\"Category\":\"quest\",\"Path\":\"Metadata/MiscellaneousObjects/WorldItem@123\",\"ItemPath\":\"Metadata/Items/QuestItems/Gallows/Act2/SuicideNote\",\"Label\":\"Final Letter\"");
+    "\"Category\":\"quest\",\"Path\":\"Metadata/MiscellaneousObjects/WorldItem@123\",\"ItemPath\":\"Metadata/Items/QuestItems/Gallows/Act2/SuicideNote\",\"Label\":\"Final Letter (Skill Points)\"");
 if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(questItemRadarText), 123,
         DateTime.UtcNow, out var questItemFrame) ||
     questItemFrame?.Markers[1].Category != "quest" ||
-    RadarOverlayWindow.DisplayLabel(questItemFrame.Markers[1]) != "任务线索 · Final Letter" ||
+    RadarOverlayWindow.DisplayLabel(questItemFrame.Markers[1]) != "任务线索 · Final Letter (Skill Points)" ||
     RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
         questItemRadarText.Replace("Metadata/Items/QuestItems/Gallows/Act2/SuicideNote",
             "Metadata/Items/Weapons/Sword")), 123, DateTime.UtcNow, out _) ||

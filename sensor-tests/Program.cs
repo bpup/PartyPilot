@@ -298,6 +298,10 @@ Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
     RadarClassifier.IsWorldItemWrapperPath("Metadata/MiscellaneousObjects/WorldItem@123") &&
     !RadarClassifier.IsWorldItemWrapperPath("Metadata/Items/Weapons/Sword") &&
     RadarClassifier.IsQuestItemPath("Metadata/Items/QuestItems/Gallows/Act2/SuicideNote") &&
+    RadarClassifier.QuestItemLabel("Metadata/Items/QuestItems/Gallows/Act2/SuicideNote", "Final Letter") ==
+        "Final Letter (Skill Points)" &&
+    RadarClassifier.QuestItemLabel("Metadata/Items/QuestItems/Gallows/Act4/FutureCampaignRelic", "Future Campaign Relic") ==
+        "Future Campaign Relic" &&
     !RadarClassifier.IsQuestItemPath("Metadata/Items/Weapons/Sword") &&
     !RadarClassifier.IsQuestItemPath("Metadata/Items/QuestItemsFake/SuicideNote") &&
     RadarClassifier.IsNavigation("waypoint") && RadarClassifier.IsNavigation("quest") &&

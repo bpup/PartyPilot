@@ -1211,7 +1211,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 EntityId = entity.Id,
                 Category = category,
                 Path = path,
-                Label = lootName ?? (isPlayer ? playerName : category == "quest" ? RadarClassifier.QuestLabel(path) :
+                Label = questItem ? RadarClassifier.QuestItemLabel(itemPath!, lootName!) :
+                    lootName ?? (isPlayer ? playerName : category == "quest" ? RadarClassifier.QuestLabel(path) :
                     category == "boss" ? RadarClassifier.BossLabel(path) : null),
                 ItemPath = itemPath,
                 Stack = questItem ? null : lootStack,
