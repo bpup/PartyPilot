@@ -17,6 +17,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     private readonly UdpClient _udp = new();
     private DateTime _lastSentUtc;
     private DateTime _lastFastCandidateSentUtc;
+    private int _lastExperimentalOrderedProcessId;
+    private uint _lastExperimentalOrderedAreaHash;
     private DateTime _lastSlotScanUtc;
     private long _lastSlotScanStateAddress;
     private long _lastSlotScanDataAddress;
@@ -56,6 +58,10 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
 
     public override void Render()
     {
+        var now = DateTime.UtcNow;
+        if (!Settings.Enable.Value || !Settings.DiagnoseLocalSlotCandidates.Value ||
+            !Settings.ExperimentalOrderedFollow.Value)
+            RevokeLastExperimentalOrdered(now);
         if (!Settings.Enable.Value)
         {
             _monsterTracker.Reset();
@@ -65,7 +71,6 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             _dormantSurvey.Reset();
             return;
         }
-        var now = DateTime.UtcNow;
         if (Settings.DiagnoseLocalSlotCandidates.Value &&
             (Settings.DiagnoseFastOrderedMotion.Value || Settings.ExperimentalOrderedFollow.Value) &&
             now - _lastFastCandidateSentUtc >= TimeSpan.FromMilliseconds(20))
@@ -887,14 +892,25 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         {
             var player = GameController.Player;
             var render = player?.GetComponent<Render>();
-            if (player is null || render == null) return;
+            if (player is null || render == null)
+            {
+                RevokeLastExperimentalOrdered(seenUtc);
+                return;
+            }
             var data = GameController.IngameState.Data;
             var stateAddress = GameController.IngameState.Address;
             var areaAddress = data.Address;
             var localAddress = player.Address;
             areaHash = data.CurrentAreaHash;
             processId = GameController.Window.Process.Id;
-            if (localAddress <= 0 || processId <= 0) return;
+            if (localAddress <= 0 || processId <= 0)
+            {
+                RevokeLastExperimentalOrdered(seenUtc);
+                return;
+            }
+            if (_lastExperimentalOrderedProcessId > 0 &&
+                _lastExperimentalOrderedProcessId != processId &&
+                !RevokeLastExperimentalOrdered(seenUtc)) return;
             bool SameIdentity()
             {
                 try
@@ -943,8 +959,11 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             {
                 var control = FastOrderedCandidateFrame.TryEncodeExperimentalControl(
                     processId, areaHash, GameController.Area.CurrentArea?.Name, captured,
-                    seenUtc, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) ?? bytes;
-                _udp.Send(control, control.Length, Receiver);
+                    seenUtc, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                var packet = control ?? bytes;
+                _udp.Send(packet, packet.Length, Receiver);
+                _lastExperimentalOrderedProcessId = control is null ? 0 : processId;
+                _lastExperimentalOrderedAreaHash = control is null ? 0 : areaHash;
             }
         }
         catch
@@ -952,6 +971,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             // Once a PID is known, revoke its prior ordered positions instead
             // of leaving the last movement active until sample expiry.
             EmitFastOrderedInvalidation(processId, areaHash, seenUtc);
+            if (processId <= 0) RevokeLastExperimentalOrdered(seenUtc);
         }
     }
 
@@ -963,10 +983,34 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             var bytes = FastOrderedCandidateFrame.Encode(processId, areaHash, null,
                 null, seenUtc, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             _udp.Send(bytes, bytes.Length, Receiver);
+            if (_lastExperimentalOrderedProcessId == processId)
+            {
+                _lastExperimentalOrderedProcessId = 0;
+                _lastExperimentalOrderedAreaHash = 0;
+            }
         }
         catch
         {
             // Failure reporting must not interrupt ExileCore's render callback.
+        }
+    }
+
+    private bool RevokeLastExperimentalOrdered(DateTime seenUtc)
+    {
+        if (_lastExperimentalOrderedProcessId <= 0) return true;
+        try
+        {
+            var bytes = FastOrderedCandidateFrame.Encode(
+                _lastExperimentalOrderedProcessId, _lastExperimentalOrderedAreaHash,
+                null, null, seenUtc, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            _udp.Send(bytes, bytes.Length, Receiver);
+            _lastExperimentalOrderedProcessId = 0;
+            _lastExperimentalOrderedAreaHash = 0;
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 
