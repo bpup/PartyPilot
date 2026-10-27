@@ -1367,7 +1367,8 @@ public sealed class MainWindow : Window
 
     private void UpdateFollowTargetChoices()
     {
-        var supported = _selectedTopology?.Id is "2-split" or "3-three-singles";
+        var supported = _selectedTopology?.Id is "2-split" or "3-three-singles" or
+            "4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced";
         if (!_followTargetPreferenceReady) Array.Clear(_followTargetsRecovered);
         _updatingFollowTargetChoices = true;
         try
@@ -1418,7 +1419,8 @@ public sealed class MainWindow : Window
     {
         if (_updatingFollowStopFields || _selectedTopology is null) return;
         var slot = _selectedTopology.Slots.FirstOrDefault(item => item.PartyPlayer == player);
-        if (slot is null || _selectedTopology.Id is not ("2-split" or "3-three-singles")) return;
+        if (slot is null || _selectedTopology.Id is not ("2-split" or "3-three-singles" or
+            "4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced")) return;
         if (!FollowPlayerStop.TryRead(_followPlayerStops[player - 1].Text, out var value))
         {
             _followStopPreferenceStatus.Text = "停止距离必须为 0–200；当前输入未保存。";
@@ -1437,7 +1439,8 @@ public sealed class MainWindow : Window
     private void SaveFollowTargetChoice(int player)
     {
         if (_updatingFollowTargetChoices || _selectedTopology is null ||
-            _selectedTopology.Id is not ("2-split" or "3-three-singles")) return;
+            _selectedTopology.Id is not ("2-split" or "3-three-singles" or
+                "4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced")) return;
         if (!FollowTargetChoices.TryRead(_selectedTopology, player,
                 _followTargets[player - 1].SelectedItem as string, out var target)) return;
         var next = (int[])_configuredFollowTargets.Clone();
@@ -2437,7 +2440,8 @@ public sealed class MainWindow : Window
         foreach (var binding in _terrainBindingPaths)
             if (binding is not null) binding.IsEnabled = _follow is null && !_busy;
         _classicSprintCatchUp.IsEnabled = _follow is null && !_busy &&
-            _selectedTopology?.Id is ("2-split" or "3-three-singles");
+            _selectedTopology?.Id is ("2-split" or "3-three-singles" or
+                "4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced");
         _sprintCatchUp.IsEnabled = _classicSprintCatchUp.IsEnabled;
         _sprintCatchUpPriority.IsEnabled = _sprintCatchUp.IsEnabled &&
             _sprintCatchUp.IsChecked == true;

@@ -21,5 +21,11 @@ internal static class FollowTargetChoicesSmoke
             FollowTargetChoices.Normalize(split, 2, 2) != "当前主控" ||
             FollowTargetChoices.Normalize(three, 2, 3) != "P3")
             throw new Exception("Two-client follow choices included an inactive player.");
+        var six = PartyTopologies.ForPlayerCount(6)
+            .Single(topology => topology.Id == "6-balanced");
+        if (!FollowTargetChoices.For(six, 6).SequenceEqual(
+                ["当前主控", "P1", "P2", "P3", "P4", "P5"]) ||
+            !FollowTargetChoices.TryRead(six, 6, "P5", out target) || target != 5)
+            throw new Exception("Six-player follow choices did not include every other active player.");
     }
 }

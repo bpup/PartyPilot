@@ -961,6 +961,44 @@ if (attach.IsEnabled) throw new Exception("Existing-window attachment was enable
 clientCount.SelectedIndex = 3;
 Dispatcher.UIThread.RunJobs();
 if (!attach.IsEnabled) throw new Exception("Existing-window attachment was unavailable for a selected topology.");
+var fourTarget = window.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(item => item.Name == "follow-target-4");
+var fourStop = window.GetLogicalDescendants().OfType<TextBox>()
+    .Single(item => item.Name == "follow-stop-4");
+if (!fourTarget.IsEffectivelyVisible || !fourStop.IsEffectivelyVisible ||
+    !fourTarget.ItemsSource!.Cast<string>().SequenceEqual(["当前主控", "P1", "P2", "P3"]) ||
+    classicSprint.IsEnabled == false)
+    throw new Exception("Four-player follow choices, stop distance or sprint control were unavailable.");
+fourTarget.SelectedItem = "P1";
+fourStop.Text = "42.5";
+Dispatcher.UIThread.RunJobs();
+if (followPreferenceStore.Load() is not { Success: true, Targets: [0, 0, 0, 1, 0, 0] } ||
+    stopPreferenceStore.Load() is not { Success: true, Stops: [null, null, null, 42.5, null, null] })
+    throw new Exception("Four-player follow target or stop distance did not persist.");
+fourTarget.SelectedItem = "当前主控";
+fourStop.Text = string.Empty;
+Dispatcher.UIThread.RunJobs();
+clientCount.SelectedIndex = 5;
+Dispatcher.UIThread.RunJobs();
+var sixTarget = window.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(item => item.Name == "follow-target-6");
+var sixStop = window.GetLogicalDescendants().OfType<TextBox>()
+    .Single(item => item.Name == "follow-stop-6");
+if (!sixTarget.IsEffectivelyVisible || !sixStop.IsEffectivelyVisible ||
+    !sixTarget.ItemsSource!.Cast<string>().SequenceEqual(
+        ["当前主控", "P1", "P2", "P3", "P4", "P5"]))
+    throw new Exception("Six-player follower controls were unavailable.");
+sixTarget.SelectedItem = "P5";
+sixStop.Text = "43.5";
+Dispatcher.UIThread.RunJobs();
+if (followPreferenceStore.Load() is not { Success: true, Targets: [0, 0, 0, 0, 0, 5] } ||
+    stopPreferenceStore.Load() is not { Success: true, Stops: [null, null, null, null, null, 43.5] })
+    throw new Exception("Six-player follow target or stop distance did not persist.");
+sixTarget.SelectedItem = "当前主控";
+sixStop.Text = string.Empty;
+Dispatcher.UIThread.RunJobs();
+clientCount.SelectedIndex = 3;
+Dispatcher.UIThread.RunJobs();
 physicalIndex.SelectedIndex = 0;
 isolation.IsChecked = true;
 Dispatcher.UIThread.RunJobs();
