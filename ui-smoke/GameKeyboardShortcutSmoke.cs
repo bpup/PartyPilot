@@ -20,5 +20,17 @@ internal static class GameKeyboardShortcutSmoke
         if (!hook.SetKeys(0, 0x76) ||
             hook.HandleKey(0x77, true, true) != (false, false, false))
             throw new Exception("Disabling Auto Party key left it active.");
+		if (GameKeyboardShortcutHook.MouseVirtualKey(0x204, 0) != 65538 ||
+			GameKeyboardShortcutHook.MouseVirtualKey(0x207, 0) != 65539 ||
+			GameKeyboardShortcutHook.MouseVirtualKey(0x20B, 1 << 16) != 65540 ||
+			GameKeyboardShortcutHook.MouseVirtualKey(0x20B, 2 << 16) != 65541 ||
+			GameKeyboardShortcutHook.MouseVirtualKey(0x20B, 3 << 16) != 0 ||
+			!hook.SetKeys(65540, 65541) || hook.SetKeys(65540, 65540) ||
+			hook.HandleMouse(0x20B, 1 << 16, true) != (true, true, false) ||
+			hook.HandleMouse(0x20B, 1 << 16, true) != (true, false, false) ||
+			hook.HandleMouse(0x20C, 1 << 16, true) != (true, false, false) ||
+			hook.HandleMouse(0x20B, 2 << 16, false) != (false, false, false) ||
+			hook.HandleMouse(0x20B, 2 << 16, true) != (true, false, true))
+			throw new Exception("Mouse shortcuts did not use the game foreground and press gate.");
     }
 }

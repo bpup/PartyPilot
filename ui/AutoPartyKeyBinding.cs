@@ -1,7 +1,7 @@
 namespace PartyPilot.Desktop;
 
-// Keyboard subset of the supplied build's HybridKeyboardBinding options.
-// Extra mouse buttons require a separate input source and are not offered here.
+// Windows low-level hooks expose M2–M5 directly. Higher mouse buttons require
+// device-specific remapping and are not offered as working bindings here.
 internal static class AutoPartyKeyBinding
 {
     internal static readonly IReadOnlyList<string> Options = BuildOptions();
@@ -19,6 +19,7 @@ internal static class AutoPartyKeyBinding
             "Enter", "Backspace", "Space", "Tab", "Caps Lock", "Scroll Lock", "Pause",
             "Left Shift", "Right Shift", "Left Ctrl", "Right Ctrl", "Left Alt", "Right Alt"]);
         options.AddRange(Enumerable.Range(1, 24).Select(value => $"F{value}"));
+        options.AddRange(Enumerable.Range(2, 4).Select(value => $"M{value}"));
         return options;
     }
 
@@ -28,6 +29,8 @@ internal static class AutoPartyKeyBinding
     internal static int VirtualKey(string value)
     {
         if (value == "None") return 0;
+        if (value is "M2" or "M3" or "M4" or "M5")
+            return 65536 + value[1] - '0';
         if (value.Length == 1 && char.IsAsciiLetterOrDigit(value[0]))
             return char.ToUpperInvariant(value[0]);
         if (value.StartsWith('F') && int.TryParse(value.AsSpan(1), out var function) &&

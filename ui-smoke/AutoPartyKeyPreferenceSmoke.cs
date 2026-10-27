@@ -11,10 +11,14 @@ internal static class AutoPartyKeyPreferenceSmoke
             AutoPartyKeyBinding.Normalize("f24") != "F24" ||
             AutoPartyKeyBinding.VirtualKey("F24") != 135 ||
             AutoPartyKeyBinding.VirtualKey("Numpad 9") != 105 ||
+			AutoPartyKeyBinding.Normalize("m5") != "M5" ||
+			AutoPartyKeyBinding.VirtualKey("M2") != 65538 ||
+			AutoPartyKeyBinding.VirtualKey("M5") != 65541 ||
             AutoPartyKeyBinding.Normalize("M12") is not null ||
             AutoPartyKeyBinding.Normalize("F25") is not null ||
             !store.Save("F9") || store.Load() != (true, "F9") ||
-            !store.Save("None") || store.Load() != (true, "None") ||
+			!store.Save("M4") || store.Load() != (true, "M4") ||
+			!store.Save("None") || store.Load() != (true, "None") ||
             store.Save("M12"))
             throw new Exception("Auto Party keyboard settings lost their supported range or default.");
         File.WriteAllText(path, "{\"Key\":\"F25\"}");

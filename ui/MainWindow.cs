@@ -253,8 +253,8 @@ public sealed class MainWindow : Window
                 AutoPartyKeyBinding.VirtualKey(_followPauseKeyValue));
             if (!_gameHotkeys.Start())
             {
-                _autoPartyKeyStatus.Text = "快捷键监听未能启用；仍可使用自动组队按钮。";
-                _followPauseKeyStatus.Text = "快捷键监听未能启用；仍可使用暂停跟随按钮。";
+                _autoPartyKeyStatus.Text = "键鼠快捷键监听未能启用；仍可使用自动组队按钮。";
+                _followPauseKeyStatus.Text = "键鼠快捷键监听未能启用；仍可使用暂停跟随按钮。";
             }
         };
         Closed += async (_, _) =>
@@ -1581,7 +1581,7 @@ public sealed class MainWindow : Window
             AutoPartyKeyBinding.VirtualKey(_followPauseKeyValue));
         _autoPartyKeyStatus.Text = OperatingSystem.IsWindows() &&
             _gameHotkeys is { IsStarted: false }
-            ? "快捷键已保存，但键盘监听未能启用；仍可使用自动组队按钮。"
+            ? "快捷键已保存，但键鼠监听未能启用；仍可使用自动组队按钮。"
             : selected == "None"
             ? "自动组队快捷键已关闭。"
             : $"自动组队快捷键：{selected}；仅在已绑定游戏窗口前台生效。";
@@ -1612,7 +1612,7 @@ public sealed class MainWindow : Window
             AutoPartyKeyBinding.VirtualKey(selected));
         _followPauseKeyStatus.Text = OperatingSystem.IsWindows() &&
             _gameHotkeys is { IsStarted: false }
-            ? "暂停键已保存，但键盘监听未能启用；仍可使用暂停跟随按钮。"
+            ? "暂停键已保存，但键鼠监听未能启用；仍可使用暂停跟随按钮。"
             : selected == "None"
                 ? "暂停跟随快捷键已关闭。"
                 : $"暂停跟随快捷键：{selected}；仅在已绑定游戏窗口前台生效。";
