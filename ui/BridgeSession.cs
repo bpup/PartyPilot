@@ -69,7 +69,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     public static async Task<BridgeSession> StartAsync(string executable, IReadOnlyList<PartySlot> partySlots, int physicalIndex,
         string deviceInstance, IReadOnlyList<string> gameExecutables, bool rightStickFollowerOverride,
         bool autoFlaskEnabled = false, bool useWgi = false, PrivateClient3Plan? privatePlan = null,
-        bool lastFocusedLeads = false)
+        bool lastFocusedLeads = false, bool menuGuardEnabled = true)
     {
         var slots = partySlots.Where(item => item.Client != 3).Select(item => item.RuntimePad).ToArray();
         var privateSlots = partySlots.Where(item => item.Client == 3)
@@ -134,6 +134,7 @@ internal sealed class BridgeSession : IAsyncDisposable
         }
         if (rightStickFollowerOverride) start.ArgumentList.Add("--right-stick-follower-override");
         if (autoFlaskEnabled) start.ArgumentList.Add("--enable-auto-flask");
+        if (!menuGuardEnabled) start.ArgumentList.Add("--disable-menu-guard");
         if (lastFocusedLeads) start.ArgumentList.Add("--last-focused-leads");
         if (directRightStickSlot != 0)
         {
@@ -148,7 +149,7 @@ internal sealed class BridgeSession : IAsyncDisposable
                 TimeSpan.FromSeconds(privatePlan is null ? 15 : 45));
             if (readyLine is null || !IsExpectedReady(readyLine, slots, focusPadMap,
                 rightStickFollowerOverride, directRightStickSlot, autoFlaskEnabled, useWgi, privatePlan,
-                lastFocusedLeads))
+                lastFocusedLeads, menuGuardEnabled))
             {
                 throw new InvalidOperationException("Virtual controller bridge did not confirm the requested pad slots.");
             }
@@ -174,7 +175,7 @@ internal sealed class BridgeSession : IAsyncDisposable
 
     internal static async Task<BridgeSession> StartHybridAsync(string executable,
         IReadOnlyList<PartySlot> partySlots, IReadOnlyList<LaunchedClient> clients,
-        HybridBindingConfig? bindings = null)
+        HybridBindingConfig? bindings = null, bool menuGuardEnabled = true)
     {
         if (partySlots.Count is < 2 or > 3 || clients.Count != 2 ||
             !partySlots.Select(slot => slot.PartyPlayer).SequenceEqual(Enumerable.Range(1, partySlots.Count)) ||
@@ -207,6 +208,7 @@ internal sealed class BridgeSession : IAsyncDisposable
             start.ArgumentList.Add("--hybrid-binding-keys");
             start.ArgumentList.Add(bindings.Encode());
         }
+        if (!menuGuardEnabled) start.ArgumentList.Add("--disable-menu-guard");
         foreach (var client in clients)
         {
             start.ArgumentList.Add("--game-exe");
@@ -219,7 +221,7 @@ internal sealed class BridgeSession : IAsyncDisposable
         {
             var readyLine = await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15));
             if (readyLine is null || !IsExpectedHybridReady(readyLine, slots, playerPads,
-                    windowMap, bindings?.Encode()))
+                    windowMap, bindings?.Encode(), menuGuardEnabled))
                 throw new InvalidOperationException("Keyboard bridge did not confirm its pad and window binding.");
             return new BridgeSession(process, readError, false, false, slots, slots, hybridMode: true);
         }
@@ -235,7 +237,8 @@ internal sealed class BridgeSession : IAsyncDisposable
     }
 
     internal static bool IsExpectedHybridReady(string line, int[] slots,
-        string playerPads, string windowMap, string? bindingKeys = null)
+        string playerPads, string windowMap, string? bindingKeys = null,
+        bool menuGuardEnabled = true)
     {
         try
         {
@@ -244,6 +247,8 @@ internal sealed class BridgeSession : IAsyncDisposable
             return root.TryGetProperty("event", out var kind) && kind.GetString() == "ready" &&
                 root.TryGetProperty("hybrid_mode", out var hybrid) && hybrid.GetBoolean() &&
                 root.TryGetProperty("physical_mode", out var physical) && !physical.GetBoolean() &&
+                root.TryGetProperty("menu_guard_enabled", out var menuGuard) &&
+                menuGuard.GetBoolean() == menuGuardEnabled &&
                 root.TryGetProperty("slots", out var selected) &&
                 selected.EnumerateArray().Select(value => value.GetInt32()).SequenceEqual(slots.Order()) &&
                 root.TryGetProperty("hybrid_player_pads", out var pads) && pads.GetString() == playerPads &&
@@ -259,7 +264,8 @@ internal sealed class BridgeSession : IAsyncDisposable
 
     internal static bool IsExpectedReady(string line, int[] slots, string focusPadMap,
         bool rightStickFollowerOverride, int directRightStickSlot, bool autoFlaskEnabled, bool useWgi,
-        PrivateClient3Plan? privatePlan, bool lastFocusedLeads = false)
+        PrivateClient3Plan? privatePlan, bool lastFocusedLeads = false,
+        bool menuGuardEnabled = true)
     {
         try
         {
@@ -272,6 +278,8 @@ internal sealed class BridgeSession : IAsyncDisposable
                    root.TryGetProperty("hidhide_preflight", out var preflight) && preflight.GetBoolean() &&
                    root.TryGetProperty("auto_flask_enabled", out var flaskMode) &&
                    flaskMode.GetBoolean() == autoFlaskEnabled &&
+                   root.TryGetProperty("menu_guard_enabled", out var menuGuard) &&
+                   menuGuard.GetBoolean() == menuGuardEnabled &&
                    root.TryGetProperty("last_focused_leads", out var dynamicMain) &&
                    dynamicMain.GetBoolean() == lastFocusedLeads &&
                    root.TryGetProperty("right_stick_follower_override", out var rightStick) &&

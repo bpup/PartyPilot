@@ -17,6 +17,7 @@ await AutoLoginFillSmoke.RunAsync();
 AutoLoginPreferenceSmoke.Run();
 AutoLoginStartupPlanSmoke.Run();
 LeadershipPreferenceSmoke.Run();
+MenuGuardPreferenceSmoke.Run();
 AutoPartyCoordinatorSmoke.Run();
 AutoPartyHotkeySmoke.Run();
 AutoPartyKeyPreferenceSmoke.Run();
@@ -136,6 +137,9 @@ if (args.Contains("--ui-controls-only"))
     if (window.GetLogicalDescendants().OfType<Button>().Count(button =>
             button.Content?.ToString() == "设置键鼠按键映射") != 1)
         throw new Exception("The desktop did not expose the target-version keyboard map editor.");
+    if (window.GetLogicalDescendants().OfType<CheckBox>().Count(box =>
+            box.Content?.ToString() == "启用菜单保护") != 1)
+        throw new Exception("The desktop did not expose the target-version menu protection choice.");
     if (!PartyPilot.Common.HybridBindingConfig.TryCreate(
             PartyPilot.Common.HybridBindingConfig.Definitions.Select(item => item.DefaultKey).ToArray(),
             [new PartyPilot.Common.HybridCustomAction("额外确认", "", 70, 11)],

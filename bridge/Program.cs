@@ -212,6 +212,7 @@ if (hybridKeysPosition >= 0 && (!hybridMode ||
     return 2;
 }
 var hybridBindings = configuredBindings ?? HybridBindingConfig.Default;
+var menuGuardEnabled = !args.Contains("--disable-menu-guard");
 var wgiMode = args.Contains("--physical-wgi");
 var physicalMode = wgiMode || args.Contains("--physical-index") || args.Contains("--main-slot") ||
     args.Contains("--physical-hidden-confirmed") || args.Contains("--right-stick-follower-override");
@@ -429,6 +430,7 @@ try
             physical_wgi = wgiMode,
             pairing_protected = protectedPairing, hidhide_preflight = physicalMode,
             auto_flask_enabled = autoFlaskEnabled,
+            menu_guard_enabled = menuGuardEnabled,
             right_stick_follower_override = rightStickFollowerOverride,
             last_focused_leads = lastFocusedLeads,
             direct_right_stick_slot = directRightStickSlot,
@@ -478,7 +480,7 @@ try
                         Console.WriteLine(JsonSerializer.Serialize(new { @event = "hybrid_confirm_released",
                             player = focusedPlayer, pid = target.Pid, window_handle = target.Handle }));
                     }
-                    if (router.AutoPartyActive)
+                    if (router.AutoPartyActive || !menuGuardEnabled)
                     {
                         PublishMenuChanges(menuGuard.Reset());
                         router.SetHybridMenuOpen(false);
@@ -618,7 +620,7 @@ try
                 }
                 var target = hybridPlan.PlayerWindows[router.HybridFocusedPlayer];
                 router.SetHybridForeground(ForegroundWindowProbe.IsExpectedForeground(target.Pid, target.Handle));
-                if (router.AutoPartyActive)
+                if (router.AutoPartyActive || !menuGuardEnabled)
                 {
                     PublishMenuChanges(menuGuard.Reset());
                     router.SetHybridMenuOpen(false);
@@ -703,7 +705,7 @@ try
                         stable && foreground, loginReadiness.Ready);
                     router.SetPhysical(observation.Forwarded, observedAt,
                         allowDirectRightStick: pairingGate.Phase == ProtectedPairingPhase.Complete);
-                    if (router.AutoPartyActive)
+                    if (router.AutoPartyActive || !menuGuardEnabled)
                     {
                         PublishMenuChanges(menuGuard.Reset());
                         router.SetMenuGuardActive(false);
@@ -727,8 +729,10 @@ try
                 else
                 {
                     router.SetPhysical(gamepad);
-                    var changes = menuGuard.Observe(router.FocusedSlot, gamepad.Buttons, DateTime.UtcNow);
-                    router.SetMenuGuardActive(menuGuard.AnyActive);
+                    var changes = menuGuardEnabled
+                        ? menuGuard.Observe(router.FocusedSlot, gamepad.Buttons, DateTime.UtcNow)
+                        : menuGuard.Reset();
+                    router.SetMenuGuardActive(menuGuardEnabled && menuGuard.AnyActive);
                     PublishMenuChanges(changes);
                     var pairedSlot = pairingSignals.Observe((gamepad.Buttons & 0x1000) != 0, router.FocusedSlot);
                     if (pairedSlot != 0)

@@ -54,7 +54,8 @@ internal static class ProcessPipelineSmoke
             File.WriteAllText(bridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '--focus-pad-map' not in sys.argv or sys.argv[sys.argv.index('--focus-pad-map')+1] != '1:1,2:3': sys.exit(2)\n" +
                 "if '--enable-auto-flask' not in sys.argv: sys.exit(2)\n" +
-                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"last_focused_leads\":false,\"auto_flask_enabled\":true,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
+                "if '--disable-menu-guard' not in sys.argv: sys.exit(2)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"menu_guard_enabled\":false,\"last_focused_leads\":false,\"auto_flask_enabled\":true,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
                 $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(log)}, 'a') as out: out.write(line)\n");
             File.WriteAllText(followExe, "#!/usr/bin/env python3\nimport sys,json\n" +
                 "if '-auto-flask' not in sys.argv: sys.exit(2)\n" +
@@ -65,7 +66,7 @@ internal static class ProcessPipelineSmoke
                 "for line in sys.stdin:\n    control=json.loads(line)\n    if control.get('type')!='follow_pause': sys.exit(2)\n    if control.get('state')=='paused': print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"reason\":\"follow paused\"}}}', flush=True)\n    elif control.get('state')=='following': print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0}}}', flush=True)\n    else: sys.exit(2)\n");
             File.WriteAllText(dynamicBridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '--last-focused-leads' not in sys.argv: sys.exit(2)\n" +
-                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"last_focused_leads\":true,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"menu_guard_enabled\":true,\"last_focused_leads\":true,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
                 "print('{\"event\":\"manual_focus\",\"slot\":3}', flush=True)\n" +
                 $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(dynamicLog)}, 'a') as out: out.write(line)\n");
             File.WriteAllText(dynamicFollowExe, "#!/usr/bin/env python3\nimport sys,json,time\n" +
@@ -77,7 +78,7 @@ internal static class ProcessPipelineSmoke
                 "time.sleep(0.3)\n");
             File.WriteAllText(switchBridgeExe, "#!/usr/bin/env python3\nimport sys,json\n" +
                 "if '--last-focused-leads' not in sys.argv: sys.exit(2)\n" +
-                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"last_focused_leads\":true,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"menu_guard_enabled\":true,\"last_focused_leads\":true,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
                 "phase=0\n" +
                 $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(switchLog)}, 'a') as out: out.write(line)\n" +
                 "    command=json.loads(line)\n" +
@@ -95,7 +96,7 @@ internal static class ProcessPipelineSmoke
                 "time.sleep(0.3)\n");
             File.WriteAllText(tripleBridgeExe, "#!/usr/bin/env python3\nimport sys,json\n" +
                 "if '--last-focused-leads' not in sys.argv or '--client3-players' not in sys.argv or sys.argv[sys.argv.index('--client3-players')+1] != '5': sys.exit(2)\n" +
-                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"last_focused_leads\":true,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3,3:5\",\"private_client3_pid\":103,\"private_client3_window_handle\":203,\"private_client3_slots\":[5]}', flush=True)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"menu_guard_enabled\":true,\"last_focused_leads\":true,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3,3:5\",\"private_client3_pid\":103,\"private_client3_window_handle\":203,\"private_client3_slots\":[5]}', flush=True)\n" +
                 "focused=False\n" +
                 $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(tripleLog)}, 'a') as out: out.write(line)\n" +
                 "    command=json.loads(line)\n" +
@@ -114,12 +115,12 @@ internal static class ProcessPipelineSmoke
             File.WriteAllText(couchBridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '--focus-pad-map' not in sys.argv or sys.argv[sys.argv.index('--focus-pad-map')+1] != '1:1,2:2': sys.exit(2)\n" +
                 "if '--right-stick-follower-override' not in sys.argv or '--direct-right-stick-slot' not in sys.argv or sys.argv[sys.argv.index('--direct-right-stick-slot')+1] != '2': sys.exit(2)\n" +
-                "print('{\"event\":\"ready\",\"slots\":[1,2],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"last_focused_leads\":false,\"auto_flask_enabled\":false,\"right_stick_follower_override\":true,\"direct_right_stick_slot\":2,\"focus_pad_map\":\"1:1,2:2\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,2],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"menu_guard_enabled\":true,\"last_focused_leads\":false,\"auto_flask_enabled\":false,\"right_stick_follower_override\":true,\"direct_right_stick_slot\":2,\"focus_pad_map\":\"1:1,2:2\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
                 "for line in sys.stdin: pass\n");
             File.WriteAllText(wgiBridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '--physical-wgi' not in sys.argv or '--physical-index' in sys.argv: sys.exit(2)\n" +
                 "if '--focus-pad-map' not in sys.argv or sys.argv[sys.argv.index('--focus-pad-map')+1] != '1:1,2:2,3:3,4:4': sys.exit(2)\n" +
-                "print('{\"event\":\"ready\",\"slots\":[1,2,3,4],\"physical_mode\":true,\"physical_wgi\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"last_focused_leads\":false,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:2,3:3,4:4\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,2,3,4],\"physical_mode\":true,\"physical_wgi\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"menu_guard_enabled\":true,\"last_focused_leads\":false,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:2,3:3,4:4\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
                 "for line in sys.stdin: pass\n");
             File.WriteAllText(client3BridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "def value(flag):\n    return sys.argv[sys.argv.index(flag)+1] if flag in sys.argv else None\n" +
@@ -127,7 +128,7 @@ internal static class ProcessPipelineSmoke
                 "if value('--client3-pid') != '103' or value('--client3-window-handle') != '203' or value('--client3-players') != '5,6': sys.exit(2)\n" +
                 "games = [sys.argv[i+1] for i, arg in enumerate(sys.argv[:-1]) if arg == '--game-exe']\n" +
                 "if len(games) != 3 or value('--client3-game-exe') != games[2]: sys.exit(2)\n" +
-                "print('{\"event\":\"ready\",\"slots\":[1,3,4],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"last_focused_leads\":false,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3,3:4,4:5,5:6\",\"private_client3_pid\":103,\"private_client3_window_handle\":203,\"private_client3_slots\":[5,6]}', flush=True)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,3,4],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"menu_guard_enabled\":true,\"last_focused_leads\":false,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3,3:4,4:5,5:6\",\"private_client3_pid\":103,\"private_client3_window_handle\":203,\"private_client3_slots\":[5,6]}', flush=True)\n" +
                 "for line in sys.stdin: pass\n");
             File.SetUnixFileMode(bridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(followExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -143,7 +144,8 @@ internal static class ProcessPipelineSmoke
             Console.WriteLine("Pipeline smoke: starting fake bridge.");
             var topology = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-split");
             await using var bridge = await BridgeSession.StartAsync(bridgeExe, topology.Slots, 0,
-                @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"], false, true);
+                @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"], false, true,
+                menuGuardEnabled: false);
             if (!bridge.IsRunning) throw new Exception("Bridge readiness did not leave a live prelaunch process.");
             Console.WriteLine("Pipeline smoke: fake bridge ready.");
             bridge.StartReading();
@@ -173,7 +175,15 @@ internal static class ProcessPipelineSmoke
                 if (follow.Current.Status != "following")
                     throw new Exception("The resumed follow frame was not received.");
             }
-            var lines = File.Exists(log) ? File.ReadAllLines(log) : [];
+            var neutralDeadline = DateTime.UtcNow.AddSeconds(2);
+            string[] lines;
+            do
+            {
+                lines = File.Exists(log) ? File.ReadAllLines(log) : [];
+                if (lines.Length >= 6 && lines[^1].Contains("\"slot\":3,\"state\":\"waiting\""))
+                    break;
+                await Task.Delay(20);
+            } while (DateTime.UtcNow < neutralDeadline);
             if (lines.Length < 6 ||
                 !lines[0].Contains("\"slot\":3,\"state\":\"waiting\"") ||
                 !lines[1].Contains("\"slot\":3,\"state\":\"catching_up\"") ||
@@ -275,7 +285,7 @@ internal static class ProcessPipelineSmoke
             Console.WriteLine("Three independent clients and P5 private follow routing checked with local fake executables.");
             File.WriteAllText(tripleBridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '--enable-auto-flask' not in sys.argv or '--client3-players' not in sys.argv: sys.exit(2)\n" +
-                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"last_focused_leads\":true,\"auto_flask_enabled\":true,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3,3:5\",\"private_client3_pid\":103,\"private_client3_window_handle\":203,\"private_client3_slots\":[5]}', flush=True)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"menu_guard_enabled\":true,\"last_focused_leads\":true,\"auto_flask_enabled\":true,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3,3:5\",\"private_client3_pid\":103,\"private_client3_window_handle\":203,\"private_client3_slots\":[5]}', flush=True)\n" +
                 $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(tripleLog)}, 'a') as out: out.write(line)\n");
             File.SetUnixFileMode(tripleBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.WriteAllText(tripleFollowExe, "#!/usr/bin/env python3\nimport sys,time\n" +

@@ -85,6 +85,10 @@ public sealed class MainWindow : Window
     private readonly CheckBox _isolationConfirmed = new();
     private readonly CheckBox _rightStickFollowerOverride = new();
     private readonly CheckBox _autoFlask = new();
+    private readonly CheckBox _menuGuard = new();
+    private readonly TextBlock _menuGuardStatus = new();
+    private readonly MenuGuardPreferenceStore _menuGuardPreferences = new();
+    private bool _menuGuardPreferenceReady;
     private readonly CheckBox _lastFocusedLeads = new();
     private readonly TextBlock _leadershipPreferenceStatus = new();
     private readonly LeadershipPreferenceStore _leadershipPreferences = new();
@@ -400,6 +404,34 @@ public sealed class MainWindow : Window
         panel.Children.Add(_rightStickFollowerOverride);
         _autoFlask.Content = "随实时跟随启用自动药剂（双/三客户端各一名角色；生命/魔力须绑定手柄十字键左/右）";
         panel.Children.Add(_autoFlask);
+        var menuPreference = _menuGuardPreferences.Load();
+        _menuGuardPreferenceReady = menuPreference.Success;
+        _menuGuard.Content = "启用菜单保护";
+        _menuGuard.IsThreeState = true;
+        _menuGuard.IsChecked = menuPreference.Success ? menuPreference.Enabled : null;
+        _menuGuardStatus.Text = menuPreference.Success
+            ? "目标版默认开启；更改后在下次准备桥接时生效。"
+            : "菜单保护设置无效；请重新选择并保存。";
+        _menuGuardStatus.Foreground = MutedBrush;
+        _menuGuardStatus.TextWrapping = TextWrapping.Wrap;
+        _menuGuard.IsCheckedChanged += (_, _) =>
+        {
+            if (_menuGuard.IsChecked is not bool enabled)
+            {
+                _menuGuardPreferenceReady = false;
+                _menuGuardStatus.Text = "请选择菜单保护状态。";
+            }
+            else
+            {
+                _menuGuardPreferenceReady = _menuGuardPreferences.Save(enabled);
+                _menuGuardStatus.Text = _menuGuardPreferenceReady
+                    ? "菜单保护设置已保存；下次准备桥接时生效。"
+                    : "菜单保护设置保存失败；重新保存前不能准备桥接。";
+            }
+            UpdateBridgeControls();
+        };
+        panel.Children.Add(_menuGuard);
+        panel.Children.Add(_menuGuardStatus);
         var leadership = _leadershipPreferences.Load();
         _leadershipPreferenceReady = leadership.Success;
         _lastFocusedLeads.Content = "最近手动聚焦的角色成为 MAIN";
@@ -1589,6 +1621,7 @@ public sealed class MainWindow : Window
         _prepareBridge.Content = HybridSelected && _selectedTopology?.PlayerCount == 1
             ? "单人原生键鼠无需桥接" : HybridSelected ? "准备键鼠虚拟手柄" : "准备虚拟手柄";
         _prepareBridge.IsEnabled = !_busy && _bridge is null && gamePathsReady &&
+            _menuGuardPreferenceReady && _menuGuard.IsChecked is bool &&
             (HybridSelected ? hybridSupported && _gameHotkeys?.IsStarted == true :
                 supported && _leadershipPreferenceReady && _lastFocusedLeads.IsChecked is bool &&
                 (useWgi || _physicalIndex.SelectedIndex is >= 0 and <= 3) &&
@@ -1629,6 +1662,7 @@ public sealed class MainWindow : Window
         _lastFocusedLeads.IsEnabled = !HybridSelected && _bridge is null && !_busy;
         _autoFlask.IsEnabled = !HybridSelected && _bridge is null && !_busy &&
             (_selectedTopology?.Id is "2-split" or "3-three-singles");
+        _menuGuard.IsEnabled = _bridge is null && !_busy;
         _check.IsEnabled = !_busy && !_pairingHasStarted && _bridge is null && _selectedTopology is not null;
         _launch.IsEnabled = _check.IsEnabled && (!HybridSelected || _selectedTopology is not null &&
             (_selectedTopology.PlayerCount == 1 && HybridTopologySupport.HasNativeP1(_selectedTopology) ||
@@ -2017,6 +2051,11 @@ public sealed class MainWindow : Window
             _pairingStatus.Text = "手柄桥接需要 Windows、已选布局与空闲桥接会话。";
             return;
         }
+        if (!_menuGuardPreferenceReady || _menuGuard.IsChecked is not bool)
+        {
+            _pairingStatus.Text = "先确认并保存菜单保护设置，再准备桥接。";
+            return;
+        }
         if (HybridSelected)
         {
             await PrepareHybridBridgeAsync();
@@ -2057,7 +2096,8 @@ public sealed class MainWindow : Window
             var session = await BridgeSession.StartAsync(executable, _selectedTopology.Slots, _physicalIndex.SelectedIndex,
                 _physicalDevice.Text.Trim(), gameExecutables, _rightStickFollowerOverride.IsChecked == true,
                 _selectedTopology.Id is "2-split" or "3-three-singles" && _autoFlask.IsChecked == true,
-                useWgi, privatePlan, lastFocusedLeads: _lastFocusedLeads.IsChecked == true);
+                useWgi, privatePlan, lastFocusedLeads: _lastFocusedLeads.IsChecked == true,
+                menuGuardEnabled: _menuGuard.IsChecked == true);
             ActivateBridge(session, _selectedTopology);
         }
         catch (Exception error)
@@ -2076,7 +2116,8 @@ public sealed class MainWindow : Window
         var topology = _selectedTopology;
         var clients = _launchedClients.ToArray();
         if (topology is null || !HybridTopologySupport.CanBridge(topology) ||
-            clients.Length != topology.ClientCount || _gameHotkeys?.IsStarted != true)
+            clients.Length != topology.ClientCount || _gameHotkeys?.IsStarted != true ||
+            !_menuGuardPreferenceReady || _menuGuard.IsChecked is not bool)
         {
             _pairingStatus.Text = "键鼠模式需要已绑定的游戏窗口与可用的键鼠监听；当前尚未就绪。";
             return;
@@ -2099,7 +2140,7 @@ public sealed class MainWindow : Window
         try
         {
             var session = await BridgeSession.StartHybridAsync(executable, topology.Slots, clients,
-                _hybridBindings);
+                _hybridBindings, menuGuardEnabled: _menuGuard.IsChecked == true);
             Volatile.Write(ref _hybridFocusedPlayer, 1);
             Volatile.Write(ref _hybridFocusTransition, 0);
             _hybridFocusKeysDown.Clear();
@@ -2819,6 +2860,11 @@ public sealed class MainWindow : Window
             }
             else if (action == ClientAction.Start)
             {
+                if (!_menuGuardPreferenceReady || _menuGuard.IsChecked is not bool)
+                {
+                    _status.Text = "先确认并保存菜单保护设置；游戏尚未启动。";
+                    return;
+                }
                 if (_isolationConfirmed.IsChecked != true || string.IsNullOrWhiteSpace(_physicalDevice.Text))
                 {
                     _status.Text = "启动前请确认实体手柄隔离并填写所选设备 ID；游戏尚未启动。";
@@ -2859,7 +2905,8 @@ public sealed class MainWindow : Window
                             _physicalDevice.Text.Trim(), gameExecutables,
                             _rightStickFollowerOverride.IsChecked == true,
                             _selectedTopology.Id is "2-split" or "3-three-singles" && _autoFlask.IsChecked == true,
-                            useWgi, lastFocusedLeads: _lastFocusedLeads.IsChecked == true);
+                            useWgi, lastFocusedLeads: _lastFocusedLeads.IsChecked == true,
+                            menuGuardEnabled: _menuGuard.IsChecked == true);
                         ActivateBridge(session, _selectedTopology);
                         prelaunchBridge = session;
                     }
