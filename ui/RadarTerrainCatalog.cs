@@ -31,6 +31,7 @@ public sealed class RadarTerrainCatalog
         {
             _scanIdentity[frame.ProcessId] = identity;
             _scanCursor[frame.ProcessId] = 0;
+            _nextScanUtc.Remove(frame.ProcessId);
         }
         if (_current.TryGetValue(frame.ProcessId, out var current) &&
             current.Matches(frame) && current.MetadataUnchanged())

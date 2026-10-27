@@ -163,9 +163,16 @@ internal static class RadarTerrainCaptureSmoke
             File.Copy(metadataPath, Path.Combine(autoDirectory, "terrain-123-test.json"));
             if (catalog.FindMatching(matching, scanAt.AddSeconds(1)) is not null ||
                 catalog.FindMatching(matching, scanAt.AddSeconds(3)) is not { } discovered ||
-                !discovered.Matches(matching) ||
-                catalog.FindMatching(matching with { AreaHash = 43 }, scanAt.AddSeconds(4)) is not null)
-                throw new Exception("Radar did not discover a new matching capture or reject a new area.");
+                !discovered.Matches(matching))
+                throw new Exception("Radar did not discover a new matching capture.");
+            File.WriteAllText(Path.Combine(autoDirectory, "terrain-123-next.json"),
+                Metadata("01").Replace("\"AreaHash\":\"42\"", "\"AreaHash\":\"43\""));
+            var nextAreaFrame = matching with { AreaHash = 43, SeenUtc = DateTime.UtcNow };
+            if (catalog.FindMatching(nextAreaFrame, scanAt.AddSeconds(3).AddMilliseconds(100))
+                    is not { } nextArea || !nextArea.Matches(nextAreaFrame) ||
+                catalog.FindMatching(matching, scanAt.AddSeconds(3).AddMilliseconds(200))
+                    is not { } returned || !returned.Matches(matching))
+                throw new Exception("Radar delayed terrain discovery after an area change.");
             var crowdedDirectory = Path.Combine(directory, "crowded");
             Directory.CreateDirectory(crowdedDirectory);
             File.Copy(dataPath, Path.Combine(crowdedDirectory, "capture.packed"));
