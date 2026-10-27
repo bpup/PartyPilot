@@ -90,7 +90,9 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         IReadOnlyList<LaunchedClient> clients, BridgeSession bridge, LiveFollowPlan plan,
         IReadOnlyDictionary<int, string>? memberNames = null,
         IReadOnlyDictionary<int, int>? followTargets = null,
-        IReadOnlyDictionary<int, double>? playerStops = null)
+        IReadOnlyDictionary<int, double>? playerStops = null,
+        IReadOnlyDictionary<int, string>? terrainBindings = null,
+        bool classicCollisionDodge = false)
     {
         if (topology.Id is not ("2-split" or "3-three-singles") ||
             clients.Count != topology.ClientCount ||
@@ -98,6 +100,14 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             topology.Slots.Any(slot => slot.LocalPlayer != 1) ||
             topology.ClientCount == 3 && !bridge.LastFocusedLeadsEnabled)
             throw new InvalidOperationException("Live control requires a supported one-player-per-client layout.");
+        var terrain = terrainBindings ?? new Dictionary<int, string>();
+        if ((terrain.Count != 0 &&
+             (terrain.Count != topology.ClientCount ||
+              terrain.Keys.Any(player => !topology.Slots.Any(slot => slot.PartyPlayer == player)) ||
+              terrain.Values.Any(path => !Path.IsPathFullyQualified(path) || !File.Exists(path)) ||
+              terrain.Values.Distinct(StringComparer.OrdinalIgnoreCase).Count() != terrain.Count)) ||
+            (classicCollisionDodge && terrain.Count != topology.ClientCount))
+            throw new ArgumentException("Live terrain requires one distinct binding file per client.");
         var start = new ProcessStartInfo(executable)
         {
             WorkingDirectory = Path.GetDirectoryName(executable)!,
@@ -158,6 +168,12 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 start.ArgumentList.Add($"{player}={stop.ToString("R", CultureInfo.InvariantCulture)}");
             }
         }
+        foreach (var (player, path) in terrain.OrderBy(entry => entry.Key))
+        {
+            start.ArgumentList.Add("-terrain-binding");
+            start.ArgumentList.Add($"{player}={path}");
+        }
+        if (classicCollisionDodge) start.ArgumentList.Add("-classic-collision-dodge");
         if (bridge.AutoFlaskEnabled) start.ArgumentList.Add("-auto-flask");
         if (bridge.LastFocusedLeadsEnabled) start.ArgumentList.Add("-last-focused-leads");
         start.ArgumentList.Add("-allow-follow-pause");

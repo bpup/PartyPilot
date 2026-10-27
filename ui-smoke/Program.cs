@@ -13,6 +13,7 @@ FollowTargetChoicesSmoke.Run();
 FollowTargetPreferenceSmoke.Run();
 FollowPlayerStopSmoke.Run();
 FollowStopPreferenceSmoke.Run();
+LiveTerrainSelectionSmoke.Run();
 AccountProfileSmoke.Run();
 LoginCalibrationSmoke.Run();
 await AutoLoginFillSmoke.RunAsync();
@@ -122,6 +123,15 @@ var topologyChoice = window.GetLogicalDescendants().OfType<ComboBox>()
 topologyChoice.SelectedItem = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-split");
 if (!launchButton.IsEnabled)
     throw new Exception("Keyboard mode hid the supported two-client native P1 layout.");
+var terrainPaths = window.GetLogicalDescendants().OfType<TextBox>()
+    .Where(box => box.Name?.StartsWith("terrain-binding-client-", StringComparison.Ordinal) == true)
+    .OrderBy(box => box.Name).ToArray();
+var terrainDodge = window.GetLogicalDescendants().OfType<CheckBox>()
+    .Single(box => box.Content?.ToString()?.StartsWith("启用经典冲刺地形碰撞闪避", StringComparison.Ordinal) == true);
+if (terrainPaths.Length != 3 || !terrainPaths[0].IsEffectivelyVisible ||
+    !terrainPaths[1].IsEffectivelyVisible || terrainPaths[2].IsEffectivelyVisible ||
+    terrainDodge.IsChecked != false)
+    throw new Exception("Two-client terrain controls did not default off with two visible bindings.");
 inputMode.SelectedIndex = 0;
 playerCountChoice.SelectedIndex = -1;
 if (window.GetLogicalDescendants().OfType<TextBox>().Count(field =>
@@ -615,6 +625,8 @@ var p2Target = window.GetLogicalDescendants().OfType<ComboBox>()
 if (!p2Target.IsEffectivelyVisible ||
     !p2Target.ItemsSource!.Cast<string>().SequenceEqual(["Current MAIN", "P1", "P3"]))
     throw new Exception("Three independent clients did not expose P2's active follow targets.");
+if (!terrainPaths.All(box => box.IsEffectivelyVisible))
+    throw new Exception("Three independent clients did not expose three terrain bindings.");
 p2Target.SelectedItem = "P3";
 Dispatcher.UIThread.RunJobs();
 if (followPreferenceStore.Load() is not { Success: true, Targets: [0, 3, 0, 0, 0, 0] })
@@ -690,6 +702,8 @@ variant.SelectedIndex = 0;
 Dispatcher.UIThread.RunJobs();
 if (p2Target.IsEffectivelyVisible)
     throw new Exception("Couch layout exposed unsupported live follow targets.");
+if (terrainPaths.Any(box => box.IsEffectivelyVisible) || terrainDodge.IsEnabled)
+    throw new Exception("Couch layout exposed unsupported live terrain controls.");
 if (prepare.IsEnabled) throw new Exception("Bridge preparation ignored missing device and game paths.");
 deviceInstance.Text = @"HID\VID_1234&PID_5678\DEVICE";
 pathFields[0].Text = "C:/GameA.exe";

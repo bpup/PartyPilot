@@ -40,6 +40,7 @@ internal static class ProcessPipelineSmoke
         var wgiBridgeExe = Path.Combine(directory, "fake-wgi-bridge");
         var client3BridgeExe = Path.Combine(directory, "fake-client3-bridge");
         var followExe = Path.Combine(directory, "fake-follow");
+        var terrainFollowExe = Path.Combine(directory, "fake-terrain-follow");
         var dynamicBridgeExe = Path.Combine(directory, "fake-dynamic-bridge");
         var dynamicFollowExe = Path.Combine(directory, "fake-dynamic-follow");
         var dynamicLog = Path.Combine(directory, "dynamic-bridge-input.jsonl");
@@ -64,6 +65,16 @@ internal static class ProcessPipelineSmoke
                 "if {(s['slot'],s['state']) for s in states} != {(1,'clear'),(2,'clear')}: sys.exit(2)\n" +
                 "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0,\"manual_override_eligible\":true,\"sprint_down\":true}},\"flasks\":[{\"player\":2,\"resource\":\"life\",\"percent\":30,\"reason\":\"threshold\"}]}', flush=True)\n" +
                 "for line in sys.stdin:\n    control=json.loads(line)\n    if control.get('type')!='follow_pause': sys.exit(2)\n    if control.get('state')=='paused': print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"reason\":\"follow paused\"}}}', flush=True)\n    elif control.get('state')=='following': print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0}}}', flush=True)\n    else: sys.exit(2)\n");
+            var terrainClient1 = Path.Combine(directory, "terrain-client-1.json");
+            var terrainClient2 = Path.Combine(directory, "terrain-client-2.json");
+            File.WriteAllText(terrainClient1, "{}");
+            File.WriteAllText(terrainClient2, "{}");
+            File.WriteAllText(terrainFollowExe, "#!/usr/bin/env python3\nimport sys\n" +
+                $"expected = {{'1={terrainClient1}', '2={terrainClient2}'}}\n" +
+                "bindings = {sys.argv[i+1] for i, arg in enumerate(sys.argv[:-1]) if arg == '-terrain-binding'}\n" +
+                "if bindings != expected or '-classic-collision-dodge' not in sys.argv: sys.exit(2)\n" +
+                "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}}}', flush=True)\n" +
+                "for line in sys.stdin: pass\n");
             File.WriteAllText(dynamicBridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '--last-focused-leads' not in sys.argv: sys.exit(2)\n" +
                 "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"menu_guard_enabled\":true,\"last_focused_leads\":true,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
@@ -134,6 +145,7 @@ internal static class ProcessPipelineSmoke
                 "for line in sys.stdin: pass\n");
             File.SetUnixFileMode(bridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(followExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(terrainFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(dynamicBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(dynamicFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(switchBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -197,6 +209,24 @@ internal static class ProcessPipelineSmoke
                 !lines[^1].Contains("\"slot\":3,\"state\":\"waiting\""))
                 throw new Exception("Live follow did not hand off movement/flasks and neutralize on exit: " + string.Join(" | ", lines));
             Console.WriteLine("Desktop movement, flask, pause/resume, and stop handoff checked with local fake executables.");
+            try
+            {
+                await LiveFollowSession.StartAsync(terrainFollowExe, topology, clients, bridge, plan,
+                    classicCollisionDodge: true);
+                throw new Exception("Collision dodge started without terrain bindings.");
+            }
+            catch (ArgumentException) { }
+            await using (var terrainFollow = await LiveFollowSession.StartAsync(terrainFollowExe,
+                topology, clients, bridge, plan,
+                terrainBindings: new Dictionary<int, string>
+                {
+                    [1] = terrainClient1, [2] = terrainClient2
+                }, classicCollisionDodge: true))
+            {
+                if (terrainFollow.Current.FocusedPlayer != 1)
+                    throw new Exception("Bound terrain follow did not return its initial frame.");
+            }
+            Console.WriteLine("Desktop terrain bindings and collision option reached the live process.");
             await using (var dynamicBridge = await BridgeSession.StartAsync(dynamicBridgeExe, topology.Slots, 0,
                 @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"], false,
                 lastFocusedLeads: true))

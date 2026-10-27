@@ -113,6 +113,10 @@ public sealed class MainWindow : Window
     private readonly TextBox _followCatchup = new();
     private readonly TextBox _followMaxAge = new();
     private readonly TextBox _followLogAge = new();
+    private readonly TextBox[] _terrainBindingPaths = new TextBox[3];
+    private readonly StackPanel[] _terrainBindingRows = new StackPanel[3];
+    private readonly CheckBox _classicCollisionDodge = new();
+    private readonly TextBlock _terrainBindingStatus = new();
     private readonly TextBox _followLeaderName = new();
     private readonly ComboBox[] _followTargets = new ComboBox[6];
     private readonly TextBox[] _followPlayerStops = new TextBox[6];
@@ -824,6 +828,26 @@ public sealed class MainWindow : Window
             box.TextChanged += (_, _) => UpdateFollowControls();
             panel.Children.Add(box);
         }
+        panel.Children.Add(Label("候选地形绑定（可选；每个客户端都须使用已核对的独立文件）", 12, MutedBrush));
+        for (var index = 0; index < _terrainBindingPaths.Length; index++)
+        {
+            var row = new StackPanel { Spacing = 4, IsVisible = false };
+            row.Children.Add(Label($"客户端 {index + 1} 地形绑定 JSON 绝对路径", 12, MutedBrush));
+            var binding = new TextBox { Name = $"terrain-binding-client-{index + 1}",
+                Watermark = "留空表示不使用地形", MinWidth = 310,
+                HorizontalAlignment = HorizontalAlignment.Left };
+            binding.TextChanged += (_, _) => UpdateFollowControls();
+            _terrainBindingPaths[index] = binding;
+            _terrainBindingRows[index] = row;
+            row.Children.Add(binding);
+            panel.Children.Add(row);
+        }
+        _classicCollisionDodge.Content = "启用经典冲刺地形碰撞闪避（目标版默认关闭）";
+        _classicCollisionDodge.IsCheckedChanged += (_, _) => UpdateFollowControls();
+        panel.Children.Add(_classicCollisionDodge);
+        _terrainBindingStatus.Foreground = MutedBrush;
+        _terrainBindingStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_terrainBindingStatus);
         panel.Children.Add(Label("初始 MAIN 角色名（可选，用于识别离队）", 12, MutedBrush));
         _followLeaderName.Watermark = "角色名";
         _followLeaderName.Width = 190;
@@ -1155,6 +1179,10 @@ public sealed class MainWindow : Window
             _updatingFollowTargetChoices = false;
         }
         UpdateFollowStopFields();
+        for (var index = 0; index < _terrainBindingRows.Length; index++)
+            if (_terrainBindingRows[index] is not null)
+                _terrainBindingRows[index].IsVisible = supported &&
+                    index < _selectedTopology!.ClientCount;
         UpdateFollowControls();
     }
 
@@ -2112,11 +2140,26 @@ public sealed class MainWindow : Window
             if (choice is not null) choice.IsEnabled = _follow is null && !_busy;
         foreach (var stop in _followPlayerStops)
             if (stop is not null) stop.IsEnabled = _follow is null && !_busy;
+        foreach (var binding in _terrainBindingPaths)
+            if (binding is not null) binding.IsEnabled = _follow is null && !_busy;
+        _classicCollisionDodge.IsEnabled = _follow is null && !_busy &&
+            _selectedTopology?.Id is ("2-split" or "3-three-singles");
         var valid = LiveFollowPlan.TryCreate(_followStop.Text, _followCatchup.Text,
             _followMaxAge.Text, _followLogAge.Text, _followLeaderName.Text, out _);
         if (_selectedTopology?.Id is "2-split" or "3-three-singles")
+        {
             valid &= _selectedTopology.Slots.All(slot =>
                 FollowPlayerStop.TryRead(_followPlayerStops[slot.PartyPlayer - 1].Text, out _));
+            var terrainValid = LiveTerrainSelection.TryCreate(_selectedTopology,
+                _terrainBindingPaths.Select(box => box?.Text).ToArray(),
+                _classicCollisionDodge.IsChecked == true, out var terrain, out var terrainError);
+            valid &= terrainValid;
+            _terrainBindingStatus.Text = terrainValid
+                ? terrain.Count == 0 ? "未使用候选地形；碰撞闪避保持关闭。" :
+                    "已选择逐客户端候选地形；程序仍会核对文件和实时实例，游戏内映射未验证。"
+                : terrainError;
+        }
+        else _terrainBindingStatus.Text = "当前布局不支持实时地形绑定。";
         _startFollow.IsEnabled = OperatingSystem.IsWindows() && !_busy && !_followStopping && _follow is null &&
             _followTargetPreferenceReady && _followStopPreferenceReady && _bridge is not null && _pairingSettled &&
             (!_bridge.IsHybridMode || _hybridPairing?.Phase == HybridPairingPhase.Complete &&
@@ -2764,6 +2807,10 @@ public sealed class MainWindow : Window
         _followStatus.Text = "正在核对进程、日志与传感器输入…";
         try
         {
+            if (!LiveTerrainSelection.TryCreate(_selectedTopology,
+                    _terrainBindingPaths.Select(box => box?.Text).ToArray(),
+                    _classicCollisionDodge.IsChecked == true, out var terrain, out var terrainError))
+                throw new InvalidOperationException(terrainError);
             var followTargets = new Dictionary<int, int>();
             var playerStops = new Dictionary<int, double>();
             foreach (var slot in _selectedTopology.Slots)
@@ -2789,7 +2836,8 @@ public sealed class MainWindow : Window
                 memberNames = confirmed;
             }
             var session = await LiveFollowSession.StartAsync(executable, _selectedTopology,
-                _launchedClients, _bridge, plan, memberNames, followTargets, playerStops);
+                _launchedClients, _bridge, plan, memberNames, followTargets, playerStops,
+                terrain, _classicCollisionDodge.IsChecked == true);
             session.StatusChanged += FollowStatusChanged;
             session.Ended += FollowEnded;
             _follow = session;
