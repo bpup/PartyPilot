@@ -120,6 +120,33 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         return rules.GetArrayLength();
     }
 
+    internal static IReadOnlyList<string> RosterArguments(PartyTopology topology,
+        IReadOnlyList<LaunchedClient> clients)
+    {
+        if (clients.Count != topology.ClientCount || clients.Any(client => client.Pid <= 0))
+            throw new ArgumentException("Live roster needs a process for every client.");
+        if (topology.Id is "4-balanced" or "6-balanced")
+            return ["-experimental-ordered-input", .. topology.Slots.SelectMany(slot =>
+                new[] { "-role-bind",
+                    $"{slot.PartyPlayer}:{slot.Client}:{slot.LocalPlayer}:{clients[slot.Client - 1].Pid}" })];
+        if (topology.Id is "2-split" or "3-three-singles")
+            return ["-roster", string.Join(',', topology.Slots.Select(slot =>
+                $"{slot.PartyPlayer}:{clients[slot.Client - 1].Pid}"))];
+        throw new ArgumentException("Live roster needs a supported layout.");
+    }
+
+    internal static IReadOnlyList<string> ExecutableArguments(PartyTopology topology,
+        IReadOnlyList<LaunchedClient> clients)
+    {
+        if (clients.Count != topology.ClientCount)
+            throw new ArgumentException("Live log sources need one process per client.");
+        if (topology.Id is "4-balanced" or "6-balanced")
+            return [.. clients.SelectMany((client, index) =>
+                new[] { "-exe", $"{index + 1}={client.Executable}" })];
+        return [.. topology.Slots.SelectMany(slot =>
+            new[] { "-exe", $"{slot.PartyPlayer}={clients[slot.Client - 1].Executable}" })];
+    }
+
     public static async Task<LiveFollowSession> StartAsync(string executable, PartyTopology topology,
         IReadOnlyList<LaunchedClient> clients, BridgeSession bridge, LiveFollowPlan plan,
         IReadOnlyDictionary<int, string>? memberNames = null,
@@ -164,12 +191,15 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         var customRuleCount = flaskCustomFile is null ? 0 : ReadCustomRuleCount(flaskCustomFile);
         if (closeRangeMirror && closeMirrorDuration is < 50 or > 5000)
             throw new ArgumentOutOfRangeException(nameof(closeMirrorDuration));
-        if (topology.Id is not ("2-split" or "3-three-singles") ||
+        var orderedTopology = topology.Id is "4-balanced" or "6-balanced";
+        if (topology.Id is not ("2-split" or "3-three-singles" or "4-balanced" or "6-balanced") ||
             clients.Count != topology.ClientCount ||
-            topology.Slots.Count != topology.ClientCount ||
-            topology.Slots.Any(slot => slot.LocalPlayer != 1) ||
-            topology.ClientCount == 3 && !bridge.LastFocusedLeadsEnabled)
-            throw new InvalidOperationException("Live control requires a supported one-player-per-client layout.");
+            (!orderedTopology && (topology.Slots.Count != topology.ClientCount ||
+                topology.Slots.Any(slot => slot.LocalPlayer != 1))) ||
+            (orderedTopology || topology.ClientCount == 3) && !bridge.LastFocusedLeadsEnabled)
+            throw new InvalidOperationException("Live control requires a supported layout and dynamic MAIN focus.");
+        if (orderedTopology && terrainBindings is { Count: > 0 })
+            throw new ArgumentException("Two-player clients have no verified terrain binding.");
         var terrain = terrainBindings ?? new Dictionary<int, string>();
         if ((terrain.Count != 0 &&
              (terrain.Count != topology.ClientCount ||
@@ -187,19 +217,17 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             RedirectStandardInput = true,
             CreateNoWindow = true
         };
+        foreach (var argument in RosterArguments(topology, clients))
+            start.ArgumentList.Add(argument);
         foreach (var argument in new[]
         {
-            "-roster", string.Join(',', topology.Slots.Select(slot =>
-                $"{slot.PartyPlayer}:{clients[slot.Client - 1].Pid}")), "-leader", "1",
+            "-leader", "1",
             "-stop", plan.Stop.ToString("R", CultureInfo.InvariantCulture),
             "-catchup", plan.Catchup.ToString("R", CultureInfo.InvariantCulture),
             "-max-age", plan.MaxAge, "-log-max-age", plan.LogMaxAge
         }) start.ArgumentList.Add(argument);
-        foreach (var slot in topology.Slots)
-        {
-            start.ArgumentList.Add("-exe");
-            start.ArgumentList.Add($"{slot.PartyPlayer}={clients[slot.Client - 1].Executable}");
-        }
+        foreach (var argument in ExecutableArguments(topology, clients))
+            start.ArgumentList.Add(argument);
         if (plan.LeaderName.Length > 0)
         {
             start.ArgumentList.Add("-leader-name");

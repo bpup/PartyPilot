@@ -46,6 +46,18 @@ internal static class ProcessPipelineSmoke
         }
         catch (InvalidDataException) { }
         var fourTopology = PartyTopologies.ForPlayerCount(4).Single(item => item.Id == "4-balanced");
+        var fourRoster = LiveFollowSession.RosterArguments(fourTopology,
+            [new LaunchedClient(101, 201, "C:/GameA.exe"),
+             new LaunchedClient(102, 202, "D:/GameB.exe")]);
+        if (!fourRoster.SequenceEqual(["-experimental-ordered-input",
+                "-role-bind", "1:1:1:101", "-role-bind", "2:1:2:101",
+                "-role-bind", "3:2:1:102", "-role-bind", "4:2:2:102"]))
+            throw new Exception("Four-player desktop startup lost an ordered local role binding.");
+        var fourSources = LiveFollowSession.ExecutableArguments(fourTopology,
+            [new LaunchedClient(101, 201, "C:/GameA.exe"),
+             new LaunchedClient(102, 202, "D:/GameB.exe")]);
+        if (!fourSources.SequenceEqual(["-exe", "1=C:/GameA.exe", "-exe", "2=D:/GameB.exe"]))
+            throw new Exception("Four-player live logs were bound by role instead of client.");
         var fourFrame = LiveFollowFrame.ParseDynamic(
             "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0}," +
             "\"3\":{\"state\":\"following\",\"x\":0,\"y\":1},\"4\":{\"state\":\"waiting\"}}}", fourTopology);
@@ -66,6 +78,22 @@ internal static class ProcessPipelineSmoke
         }
         catch (InvalidDataException) { }
         var six = PartyTopologies.ForPlayerCount(6).Single(item => item.Id == "6-balanced");
+        var sixRoster = LiveFollowSession.RosterArguments(six,
+            [new LaunchedClient(101, 201, "C:/GameA.exe"),
+             new LaunchedClient(102, 202, "D:/GameB.exe"),
+             new LaunchedClient(103, 203, "E:/GameC.exe")]);
+        if (!sixRoster.SequenceEqual(["-experimental-ordered-input",
+                "-role-bind", "1:1:1:101", "-role-bind", "2:1:2:101",
+                "-role-bind", "3:2:1:102", "-role-bind", "4:2:2:102",
+                "-role-bind", "5:3:1:103", "-role-bind", "6:3:2:103"]))
+            throw new Exception("Six-player desktop startup lost an ordered local role binding.");
+        var sixSources = LiveFollowSession.ExecutableArguments(six,
+            [new LaunchedClient(101, 201, "C:/GameA.exe"),
+             new LaunchedClient(102, 202, "D:/GameB.exe"),
+             new LaunchedClient(103, 203, "E:/GameC.exe")]);
+        if (!sixSources.SequenceEqual(["-exe", "1=C:/GameA.exe", "-exe", "2=D:/GameB.exe",
+                "-exe", "3=E:/GameC.exe"]))
+            throw new Exception("Six-player live logs were bound by role instead of client.");
         var sixFrame = LiveFollowFrame.ParseDynamic(
             "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0,\"sprint_down\":true}," +
             "\"3\":{\"state\":\"following\",\"x\":0,\"y\":1},\"4\":{\"state\":\"waiting\"}," +

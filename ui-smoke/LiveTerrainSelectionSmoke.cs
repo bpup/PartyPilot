@@ -10,6 +10,15 @@ internal static class LiveTerrainSelectionSmoke
             LiveTerrainSelection.TryCreate(two, ["", ""], true, out _, out _) ||
             LiveTerrainSelection.TryCreate(two, ["/missing.json", ""], false, out _, out _))
             throw new Exception("Optional terrain mode accepted a partial or unbound collision request.");
+        var four = PartyTopologies.ForPlayerCount(4).Single(item => item.Id == "4-balanced");
+        var six = PartyTopologies.ForPlayerCount(6).Single(item => item.Id == "6-balanced");
+        if (!LiveTerrainSelection.TryCreate(four, ["", ""], false, out var fourNone, out _) ||
+            fourNone.Count != 0 ||
+            !LiveTerrainSelection.TryCreate(six, ["", "", ""], false, out var sixNone, out _) ||
+            sixNone.Count != 0 ||
+            LiveTerrainSelection.TryCreate(four, ["", ""], true, out _, out _) ||
+            LiveTerrainSelection.TryCreate(six, ["/candidate.json", "", ""], false, out _, out _))
+            throw new Exception("Ordered two-player clients accepted unverified terrain bindings.");
         var directory = Path.Combine(Path.GetTempPath(),
             "partypilot-live-terrain-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);

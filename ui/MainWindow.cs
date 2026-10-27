@@ -897,7 +897,7 @@ public sealed class MainWindow : Window
 
     private Border BuildFollowStep()
     {
-        var panel = Step("4", "自动跟随与追赶", "本次 Beta 可测试双客户端 2 人或三客户端 3 人，均须每端一名角色；先完成配对，并在每个客户端启用只读位置传感器。4–6 人跟随仍需实机验证双角色数据。距离与时效需要按实际游戏校准。");
+        var panel = Step("4", "自动跟随与追赶", "先完成配对，并在每个客户端启用只读位置传感器。4 人和 6 人布局可启动双角色跟随链路；当前传感器的本地双角色顺序仍是候选数据，未核验前引擎会等待并停止自动方向。距离与时效需要按实际游戏校准。");
         var fields = new (TextBox Box, string Label)[]
         {
             (_followStop, "停止距离"), (_followCatchup, "追赶距离"),
@@ -2374,7 +2374,7 @@ public sealed class MainWindow : Window
         if (_closeRangeMirror.IsEnabled && _closeRangeMirror.IsChecked == true)
             valid &= int.TryParse(_closeMirrorDuration.Text, NumberStyles.None,
                 CultureInfo.InvariantCulture, out var duration) && duration is >= 50 and <= 5000;
-        if (_selectedTopology?.Id is "2-split" or "3-three-singles")
+        if (_selectedTopology?.Id is "2-split" or "3-three-singles" or "4-balanced" or "6-balanced")
         {
             valid &= _selectedTopology.Slots.All(slot =>
                 FollowPlayerStop.TryRead(_followPlayerStops[slot.PartyPlayer - 1].Text, out _));
@@ -2394,7 +2394,9 @@ public sealed class MainWindow : Window
             _bridge is not null && _pairingSettled &&
             (!_bridge.IsHybridMode || _hybridPairing?.Phase == HybridPairingPhase.Complete &&
              Volatile.Read(ref _hybridFocusedPlayer) == 1 && Volatile.Read(ref _hybridFocusTransition) == 0) &&
-            (_selectedTopology?.Id is "2-split" or "3-three-singles") &&
+            (_selectedTopology?.Id is "2-split" or "3-three-singles" ||
+             _selectedTopology?.Id is "4-balanced" or "6-balanced" &&
+             _bridge.LastFocusedLeadsEnabled) &&
             _launchedClients.Count == _selectedTopology.ClientCount && valid &&
             (_bridge.AutoFlaskEnabled != true ||
              _flaskSupportPreferences.Load(_selectedTopology.PlayerCount).Success &&
@@ -3212,7 +3214,7 @@ public sealed class MainWindow : Window
             _followStatus.Text = "跟随已暂停；所有自动方向已回中，恢复后仍需新鲜位置与区域证据。";
             return;
         }
-        if (_selectedTopology?.Id == "3-three-singles" &&
+        if (_selectedTopology?.Id is "3-three-singles" or "4-balanced" or "6-balanced" &&
             frame.Reason is not ("party disbanded" or "local client left party" or "followed member left party"))
         {
             var states = string.Join(" · ", frame.PadCommands.Select(command =>
