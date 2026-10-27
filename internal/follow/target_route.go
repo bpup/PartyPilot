@@ -10,6 +10,16 @@ import (
 // leader exclusion stay within the supplied build's replan thresholds.
 func (e *Engine) targetRouteDirection(terrain *navigation.Grid,
 	fromX, fromY, targetX, targetY, avoidX, avoidY float64) (float64, float64, bool) {
+	if segmentDistance(avoidX, avoidY, fromX, fromY, targetX, targetY) >= 5 &&
+		terrain.HasLineOfSightAvoid(fromX, fromY, targetX, targetY, avoidX, avoidY, 5, 1) {
+		e.route = nil
+		e.routeTerrain = nil
+		dx, dy := targetX-fromX, targetY-fromY
+		if length := math.Hypot(dx, dy); length > 0 {
+			return dx / length, dy / length, true
+		}
+		return 0, 0, false
+	}
 	needsPlan := e.routeTerrain != terrain || len(e.route) == 0 ||
 		math.Hypot(e.planTarget.x-targetX, e.planTarget.y-targetY) > 3 ||
 		math.Hypot(e.planOrigin.x-fromX, e.planOrigin.y-fromY) > 8 ||
