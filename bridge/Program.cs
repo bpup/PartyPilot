@@ -705,6 +705,7 @@ try
                         stable && foreground, loginReadiness.Ready);
                     router.SetPhysical(observation.Forwarded, observedAt,
                         allowDirectRightStick: pairingGate.Phase == ProtectedPairingPhase.Complete);
+                    router.SetFollowerMirrorEnabled(pairingGate.Phase == ProtectedPairingPhase.Complete);
                     if (router.AutoPartyActive || !menuGuardEnabled)
                     {
                         PublishMenuChanges(menuGuard.Reset());
@@ -729,6 +730,7 @@ try
                 else
                 {
                     router.SetPhysical(gamepad);
+                    router.SetFollowerMirrorEnabled(true);
                     var changes = menuGuardEnabled
                         ? menuGuard.Observe(router.FocusedSlot, gamepad.Buttons, DateTime.UtcNow)
                         : menuGuard.Reset();

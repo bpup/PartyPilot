@@ -48,6 +48,7 @@ internal sealed class BridgeRouter
     private DateTime _lastFocusToggleUtc = DateTime.MinValue;
     private PadReport _physicalReport;
     private bool _physicalConnected;
+    private bool _followerMirrorEnabled;
     private short _manualX;
     private short _manualY;
     private ushort _previousButtons;
@@ -326,7 +327,8 @@ internal sealed class BridgeRouter
         _physicalReport = PadReport.FromPhysical(gamepad);
         if (previousFocus != _focusedSlot || previousIsolation != _isolatedSlot)
             ReleaseCombatAll();
-        if (previousFocus != _focusedSlot || previousIsolation != _isolatedSlot || _rightStickFollowerOverride) RenderAll();
+        if (previousFocus != _focusedSlot || previousIsolation != _isolatedSlot ||
+            _rightStickFollowerOverride || _followerMirrorEnabled) RenderAll();
         else Render(_focusedSlot, _routes[_focusedSlot]);
     }
 
@@ -339,6 +341,15 @@ internal sealed class BridgeRouter
         _focusedSlot = _mainSlot;
         _lastManualFocusSlot = _mainSlot;
         _lastFocusToggleUtc = DateTime.MinValue;
+    }
+
+    public void SetFollowerMirrorEnabled(bool enabled)
+    {
+        enabled = enabled && _physicalMode && _physicalConnected;
+        if (_followerMirrorEnabled == enabled) return;
+        _followerMirrorEnabled = enabled;
+        foreach (var route in _routes.Values) route.DodgeSprint.Reset();
+        RenderAll();
     }
 
     public void SetMenuGuardActive(bool active)
@@ -481,6 +492,7 @@ internal sealed class BridgeRouter
         _autoPartyButtonsUntilUtc = default;
         _menuGuardActive = false;
         _physicalConnected = false;
+        _followerMirrorEnabled = false;
         _physicalReport = default;
         _manualX = 0;
         _manualY = 0;
@@ -498,6 +510,7 @@ internal sealed class BridgeRouter
                 route.LifeUntilUtc = route.ManaUntilUtc = DateTime.MinValue;
                 route.CombatLeaseUntilUtc = route.CombatPulseUntilUtc = default;
                 route.CombatPulse = default;
+                route.DodgeSprint.Reset();
                 route.Output.SetReport(default);
             }
             _reportBatch?.EndBatch();
@@ -520,6 +533,7 @@ internal sealed class BridgeRouter
     {
         if (_autoPartyActive)
         {
+            route.DodgeSprint.Reset();
             route.Output.SetReport(slot == _autoPartySlot && _autoPartyButtons != 0
                 ? new PadReport(_autoPartyButtons, 0, 0, 0, 0, 0, 0) : default);
             return;
@@ -542,21 +556,25 @@ internal sealed class BridgeRouter
         }
         if (_physicalMode && slot == _focusedSlot)
         {
+            route.DodgeSprint.Reset();
             route.Output.SetReport(_physicalConnected ? WithFlasks(_physicalReport, route) : default);
             return;
         }
         if (_menuGuardActive)
         {
+            route.DodgeSprint.Reset();
             route.Output.SetReport(default);
             return;
         }
         if (_physicalMode && _isolatedSlot != 0)
         {
+            route.DodgeSprint.Reset();
             route.Output.SetReport(default);
             return;
         }
         if (route.CombatPulseUntilUtc != default)
         {
+            route.DodgeSprint.Reset();
             route.Output.SetReport(route.CombatPulse);
             return;
         }
@@ -565,7 +583,8 @@ internal sealed class BridgeRouter
              (_allowDirectRightStick && slot == _directRightStickSlot)) &&
             (Math.Abs((int)_manualX) > 8000 || Math.Abs((int)_manualY) > 8000))
         {
-            route.Output.SetReport(WithFlasks(PadReport.FromMovement(_manualX, _manualY), route));
+            route.Output.SetReport(WithFlasks(WithFollowerMirror(
+                PadReport.FromMovement(_manualX, _manualY), route), route));
             return;
         }
         var automation = route.Automation;
@@ -574,7 +593,26 @@ internal sealed class BridgeRouter
             {
                 Buttons = (ushort)(automation.Buttons | _hybridKeyboard.MainFollowMirrorButtons)
             };
-        route.Output.SetReport(WithFlasks(automation, route));
+        route.Output.SetReport(WithFlasks(WithFollowerMirror(automation, route), route));
+    }
+
+    private PadReport WithFollowerMirror(PadReport automation, PadRoute route)
+    {
+        if (!_followerMirrorEnabled || !_physicalConnected)
+        {
+            route.DodgeSprint.Reset();
+            return automation;
+        }
+        const ushort mirroredButtons = 0xF30F; // A/B/X/Y, LB/RB and D-pad; not Start/View.
+        var input = (ushort)(_physicalReport.Buttons & mirroredButtons);
+        var buttons = route.DodgeSprint.Resolve(input,
+            (automation.Buttons & 0x2000) != 0, DateTime.UtcNow);
+        return automation with
+        {
+            Buttons = (ushort)((automation.Buttons & ~0x2000) | buttons),
+            LeftTrigger = _physicalReport.LeftTrigger,
+            RightTrigger = _physicalReport.RightTrigger
+        };
     }
 
     private PadReport WithFlasks(PadReport report, PadRoute route)
@@ -607,5 +645,6 @@ internal sealed class BridgeRouter
         public DateTime CombatLeaseUntilUtc { get; set; }
         public DateTime CombatPulseUntilUtc { get; set; }
         public PadReport CombatPulse { get; set; }
+        public DodgeSprintButtonArbiter DodgeSprint { get; } = new();
     }
 }

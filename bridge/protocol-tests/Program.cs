@@ -243,6 +243,36 @@ sprintRouter.ApplyLine(sprintLine, now.AddMilliseconds(600));
 sprintRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080 }, now.AddMilliseconds(600));
 if (sprintFollower.Report.Buttons != 0)
     throw new Exception("Manual focus retained the synthetic sprint button.");
+var mirroredMain = new FakePad();
+var mirroredFollower = new FakePad();
+var mirroredRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
+    { [1] = mirroredMain, [2] = mirroredFollower });
+if (!mirroredRouter.ConfigurePhysical(1) ||
+    !mirroredRouter.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", now))
+    throw new Exception("Follower mirror setup failed.");
+mirroredRouter.SetPhysical(new XInputGamepad
+    { Buttons = 0xD010, LeftTrigger = 42, RightTrigger = 80 }, now);
+if (mirroredFollower.Report.Buttons != 0 || mirroredFollower.Report.LeftTrigger != 0)
+    throw new Exception("Physical buttons mirrored before protected pairing completion.");
+mirroredRouter.SetFollowerMirrorEnabled(true);
+if (mirroredMain.Report.Buttons != 0xD010 || mirroredFollower.Report.Buttons != 0xD000 ||
+    mirroredFollower.Report.LeftTrigger != 42 || mirroredFollower.Report.RightTrigger != 80 ||
+    mirroredFollower.Report.LeftX != 32767)
+    throw new Exception("Default follower mirror lost buttons, triggers, movement, or leaked Start.");
+mirroredRouter.SetMenuGuardActive(true);
+if (mirroredFollower.Report != default)
+    throw new Exception("Follower mirror escaped menu protection.");
+mirroredRouter.SetMenuGuardActive(false);
+mirroredRouter.SetFollowerMirrorEnabled(false);
+if (mirroredFollower.Report.Buttons != 0 || mirroredFollower.Report.LeftTrigger != 0)
+    throw new Exception("Disabled follower mirror retained physical actions.");
+var dodgeArbiter = new DodgeSprintButtonArbiter();
+if (dodgeArbiter.Resolve(0, true, now) != 0x2000 ||
+    dodgeArbiter.Resolve(0x2000, true, now.AddMilliseconds(25)) != 0 ||
+    dodgeArbiter.Resolve(0x2000, true, now.AddMilliseconds(90)) != 0 ||
+    dodgeArbiter.Resolve(0x2000, true, now.AddMilliseconds(125)) != 0x2000 ||
+    dodgeArbiter.Resolve(0, false, now.AddMilliseconds(260)) != 0)
+    throw new Exception("Mirrored dodge did not retrigger cleanly over synthetic sprint.");
 if (Marshal.SizeOf<XInputGamepad>() != 12 || Marshal.SizeOf<XInputState>() != 16)
     throw new Exception("XInput native structure sizes do not match the Windows API.");
 if (HidHidePreflight.GetWhitelistCode != 2147573760u ||
