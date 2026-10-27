@@ -45,6 +45,7 @@ type Engine struct {
 	closeMirrorEnabled  bool
 	closeMirrorDuration time.Duration
 	closeMirrors        map[int]*follow.CloseMirror
+	closeMirrorBAllowed map[int]bool
 }
 
 // SetFollowPaused temporarily releases movement without discarding process,

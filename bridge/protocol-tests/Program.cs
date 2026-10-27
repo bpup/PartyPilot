@@ -111,6 +111,17 @@ if (!BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"holding\",\"x\":1,\"y\":0,
     BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0,\"mirror_movement\":true}", out _) ||
     BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"holding\",\"x\":0,\"y\":0,\"manual_override_eligible\":true,\"mirror_movement\":true}", out _))
     throw new Exception("Close-range mirror movement was not isolated from ordinary holding.");
+if (!BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"holding\",\"suppress_mirrored_b\":true}", out var suppressedB) ||
+    !suppressedB.SuppressMirroredB ||
+    BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"waiting\",\"suppress_mirrored_b\":true}", out _) ||
+    BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"catching_up\",\"x\":1,\"y\":0,\"sprint_down\":true,\"suppress_mirrored_b\":true}", out _) ||
+    BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"holding\",\"suppress_mirrored_b\":1}", out _))
+    throw new Exception("Mirrored B suppression was not limited to active follow states.");
+if (!BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"following\",\"x\":0,\"y\":0,\"mirror_idle\":true}", out var idleMirror) ||
+    idleMirror.Active ||
+    BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"following\",\"x\":0,\"y\":0}", out _) ||
+    BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"holding\",\"x\":0,\"y\":0,\"mirror_idle\":true}", out _))
+    throw new Exception("Idle mirrored sprint was not centered explicitly.");
 Expect("{\"slot\":2,\"state\":\"waiting\"}", true, 2, false);
 if (!BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"holding\",\"manual_override_eligible\":true}", out var manualHolding) ||
     !manualHolding.EligibleForManualMovement || manualHolding.Active ||
@@ -278,6 +289,13 @@ if (mirroredMain.Report.Buttons != 0xD010 || mirroredFollower.Report.Buttons != 
     mirroredFollower.Report.LeftTrigger != 42 || mirroredFollower.Report.RightTrigger != 80 ||
     mirroredFollower.Report.LeftX != 32767)
     throw new Exception("Default follower mirror lost buttons, triggers, movement, or leaked Start.");
+mirroredRouter.SetPhysical(new XInputGamepad { Buttons = 0x2000 }, now);
+Thread.Sleep(180); // The target arbiter guarantees at least 125 ms for the initial B press.
+if (!mirroredRouter.ApplyLine("{\"slot\":2,\"state\":\"holding\",\"suppress_mirrored_b\":true}",
+        now.AddMilliseconds(180)) ||
+    (mirroredFollower.Report.Buttons & 0x2000) != 0 ||
+    (mirroredMain.Report.Buttons & 0x2000) == 0)
+    throw new Exception("Close-range B suppression did not release only the follower button.");
 mirroredRouter.SetMenuGuardActive(true);
 if (mirroredFollower.Report != default)
     throw new Exception("Follower mirror escaped menu protection.");

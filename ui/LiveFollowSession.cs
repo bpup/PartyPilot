@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using Avalonia.Threading;
+using PartyPilot.Common;
 
 namespace PartyPilot.Desktop;
 
@@ -114,7 +115,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         bool classicSprintCatchUp = false,
         bool relayMainInput = false,
         bool closeRangeMirror = false,
-        int closeMirrorDuration = 400)
+        int closeMirrorDuration = 400,
+        FollowerMirrorConfig? followerMirror = null)
     {
         if (closeRangeMirror && !relayMainInput)
             throw new ArgumentException("Close-range mirror requires main-controller input.");
@@ -206,6 +208,13 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         {
             start.ArgumentList.Add("-close-mirror-duration");
             start.ArgumentList.Add($"{closeMirrorDuration}ms");
+            start.ArgumentList.Add("-mirror-b-players");
+            var mirror = followerMirror ?? FollowerMirrorConfig.Default;
+            var players = topology.Slots.Where(slot =>
+                (mirror.ButtonsForPlayer(slot.PartyPlayer) & 0x2000) != 0)
+                .Select(slot => slot.PartyPlayer.ToString(CultureInfo.InvariantCulture));
+            var allowed = string.Join(',', players);
+            start.ArgumentList.Add(allowed.Length == 0 ? "none" : allowed);
         }
         if (classicCollisionDodge) start.ArgumentList.Add("-classic-collision-dodge");
         if (bridge.AutoFlaskEnabled) start.ArgumentList.Add("-auto-flask");

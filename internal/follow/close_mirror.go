@@ -123,6 +123,8 @@ func (m *CloseMirror) Apply(input CloseMirrorInput) Command {
 			follow.X, follow.Y = normalizedMirror(input.LeftX, input.LeftY)
 			follow.Reason = "Mirrored dodge / sprint"
 			follow.SprintDown = false
+			follow.MirrorMovement = follow.State == Holding && (follow.X != 0 || follow.Y != 0)
+			follow.MirrorIdle = follow.State != Holding && follow.X == 0 && follow.Y == 0
 			return follow
 		}
 		m.mirroringSprint = false

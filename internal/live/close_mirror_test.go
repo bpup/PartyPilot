@@ -114,3 +114,54 @@ func TestLiveCloseMirrorHandsOffOnExpiryInSameFrame(t *testing.T) {
 		t.Fatalf("mirror expiry did not transfer movement in the same frame: %+v", got)
 	}
 }
+
+func TestLiveCloseMirrorReleasesConfiguredBAtEight(t *testing.T) {
+	at := time.Unix(2300, 0).UTC()
+	engine, err := New(map[int]int{1: 101, 2: 202}, 1,
+		follow.Config{StopDistance: 10, ResumeDistance: 13, CatchUpDistance: 90,
+			MaxAge: time.Second, TargetTrail: true}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	for _, slot := range []int{1, 2} {
+		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
+			ObservedAt: at, Origin: "live"})
+	}
+	start := at.Add(time.Millisecond)
+	for _, sample := range []telemetry.Sample{
+		{ProcessID: 101, SeenUTC: start, X: 12},
+		{ProcessID: 202, SeenUTC: start},
+	} {
+		if !observeGridSample(engine, sample) {
+			t.Fatal("initial position rejected")
+		}
+	}
+	engine.SetAcceptMainInput(true)
+	engine.SetCloseRangeMirror(true, 400*time.Millisecond)
+	engine.ObserveMainInput(MainInput{Slot: 1, LeftX: 1, BDown: true, ObservedAt: start}, start)
+	if got := engine.Step(start)[2]; got.MirrorMovement || got.SuppressMirroredB {
+		t.Fatalf("disabled follower B started close mirror: %+v", got)
+	}
+	if err := engine.SetCloseMirrorBAllowed(2, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := engine.Step(start)[2]; got.Reason != "Mirrored dodge / sprint" ||
+		!got.MirrorMovement || got.SuppressMirroredB {
+		t.Fatalf("configured B did not start mirrored dodge: %+v", got)
+	}
+	near := start.Add(150 * time.Millisecond)
+	if !observeGridSample(engine, telemetry.Sample{ProcessID: 101, SeenUTC: near, X: 8}) ||
+		!observeGridSample(engine, telemetry.Sample{ProcessID: 202, SeenUTC: near}) {
+		t.Fatal("near frame rejected")
+	}
+	engine.ObserveMainInput(MainInput{Slot: 1, LeftX: 1, BDown: true, ObservedAt: near}, near)
+	if got := engine.Step(near)[2]; !got.SuppressMirroredB || got.MirrorMovement {
+		t.Fatalf("mirrored B was not released at eight grid units: %+v", got)
+	}
+	released := near.Add(50 * time.Millisecond)
+	engine.ObserveMainInput(MainInput{Slot: 1, LeftX: 1, ObservedAt: released}, released)
+	if got := engine.Step(released)[2]; got.SuppressMirroredB {
+		t.Fatalf("physical B release kept suppression latched: %+v", got)
+	}
+}

@@ -2877,7 +2877,8 @@ public sealed class MainWindow : Window
                 _classicSprintCatchUp.IsChecked == true,
                 relayMainInput: enableCloseMirror,
                 closeRangeMirror: enableCloseMirror,
-                closeMirrorDuration: int.Parse(_closeMirrorDuration.Text!, CultureInfo.InvariantCulture));
+                closeMirrorDuration: int.Parse(_closeMirrorDuration.Text!, CultureInfo.InvariantCulture),
+                followerMirror: _followerMirror);
             session.StatusChanged += FollowStatusChanged;
             session.Ended += FollowEnded;
             _follow = session;
@@ -2925,6 +2926,7 @@ public sealed class MainWindow : Window
             ("following", _) => "已输出跟随方向；游戏内移动效果待验证。",
             ("catching_up", _) => "已输出追赶方向；游戏内移动效果待验证。",
             ("holding", "Close-range mirror") => "近距离镜像方向已输出；游戏内移动效果待验证。",
+            ("holding", "Mirrored dodge / sprint") => "镜像闪避／冲刺方向已输出；游戏内效果待验证。",
             ("holding", _) => "跟随者已停靠，自动方向已停止。",
             ("waiting", "missing position") => "缺少角色位置样本；请检查两端传感器与进程绑定。自动方向已停止。",
             ("waiting", "different or unknown instance") => "两端尚无可用的同一区域实例证据；自动方向已停止。",

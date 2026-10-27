@@ -1,11 +1,27 @@
 package live
 
 import (
+	"fmt"
 	"time"
 
 	"partypilot/internal/follow"
 	"partypilot/internal/navigation"
 )
+
+func (e *Engine) SetCloseMirrorBAllowed(slot int, allowed bool) error {
+	known := false
+	for _, candidate := range e.slots {
+		known = known || candidate == slot
+	}
+	if !known {
+		return fmt.Errorf("unknown close-mirror player %d", slot)
+	}
+	if e.closeMirrorBAllowed == nil {
+		e.closeMirrorBAllowed = make(map[int]bool)
+	}
+	e.closeMirrorBAllowed[slot] = allowed
+	return nil
+}
 
 // SetCloseRangeMirror enables the supplied build's optional two-player stick
 // burst. A trusted main-input subscription must be enabled separately.
@@ -53,16 +69,23 @@ func (e *Engine) applyCloseMirror(slot int, command follow.Command, now time.Tim
 		e.closeMirrors[slot] = mirror
 	}
 	originalState := command.State
+	bAllowed := e.closeMirrorBAllowed[slot]
 	command = mirror.Apply(follow.CloseMirrorInput{
 		Follow: command, LeftX: input.LeftX, LeftY: input.LeftY,
-		Enabled: true, Blocked: input.Blocked,
+		Enabled: true, Blocked: input.Blocked || input.BDown && !bAllowed,
 		Duration: e.closeMirrorDuration, Now: now,
 		FrameReceived: e.samples[e.leader].ReceivedAt,
 		Area:          leader.Area, Leader: e.leader,
+		MirroredSprintHeld: input.BDown && bAllowed,
+		WithinCloseRange:   command.Distance <= e.coordinator.StopDistanceFor(slot)+3,
 		TeleportRecovery: command.Reason == "Teleport catch-up" ||
 			command.Reason == "Teleport terrain path" ||
 			command.Reason == "Teleport obstacle recovery",
 	})
+	command.SuppressMirroredB = mirror.SuppressMirroredSprint()
+	if command.SuppressMirroredB {
+		command.SprintDown = false
+	}
 	if mirror.ContinuousFollow && originalState == follow.Holding && !input.Blocked {
 		continued := e.coordinator.ContinueCloseFollow(slot, now, positions, terrains[slot])
 		if continued.State == follow.Following || continued.State == follow.CatchingUp {
@@ -70,6 +93,10 @@ func (e *Engine) applyCloseMirror(slot int, command follow.Command, now time.Tim
 		}
 		if continued.State != follow.Waiting {
 			continued.ManualOverrideEligible = command.ManualOverrideEligible
+			continued.SuppressMirroredB = command.SuppressMirroredB
+			if continued.SuppressMirroredB {
+				continued.SprintDown = false
+			}
 		}
 		return continued
 	}

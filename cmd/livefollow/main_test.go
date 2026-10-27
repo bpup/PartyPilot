@@ -245,3 +245,18 @@ func TestMainInputControlRequiresOptInAndCurrentLeader(t *testing.T) {
 		t.Fatalf("other role replaced the main sample: %+v %v", got, ok)
 	}
 }
+
+func TestMirrorBPlayerSelectionMatchesRoster(t *testing.T) {
+	roster := map[int]int{1: 101, 2: 202}
+	if allowed, err := parseMirrorBPlayers("2", roster); err != nil || !allowed[2] || allowed[1] {
+		t.Fatalf("per-player B choice was not retained: %+v %v", allowed, err)
+	}
+	if allowed, err := parseMirrorBPlayers("none", roster); err != nil || len(allowed) != 0 {
+		t.Fatalf("B mirror could not be disabled: %+v %v", allowed, err)
+	}
+	for _, value := range []string{"", "1,1", "1,3", "bad", "1,"} {
+		if _, err := parseMirrorBPlayers(value, roster); err == nil {
+			t.Fatalf("invalid B mirror players accepted: %q", value)
+		}
+	}
+}

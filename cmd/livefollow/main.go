@@ -34,6 +34,30 @@ type stopDistances map[int]float64
 
 type roleBindings []live.RoleBinding
 
+func parseMirrorBPlayers(value string, roster map[int]int) (map[int]bool, error) {
+	allowed := make(map[int]bool)
+	if value == "none" {
+		return allowed, nil
+	}
+	if value == "all" {
+		for slot := range roster {
+			allowed[slot] = true
+		}
+		return allowed, nil
+	}
+	if value == "" {
+		return nil, errors.New("mirror B players must be all, none, or a roster slot list")
+	}
+	for _, part := range strings.Split(value, ",") {
+		slot, err := strconv.Atoi(part)
+		if err != nil || roster[slot] == 0 || allowed[slot] {
+			return nil, errors.New("mirror B players must be unique roster slots")
+		}
+		allowed[slot] = true
+	}
+	return allowed, nil
+}
+
 func (bindings *roleBindings) String() string { return fmt.Sprint([]live.RoleBinding(*bindings)) }
 func (bindings *roleBindings) Set(value string) error {
 	parts := strings.Split(value, ":")
@@ -430,6 +454,7 @@ func main() {
 	acceptMainInput := flag.Bool("accept-main-input", false, "accept bound main-controller samples without enabling mirror output")
 	closeRangeMirror := flag.Bool("close-range-mirror", false, "enable optional two-player close-range stick mirror")
 	closeMirrorDuration := flag.Duration("close-mirror-duration", 400*time.Millisecond, "close-range stick burst duration")
+	mirrorBPlayers := flag.String("mirror-b-players", "all", "roster slots allowed to mirror B; all, none, or comma-separated slots")
 	address := flag.String("listen", "127.0.0.1:47617", "loopback sensor address")
 	var logs, exes, terrainBindings sources
 	var names memberNames
@@ -519,6 +544,17 @@ func main() {
 			os.Exit(2)
 		}
 		engine.SetCloseRangeMirror(true, *closeMirrorDuration)
+		allowed, parseErr := parseMirrorBPlayers(*mirrorBPlayers, roster)
+		if parseErr != nil {
+			fmt.Fprintln(os.Stderr, parseErr)
+			os.Exit(2)
+		}
+		for slot := range allowed {
+			if err := engine.SetCloseMirrorBAllowed(slot, true); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+		}
 	}
 	for slot, target := range targets {
 		if err := engine.SetFollowTarget(slot, target); err != nil {

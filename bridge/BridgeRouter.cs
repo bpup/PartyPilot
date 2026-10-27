@@ -223,6 +223,7 @@ internal sealed class BridgeRouter
             route.Automation = default;
             route.Active = false;
             route.EligibleForManualMovement = false;
+            route.SuppressMirroredB = false;
         }
     }
 
@@ -264,6 +265,7 @@ internal sealed class BridgeRouter
             : default;
         route.Active = command.Active;
         route.EligibleForManualMovement = command.EligibleForManualMovement;
+        route.SuppressMirroredB = command.SuppressMirroredB;
         route.LastUpdateUtc = nowUtc;
         Render(command.Slot, route);
         return true;
@@ -497,6 +499,7 @@ internal sealed class BridgeRouter
                 route.Automation = default;
                 route.Active = false;
                 route.EligibleForManualMovement = false;
+                route.SuppressMirroredB = false;
                 Render(slot, route);
             }
             else if (expired || _engageDodgeEnabled) Render(slot, route);
@@ -532,6 +535,7 @@ internal sealed class BridgeRouter
                 route.Automation = default;
                 route.Active = false;
                 route.EligibleForManualMovement = false;
+                route.SuppressMirroredB = false;
                 route.LifeUntilUtc = route.ManaUntilUtc = DateTime.MinValue;
                 route.CombatLeaseUntilUtc = route.CombatPulseUntilUtc = default;
                 route.CombatPulse = default;
@@ -653,6 +657,7 @@ internal sealed class BridgeRouter
             return automation;
         }
         var input = (ushort)(_physicalReport.Buttons & _followerMirror.ButtonsForPlayer(player));
+        if (route.SuppressMirroredB) input = (ushort)(input & ~0x2000);
         var buttons = route.DodgeSprint.Resolve(input,
             (automation.Buttons & 0x2000) != 0, DateTime.UtcNow);
         return automation with
@@ -688,6 +693,7 @@ internal sealed class BridgeRouter
         public DateTime LastUpdateUtc { get; set; }
         public bool Active { get; set; }
         public bool EligibleForManualMovement { get; set; }
+        public bool SuppressMirroredB { get; set; }
         public DateTime LifeUntilUtc { get; set; }
         public DateTime ManaUntilUtc { get; set; }
         public DateTime CombatLeaseUntilUtc { get; set; }

@@ -74,6 +74,7 @@ internal static class ProcessPipelineSmoke
             File.WriteAllText(mainInputFollowExe, "#!/usr/bin/env python3\nimport sys,json,time\n" +
                 "if '-accept-main-input' not in sys.argv or '-close-range-mirror' not in sys.argv: sys.exit(2)\n" +
                 "if '-close-mirror-duration' not in sys.argv or sys.argv[sys.argv.index('-close-mirror-duration')+1] != '650ms': sys.exit(2)\n" +
+                "if '-mirror-b-players' not in sys.argv or sys.argv[sys.argv.index('-mirror-b-players')+1] != '1,2': sys.exit(2)\n" +
                 "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}}}', flush=True)\n" +
                 "for line in sys.stdin:\n" +
                 "    control=json.loads(line)\n" +

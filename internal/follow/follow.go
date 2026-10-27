@@ -34,6 +34,8 @@ type Command struct {
 	ManualOverrideEligible bool    `json:"manual_override_eligible,omitempty"`
 	SprintDown             bool    `json:"sprint_down,omitempty"`
 	MirrorMovement         bool    `json:"mirror_movement,omitempty"`
+	SuppressMirroredB      bool    `json:"suppress_mirrored_b,omitempty"`
+	MirrorIdle             bool    `json:"mirror_idle,omitempty"`
 }
 
 type Config struct {
@@ -130,6 +132,8 @@ type Engine struct {
 	planner               *navigation.PathPlanner
 	plannerOwned          bool
 }
+
+func (e *Engine) StopDistance() float64 { return e.config.StopDistance }
 
 func New(config Config) (*Engine, bool) {
 	if !config.Valid() {

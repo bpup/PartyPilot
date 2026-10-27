@@ -73,6 +73,13 @@ func (c *Coordinator) SetStopDistance(slot int, distance float64) error {
 	return nil
 }
 
+func (c *Coordinator) StopDistanceFor(slot int) float64 {
+	if engine := c.followers[slot]; engine != nil {
+		return engine.StopDistance()
+	}
+	return 0
+}
+
 // SetFollowTarget assigns a specific player as one follower's target.
 // Self or inactive choices restore Current MAIN, matching the supplied
 // navigation setting's FollowTargetChoice normalization.

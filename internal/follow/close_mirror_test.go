@@ -40,6 +40,12 @@ func TestCloseMirrorReleasesMirroredSprintAtEight(t *testing.T) {
 	if got := mirror.Apply(input); got.Reason != "Mirrored dodge / sprint" || !mirror.mirroringSprint {
 		t.Fatalf("close sprint did not start movement mirroring: %+v", got)
 	}
+	input.LeftX = 0
+	input.Now, input.FrameReceived = at.Add(50*time.Millisecond), at.Add(50*time.Millisecond)
+	if got := mirror.Apply(input); !got.MirrorIdle || got.X != 0 || got.Y != 0 {
+		t.Fatalf("held B with released stick did not emit an idle mirror frame: %+v", got)
+	}
+	input.LeftX = 1
 	input.Follow.Distance = 8
 	input.Now, input.FrameReceived = at.Add(100*time.Millisecond), at.Add(100*time.Millisecond)
 	if got := mirror.Apply(input); mirror.SuppressMirroredSprint() || got.Reason != "Mirrored dodge / sprint" {
