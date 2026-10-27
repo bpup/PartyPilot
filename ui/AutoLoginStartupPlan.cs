@@ -21,7 +21,7 @@ internal static class AutoLoginStartupPlan
         var ready = new List<AutoLoginStartupItem>();
         for (var index = 0; index < topology.ClientCount; index++)
         {
-            if (topology.Clients[index].Count != 1 || !configurations[index].Enabled) continue;
+            if (!configurations[index].Enabled) continue;
             var configured = configurations[index];
             if (configured.Credential is not { } credential ||
                 configured.Calibration is not { } calibration ||

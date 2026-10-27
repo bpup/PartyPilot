@@ -33,5 +33,30 @@ internal static class AutoLoginStartupPlanSmoke
         var manual = configs.Select(config => config with { Enabled = false }).ToArray();
         if (!AutoLoginStartupPlan.TryCreate(split, clients, manual, out var none, out _) || none.Count != 0)
             throw new Exception("Manual login unexpectedly scheduled credential input.");
+
+        foreach (var playerCount in new[] { 4, 6 })
+        {
+            var topology = PartyTopologies.ForPlayerCount(playerCount).Single(item =>
+                item.Id == (playerCount == 4 ? "4-balanced" : "6-balanced"));
+            var bound = Enumerable.Range(1, topology.ClientCount)
+                .Select(client => new LaunchedClient(100 + client, 200 + client, "game.exe"))
+                .ToArray();
+            var perClient = Enumerable.Range(1, topology.ClientCount)
+                .Select(client => new AutoLoginStartupConfiguration(true,
+                    new AccountCredential($"client{client}@example.invalid", "synthetic"),
+                    new LoginCalibration(.42, .52, .43, .62, 1000, 800, topology.Id)))
+                .ToArray();
+            if (!AutoLoginStartupPlan.TryCreate(topology, bound, perClient,
+                    out var planned, out _) ||
+                !planned.Select(item => item.Client).SequenceEqual(
+                    Enumerable.Range(1, topology.ClientCount)))
+                throw new Exception("Dual-role clients did not receive one login plan per window.");
+            if (AutoLoginStartupPlan.TryCreate(topology, bound,
+                    perClient.Select((item, index) => index == 1 ? item with
+                    {
+                        Credential = perClient[0].Credential
+                    } : item).ToArray(), out _, out _))
+                throw new Exception("Duplicate accounts across dual-role clients were accepted.");
+        }
     }
 }

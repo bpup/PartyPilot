@@ -673,7 +673,7 @@ public sealed class MainWindow : Window
     private Border BuildAccountStep()
     {
         var panel = Step("2A", "账号资料",
-            "按客户端保存独立 PoE 账号；密码只写入当前 Windows 用户保护的本地资料。每端一名角色时可启用启动后自动填入；须先确认邮箱和密码字段。");
+            "按客户端保存独立 PoE 账号；密码只写入当前 Windows 用户保护的本地资料。每端一名或两名角色均可在启动后自动填入一次；须先确认邮箱和密码字段。");
         for (var index = 0; index < 3; index++)
         {
             var client = index + 1;
@@ -1446,7 +1446,7 @@ public sealed class MainWindow : Window
                 _autoLoginChoices[index].IsEnabled = OperatingSystem.IsWindows() &&
                     !_armRequested && !_pairingHasStarted && !_busy &&
                     _selectedTopology is { } topology && index < topology.ClientCount &&
-                    topology.Clients[index].Count == 1 && _accountPresent[index];
+                    _accountPresent[index];
             }
     }
 
@@ -1894,11 +1894,11 @@ public sealed class MainWindow : Window
         _armPairing.IsEnabled = !HybridSelected && _bridge is not null && _pairing?.Current is not null &&
             _launchedClients.Count == _selectedTopology?.ClientCount &&
             _pairing.Armed == false && _pairing.AReleased == false && !_armRequested && !_busy &&
-            (_selectedTopology?.Clients[_pairing.Current.Client - 1].Count != 1 ||
+            (_pairing.Current.LocalPlayer != 1 ||
              !_accountPresent[_pairing.Current.Client - 1] ||
              _autoLoginPreferenceReady[_pairing.Current.Client - 1]);
         _armPairing.Content = _pairing?.Current is { } next &&
-            _selectedTopology?.Clients[next.Client - 1].Count == 1 &&
+            next.LocalPlayer == 1 &&
             _accountPresent[next.Client - 1] &&
             _autoLoginChoices[next.Client - 1].IsChecked == true
                 ? _manualAutoLoginWindows[next.Client - 1] is { } manual &&
@@ -2760,7 +2760,7 @@ public sealed class MainWindow : Window
         UpdateBridgeControls();
         try
         {
-            if (topology.Clients[current.Client - 1].Count == 1 &&
+            if (current.LocalPlayer == 1 &&
                 _accountPresent[current.Client - 1] &&
                 _autoLoginChoices[current.Client - 1].IsChecked == true &&
                 _manualAutoLoginWindows[current.Client - 1] != client)
@@ -3646,8 +3646,7 @@ public sealed class MainWindow : Window
             var credentials = new AccountCredential?[topology.ClientCount];
             for (var index = 0; index < credentials.Length; index++)
             {
-                if (topology.Clients[index].Count != 1 ||
-                    _autoLoginChoices[index].IsChecked != true) continue;
+                if (_autoLoginChoices[index].IsChecked != true) continue;
                 if (!_autoLoginPreferenceReady[index])
                     return $"客户端 {index + 1} 自动填入设置无效；请重新选择，未发送登录输入。";
                 credentials[index] = _accountProfiles.Load(index + 1);
@@ -3663,8 +3662,7 @@ public sealed class MainWindow : Window
             for (var index = 0; index < configurations.Length; index++)
             {
                 cancellation.Token.ThrowIfCancellationRequested();
-                if (topology.Clients[index].Count != 1 ||
-                    _autoLoginChoices[index].IsChecked != true)
+                if (_autoLoginChoices[index].IsChecked != true)
                 {
                     configurations[index] = new(false, null, null);
                     continue;
