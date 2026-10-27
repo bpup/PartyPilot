@@ -136,8 +136,15 @@ Require(RawCharacterPathReader.Read(other, Read) == characterPath,
 var rawPathCandidate = LocalSlotCandidateScanner.Scan(state, data, local, paths, Read,
     address => RawCharacterPathReader.Read(address, Read));
 Require(rawPathCandidate.Status == "two_slot_candidate" &&
-    rawPathCandidate.OrderedAddresses.SequenceEqual(["0x200000", "0x300000"]),
+    rawPathCandidate.OrderedAddresses.SequenceEqual(["0x200000", "0x300000"]) &&
+    rawPathCandidate.RawPathEntries == 1 && rawPathCandidate.VisiblePathEntries == 1 &&
+    rawPathCandidate.SelectedStructOffset == 1408 && rawPathCandidate.SelectedVectorOffset == 72,
     "An offscreen vector entry with a raw character path was lost.");
+paths[other] = "Metadata/Monsters/Other";
+Require(LocalSlotCandidateScanner.Scan(state, data, local, paths, Read,
+        address => RawCharacterPathReader.Read(address, Read)).Status == "two_slot_candidate",
+    "A valid raw path was ignored when the visible path was stale.");
+paths.Remove(other);
 memory[pathAddress] = System.Text.Encoding.Unicode.GetBytes(characterPath.Replace("Characters", "Charactezz"));
 Require(RawCharacterPathReader.Read(other, Read) == null &&
     LocalSlotCandidateScanner.Scan(state, data, local, paths, Read,

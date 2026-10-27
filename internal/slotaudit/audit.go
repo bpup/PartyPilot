@@ -16,6 +16,7 @@ type Report struct {
 	Samples             int               `json:"samples"`
 	CandidateStatuses   map[string]int    `json:"candidateStatuses"`
 	CompleteFrames      int               `json:"completeFrames"`
+	RawPathFrames       int               `json:"rawPathFrames"`
 	LocalWorldErrorMax  float64           `json:"localWorldErrorMax"`
 	LocalGridErrorMax   float64           `json:"localGridErrorMax"`
 	OrderChanges        int               `json:"orderChangesWithinArea"`
@@ -127,6 +128,9 @@ func (a *Audit) Observe(s telemetry.Sample) {
 	}
 	if complete {
 		r.CompleteFrames++
+		if c.RawPathEntries > 0 {
+			r.RawPathFrames++
+		}
 		if local := c.ObservedLocalPositionComparison; local != nil {
 			r.LocalWorldErrorMax = math.Max(r.LocalWorldErrorMax, local.WorldXYDistance)
 			r.LocalGridErrorMax = math.Max(r.LocalGridErrorMax, local.GridXYDistance)

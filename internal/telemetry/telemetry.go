@@ -192,6 +192,10 @@ type LocalSlotCandidates struct {
 	StatePointerMatchesDataAddress  *bool                 `json:"StatePointerMatchesDataAddress,omitempty"`
 	CandidateAreaAddresses          []string              `json:"CandidateAreaAddresses"`
 	VectorHeaderAddress             string                `json:"VectorHeaderAddress,omitempty"`
+	SelectedStructOffset            *int                  `json:"SelectedStructOffset,omitempty"`
+	SelectedVectorOffset            *int                  `json:"SelectedVectorOffset,omitempty"`
+	RawPathEntries                  int                   `json:"RawPathEntries,omitempty"`
+	VisiblePathEntries              int                   `json:"VisiblePathEntries,omitempty"`
 	RawPositions                    []*RawSlotPosition    `json:"RawPositions,omitempty"`
 	RawPositionsSeenUTC             *time.Time            `json:"RawPositionsSeenUtc,omitempty"`
 	ObservedLocalPositionComparison *RawLocalComparison   `json:"ObservedLocalPositionComparison,omitempty"`
@@ -585,6 +589,15 @@ func validLocalSlotCandidates(candidate *LocalSlotCandidates, scanStatus, observ
 		return false
 	}
 	if len(candidate.OrderedAddresses) != want || (want > 0 && candidate.MatchingHeaders < 1) {
+		return false
+	}
+	if candidate.RawPathEntries < 0 || candidate.VisiblePathEntries < 0 ||
+		(candidate.RawPathEntries+candidate.VisiblePathEntries > 0 &&
+			candidate.RawPathEntries+candidate.VisiblePathEntries != want) ||
+		(candidate.SelectedStructOffset == nil) != (candidate.SelectedVectorOffset == nil) ||
+		(candidate.SelectedStructOffset != nil &&
+			(want == 0 || *candidate.SelectedStructOffset < 0 ||
+				*candidate.SelectedVectorOffset < 0 || *candidate.SelectedVectorOffset > 256)) {
 		return false
 	}
 	if !validAddress(candidate.VectorHeaderAddress) ||

@@ -4,7 +4,8 @@ namespace PartyPilot.Sensor;
 // evidence of the active runtime profile or of this reader's anchor address.
 public static class LocalSlotCandidateScanner
 {
-    private sealed record VectorMatch(long HeaderAddress, long[] Ordered, int Delta, int StructOffset);
+    private sealed record VectorMatch(long HeaderAddress, long[] Ordered, int Delta,
+        int StructOffset, int RawPathEntries, int VisiblePathEntries);
     private static readonly int[] ReferenceStructOffsets = [1408, 2552];
     private const int ReferenceAreaPointerOffset = 656;
     private const int ReferenceVectorOffset = 72;
@@ -14,6 +15,10 @@ public static class LocalSlotCandidateScanner
         bool? StatePointerMatchesDataAddress, string[] CandidateAreaAddresses)
     {
         public string? VectorHeaderAddress { get; init; }
+        public int? SelectedStructOffset { get; init; }
+        public int? SelectedVectorOffset { get; init; }
+        public int RawPathEntries { get; init; }
+        public int VisiblePathEntries { get; init; }
         public RawRenderPositionReader.Position?[]? RawPositions { get; init; }
         public DateTime? RawPositionsSeenUtc { get; init; }
         public RawRenderPositionReader.LocalComparison? ObservedLocalPositionComparison { get; init; }
@@ -60,11 +65,12 @@ public static class LocalSlotCandidateScanner
                     if (vectorOffset < 0) continue;
                     var headerAddress = areaAddress + structOffset + vectorOffset;
                     if (!TryReadOrder(headerAddress, observedLocalAddress, visiblePaths, read,
-                            readMissingPath, out var order))
+                            readMissingPath, out var order, out var rawPaths, out var visiblePathsCount))
                         continue;
                     matchingHeaders++;
                     matchedAreas.Add(areaAddress);
-                    matches.Add(new VectorMatch(headerAddress, order, delta, structOffset));
+                    matches.Add(new VectorMatch(headerAddress, order, delta, structOffset,
+                        rawPaths, visiblePathsCount));
                 }
             }
         }
@@ -82,7 +88,13 @@ public static class LocalSlotCandidateScanner
         return new Result(selected.Ordered.Length == 2 ? "two_slot_candidate" : "single_slot_candidate",
             anchor, profile, selected.Ordered.Select(value => $"0x{value:X}").ToArray(), matchingHeaders,
             statePointerText, pointerMatchesData, candidateAreas)
-        { VectorHeaderAddress = $"0x{selected.HeaderAddress:X}" };
+        {
+            VectorHeaderAddress = $"0x{selected.HeaderAddress:X}",
+            SelectedStructOffset = selected.StructOffset,
+            SelectedVectorOffset = ReferenceVectorOffset + selected.Delta,
+            RawPathEntries = selected.RawPathEntries,
+            VisiblePathEntries = selected.VisiblePathEntries
+        };
     }
 
     public static bool Revalidate(Result candidate, long observedLocalAddress,
@@ -98,7 +110,7 @@ public static class LocalSlotCandidateScanner
                 System.Globalization.CultureInfo.InvariantCulture, out var headerAddress) ||
             !Plausible(headerAddress) ||
             !TryReadOrder(headerAddress, observedLocalAddress, visiblePaths, read,
-                readMissingPath, out var ordered)) return false;
+                readMissingPath, out var ordered, out _, out _)) return false;
         return ordered.Select(value => $"0x{value:X}").SequenceEqual(candidate.OrderedAddresses);
     }
 
@@ -114,9 +126,11 @@ public static class LocalSlotCandidateScanner
 
     private static bool TryReadOrder(long headerAddress, long observedLocalAddress,
         IReadOnlyDictionary<long, string> visiblePaths, Func<long, int, byte[]?> read,
-        Func<long, string?>? readMissingPath, out long[] order)
+        Func<long, string?>? readMissingPath, out long[] order,
+        out int rawPathEntries, out int visiblePathEntries)
     {
         order = [];
+        rawPathEntries = visiblePathEntries = 0;
         var header = read(headerAddress, 24);
         if (header is not { Length: 24 }) return false;
         var first = BitConverter.ToInt64(header, 0);
@@ -137,9 +151,15 @@ public static class LocalSlotCandidateScanner
         {
             var address = BitConverter.ToInt64(entries, index * 8);
             if (!Plausible(address) || !seen.Add(address)) return false;
-            if (!visiblePaths.TryGetValue(address, out var path))
+            var visibleValid = visiblePaths.TryGetValue(address, out var path) &&
+                path != null && IsCharacterPath(path);
+            if (visibleValid) visiblePathEntries++;
+            else
+            {
                 path = readMissingPath?.Invoke(address);
-            if (path == null || !IsCharacterPath(path)) return false;
+                if (path == null || !IsCharacterPath(path)) return false;
+                rawPathEntries++;
+            }
             found[index] = address;
             hasLocal |= address == observedLocalAddress;
         }

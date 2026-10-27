@@ -15,6 +15,7 @@ func TestTracksOrderAreaAndMovementWithoutVerdict(t *testing.T) {
 		return telemetry.Sample{ProcessID: 17, SeenUTC: seen, TickMS: int64(offset+1) * 1000,
 			AreaHash: area, IngameDataAddress: "0x100000", ObservedLocalAddress: "0x200000",
 			LocalSlotCandidates: &telemetry.LocalSlotCandidates{Status: "two_slot_candidate",
+				RawPathEntries: 1, VisiblePathEntries: 1,
 				OrderedAddresses: addresses, RawPositionsSeenUTC: &seen,
 				RawPositions: []*telemetry.RawSlotPosition{
 					{WorldX: x, WorldY: 2}, {WorldX: 9, WorldY: 2}},
@@ -29,7 +30,7 @@ func TestTracksOrderAreaAndMovementWithoutVerdict(t *testing.T) {
 	a.Observe(makeSample(4, 11, []string{"0x200000", "0x300000"}, 3))
 	a.Observe(makeSample(2, 11, []string{"0x200000", "0x300000"}, 99))
 	r := a.Reports()[0]
-	if r.Samples != 5 || r.CompleteFrames != 4 || r.OrderChanges != 1 ||
+	if r.Samples != 5 || r.CompleteFrames != 4 || r.RawPathFrames != 4 || r.OrderChanges != 1 ||
 		r.AreaChanges != 1 || r.SourceTimeRegressed != 1 || r.SlotMovementFrames != [2]int{1, 0} ||
 		r.LocalWorldErrorMax != 0.25 || r.LocalGridErrorMax != 12 {
 		t.Fatalf("wrong audit report: %+v", r)

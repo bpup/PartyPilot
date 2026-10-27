@@ -114,6 +114,18 @@ func TestLocalSlotCandidateDiagnosticCannotAssertUnobservedOrder(t *testing.T) {
 	if err != nil || got.LocalSlotCandidates == nil || got.LocalSlotCandidates.Status != "two_slot_candidate" {
 		t.Fatalf("candidate diagnostic rejected: %+v, %v", got, err)
 	}
+	withPathEvidence := strings.Replace(base, `"MatchingHeaders":1,`,
+		`"MatchingHeaders":1,"SelectedStructOffset":1408,"SelectedVectorOffset":72,`+
+			`"RawPathEntries":1,"VisiblePathEntries":1,`, 1)
+	if detailed, err := Decode([]byte(withPathEvidence)); err != nil ||
+		detailed.LocalSlotCandidates.RawPathEntries != 1 ||
+		*detailed.LocalSlotCandidates.SelectedVectorOffset != 72 {
+		t.Fatalf("path evidence lost: %+v, %v", detailed.LocalSlotCandidates, err)
+	}
+	badPathCount := strings.Replace(withPathEvidence, `"RawPathEntries":1`, `"RawPathEntries":2`, 1)
+	if _, err := Decode([]byte(badPathCount)); err == nil {
+		t.Fatal("path evidence count exceeding local slots accepted")
+	}
 	for _, changed := range []string{
 		strings.Replace(base, `"0x200000","0x300000"`, `"0x300000","0x400000"`, 1),
 		strings.Replace(base, `"0x200000","0x300000"`, `"0x200000","0x200000"`, 1),
