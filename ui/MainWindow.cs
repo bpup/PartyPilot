@@ -2677,6 +2677,9 @@ public sealed class MainWindow : Window
                         .Select(result => $"PID {result.Pid} {result.Detail}")) : "") + "。";
             _launchedClients = [];
             _sessionGameIdentities = [];
+            Array.Clear(_preparedAutoLoginWindows);
+            Array.Clear(_manualAutoLoginWindows);
+            _rosterStatus.Text = "会话已结束；再次检查 Current Party 前需重新绑定游戏窗口。";
         }
         catch (Exception error)
         {
