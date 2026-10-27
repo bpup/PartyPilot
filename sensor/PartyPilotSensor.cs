@@ -12,8 +12,10 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     private static readonly IPEndPoint Receiver = new(IPAddress.Loopback, 47617);
     private static readonly IPEndPoint RadarReceiver = new(IPAddress.Loopback, 47618);
     private static readonly IPEndPoint PrivacyReceiver = new(IPAddress.Loopback, 47619);
+    private static readonly IPEndPoint FastCandidateReceiver = new(IPAddress.Loopback, 47620);
     private readonly UdpClient _udp = new();
     private DateTime _lastSentUtc;
+    private DateTime _lastFastCandidateSentUtc;
     private DateTime _lastSlotScanUtc;
     private long _lastSlotScanStateAddress;
     private long _lastSlotScanDataAddress;
@@ -46,6 +48,12 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             return;
         }
         var now = DateTime.UtcNow;
+        if (Settings.DiagnoseLocalSlotCandidates.Value && Settings.DiagnoseFastOrderedMotion.Value &&
+            now - _lastFastCandidateSentUtc >= TimeSpan.FromMilliseconds(20))
+        {
+            _lastFastCandidateSentUtc = now;
+            EmitFastOrderedCandidate(now);
+        }
         if (now - _lastSentUtc < TimeSpan.FromMilliseconds(100)) return;
         _lastSentUtc = now;
 
@@ -552,6 +560,65 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             PrivacyStatus = "render-ok"
         });
         _udp.Send(privacyPulse, privacyPulse.Length, PrivacyReceiver);
+    }
+
+    private void EmitFastOrderedCandidate(DateTime seenUtc)
+    {
+        try
+        {
+            var player = GameController.Player;
+            var render = player?.GetComponent<Render>();
+            if (player is null || render == null) return;
+            var data = GameController.IngameState.Data;
+            var stateAddress = GameController.IngameState.Address;
+            var areaAddress = data.Address;
+            var localAddress = player.Address;
+            var areaHash = data.CurrentAreaHash;
+            var processId = GameController.Window.Process.Id;
+            if (localAddress <= 0 || processId <= 0) return;
+            bool SameIdentity()
+            {
+                try
+                {
+                    return GameController.IngameState.Address == stateAddress &&
+                        GameController.IngameState.Data.Address == areaAddress &&
+                        GameController.IngameState.Data.CurrentAreaHash == areaHash &&
+                        (GameController.Player?.Address ?? 0) == localAddress &&
+                        GameController.Window.Process.Id == processId;
+                }
+                catch { return false; }
+            }
+            byte[]? ReadCandidate(long address, int size)
+            {
+                try { return data.M.ReadMem(address, size); }
+                catch { return null; }
+            }
+            LocalSlotCandidateScanner.Result? captured = null;
+            if (_slotCandidates is { Status: "single_slot_candidate" or "two_slot_candidate" } candidate &&
+                _lastSlotScanStateAddress == stateAddress &&
+                _lastSlotScanDataAddress == areaAddress &&
+                _lastSlotScanLocalAddress == localAddress &&
+                seenUtc - _lastSlotScanUtc <= TimeSpan.FromSeconds(1))
+            {
+                var localPath = player.Path;
+                var paths = new Dictionary<long, string>();
+                if (!string.IsNullOrWhiteSpace(localPath)) paths[localAddress] = localPath;
+                captured = LocalSlotMotionSampler.Capture(candidate, localAddress, paths,
+                    new Dictionary<long, (float X, float Y, float Z)>(),
+                    ReadCandidate, address => RawCharacterPathReader.Read(address, ReadCandidate),
+                    SameIdentity, render.Pos.X, render.Pos.Y, render.Pos.Z, seenUtc);
+                if (captured == null) return; // Identity or vector changed during capture.
+            }
+            if (!SameIdentity()) return;
+            var bytes = FastOrderedCandidateFrame.Encode(processId, areaHash,
+                GameController.Area.CurrentArea?.Name, captured, seenUtc,
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            _udp.Send(bytes, bytes.Length, FastCandidateReceiver);
+        }
+        catch
+        {
+            // The experimental stream must not interrupt the normal sensor.
+        }
     }
 
     private object[] ReadVisiblePlayers(uint? observedLocalId)

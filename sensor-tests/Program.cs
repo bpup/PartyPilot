@@ -59,6 +59,22 @@ Require(motion?.RawPositions is { Length: 2 } &&
     motion.ObservedLocalPositionComparison?.WorldXYDistance == 0 &&
     motion.VisiblePositionComparisons?[1]?.WorldXYDistance == 0,
     "A complete revalidated diagnostic position frame was not captured.");
+using (var fast = System.Text.Json.JsonDocument.Parse(FastOrderedCandidateFrame.Encode(
+    101, 42, "TestArea", motion, motionSeen, motionSeen.Ticks)))
+{
+    var root = fast.RootElement;
+    Require(root.GetProperty("Kind").GetString() == "ordered_client" &&
+        !root.GetProperty("PlayerOrderReliable").GetBoolean() &&
+        root.GetProperty("PlayerOrderSource").GetString() == FastOrderedCandidateFrame.Source &&
+        root.GetProperty("Players").GetArrayLength() == 2 &&
+        root.GetProperty("Players")[1].GetProperty("X").GetSingle() == 30,
+        "Fast candidate packet promoted an unverified order or lost P2 motion.");
+}
+using (var fast = System.Text.Json.JsonDocument.Parse(FastOrderedCandidateFrame.Encode(
+    101, 42, "TestArea", null, motionSeen, motionSeen.Ticks)))
+    Require(!fast.RootElement.GetProperty("PlayerOrderReliable").GetBoolean() &&
+        fast.RootElement.GetProperty("Players").GetArrayLength() == 0,
+        "Missing local slots produced a trusted or partial fast frame.");
 secondWorldX = 35;
 var nextMotion = LocalSlotMotionSampler.Capture(two, local, paths, visiblePositions, Read,
     _ => null, () => true, 10, 20, 5, motionSeen.AddMilliseconds(100), ReadSyntheticPosition);
