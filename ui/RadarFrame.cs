@@ -171,7 +171,7 @@ public sealed class RadarLandmarkCache
     public bool TryApply(RadarFrame frame, out RadarFrame? enriched)
     {
         enriched = null;
-        if (_lastSeenUtc != default && frame.SeenUtc < _lastSeenUtc)
+        if (_lastSeenUtc != default && frame.SeenUtc <= _lastSeenUtc)
             return false;
         enriched = Apply(frame);
         return true;

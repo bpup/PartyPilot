@@ -115,7 +115,7 @@ internal sealed class RadarSession : IAsyncDisposable
                 {
                     if (!RadarFrames.TryParse(packet.Buffer, pid, DateTime.UtcNow, out var frame) || frame == null)
                         continue;
-                    if (lastQueued.TryGetValue(pid, out var previous) && frame.SeenUtc < previous)
+                    if (lastQueued.TryGetValue(pid, out var previous) && frame.SeenUtc <= previous)
                         break;
                     lastQueued[pid] = frame.SeenUtc;
                     RadarTerrainCapture? terrain = null;

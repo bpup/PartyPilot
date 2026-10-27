@@ -359,6 +359,8 @@ var sameHashNewAddress = new RadarLandmarkCache();
 sameHashNewAddress.Apply(radarFrame);
 if (sameHashNewAddress.TryApply(radarFrame with
     { SeenUtc = radarFrame.SeenUtc.AddMilliseconds(-1), AreaHash = 99, Markers = [] }, out _) ||
+    sameHashNewAddress.TryApply(radarFrame with
+    { AreaHash = 99, Markers = [] }, out _) ||
     !sameHashNewAddress.TryApply(radarFrame with
     { SeenUtc = radarFrame.SeenUtc.AddMilliseconds(1), Markers = [] }, out var orderedRadar) ||
     orderedRadar?.Markers.Count != 1)
