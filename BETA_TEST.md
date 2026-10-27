@@ -2,6 +2,8 @@
 
 此 Beta 供 Windows x64 上的 PoE2 实机联调。请解压整个压缩包，运行 `release/desktop/PartyPilot.Desktop.exe`；不要只复制桌面程序。它不是 MultiPilot 0.6.17 的完整替代版。
 
+首次测试前，在每个实际使用的 ExileCore2 安装目录下，把压缩包中的 `release/sensor-plugin/PartyPilot.Sensor/` 整个文件夹复制到 `Plugins/Compiled/`，使最终目录内同时有 `PartyPilot.Sensor.dll` 和 `PartyPilot.Sensor.deps.json`。本机参考版的已编译插件采用这个目录结构；不同 ExileCore2 版本是否加载仍需在 Windows 上确认。启动对应实例后，在插件列表中确认 `PartyPilot.Sensor` 出现并启用，再检查桌面是否收到该游戏进程的新位置样本。未确认每个客户端都收到样本前，不要开始自动跟随。
+
 目标布局已按用户确认记录：客户端 1 的 P1 带路、P2 跟随；客户端 2 的 P3/P4 跟随；客户端 3 的 P5/P6 跟随。4 人与 6 人布局，以及混合单双角色的 5 人布局，现有默认关闭的实验双角色位置输入，须在游戏内核对角色身份和方向后才能判断是否可用。
 
 ## 本次先测的两项

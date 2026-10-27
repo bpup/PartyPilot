@@ -22,6 +22,8 @@ REQUIRED = {
     "release/PartyPilot-ClientLaunch.exe",
     "release/PartyPilot.Sensor.dll",
     "release/PartyPilot.Sensor.deps.json",
+    "release/sensor-plugin/PartyPilot.Sensor/PartyPilot.Sensor.dll",
+    "release/sensor-plugin/PartyPilot.Sensor/PartyPilot.Sensor.deps.json",
     "release/PartyPilot-SensorLog.exe",
     "release/PartyPilot-SlotAudit.exe",
     "release/PartyPilot-OrderedMotionLog.exe",
@@ -56,8 +58,11 @@ def refresh_binaries() -> None:
     run(["dotnet", "build", "sensor/PartyPilot.Sensor.csproj", "-c", "Release"],
         cwd=ROOT, env={**os.environ, "EXILECORE2_DIR": exilecore}, check=True)
     built = ROOT / "sensor/bin/Release/net8.0-windows"
+    plugin = ROOT / "release/sensor-plugin/PartyPilot.Sensor"
+    plugin.mkdir(parents=True, exist_ok=True)
     for name in ("PartyPilot.Sensor.dll", "PartyPilot.Sensor.deps.json"):
         shutil.copy2(built / name, ROOT / "release" / name)
+        shutil.copy2(built / name, plugin / name)
     for output, command in FOLLOW_BINARIES.items():
         run(["go", "build", "-o", output, "./cmd/" + command], cwd=ROOT,
             env={**os.environ, "GOOS": "windows", "GOARCH": "amd64"}, check=True)
@@ -79,6 +84,9 @@ def check_binaries_current() -> None:
              ROOT / "bridge/PartyPilot.Bridge.csproj"],
         ROOT / "release/PartyPilot.Sensor.dll":
             [*source_files("sensor"), *shared,
+             ROOT / "sensor/PartyPilot.Sensor.csproj"],
+        ROOT / "release/sensor-plugin/PartyPilot.Sensor/PartyPilot.Sensor.dll":
+            [*source_files("sensor"), *shared,
              ROOT / "sensor/PartyPilot.Sensor.csproj"]
     }
     follow_sources = [*ROOT.glob("internal/**/*.go"), ROOT / "go.mod"]
@@ -90,6 +98,11 @@ def check_binaries_current() -> None:
     if stale:
         raise SystemExit("Preview binaries are older than source: " + ", ".join(stale)
                          + "; rebuild with --refresh")
+    plugin = ROOT / "release/sensor-plugin/PartyPilot.Sensor"
+    for name in ("PartyPilot.Sensor.dll", "PartyPilot.Sensor.deps.json"):
+        if not (ROOT / "release" / name).is_file() or not (plugin / name).is_file() or \
+                (ROOT / "release" / name).read_bytes() != (plugin / name).read_bytes():
+            raise SystemExit("Sensor plugin folder differs from the built release; rebuild with --refresh")
 
 
 def main() -> None:
