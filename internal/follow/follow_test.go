@@ -63,6 +63,43 @@ func TestFollowHysteresisAndCatchUp(t *testing.T) {
 	}
 }
 
+func TestTargetTrailKeepsSameInstanceAcrossAreaLetterCase(t *testing.T) {
+	at := time.Unix(20, 0)
+	engine, ok := New(Config{StopDistance: 2, ResumeDistance: 5,
+		CatchUpDistance: 90, MaxAge: time.Second, TargetTrail: true})
+	if !ok {
+		t.Fatal("invalid test config")
+	}
+	leader := Position{X: 20, Area: "G2_4:123", Seen: at, Valid: true}
+	follower := Position{Area: "g2_4:123", Seen: at, Valid: true}
+	if got := engine.Step(at, leader, follower); got.State == Waiting {
+		t.Fatalf("same instance with different letter case was rejected: %+v", got)
+	}
+	at = at.Add(100 * time.Millisecond)
+	leader.X = 22
+	leader.Area = "g2_4:123"
+	leader.Seen, follower.Seen = at, at
+	if got := engine.Step(at, leader, follower); got.State == Waiting || len(engine.trail) < 2 {
+		t.Fatalf("letter-case change reset the leader trail: command=%+v trail=%+v", got, engine.trail)
+	}
+	follower.Area = "g2_4:124"
+	if got := engine.Step(at, leader, follower); got.State != Waiting {
+		t.Fatalf("different instance seed was accepted: %+v", got)
+	}
+}
+
+func TestTerrainAcceptsSameInstanceAcrossAreaLetterCase(t *testing.T) {
+	at := time.Unix(30, 0)
+	engine, _ := New(Config{StopDistance: 1, ResumeDistance: 2,
+		CatchUpDistance: 20, MaxAge: time.Second, RequireTerrain: true})
+	leader := Position{X: 4, Area: "G2_4:123", Seen: at, Valid: true}
+	follower := Position{Area: "g2_4:123", Seen: at, Valid: true}
+	grid := &navigation.Grid{Area: "g2_4:123", CellSize: 1, Width: 5, Height: 5}
+	if got := engine.StepWithTerrain(at, leader, follower, grid); got.State == Waiting {
+		t.Fatalf("matching terrain with different letter case was rejected: %+v", got)
+	}
+}
+
 func TestTerrainRouteTurnsAndMissingMapStops(t *testing.T) {
 	now := time.Unix(50, 0)
 	engine, ok := New(Config{StopDistance: 1, ResumeDistance: 2, CatchUpDistance: 20,

@@ -2,6 +2,7 @@ package live
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"partypilot/internal/follow"
@@ -56,7 +57,7 @@ func (e *Engine) applyCloseMirror(slot int, command follow.Command, now time.Tim
 	leader, leaderOK := positions[e.leader]
 	follower, followerOK := positions[slot]
 	input, inputOK := e.CurrentMainInput(now)
-	if !leaderOK || !followerOK || !inputOK || leader.Area != follower.Area {
+	if !leaderOK || !followerOK || !inputOK || !strings.EqualFold(leader.Area, follower.Area) {
 		e.resetCloseMirror(slot)
 		return command
 	}
