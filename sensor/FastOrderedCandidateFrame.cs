@@ -19,7 +19,7 @@ public static class FastOrderedCandidateFrame
         long tickMs)
     {
         if (areaHash == 0 || candidate is not { Status: "two_slot_candidate", ContainsObservedLocal: true,
-                StatePointerMatchesDataAddress: true, RawPositions: { Length: 2 } positions } ||
+                RawPositions: { Length: 2 } positions } ||
             candidate.OrderedAddresses.Length != 2 ||
             candidate.SelectedAreaAddress is null ||
             candidate.SelectedAreaAddress != candidate.StatePointerAreaAddress ||

@@ -115,8 +115,8 @@ using (var control = System.Text.Json.JsonDocument.Parse(experimental!))
         "Experimental control frame lost ordered local positions.");
 foreach (var invalid in new[]
 {
-    motion! with { StatePointerMatchesDataAddress = false },
     motion! with { SelectedAreaAddress = "0x900000" },
+    motion! with { StatePointerAreaAddress = "0x900000" },
     motion! with { ContainsObservedLocal = false },
     motion! with { RawPositions = [motion!.RawPositions![0], null] },
     motion! with { RawPositions = [motion!.RawPositions![0],
@@ -239,6 +239,13 @@ Require(divergent.Status == "two_slot_candidate" && divergent.StatePointerAreaAd
     divergent.StatePointerMatchesDataAddress == false &&
     divergent.CandidateAreaAddresses.SequenceEqual(["0x900000"]),
     "A distinct state-derived area candidate was lost or mislabeled.");
+var divergentMotion = LocalSlotMotionSampler.Capture(divergent, local, paths,
+    visiblePositions, Read, _ => null, () => true, 10, 20, 5,
+    motionSeen, ReadSyntheticPosition, state);
+Require(divergentMotion is not null &&
+    FastOrderedCandidateFrame.TryEncodeExperimentalControl(101, 42, "TestArea",
+        divergentMotion, motionSeen, motionSeen.Ticks) is not null,
+    "A state-pointer area candidate was rejected only because ExileCore2 Data used another address.");
 memory[state + 656] = BitConverter.GetBytes(0xA00000L);
 Require(!LocalSlotCandidateScanner.Revalidate(divergent, local, paths, Read,
         ingameStateAddress: state),
