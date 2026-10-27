@@ -37,12 +37,13 @@ public static class RadarTerrainRaster
                     boundary = IsBoundary(capture, gridX, gridY);
                     boundaryByCell.Add(key, boundary);
                 }
-                // The complete candidate area is drawn regardless of visited state.
-                // Source BGRA colors are converted to Avalonia's premultiplied format.
-                pixels[offset] = boundary ? (byte)174 : (byte)9;
-                pixels[offset + 1] = boundary ? (byte)184 : (byte)7;
-                pixels[offset + 2] = boundary ? (byte)184 : (byte)5;
-                pixels[offset + 3] = boundary ? (byte)224 : (byte)38;
+                if (!boundary) continue;
+                // The active hardware radar injects a bitmap with zero default
+                // background opacity. Convert its border to premultiplied BGRA.
+                pixels[offset] = 174;
+                pixels[offset + 1] = 184;
+                pixels[offset + 2] = 184;
+                pixels[offset + 3] = 224;
             }
         }
         return pixels;
@@ -54,8 +55,8 @@ public static class RadarTerrainRaster
         {
             var neighborX = x + offsetX;
             var neighborY = y + offsetY;
-            if (neighborX >= 0 && neighborX < capture.Width &&
-                neighborY >= 0 && neighborY < capture.Height &&
+            if (neighborX < 0 || neighborX >= capture.Width ||
+                neighborY < 0 || neighborY >= capture.Height ||
                 !capture.Walkable(neighborX, neighborY)) return true;
         }
         return false;
