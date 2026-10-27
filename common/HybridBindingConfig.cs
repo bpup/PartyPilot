@@ -127,7 +127,7 @@ internal sealed class HybridBindingConfig
 
     private static bool AllowedKey(int key) => key == 0 ||
         key is >= 65 and <= 90 or >= 48 and <= 57 or >= 96 and <= 111 or
-            >= 112 and <= 135 or >= 65538 and <= 65541 or
+            >= 112 and <= 135 or >= 65538 and <= 65552 or
             8 or 9 or 13 or 19 or 20 or 32 or 33 or 34 or 35 or 36 or 37 or 38 or 39 or 40 or
             45 or 46 or 145 or 160 or 161 or 162 or 163 or 164 or 165 or
             186 or 187 or 188 or 189 or 190 or 191 or 192 or 219 or 220 or 221 or 222;

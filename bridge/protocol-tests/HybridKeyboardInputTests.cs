@@ -67,6 +67,18 @@ internal static class HybridKeyboardInputTests
                 index == 1 ? customKeys[0] : key).ToArray(), out _) ||
             HybridBindingConfig.TryParse("1,2", out _))
             throw new Exception("Custom Hybrid bindings were not validated and routed exactly.");
+        var extendedMouseKeys = HybridBindingConfig.Definitions
+            .Select(item => item.DefaultKey).ToArray();
+        extendedMouseKeys[19] = 65552;
+        if (!HybridBindingConfig.TryCreate(extendedMouseKeys, out var extendedMouse) ||
+            extendedMouse is null ||
+            HybridKeyboardInput.ActionForKey(65552, extendedMouse) != HybridAction.RightTrigger ||
+            !BridgeProtocol.TryParseHybridKey(
+                "{\"type\":\"hybrid_key\",\"key\":65552,\"down\":true}",
+                out _, extendedMouse) ||
+            HybridBindingConfig.TryCreate(extendedMouseKeys.Select((key, index) =>
+                index == 19 ? 65553 : key).ToArray(), out _))
+            throw new Exception("Extended M16 Hybrid binding was not accepted exactly.");
         var customState = new HybridKeyboardState([2], custom);
         customState.Handle(120, true, true);
         customState.Handle(120, false, true);

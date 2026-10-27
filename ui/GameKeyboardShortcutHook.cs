@@ -99,12 +99,10 @@ internal sealed class GameKeyboardShortcutHook : IDisposable
         if (message is RightDown or RightUp) return 65538;
         if (message is MiddleDown or MiddleUp) return 65539;
         if (message is XDown or XUp)
-            return ((mouseData >> 16) & 0xffff) switch
-            {
-                1 => 65540,
-                2 => 65541,
-                _ => 0
-            };
+        {
+            var button = ((mouseData >> 16) & 0xffff) + 3;
+            return button is >= 4 and <= 16 ? 65536 + button : 0;
+        }
         return 0;
     }
 
