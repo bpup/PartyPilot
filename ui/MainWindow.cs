@@ -265,12 +265,25 @@ public sealed class MainWindow : Window
         shell.Children.Add(new ScrollViewer { Content = content });
         Content = shell;
         var followInput = _followInputPreferences.Load();
-        _sprintCatchUpPriority.IsChecked = followInput.Success ? followInput.SprintCatchUpPriority : null;
-        _mirrorAttackDirection.IsChecked = followInput.Success ? followInput.MirrorAttackDirection : null;
+        var followOptions = followInput.Options;
+        _sprintCatchUp.IsChecked = followOptions.SprintCatchUp;
+        _sprintCatchUpPriority.IsChecked = followInput.Success ? followOptions.SprintCatchUpPriority : null;
+        _mirrorAttackDirection.IsChecked = followInput.Success ? followOptions.MirrorAttackDirection : null;
+        _classicSprintCatchUp.IsChecked = followOptions.ClassicSprintCatchUp;
+        _aggressiveBlinkCatchUp.IsChecked = followOptions.AggressiveBlinkCatchUp;
+        _aggressiveSprintRetryDelay.Text = followOptions.AggressiveSprintRetryDelayMs.ToString(CultureInfo.InvariantCulture);
+        _closeRangeMirror.IsChecked = followOptions.CloseRangeMirror;
+        _closeMirrorDuration.Text = followOptions.CloseRangeMirrorDurationMs.ToString(CultureInfo.InvariantCulture);
         _followInputPreferenceReady = followInput.Success;
         _followInputPreferenceStatus.Text = followInput.Message;
+        _sprintCatchUp.IsCheckedChanged += (_, _) => SaveFollowInputPreference();
         _sprintCatchUpPriority.IsCheckedChanged += (_, _) => SaveFollowInputPreference();
         _mirrorAttackDirection.IsCheckedChanged += (_, _) => SaveFollowInputPreference();
+        _classicSprintCatchUp.IsCheckedChanged += (_, _) => SaveFollowInputPreference();
+        _aggressiveBlinkCatchUp.IsCheckedChanged += (_, _) => SaveFollowInputPreference();
+        _aggressiveSprintRetryDelay.TextChanged += (_, _) => SaveFollowInputPreference();
+        _closeRangeMirror.IsCheckedChanged += (_, _) => SaveFollowInputPreference();
+        _closeMirrorDuration.TextChanged += (_, _) => SaveFollowInputPreference();
         var hybridPreference = _hybridBindingPreferences.Load();
         _hybridBindings = hybridPreference.Bindings;
         _hybridBindingsStatus.Text = hybridPreference.Success
@@ -880,6 +893,7 @@ public sealed class MainWindow : Window
         };
         panel.Children.Add(_aggressiveBlinkCatchUp);
         panel.Children.Add(Label("激进冲刺重试间隔（毫秒，500–1500；目标版默认 800）", 12, MutedBrush));
+        _aggressiveSprintRetryDelay.Name = "aggressive-sprint-retry-delay";
         _aggressiveSprintRetryDelay.Text = "800";
         _aggressiveSprintRetryDelay.Width = 190;
         _aggressiveSprintRetryDelay.HorizontalAlignment = HorizontalAlignment.Left;
@@ -889,6 +903,7 @@ public sealed class MainWindow : Window
         _closeRangeMirror.IsCheckedChanged += (_, _) => UpdateFollowControls();
         panel.Children.Add(_closeRangeMirror);
         panel.Children.Add(Label("镜像时长（毫秒，50–5000；目标版默认 400）", 12, MutedBrush));
+        _closeMirrorDuration.Name = "close-mirror-duration";
         _closeMirrorDuration.Text = "400";
         _closeMirrorDuration.Width = 190;
         _closeMirrorDuration.HorizontalAlignment = HorizontalAlignment.Left;
@@ -2210,9 +2225,24 @@ public sealed class MainWindow : Window
         }
         else
         {
-            var saved = _followInputPreferences.Save(priority, mirror);
-            _followInputPreferenceReady = saved.Success;
-            _followInputPreferenceStatus.Text = saved.Message;
+            if (!int.TryParse(_aggressiveSprintRetryDelay.Text, NumberStyles.None,
+                    CultureInfo.InvariantCulture, out var retry) ||
+                !int.TryParse(_closeMirrorDuration.Text, NumberStyles.None,
+                    CultureInfo.InvariantCulture, out var duration))
+            {
+                _followInputPreferenceReady = false;
+                _followInputPreferenceStatus.Text = "重试间隔和镜像时长须填写有效毫秒数。";
+            }
+            else
+            {
+                var options = new FollowInputOptions(_sprintCatchUp.IsChecked == true,
+                    priority, mirror, _classicSprintCatchUp.IsChecked == true,
+                    _aggressiveBlinkCatchUp.IsChecked == true, retry,
+                    _closeRangeMirror.IsChecked == true, duration);
+                var saved = _followInputPreferences.Save(options);
+                _followInputPreferenceReady = saved.Success;
+                _followInputPreferenceStatus.Text = saved.Message;
+            }
         }
         UpdateFollowControls();
     }

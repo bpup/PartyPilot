@@ -91,9 +91,21 @@ if (priorityChoice.IsChecked != true || attackChoice.IsChecked != true)
     throw new Exception("Desktop did not load the observed follow input defaults.");
 priorityChoice.IsChecked = false;
 attackChoice.IsChecked = false;
-if (followInputPreferenceStore.Load() is not
-    { Success: true, SprintCatchUpPriority: false, MirrorAttackDirection: false })
-    throw new Exception("Desktop did not save changed follow input options.");
+var retryField = window.GetLogicalDescendants().OfType<TextBox>()
+    .Single(box => box.Name == "aggressive-sprint-retry-delay");
+retryField.Text = "900";
+var closeChoice = window.GetLogicalDescendants().OfType<CheckBox>()
+    .Single(box => box.Content?.ToString()?.StartsWith("近距离镜像跟随", StringComparison.Ordinal) == true);
+closeChoice.IsChecked = true;
+var closeDurationField = window.GetLogicalDescendants().OfType<TextBox>()
+    .Single(box => box.Name == "close-mirror-duration");
+closeDurationField.Text = "650";
+Dispatcher.UIThread.RunJobs();
+var savedFollowInput = followInputPreferenceStore.Load();
+if (savedFollowInput is not
+    { Success: true, Options: { SprintCatchUpPriority: false, MirrorAttackDirection: false,
+        AggressiveSprintRetryDelayMs: 900, CloseRangeMirror: true, CloseRangeMirrorDurationMs: 650 } })
+    throw new Exception($"Desktop did not save changed follow input options: {savedFollowInput}.");
 var mirrorDialog = new FollowerMirrorDialog(PartyPilot.Common.FollowerMirrorConfig.Default, 3);
 var mirrorResult = mirrorDialog.ShowDialog<PartyPilot.Common.FollowerMirrorConfig?>(window);
 var mirrorPlayer = mirrorDialog.GetLogicalDescendants().OfType<ComboBox>()
@@ -708,7 +720,14 @@ if (restoredWindow.GetLogicalDescendants().OfType<CheckBox>()
         .IsChecked != false ||
     restoredWindow.GetLogicalDescendants().OfType<CheckBox>()
         .Single(box => box.Content?.ToString()?.StartsWith("攻击时同步主控移动方向", StringComparison.Ordinal) == true)
-        .IsChecked != false)
+        .IsChecked != false ||
+    restoredWindow.GetLogicalDescendants().OfType<CheckBox>()
+        .Single(box => box.Content?.ToString()?.StartsWith("近距离镜像跟随", StringComparison.Ordinal) == true)
+        .IsChecked != true ||
+    restoredWindow.GetLogicalDescendants().OfType<TextBox>()
+        .Single(box => box.Name == "aggressive-sprint-retry-delay").Text != "900" ||
+    restoredWindow.GetLogicalDescendants().OfType<TextBox>()
+        .Single(box => box.Name == "close-mirror-duration").Text != "650")
     throw new Exception("Follow input choices were not restored in a new desktop window.");
 var restoredCount = restoredWindow.GetLogicalDescendants().OfType<ComboBox>()
     .Single(item => item.PlaceholderText == "选择 1–6 人");
