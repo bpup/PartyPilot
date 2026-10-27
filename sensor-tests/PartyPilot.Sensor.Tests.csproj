@@ -36,5 +36,6 @@
     <Compile Include="../sensor/PackedTerrainCapture.cs" Link="PackedTerrainCapture.cs" />
     <Compile Include="../sensor/SkillBindTable.cs" Link="SkillBindTable.cs" />
     <Compile Include="../sensor/SkillBindSourceScanner.cs" Link="SkillBindSourceScanner.cs" />
+    <Compile Include="../sensor/AreaEntityMapSnapshotReader.cs" Link="AreaEntityMapSnapshotReader.cs" />
   </ItemGroup>
 </Project>
