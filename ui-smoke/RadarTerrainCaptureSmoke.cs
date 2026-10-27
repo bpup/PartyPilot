@@ -137,6 +137,26 @@ internal static class RadarTerrainCaptureSmoke
                 !discovered.Matches(matching) ||
                 catalog.FindMatching(matching with { AreaHash = 43 }, scanAt.AddSeconds(4)) is not null)
                 throw new Exception("Radar did not discover a new matching capture or reject a new area.");
+            var crowdedDirectory = Path.Combine(directory, "crowded");
+            Directory.CreateDirectory(crowdedDirectory);
+            File.Copy(dataPath, Path.Combine(crowdedDirectory, "capture.packed"));
+            var olderCapture = Path.Combine(crowdedDirectory, "terrain-123-older.json");
+            File.Copy(metadataPath, olderCapture);
+            File.SetLastWriteTimeUtc(olderCapture, DateTime.UtcNow.AddDays(-1));
+            for (var index = 0; index < 128; index++)
+            {
+                var decoy = Path.Combine(crowdedDirectory, $"terrain-123-newer-{index:D3}.json");
+                File.WriteAllText(decoy, "{}");
+                File.SetLastWriteTimeUtc(decoy, DateTime.UtcNow);
+            }
+            var crowdedCatalog = new RadarTerrainCatalog(crowdedDirectory);
+            if (crowdedCatalog.FindMatching(matching, scanAt.AddSeconds(5)) is not null ||
+                crowdedCatalog.FindMatching(matching with { AreaHash = 43 },
+                    scanAt.AddSeconds(7)) is not null ||
+                crowdedCatalog.FindMatching(matching, scanAt.AddSeconds(9)) is not null ||
+                crowdedCatalog.FindMatching(matching, scanAt.AddSeconds(11)) is not { } older ||
+                !older.Matches(matching))
+                throw new Exception("Radar did not resume old captures or restart its scan on area change.");
             var terrainWindow = new RadarOverlayWindow(new LaunchedClient(123, 1, "C:/Game.exe"),
                 2, new RadarVisibility(), renderOnly: true);
             terrainWindow.Show();

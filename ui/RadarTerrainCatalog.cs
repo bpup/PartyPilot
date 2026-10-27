@@ -10,6 +10,8 @@ public sealed class RadarTerrainCatalog
     private readonly string _directory;
     private readonly Dictionary<int, RadarTerrainCapture> _current = new();
     private readonly Dictionary<int, DateTime> _nextScanUtc = new();
+    private readonly Dictionary<int, int> _scanCursor = new();
+    private readonly Dictionary<int, (uint Hash, string? Area, string? StateArea)> _scanIdentity = new();
 
     public RadarTerrainCatalog(string directory)
     {
@@ -23,6 +25,13 @@ public sealed class RadarTerrainCatalog
 
     public RadarTerrainCapture? FindMatching(RadarFrame frame, DateTime nowUtc)
     {
+        var identity = (frame.AreaHash, frame.AreaAddress, frame.StateAreaAddress);
+        if (!_scanIdentity.TryGetValue(frame.ProcessId, out var previousIdentity) ||
+            previousIdentity != identity)
+        {
+            _scanIdentity[frame.ProcessId] = identity;
+            _scanCursor[frame.ProcessId] = 0;
+        }
         if (_current.TryGetValue(frame.ProcessId, out var current) &&
             current.Matches(frame) && current.MetadataUnchanged())
             return current;
@@ -34,19 +43,25 @@ public sealed class RadarTerrainCatalog
             !Directory.Exists(_directory)) return null;
         try
         {
-            foreach (var path in Directory.EnumerateFiles(_directory,
+            var files = Directory.EnumerateFiles(_directory,
                 $"terrain-{frame.ProcessId}-*.json", SearchOption.TopDirectoryOnly)
                 .Select(path => new FileInfo(path))
                 .Where(file => file.Length is >= 1 and <= 65536)
                 .OrderByDescending(file => file.LastWriteTimeUtc)
-                .Take(128))
+                .ThenByDescending(file => file.Name, StringComparer.Ordinal)
+                .ToArray();
+            var cursor = _scanCursor[frame.ProcessId];
+            if (cursor >= files.Length) cursor = 0;
+            foreach (var path in files.Skip(cursor).Take(128))
             {
                 if (!MetadataMatches(path.FullName, frame) ||
                     !RadarTerrainCapture.TryLoad(path.FullName, out var capture) ||
                     capture is null || !capture.Matches(frame)) continue;
                 _current[frame.ProcessId] = capture;
+                _scanCursor[frame.ProcessId] = 0;
                 return capture;
             }
+            _scanCursor[frame.ProcessId] = cursor + 128 >= files.Length ? 0 : cursor + 128;
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
