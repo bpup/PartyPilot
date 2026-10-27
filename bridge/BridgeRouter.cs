@@ -312,10 +312,10 @@ internal sealed class BridgeRouter
             (fifthEdge ? 1 : 0) + (sixthEdge ? 1 : 0);
         var pressedRole = edgeCount == 1
             ? fifthEdge ? 5 : sixthEdge ? 6 : leftEdge ? leftRole : rightRole : 0;
-        var promoteChord = (pressedRole is 3 or 4 &&
-            _isolatedSlot == (_focusPads.TryGetValue(pressedRole - 2, out var prefixPad) ? prefixPad : -1) &&
-            (pressedRole == 3 ? previousLeft : previousRight) && !previousLeftTrigger) ||
-            (pressedRole is 5 or 6 && _isolatedSlot != 0);
+        // While one player has manual focus, the reserved P3–P6 chords can
+        // immediately switch to another player. Repeating the active chord
+        // still needs a release edge before returning to shared control.
+        var promoteChord = pressedRole is >= 3 and <= 6 && _isolatedSlot != 0;
         if (pressedRole != 0 && _focusPads.TryGetValue(pressedRole, out var pressedSlot) &&
             (promoteChord || nowUtc - _lastFocusToggleUtc >= TimeSpan.FromMilliseconds(350)))
         {

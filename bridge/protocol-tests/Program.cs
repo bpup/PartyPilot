@@ -879,6 +879,16 @@ if (fourthRouter.FocusedSlot != 4 || fourthPads[4].X != 602 ||
     fourthPads.Take(3).Any(entry => entry.Value.Report != default))
     throw new Exception("LT+R3 did not isolate the fourth public pad.");
 fourthRouter.SetPhysical(default, now.AddMilliseconds(10));
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0040, LeftTrigger = 180, LeftX = 603 },
+    now.AddMilliseconds(100));
+if (fourthRouter.FocusedSlot != 3 || fourthPads[3].X != 603 || fourthPads[4].Report != default)
+    throw new Exception("Focused P4 did not immediately switch to P3 with LT+L3.");
+fourthRouter.SetPhysical(default, now.AddMilliseconds(110));
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080, LeftTrigger = 180, LeftX = 604 },
+    now.AddMilliseconds(180));
+if (fourthRouter.FocusedSlot != 4 || fourthPads[4].X != 604 || fourthPads[3].Report != default)
+    throw new Exception("Focused P3 did not immediately switch to P4 with LT+R3.");
+fourthRouter.SetPhysical(default, now.AddMilliseconds(190));
 fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0001, LeftTrigger = 180 },
     now.AddMilliseconds(400));
 if (fourthRouter.FocusedSlot != 4 || fourthPads[4].Report.Buttons != 0x0001 ||
