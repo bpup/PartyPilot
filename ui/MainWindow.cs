@@ -3579,6 +3579,7 @@ public sealed class MainWindow : Window
         };
         BridgeSession? prelaunchBridge = null;
         Client3PreResumeSession? pendingPrivate = null;
+        var startRadarAfterBinding = false;
         try
         {
             if (action == ClientAction.Start && HybridSelected)
@@ -3806,6 +3807,8 @@ public sealed class MainWindow : Window
                     _launchedClients.ToArray());
                 if (!string.IsNullOrEmpty(preparation))
                     _status.Text = message + Environment.NewLine + preparation;
+                // The supplied 0.6.17 first-run profile enables the radar.
+                startRadarAfterBinding = true;
             }
         }
         catch (Exception exception)
@@ -3828,6 +3831,7 @@ public sealed class MainWindow : Window
             {
                 _busy = false;
                 UpdateClientRows();
+                if (startRadarAfterBinding) StartRadar();
             }
         }
     }
