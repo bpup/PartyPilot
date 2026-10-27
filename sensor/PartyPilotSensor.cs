@@ -938,10 +938,11 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 var localPath = player.Path;
                 var paths = new Dictionary<long, string>();
                 if (!string.IsNullOrWhiteSpace(localPath)) paths[localAddress] = localPath;
+                var observedPosition = render.Pos;
                 captured = LocalSlotMotionSampler.Capture(candidate, localAddress, paths,
                     new Dictionary<long, (float X, float Y, float Z)>(),
                     ReadCandidate, address => RawCharacterPathReader.Read(address, ReadCandidate),
-                    SameIdentity, render.Pos.X, render.Pos.Y, render.Pos.Z, seenUtc,
+                    SameIdentity, observedPosition.X, observedPosition.Y, observedPosition.Z, seenUtc,
                     ingameStateAddress: stateAddress);
                 // A failed revalidation must revoke a previously accepted ordered frame.
             }
