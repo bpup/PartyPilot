@@ -13,6 +13,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     private static readonly IPEndPoint RadarReceiver = new(IPAddress.Loopback, 47618);
     private static readonly IPEndPoint PrivacyReceiver = new(IPAddress.Loopback, 47619);
     private static readonly IPEndPoint FastCandidateReceiver = new(IPAddress.Loopback, 47620);
+    private static readonly IPEndPoint PairingReceiver = new(IPAddress.Loopback, 47621);
     private readonly UdpClient _udp = new();
     private DateTime _lastSentUtc;
     private DateTime _lastFastCandidateSentUtc;
@@ -552,6 +553,26 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         });
         var bytes = Encoding.UTF8.GetBytes(message);
         _udp.Send(bytes, bytes.Length, Receiver);
+        if (frameDataAddress > 0 && frameLocalAddress > 0 && frameAreaHash != 0 &&
+            vitals is not null && vitals.MaxHP > 0 && vitals.CurHP > 0 &&
+            float.IsFinite(position.X) && float.IsFinite(position.Y) && float.IsFinite(position.Z))
+        {
+            var pairing = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                Kind = "pairing_ingame",
+                ProcessId = frameProcessId,
+                SeenUtc = now,
+                AreaHash = frameAreaHash,
+                IngameDataAddress = frameDataAddress,
+                PlayerAddress = frameLocalAddress,
+                X = position.X,
+                Y = position.Y,
+                Z = position.Z,
+                Life = vitals.CurHP,
+                LifeMax = vitals.MaxHP
+            });
+            _udp.Send(pairing, pairing.Length, PairingReceiver);
+        }
         if (radarSeenUtc.HasValue) _udp.Send(bytes, bytes.Length, RadarReceiver);
         var privacyPulse = JsonSerializer.SerializeToUtf8Bytes(new
         {

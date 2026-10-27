@@ -8,6 +8,7 @@ using Avalonia.Threading;
 using PartyPilot.Desktop;
 
 PartyRosterCounterSmoke.Run();
+await PairingInGameWitnessSmoke.RunAsync();
 SessionGameClientShutdownSmoke.Run();
 FollowTargetChoicesSmoke.Run();
 FollowTargetPreferenceSmoke.Run();

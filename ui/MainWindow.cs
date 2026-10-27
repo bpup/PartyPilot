@@ -178,6 +178,9 @@ public sealed class MainWindow : Window
     private RadarSession? _radar;
     private PrivacyMaskSession? _privacy;
     private PairingGuide? _pairing;
+    private PairingInGameWitness? _pairingWitness;
+    private readonly PairingInGameTracker _pairingInGameTracker = new();
+    private readonly HashSet<int> _sensorVerifiedRoles = [];
     private HybridPairingGuide? _hybridPairing;
     private IReadOnlyList<LaunchedClient> _launchedClients = [];
     private IReadOnlyList<SessionGameClientIdentity> _sessionGameIdentities = [];
@@ -2506,6 +2509,11 @@ public sealed class MainWindow : Window
         session.Ended += BridgeEnded;
         _bridge = session;
         _pairing = new PairingGuide(topology);
+        _pairingInGameTracker.Reset();
+        _sensorVerifiedRoles.Clear();
+        if (topology.Slots.All(slot => topology.Clients[slot.Client - 1].Count == 1))
+            _pairingWitness = PairingInGameWitness.TryStart((sample, receivedUtc) =>
+                Dispatcher.UIThread.Post(() => ObservePairingInGame(sample, receivedUtc)));
         session.StartReading();
         ShowCurrentPairingStep();
     }
@@ -2513,8 +2521,28 @@ public sealed class MainWindow : Window
     private void BridgeAReleased(int slot)
     {
         if (_pairing?.ObserveARelease(slot) != true) return;
+        _pairingInGameTracker.Reset();
         ShowCurrentPairingStep();
         UpdateBridgeControls();
+    }
+
+    private async void ObservePairingInGame(PairingInGameSample sample, DateTime receivedUtc)
+    {
+        var guide = _pairing;
+        var current = guide?.Current;
+        var topology = _selectedTopology;
+        if (_bridge is null || DateTime.UtcNow - receivedUtc > TimeSpan.FromMilliseconds(500) ||
+            guide?.AReleased != true || current is null ||
+            topology is null || current.LocalPlayer != 1 ||
+            current.Client > topology.ClientCount ||
+            topology.Clients[current.Client - 1].Count != 1 ||
+            current.Client > _launchedClients.Count) return;
+        var client = _launchedClients[current.Client - 1];
+        if (!PoeChatInviteService.IsWindowOwned(client) ||
+            !_pairingInGameTracker.Observe(sample, client.Pid, guide.AReleasedAtUtc, receivedUtc))
+            return;
+        _sensorVerifiedRoles.Add(current.PartyPlayer);
+        await ConfirmRoleAsync();
     }
 
     private async Task ArmPairingAsync()
@@ -2660,6 +2688,9 @@ public sealed class MainWindow : Window
             if (next is null)
             {
                 _pairingSettling = true;
+                var witness = _pairingWitness;
+                _pairingWitness = null;
+                if (witness is not null) await witness.DisposeAsync();
                 await _bridge.FinishPairingAsync();
             }
             ShowCurrentPairingStep();
@@ -2712,12 +2743,17 @@ public sealed class MainWindow : Window
     private void ShowCurrentPairingStep()
     {
         var current = _pairing?.Current;
+        var verified = _sensorVerifiedRoles.Count == 0 ? "" :
+            $"其中 {_sensorVerifiedRoles.Count} 名独立客户端角色有新鲜的本地传感器生命值与位置证据；";
         _pairingStatus.Text = current is null
             ? _pairingSettled
-                ? "已观察到 400 毫秒手柄回中，且所有角色步骤由用户确认；软件尚未验证游戏内实际配对。手柄桥接仍在运行。"
-                : "所有角色步骤已由用户确认；请松开所有手柄输入，等待 400 毫秒回中。"
+                ? $"已观察到 400 毫秒手柄回中；{verified}软件尚未验证游戏内实际配对。手柄桥接仍在运行。"
+                : $"所有角色已完成入场检查；{verified}请松开所有手柄输入，等待 400 毫秒回中。"
             : _pairing!.AReleased
-                ? $"已观察到 P{current.PartyPlayer} 对应虚拟手柄 A 键松开。请在游戏中选角并确认角色已加入，再继续。"
+                ? _pairingWitness is not null && _selectedTopology is { } selected &&
+                    current.Client <= selected.ClientCount && selected.Clients[current.Client - 1].Count == 1
+                    ? $"已观察到 P{current.PartyPlayer} 的 A 键松开。正在等待该客户端的新鲜生命值与位置证据；也可在游戏中确认角色已加入后手动继续。"
+                    : $"已观察到 P{current.PartyPlayer} 对应虚拟手柄 A 键松开。请在游戏中选角并确认角色已加入，再继续。"
                 : _pairing.Armed
                     ? current.LocalPlayer == 2
                         ? $"客户端 {current.Client} 的第二名角色：等待上一角色 A 键松开至少 2 秒；保持窗口前台、松开输入，提示出现后重新按一次 A 键。"
@@ -2754,8 +2790,13 @@ public sealed class MainWindow : Window
         await StopFollowAsync();
         var session = _bridge;
         _bridge = null;
+        var pairingWitness = _pairingWitness;
+        _pairingWitness = null;
+        if (pairingWitness is not null) await pairingWitness.DisposeAsync();
         ApplyGameShortcutKeys();
         _pairing = null;
+        _pairingInGameTracker.Reset();
+        _sensorVerifiedRoles.Clear();
         _hybridPairing = null;
         _pairingHasStarted = false;
         _armRequested = false;

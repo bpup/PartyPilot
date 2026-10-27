@@ -7,6 +7,7 @@ public sealed class PairingGuide
     private int _index;
     public PartySlot? Current => _index < _slots.Length ? _slots[_index] : null;
     public bool AReleased { get; private set; }
+    public DateTime AReleasedAtUtc { get; private set; }
     public bool Armed { get; private set; }
     public bool IsComplete => Current is null;
 
@@ -19,6 +20,7 @@ public sealed class PairingGuide
     {
         if (Current?.RuntimePad != runtimePad || AReleased || !Armed) return false;
         AReleased = true;
+        AReleasedAtUtc = DateTime.UtcNow;
         Armed = false;
         return true;
     }
@@ -35,6 +37,7 @@ public sealed class PairingGuide
         if (!AReleased || IsComplete) throw new InvalidOperationException("Wait for the A release before confirming the in-game role.");
         _index++;
         AReleased = false;
+        AReleasedAtUtc = default;
         Armed = false;
         return Current;
     }
