@@ -53,6 +53,8 @@ type OrderedLocalPlayer struct {
 	EnergyShieldMax *float64 `json:"EnergyShieldMax"`
 }
 
+const unverifiedExileCoreSlotSource = "unverified_exilecore_local_slot_candidate"
+
 // DecodeOrderedClient is an explicit, opt-in transport boundary. The wire
 // claim of reliable order is not proof that its producer read the game correctly.
 func DecodeOrderedClient(data []byte, receivedAt time.Time) (OrderedClientFrame, error) {
@@ -86,6 +88,7 @@ func (e *Engine) ObserveOrderedClient(frame OrderedClientFrame) bool {
 	}
 	if !frame.PlayerOrderReliable ||
 		strings.TrimSpace(frame.PlayerOrderSource) == "" ||
+		strings.EqualFold(strings.TrimSpace(frame.PlayerOrderSource), unverifiedExileCoreSlotSource) ||
 		len(frame.Players) != len(roles) || frame.CoordinateSpace != "world" ||
 		frame.SeenUTC.IsZero() || frame.ReceivedAt.IsZero() || frame.TickMS <= 0 {
 		e.invalidateOrderedIfCurrent(roles, frame)

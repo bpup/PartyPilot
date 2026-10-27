@@ -204,6 +204,38 @@ func TestOrderedMotionDoesNotRequireSlowVitals(t *testing.T) {
 	}
 }
 
+func TestUnverifiedSlotCandidateCannotBePromotedByReliableFlag(t *testing.T) {
+	now := time.Now().UTC()
+	engine, err := NewWithBindings([]RoleBinding{{1, 1, 1, 101}, {2, 1, 2, 101}},
+		1, follow.Config{StopDistance: 2, ResumeDistance: 3,
+			CatchUpDistance: 10, MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	if !engine.ObserveClientArea(101, arealog.Signal{AreaID: "G2_4", Seed: 123,
+		ObservedAt: now, Origin: "live"}) {
+		t.Fatal("client area was not applied")
+	}
+	frame := OrderedClientFrame{ProcessID: 101, SeenUTC: now.Add(time.Millisecond),
+		ReceivedAt: now.Add(time.Millisecond), TickMS: now.UnixMilli() + 1,
+		CoordinateSpace: "world", PlayerOrderReliable: true,
+		PlayerOrderSource: "verified fixture", Players: []OrderedLocalPlayer{
+			{LocalPlayer: 1, X: 30 * worldPerGridUnit},
+			{LocalPlayer: 2, X: 0},
+		}}
+	if !engine.ObserveOrderedClient(frame) || engine.Step(frame.SeenUTC)[2].State != follow.CatchingUp {
+		t.Fatal("verified fixture did not start following")
+	}
+	frame.SeenUTC = now.Add(2 * time.Millisecond)
+	frame.ReceivedAt = frame.SeenUTC
+	frame.TickMS++
+	frame.PlayerOrderSource = " UNVERIFIED_EXILECORE_LOCAL_SLOT_CANDIDATE "
+	if engine.ObserveOrderedClient(frame) || engine.Step(frame.SeenUTC)[2].State != follow.Waiting {
+		t.Fatal("unverified local-slot diagnostic drove or preserved follow movement")
+	}
+}
+
 func TestTwoLocalPlayersNeedOneCompleteOrderedFrame(t *testing.T) {
 	now := time.Now().UTC()
 	bindings := []RoleBinding{
