@@ -5,6 +5,32 @@ internal static class ProcessPipelineSmoke
 {
     public static async Task RunAsync()
     {
+        var paired = PartyTopologies.ForPlayerCount(4)
+            .Single(item => item.Id == "4-balanced");
+        static FollowPadCommand Waiting(int player) => new(player, player, "{}", "waiting", null);
+        var outward = new FollowBridgeFrame("{}", "waiting", null)
+        {
+            Handoffs = [new FollowHandoffRequest(2, 3, 2)],
+            PadCommands = [Waiting(3), Waiting(4)]
+        };
+        var returnTrip = new FollowBridgeFrame("{}", "waiting", null)
+        {
+            Handoffs = [new FollowHandoffRequest(1, 1, 4)],
+            PadCommands = [Waiting(1), Waiting(2)]
+        };
+        if (PartyWarpRoutes.FromFrame(outward, paired)?.RemotePortraitIndex != 1 ||
+            PartyWarpRoutes.FromFrame(outward with
+                { Handoffs = [new FollowHandoffRequest(2, 3, 1)] }, paired)?.RemotePortraitIndex != 0 ||
+            PartyWarpRoutes.FromFrame(returnTrip, paired)?.RemotePortraitIndex != 1 ||
+            PartyWarpRoutes.FromFrame(returnTrip with
+                { Handoffs = [new FollowHandoffRequest(1, 1, 3)] }, paired)?.RemotePortraitIndex != 0 ||
+            PartyWarpRoutes.FromFrame(returnTrip with { PadCommands = [Waiting(1)] }, paired) is not null ||
+            PartyWarpRoutes.FromFrame(returnTrip with
+                { PadCommands = [Waiting(1), Waiting(2) with { Status = "following" }] }, paired) is not null ||
+            PartyWarpRoutes.FromFrame(outward with
+                { Handoffs = [new FollowHandoffRequest(2, 3, 2),
+                    new FollowHandoffRequest(1, 1, 4)] }, paired) is not null)
+            throw new Exception("Paired warp routes accepted an incomplete or ambiguous destination.");
         const int visionWidth = 1280;
         const int visionHeight = 720;
         var portraitPixels = new byte[visionWidth * visionHeight * 4];

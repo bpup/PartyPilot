@@ -1046,7 +1046,7 @@ public sealed class MainWindow : Window
         _followPauseKeyStatus.Foreground = MutedBrush;
         _followPauseKeyStatus.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(_followPauseKeyStatus);
-        _experimentalWarpClick.Content = "实验：P3/P4 跨区追 P1/P2 时识别头像和菜单并尝试传送（仅双客户端）";
+        _experimentalWarpClick.Content = "实验：双客户端跨区时识别队伍头像和菜单并尝试传送";
         _experimentalWarpClick.IsChecked = false;
         panel.Children.Add(_experimentalWarpClick);
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
@@ -3294,10 +3294,13 @@ public sealed class MainWindow : Window
         {
             var requests = string.Join(" · ", frame.Handoffs.Select(item =>
                 $"客户端 {item.DestinationClient} 的 P{item.DriverPlayer} 需传送至 P{item.TargetPlayer}"));
-            _followStatus.Text = _experimentalWarpClick.IsChecked == true &&
-                frame.Handoffs.All(item => item.DestinationClient == 2 && item.TargetPlayer is 1 or 2)
-                ? $"检测到跨区：{requests}；正在尝试实验性视觉传送，跨区自动方向已停止。"
-                : $"检测到跨区：{requests}；自动传送未开启，跨区自动方向已停止。";
+            var warpState = _experimentalWarpClick.IsChecked != true
+                ? "自动传送未开启"
+                : _selectedTopology is not null &&
+                  PartyWarpRoutes.FromFrame(frame, _selectedTopology) is not null
+                    ? "正在尝试实验性视觉传送"
+                    : "当前跨区请求不支持视觉传送";
+            _followStatus.Text = $"检测到跨区：{requests}；{warpState}，跨区自动方向已停止。";
             return;
         }
         if (_selectedTopology?.Id is "3-three-singles" or "4-balanced" or

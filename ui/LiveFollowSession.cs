@@ -523,35 +523,30 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     private void QueueVisualWarp(FollowBridgeFrame frame)
     {
         if (!_experimentalWarpClick || _stopping) return;
-        var request = frame.Handoffs.SingleOrDefault(item =>
-            item.DestinationClient == 2 && item.TargetPlayer is 1 or 2);
-        var destinationCommands = frame.PadCommands.Where(item => item.Player is 3 or 4)
-            .ToArray();
-        if (request is null || request.DriverPlayer != 3 || Paused ||
-            destinationCommands.Length != 2 ||
-            destinationCommands.Any(item => item.Status != "waiting"))
+        var route = PartyWarpRoutes.FromFrame(frame, _topology);
+        if (route is null || Paused)
         {
             _warpAttemptCancellation?.Cancel();
             _attemptedWarp = null;
             return;
         }
-        if (_attemptedWarp == request || !_warpTask.IsCompleted) return;
-        _attemptedWarp = request;
+        if (_attemptedWarp == route.Request || !_warpTask.IsCompleted) return;
+        _attemptedWarp = route.Request;
         _warpAttemptCancellation?.Dispose();
         _warpAttemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             _warpCancellation.Token);
-        _warpTask = RunVisualWarpAsync(request, _warpAttemptCancellation.Token);
+        _warpTask = RunVisualWarpAsync(route, _warpAttemptCancellation.Token);
     }
 
-    private async Task RunVisualWarpAsync(FollowHandoffRequest request,
+    private async Task RunVisualWarpAsync(PartyWarpRoute route,
         CancellationToken token)
     {
         var original = _clients.FirstOrDefault(PoeChatInviteService.IsExactForeground);
-        var destination = _clients[request.DestinationClient - 1];
+        var destination = _clients[route.Request.DestinationClient - 1];
         try
         {
             var result = await new PartyWarpClickService(new WindowsLoginInputPort(destination))
-                .TryClickAsync(request.TargetPlayer - 1, token);
+                .TryClickAsync(route.RemotePortraitIndex, token);
             Dispatcher.UIThread.Post(() => WarpStatusChanged?.Invoke(result.Detail));
         }
         catch (OperationCanceledException) { }
