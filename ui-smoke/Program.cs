@@ -91,9 +91,9 @@ var priorityChoice = window.GetLogicalDescendants().OfType<CheckBox>()
     .Single(box => box.Content?.ToString()?.StartsWith("追赶优先", StringComparison.Ordinal) == true);
 var attackChoice = window.GetLogicalDescendants().OfType<CheckBox>()
     .Single(box => box.Content?.ToString()?.StartsWith("攻击时同步主控移动方向", StringComparison.Ordinal) == true);
-if (priorityChoice.IsChecked != true || attackChoice.IsChecked != true)
+if (priorityChoice.IsChecked != false || attackChoice.IsChecked != true)
     throw new Exception("Desktop did not load the observed follow input defaults.");
-priorityChoice.IsChecked = false;
+priorityChoice.IsChecked = true;
 attackChoice.IsChecked = false;
 var retryField = window.GetLogicalDescendants().OfType<TextBox>()
     .Single(box => box.Name == "aggressive-sprint-retry-delay");
@@ -107,7 +107,7 @@ closeDurationField.Text = "650";
 Dispatcher.UIThread.RunJobs();
 var savedFollowInput = followInputPreferenceStore.Load();
 if (savedFollowInput is not
-    { Success: true, Options: { SprintCatchUpPriority: false, MirrorAttackDirection: false,
+    { Success: true, Options: { SprintCatchUpPriority: true, MirrorAttackDirection: false,
         AggressiveSprintRetryDelayMs: 900, CloseRangeMirror: true, CloseRangeMirrorDurationMs: 650 } })
     throw new Exception($"Desktop did not save changed follow input options: {savedFollowInput}.");
 var mirrorDialog = new FollowerMirrorDialog(PartyPilot.Common.FollowerMirrorConfig.Default, 3);
@@ -963,7 +963,7 @@ var restoredWindow = new MainWindow(followPreferenceStore, stopPreferenceStore,
 restoredWindow.Show();
 if (restoredWindow.GetLogicalDescendants().OfType<CheckBox>()
         .Single(box => box.Content?.ToString()?.StartsWith("追赶优先", StringComparison.Ordinal) == true)
-        .IsChecked != false ||
+        .IsChecked != true ||
     restoredWindow.GetLogicalDescendants().OfType<CheckBox>()
         .Single(box => box.Content?.ToString()?.StartsWith("攻击时同步主控移动方向", StringComparison.Ordinal) == true)
         .IsChecked != false ||

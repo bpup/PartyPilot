@@ -916,8 +916,8 @@ public sealed class MainWindow : Window
         _sprintCatchUp.IsChecked = true;
         _sprintCatchUp.IsCheckedChanged += (_, _) => UpdateFollowControls();
         panel.Children.Add(_sprintCatchUp);
-        _sprintCatchUpPriority.Content = "追赶优先，暂停镜像施法按键（目标版默认开启）";
-        _sprintCatchUpPriority.IsChecked = true;
+        _sprintCatchUpPriority.Content = "追赶优先，暂停镜像施法按键（0.6.17 设置模型默认关闭）";
+        _sprintCatchUpPriority.IsChecked = false;
         panel.Children.Add(_sprintCatchUpPriority);
         _mirrorAttackDirection.Content = "攻击时同步主控移动方向（目标版默认开启；实体手柄）";
         _mirrorAttackDirection.IsChecked = true;

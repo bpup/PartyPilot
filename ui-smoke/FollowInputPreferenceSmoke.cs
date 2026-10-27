@@ -11,7 +11,8 @@ internal static class FollowInputPreferenceSmoke
         {
             var store = new FollowInputPreferenceStore(path);
             var initial = store.Load();
-            if (!initial.Success || initial.Options != FollowInputOptions.TargetDefaults)
+            if (!initial.Success || initial.Options != FollowInputOptions.TargetDefaults ||
+                initial.Options.SprintCatchUpPriority)
                 throw new Exception("Observed follow input defaults were not restored.");
             var chosen = FollowInputOptions.TargetDefaults with
             {
