@@ -12,6 +12,7 @@ internal sealed class RadarSession : IAsyncDisposable
     private readonly Dictionary<int, RadarOverlayWindow> _windows;
     private readonly Dictionary<int, RadarLandmarkCache> _landmarks = new();
     private readonly Dictionary<int, RadarFrame> _lastFullFrames = new();
+    private readonly Dictionary<int, RadarMotionMailbox> _motionMailboxes = new();
     private readonly Dictionary<int, RadarTerrainCapture?> _lastTerrains = new();
     private readonly Dictionary<int, nint> _gameHandles;
     private readonly RadarVisibility _visibility;
@@ -33,7 +34,11 @@ internal sealed class RadarSession : IAsyncDisposable
     {
         _receiver = receiver;
         _windows = windows;
-        foreach (var pid in windows.Keys) _landmarks.Add(pid, new RadarLandmarkCache());
+        foreach (var pid in windows.Keys)
+        {
+            _landmarks.Add(pid, new RadarLandmarkCache());
+            _motionMailboxes.Add(pid, new RadarMotionMailbox());
+        }
         _gameHandles = gameHandles;
         _visibility = visibility;
         _hotkey = hotkey;
@@ -165,10 +170,14 @@ internal sealed class RadarSession : IAsyncDisposable
                     if (lastQueued.TryGetValue(pid, out var last) && motion.SeenUtc <= last)
                         break;
                     lastQueued[pid] = motion.SeenUtc;
+                    var mailbox = _motionMailboxes[pid];
+                    if (!mailbox.Offer(motion)) break;
                     Dispatcher.UIThread.Post(() =>
                     {
+                        var latest = mailbox.TakeLatest();
+                        if (latest is null) return;
                         if (_disposed || !_lastFullFrames.TryGetValue(pid, out var full) ||
-                            !motion.TryApply(full, out var moved) || moved is null)
+                            !latest.TryApply(full, out var moved) || moved is null)
                             return;
                         _lastTerrains.TryGetValue(pid, out var terrain);
                         if (terrain != null && !terrain.MetadataUnchanged()) terrain = null;

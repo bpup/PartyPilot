@@ -44,6 +44,14 @@ internal static class RadarMotionSmoke
             motion.TryApply(full with { SeenUtc = now.AddSeconds(-3) }, out _))
             throw new Exception("Radar motion accepted stale or mismatched game identity.");
 
+        var mailbox = new RadarMotionMailbox();
+        var later = motion with { SeenUtc = now.AddMilliseconds(25), PlayerX = 12 };
+        if (!mailbox.Offer(motion) || mailbox.Offer(later) ||
+            mailbox.Offer(motion) || mailbox.TakeLatest() != later ||
+            mailbox.TakeLatest() is not null || !mailbox.Offer(motion) ||
+            mailbox.TakeLatest() != motion)
+            throw new Exception("Radar motion dispatch did not retain only the newest pending sample.");
+
         var window = new RadarOverlayWindow(new LaunchedClient(123, 1, "C:/Game.exe"),
             2, new RadarVisibility(), renderOnly: true);
         window.Show();
