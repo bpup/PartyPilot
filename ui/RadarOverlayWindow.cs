@@ -81,17 +81,27 @@ public sealed class RadarOverlayWindow : Window
         {
             "player" => NamePrivacy.Mask(marker.Label),
             "loot" => marker.Label ?? string.Empty,
-            "quest" => marker.Label == "任务目标" ? "任务目标" : "任务线索 · " + marker.Label,
-            "boss" => "首领地点 · " + marker.Label,
+            "quest" => marker.Label == "任务目标" ? "任务目标" : "任务线索 · " + LocalizeGenericLabel(marker.Label),
+            "boss" => "首领地点 · " + LocalizeGenericLabel(marker.Label),
             "waypoint" => "传送点",
             "checkpoint" => "检查点",
             "portal" => marker.Label is { } portalName ? "传送门 · " + portalName : "传送门",
-            "transition" => marker.Label is { } areaName ? "区域入口 · " + areaName : "区域入口",
+            "transition" => marker.Label is { } areaName ? "区域入口 · " + LocalizeGenericLabel(areaName) : "区域入口",
             "essence" => "精华",
             _ => marker.Path.Split('/').Last()
         };
         return dormantCandidate ? "候选 · " + label : label;
     }
+
+    private static string? LocalizeGenericLabel(string? label) => label switch
+    {
+        "Quest marker" => "任务标记",
+        "Campaign landmark" => "战役地点",
+        "Campaign boss arena" => "战役首领区域",
+        "Campaign exit" => "战役出口",
+        "Boss arena" => "首领区域",
+        _ => label
+    };
 
     public void Apply(RadarFrame frame)
     {

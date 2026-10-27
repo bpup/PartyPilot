@@ -466,7 +466,7 @@ var questRadarText = radarText.Replace(
     "\"Category\":\"quest\",\"Path\":\"Metadata/Effects/QuestMarker\",\"Label\":\"Quest marker\"");
 if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(questRadarText), 123, DateTime.UtcNow, out var questRadarFrame) ||
     questRadarFrame?.Markers[1].Category != "quest" ||
-    RadarOverlayWindow.DisplayLabel(questRadarFrame.Markers[1]) != "任务线索 · Quest marker" ||
+    RadarOverlayWindow.DisplayLabel(questRadarFrame.Markers[1]) != "任务线索 · 任务标记" ||
     RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
         questRadarText.Replace("\"Label\":\"Quest marker\"", "\"Label\":null")), 123, DateTime.UtcNow, out _))
     throw new Exception("Radar quest marker parsing or display failed.");
