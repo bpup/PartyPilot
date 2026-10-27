@@ -6,7 +6,8 @@ namespace PartyPilot.Desktop;
 
 public sealed record RadarMarker(uint Id, string Category, string Path, string? Label,
     string? ItemPath, int? Stack, string? Rarity, double X, double Y,
-    bool QuestStateCandidate = false);
+    bool QuestStateCandidate = false, bool? NavigationIsValid = null,
+    bool? NavigationIsTargetable = null);
 
 public sealed record RadarFrame(int ProcessId, DateTime SeenUtc, uint AreaHash, string? AreaAddress,
     double PlayerX, double PlayerY,
@@ -191,6 +192,22 @@ public static class RadarFrames
                 }
                 if (questStateCandidate && (category != "quest" || itemPath != null ||
                     !ValidQuestCandidatePath(path))) return false;
+                bool? navigationIsValid = null;
+                bool? navigationIsTargetable = null;
+                if (item.TryGetProperty("NavigationIsValid", out var validValue) &&
+                    validValue.ValueKind != JsonValueKind.Null)
+                {
+                    if (validValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
+                        category is not ("transition" or "waypoint" or "checkpoint" or "portal")) return false;
+                    navigationIsValid = validValue.GetBoolean();
+                }
+                if (item.TryGetProperty("NavigationIsTargetable", out var targetableValue) &&
+                    targetableValue.ValueKind != JsonValueKind.Null)
+                {
+                    if (targetableValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
+                        category is not ("transition" or "waypoint" or "checkpoint" or "portal")) return false;
+                    navigationIsTargetable = targetableValue.GetBoolean();
+                }
                 if (category == "player" &&
                     (!path.StartsWith("Metadata/Characters/", StringComparison.OrdinalIgnoreCase) ||
                      string.IsNullOrWhiteSpace(label) || Encoding.UTF8.GetByteCount(label) > 64 ||
@@ -220,7 +237,7 @@ public static class RadarFrames
                     (category is not ("transition" or "portal") && label != null ||
                      itemPath != null || stack != null || rarity != null)) return false;
                 markers.Add(new RadarMarker(id, category, path, label, itemPath, stack, rarity, x, y,
-                    questStateCandidate));
+                    questStateCandidate, navigationIsValid, navigationIsTargetable));
             }
             frame = new RadarFrame(pid, seenUtc, areaHash, addressValue.GetString(), playerX, playerY, markers)
             {

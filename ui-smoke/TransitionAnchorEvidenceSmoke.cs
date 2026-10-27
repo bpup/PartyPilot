@@ -8,7 +8,8 @@ internal static class TransitionAnchorEvidenceSmoke
         var topology = PartyTopologies.DefaultFor(4);
         var handoff = new FollowHandoffRequest(2, 3, 1);
         var entrance = new RadarMarker(10, "transition",
-            "Metadata/Terrain/Transition/Door", "The Door", null, null, null, 110, 105);
+            "Metadata/Terrain/Transition/Door", "The Door", null, null, null, 110, 105,
+            NavigationIsValid: true, NavigationIsTargetable: true);
         RadarFrame Frame(int pid, DateTime seen, uint area, double x, double y,
             params RadarMarker[] markers) => new(pid, seen, area, "0xABCDEF", x, y, markers);
         var evidence = new TransitionAnchorEvidence();
@@ -33,6 +34,13 @@ internal static class TransitionAnchorEvidenceSmoke
         far.Observe(2, Frame(202, now, 42, 200, 200, entrance));
         if (far.Match(handoff, topology, now) is not null)
             throw new Exception("Remote transition was accepted as the leader's used entrance.");
+        var inactive = new TransitionAnchorEvidence();
+        inactive.Observe(1, Frame(101, now.AddMilliseconds(-400), 41, 100, 100,
+            entrance with { NavigationIsTargetable = false }));
+        inactive.Observe(1, Frame(101, now.AddMilliseconds(-100), 43, 300, 300));
+        inactive.Observe(2, Frame(202, now, 42, 200, 200, entrance));
+        if (inactive.Match(handoff, topology, now) is not null)
+            throw new Exception("Non-targetable entrance was accepted as used.");
         Console.WriteLine("Read-only transition evidence rejected stale, distant and mismatched entrances.");
     }
 }

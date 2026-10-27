@@ -1268,6 +1268,20 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 }
             }
             if (category == null) continue;
+            bool? navigationIsValid = null;
+            bool? navigationIsTargetable = null;
+            if (category is "transition" or "waypoint" or "checkpoint" or "portal")
+            {
+                try
+                {
+                    navigationIsValid = entity.IsValid;
+                    navigationIsTargetable = entity.IsTargetable;
+                }
+                catch
+                {
+                    // Unknown component state must not become a positive interaction signal.
+                }
+            }
             string? destinationName = null;
             if (category is "transition" or "portal")
             {
@@ -1342,6 +1356,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 EntityIsAlive = entityIsAlive,
                 EntityIsHostile = entityIsHostile,
                 TrackedAliveCandidate = trackedAliveCandidate,
+                NavigationIsValid = navigationIsValid,
+                NavigationIsTargetable = navigationIsTargetable,
                 X = pos.X,
                 Y = pos.Y,
                 Z = pos.Z

@@ -336,13 +336,18 @@ var radarPayload = System.Text.Encoding.UTF8.GetBytes(
     "{\"ProcessId\":123,\"AreaHash\":42,\"RadarAreaAddress\":\"0xABCDEF\",\"RadarStatus\":\"ok\",\"RadarSeenUtc\":\"" + DateTime.UtcNow.ToString("O") +
     "\",\"X\":100,\"Y\":200,\"RadarEntities\":[" +
     "{\"EntityId\":7,\"Category\":\"monster\",\"Path\":\"Metadata/Monsters/Beast\",\"X\":103,\"Y\":198}," +
-    "{\"EntityId\":8,\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\",\"X\":95,\"Y\":205}," +
+    "{\"EntityId\":8,\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\",\"NavigationIsValid\":true,\"NavigationIsTargetable\":true,\"X\":95,\"Y\":205}," +
     "{\"EntityId\":9,\"Category\":\"player\",\"Path\":\"Metadata/Characters/Player\",\"Label\":\"Teammate\",\"X\":110,\"Y\":200}," +
     "{\"EntityId\":10,\"Category\":\"league\",\"Path\":\"Metadata/MiscellaneousObjects/Expedition2/Expedition2Encounter\",\"X\":105,\"Y\":210}," +
     "{\"EntityId\":11,\"Category\":\"loot\",\"Path\":\"Metadata/MiscellaneousObjects/WorldItem@123\",\"ItemPath\":\"Metadata/Items/Currency/CurrencyIdentification\",\"Label\":\"Scroll of Wisdom\",\"Stack\":47,\"Rarity\":\"normal\",\"X\":92,\"Y\":194}]}"
 );
 if (!RadarFrames.TryParse(radarPayload, 123, DateTime.UtcNow, out var radarFrame) || radarFrame?.Markers.Count != 5 ||
+    radarFrame.Markers[1].NavigationIsValid != true ||
+    radarFrame.Markers[1].NavigationIsTargetable != true ||
     radarFrame.Markers.Last().Stack != 47 || radarFrame.Markers.Last().Rarity != "normal" ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        System.Text.Encoding.UTF8.GetString(radarPayload).Replace("\"NavigationIsTargetable\":true", "\"NavigationIsTargetable\":\"true\"")),
+        123, DateTime.UtcNow, out _) ||
     RadarFrames.TryParse(radarPayload, 124, DateTime.UtcNow, out _) ||
     RadarFrames.TryParse(radarPayload, 123, DateTime.UtcNow.AddSeconds(3), out _) ||
     RadarProjection.TryScale("0", out _) || !RadarProjection.TryScale("2", out var radarScale))
@@ -464,7 +469,7 @@ if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
     parsedOldLoot.Markers.Last().Stack != null || parsedOldLoot.Markers.Last().Rarity != null)
     throw new Exception("Radar rejected loot without optional metadata.");
 var questRadarText = radarText.Replace(
-    "\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\"",
+    "\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\",\"NavigationIsValid\":true,\"NavigationIsTargetable\":true",
     "\"Category\":\"quest\",\"Path\":\"Metadata/Effects/QuestMarker\",\"Label\":\"Quest marker\"");
 if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(questRadarText), 123, DateTime.UtcNow, out var questRadarFrame) ||
     questRadarFrame?.Markers[1].Category != "quest" ||
@@ -485,7 +490,7 @@ if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(stateQuestText), 12
         123, DateTime.UtcNow, out _))
     throw new Exception("Candidate quest-state marker lost its provenance or accepted an invalid flag.");
 var questItemRadarText = radarText.Replace(
-    "\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\"",
+    "\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\",\"NavigationIsValid\":true,\"NavigationIsTargetable\":true",
     "\"Category\":\"quest\",\"Path\":\"Metadata/MiscellaneousObjects/WorldItem@123\",\"ItemPath\":\"Metadata/Items/QuestItems/Gallows/Act2/SuicideNote\",\"Label\":\"Final Letter (Skill Points)\"");
 if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(questItemRadarText), 123,
         DateTime.UtcNow, out var questItemFrame) ||
@@ -518,7 +523,7 @@ if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(portalRadarText), 1
     RadarOverlayWindow.DisplayLabel(portalFrame.Markers[1]) != "传送门 · Mausoleum of the Praetor")
     throw new Exception("Radar portal destination label was lost.");
 var bossRadarText = radarText.Replace(
-    "\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\"",
+    "\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\",\"NavigationIsValid\":true,\"NavigationIsTargetable\":true",
     "\"Category\":\"boss\",\"Path\":\"Metadata/Monsters/HyenaMonster/Objects/BossRoomMinimapIcon\",\"Label\":\"Rathbreaker\"");
 if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(bossRadarText), 123, DateTime.UtcNow, out var bossRadarFrame) ||
     bossRadarFrame?.Markers[1].Category != "boss" ||

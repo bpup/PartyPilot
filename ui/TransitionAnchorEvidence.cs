@@ -69,6 +69,7 @@ internal sealed class TransitionAnchorEvidence
 
     private static bool IsAnchor(RadarMarker marker) =>
         marker.Category is "transition" or "waypoint" or "checkpoint" &&
+        marker.NavigationIsValid == true && marker.NavigationIsTargetable == true &&
         marker.Path.StartsWith("Metadata/", StringComparison.OrdinalIgnoreCase);
 
     private static string Identity(RadarMarker marker) =>
