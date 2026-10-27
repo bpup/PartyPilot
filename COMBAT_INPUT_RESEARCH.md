@@ -13,4 +13,4 @@
 
 租用仅对非人工聚焦的槽位生效，十秒无续期即过期；一次只允许一个短按，按压结束后恢复已有的跟随方向。按目标版默认配置，短按期间暂停该槽位自动移动。人工聚焦切换、菜单保护、实体手柄断连、自动组队接管、显式结束或桥接停机都会释放战斗短按并回中。战斗租用期间同槽位的药剂短按会被拒绝，避免延后叠加。
 
-此通道目前仅可用于受控桥接测试。桌面入口尚未传入 `--enable-combat`，没有目标选择、技能配置、战斗调度或经游戏实测的技能绑定。`SkillBindSource` 仍是静态偏移产生的候选，不能自动授权 `combat_pulse`。因此战斗功能为 **implementation-aligned / integration-pending**。
+桌面 `BridgeSession` 现可显式传入 `combatEnabled: true`，并核对桥接的 `combat_enabled` 就绪回执；命令发送后等待匹配的控制回执，桥接退出则终止等待。本机模拟进程覆盖了开始租用、`LT+X` 短按、结束租用、默认关闭及非法绑定拒绝。真实桌面入口仍保持默认关闭，也没有可靠的目标选择、技能配置、战斗调度或经游戏实测的技能绑定。`SkillBindSource` 仍是静态偏移产生的候选，不能自动授权 `combat_pulse`。因此战斗功能为 **implementation-aligned / integration-pending**。

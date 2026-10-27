@@ -518,6 +518,7 @@ try
             physical_wgi = wgiMode,
             pairing_protected = protectedPairing, hidhide_preflight = physicalMode,
             auto_flask_enabled = autoFlaskEnabled,
+            combat_enabled = combatEnabled,
             menu_guard_enabled = menuGuardEnabled,
             right_stick_follower_override = rightStickFollowerOverride,
             right_stick_dodge_on_engage = engageDodgeEnabled,

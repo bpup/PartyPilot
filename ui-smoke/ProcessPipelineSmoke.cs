@@ -51,6 +51,8 @@ internal static class ProcessPipelineSmoke
         var log = Path.Combine(directory, "bridge-input.jsonl");
         var bridgeExe = Path.Combine(directory, "fake-bridge");
         var mainInputBridgeExe = Path.Combine(directory, "fake-main-input-bridge");
+        var combatBridgeExe = Path.Combine(directory, "fake-combat-bridge");
+        var combatLog = Path.Combine(directory, "combat-input.jsonl");
         var mainInputFollowExe = Path.Combine(directory, "fake-main-input-follow");
         var mainInputLog = Path.Combine(directory, "main-input-control.jsonl");
         var attackInputFollowExe = Path.Combine(directory, "fake-attack-input-follow");
@@ -89,6 +91,13 @@ internal static class ProcessPipelineSmoke
                 "    if enabled:\n" +
                 "        print('{\"event\":\"main_input\",\"slot\":1,\"left_x\":40000,\"left_y\":0,\"b_down\":true,\"attack_active\":false,\"blocked\":false}', flush=True)\n" +
                 "        print('{\"event\":\"main_input\",\"slot\":1,\"left_x\":1234,\"left_y\":-2345,\"b_down\":true,\"attack_active\":true,\"blocked\":false}', flush=True)\n");
+            File.WriteAllText(combatBridgeExe, "#!/usr/bin/env python3\nimport sys,json\n" +
+                "if '--enable-combat' not in sys.argv: sys.exit(2)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"menu_guard_enabled\":true,\"last_focused_leads\":false,\"auto_flask_enabled\":false,\"combat_enabled\":true,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
+                "for line in sys.stdin:\n" +
+                "    command=json.loads(line)\n" +
+                $"    with open({JsonSerializer.Serialize(combatLog)}, 'a') as out: out.write(line)\n" +
+                "    print(json.dumps({'event':'combat_control','type':command['type'],'slot':command['slot']}), flush=True)\n");
             File.WriteAllText(mainInputFollowExe, "#!/usr/bin/env python3\nimport sys,json,time\n" +
                 "if '-accept-main-input' not in sys.argv or '-close-range-mirror' not in sys.argv: sys.exit(2)\n" +
                 "if '-close-mirror-duration' not in sys.argv or sys.argv[sys.argv.index('-close-mirror-duration')+1] != '650ms': sys.exit(2)\n" +
@@ -208,6 +217,7 @@ internal static class ProcessPipelineSmoke
                 "for line in sys.stdin: pass\n");
             File.SetUnixFileMode(bridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(mainInputBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(combatBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(mainInputFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(attackInputFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(followExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -225,6 +235,29 @@ internal static class ProcessPipelineSmoke
             File.SetUnixFileMode(client3BridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             Console.WriteLine("Pipeline smoke: starting fake bridge.");
             var topology = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-split");
+            await using (var combatBridge = await BridgeSession.StartAsync(combatBridgeExe,
+                topology.Slots, 0, @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"],
+                false, combatEnabled: true))
+            {
+                combatBridge.StartReading();
+                if (!combatBridge.CombatEnabled ||
+                    BridgeSession.ValidCombatInput("LT+L3", 85) ||
+                    BridgeSession.ValidCombatInput("LT+X", 44))
+                    throw new Exception("Combat input gate accepted an unsupported binding or duration.");
+                await combatBridge.BeginCombatAsync(3);
+                await combatBridge.PulseCombatAsync(3, "LT+X", 85);
+                await combatBridge.EndCombatAsync(3);
+                var sent = File.ReadAllLines(combatLog).Select(line => JsonDocument.Parse(line)).ToArray();
+                try
+                {
+                    if (sent.Length != 3 || sent[0].RootElement.GetProperty("type").GetString() != "combat_begin" ||
+                        sent[1].RootElement.GetProperty("input").GetString() != "LT+X" ||
+                        sent[1].RootElement.GetProperty("hold_ms").GetInt32() != 85 ||
+                        sent[2].RootElement.GetProperty("type").GetString() != "combat_end")
+                        throw new Exception("Combat ownership and pulse did not cross the desktop process boundary.");
+                }
+                finally { foreach (var document in sent) document.Dispose(); }
+            }
             await using (var mainInputBridge = await BridgeSession.StartAsync(mainInputBridgeExe,
                 topology.Slots, 0, @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"], false))
             {
@@ -232,6 +265,13 @@ internal static class ProcessPipelineSmoke
                     TaskCreationOptions.RunContinuationsAsynchronously);
                 mainInputBridge.MainInputChanged += sample => sampleReceived.TrySetResult(sample);
                 mainInputBridge.StartReading();
+                if (mainInputBridge.CombatEnabled) throw new Exception("Combat must remain disabled by default.");
+                try
+                {
+                    await mainInputBridge.BeginCombatAsync(3);
+                    throw new Exception("A bridge without combat enabled accepted a combat lease.");
+                }
+                catch (InvalidOperationException) { }
                 await mainInputBridge.SetMainInputSubscriptionAsync(true);
                 var sample = await sampleReceived.Task.WaitAsync(TimeSpan.FromSeconds(2));
                 if (sample.Pad != 1 || sample.LeftX != 1234 || sample.LeftY != -2345 ||
