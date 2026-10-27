@@ -33,7 +33,7 @@ type Role struct {
 }
 
 // RoleLogic mirrors the supplied resolver fields that affect default-slot
-// eligibility. EngageAroundMain uses a separate culler rule and is not offered.
+// eligibility. Execution-only fields remain outside this read-only planner.
 type RoleLogic struct {
 	StartHelpingAtHealthPercent   int     `json:"startHelpingAtHealthPercent"`
 	FullAggressionAtHealthPercent int     `json:"fullAggressionAtHealthPercent"`
@@ -42,6 +42,7 @@ type RoleLogic struct {
 	AttackRare                    bool    `json:"attackRare"`
 	AttackUnique                  bool    `json:"attackUnique"`
 	MaximumLeashM                 float64 `json:"maximumLeashM"`
+	EngageAroundMain              bool    `json:"engageAroundMain"`
 }
 
 func (l RoleLogic) Allows(rarity string) bool {

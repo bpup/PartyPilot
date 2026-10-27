@@ -227,7 +227,11 @@ func globalBlock(profile Profile, world World) string {
 
 func chooseBehavior(role Role, preferred string, monsters []Monster, activeCombo bool,
 	distanceFromMain float64) (string, string, string) {
-	if role.Logic.MaximumLeashM > 0 && distanceFromMain > role.Logic.MaximumLeashM {
+	if role.Logic.EngageAroundMain {
+		if reason := cullerBlock(role, monsters, activeCombo, distanceFromMain); reason != "" {
+			return "", "", reason
+		}
+	} else if role.Logic.MaximumLeashM > 0 && distanceFromMain > role.Logic.MaximumLeashM {
 		return "", "", fmt.Sprintf("Waiting: too far from MAIN (%.0f of %.0f)",
 			distanceFromMain, role.Logic.MaximumLeashM)
 	}
@@ -254,8 +258,11 @@ func chooseBehavior(role Role, preferred string, monsters []Monster, activeCombo
 		pack, rare, unique := 0, 0, 0
 		inRange, healthEligible := 0, 0
 		for _, monster := range monsters {
-			distance, ok := monster.DistanceByPlayer[role.Player]
-			if !*monster.Alive || !ok || distance > radius || !role.Logic.Allows(monster.Rarity) {
+			distance := *monster.DistanceFromMainM
+			if !role.Logic.EngageAroundMain {
+				distance = monster.DistanceByPlayer[role.Player]
+			}
+			if !*monster.Alive || distance > radius || !role.Logic.Allows(monster.Rarity) {
 				continue
 			}
 			inRange++
@@ -297,6 +304,41 @@ func chooseBehavior(role Role, preferred string, monsters []Monster, activeCombo
 		firstReason = "Waiting: no enemies in range"
 	}
 	return "", "", firstReason
+}
+
+// cullerBlock follows the supplied EngageAroundMain pre-check. The later
+// behaviour filter uses distance from MAIN; this check still needs a target
+// reachable from the role's own position.
+func cullerBlock(role Role, monsters []Monster, activeCombo bool, fromMain float64) string {
+	nearest := math.Inf(1)
+	for _, monster := range monsters {
+		if !*monster.Alive || !role.Logic.Allows(monster.Rarity) ||
+			*monster.HealthPercent > float64(role.Logic.StartHelpingAtHealthPercent) {
+			continue
+		}
+		fromSelf := monster.DistanceByPlayer[role.Player]
+		if fromSelf > 120 && *monster.DistanceFromMainM > 50 {
+			continue
+		}
+		nearest = math.Min(nearest, fromSelf)
+	}
+	if math.IsInf(nearest, 1) {
+		return "Waiting: no enemy within Spark reach"
+	}
+	if role.Logic.MaximumLeashM <= 0 {
+		return ""
+	}
+	extra := 0.0
+	baseBand := 70.0
+	if activeCombo {
+		extra = 10
+		baseBand = 100
+	}
+	band := math.Max(role.Logic.MaximumLeashM, baseBand) + extra
+	if fromMain > role.Logic.MaximumLeashM+extra && fromMain > band {
+		return fmt.Sprintf("Waiting: too far from MAIN (%.0f of %.0f)", fromMain, band)
+	}
+	return ""
 }
 
 func validateProfile(profile Profile) error {

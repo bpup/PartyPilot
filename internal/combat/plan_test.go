@@ -155,6 +155,58 @@ func TestRoleEligibilityFollowsSuppliedResolver(t *testing.T) {
 	}
 }
 
+func TestEngageAroundMainUsesCullerGate(t *testing.T) {
+	profile := DefaultProfile()
+	profile.Enabled = true
+	profile.Roles[1].Logic.EngageAroundMain = true
+	world := testWorld()
+	encounter := &Encounter{ID: "enc-1", State: "active", Tags: []string{"pack"}}
+	for index := range world.Monsters {
+		world.Monsters[index].DistanceByPlayer[2] = 130
+	}
+	plans, err := EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[1].ComboID != "companion-rally-clear" {
+		t.Fatalf("MAIN-centred pack with a reachable culler target was lost: %+v, %v", plans, err)
+	}
+	for index := range world.Monsters {
+		world.Monsters[index].DistanceFromMainM = ptr(51.0)
+	}
+	plans, err = EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[1].Reason != "Waiting: no enemy within Spark reach" {
+		t.Fatalf("unreachable culler target was accepted: %+v, %v", plans, err)
+	}
+	world.EmergencyActive = ptr(true)
+	plans, err = EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[1].ComboID != "" ||
+		plans[1].Reason != "Waiting: no enemy within Spark reach" {
+		t.Fatalf("emergency skipped the culler pre-check: %+v, %v", plans, err)
+	}
+	world.EmergencyActive = ptr(false)
+	for index := range world.Monsters {
+		world.Monsters[index].DistanceFromMainM = ptr(20.0)
+	}
+	profile.Roles[1].Logic.MaximumLeashM = 10
+	player := world.Players[2]
+	player.DistanceFromMainM = ptr(80.0)
+	world.Players[2] = player
+	plans, err = EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[1].Reason != "Waiting: too far from MAIN (80 of 70)" {
+		t.Fatalf("idle culler band was ignored: %+v, %v", plans, err)
+	}
+	player.ActiveCombo = ptr(true)
+	world.Players[2] = player
+	plans, err = EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[1].ComboID != "companion-rally-clear" {
+		t.Fatalf("running culler band did not retain a combo: %+v, %v", plans, err)
+	}
+	player.DistanceFromMainM = ptr(115.0)
+	world.Players[2] = player
+	plans, err = EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[1].Reason != "Waiting: too far from MAIN (115 of 110)" {
+		t.Fatalf("running culler band overrun was accepted: %+v, %v", plans, err)
+	}
+}
+
 func TestPacingUsesCandidateOrderRatherThanPlayerNumber(t *testing.T) {
 	profile := DefaultProfile()
 	profile.Enabled = true
