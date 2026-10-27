@@ -20,6 +20,10 @@ jobs:
         run: go test ./... -count=1
       - name: Bridge protocol checks
         run: dotnet run --project bridge/protocol-tests/ProtocolTests.csproj -c Release
+      - name: Sensor offline checks
+        run: dotnet run --project sensor-tests/PartyPilot.Sensor.Tests.csproj -c Release
+        env:
+          DOTNET_ROLL_FORWARD: Major
       - name: Build Windows input bridge
         run: dotnet build bridge/PartyPilot.Bridge.csproj -c Release
       - name: Desktop client 3 contract
@@ -27,3 +31,10 @@ jobs:
       - name: Desktop headless checks
         shell: pwsh
         run: dotnet run --project ui-smoke/PartyPilot.Desktop.Smoke.csproj -c Release -- "$env:RUNNER_TEMP\PartyPilot-ui-preview.png"
+      - name: Save desktop previews
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-desktop-previews
+          path: ${{ runner.temp }}/PartyPilot-*.png
+          if-no-files-found: error
