@@ -20,6 +20,8 @@ internal sealed class BridgeSession : IAsyncDisposable
     private readonly SemaphoreSlim _partyGate = new(1, 1);
     private AutoPartyPending? _pendingAutoParty;
     private TaskCompletionSource? _pendingHybridPairingComplete;
+    private TaskCompletionSource<bool>? _pendingMainInputSubscription;
+    private bool _mainInputStreaming;
     private int _lastFocusedSlot;
     private int _lastManualFocusedSlot;
     private bool _stopping;
@@ -49,6 +51,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     public event Action<string>? Ended;
     public event Action? AutoPartyExpired;
     public event Action<int>? ManualFocusChanged;
+    public event Action<MainInputSample>? MainInputChanged;
     public event Action<int, int, long>? HybridFocusChanged;
     public event Action<int, int, long>? HybridConfirmReleased;
 
@@ -637,6 +640,27 @@ internal sealed class BridgeSession : IAsyncDisposable
         }
     }
 
+    internal async Task SetMainInputSubscriptionAsync(bool enabled, CancellationToken token = default)
+    {
+        if (IsHybridMode) throw new InvalidOperationException("Main input streaming needs a physical controller.");
+        if (_readEvents == Task.CompletedTask || !IsRunning)
+            throw new InvalidOperationException("Bridge events must be running before main input subscription.");
+        var pending = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (Interlocked.CompareExchange(ref _pendingMainInputSubscription, pending, null) is not null)
+            throw new InvalidOperationException("A main input subscription change is already pending.");
+        try
+        {
+            await WriteCommandAsync(JsonSerializer.Serialize(new
+                { type = "main_input_subscription", enabled }), token);
+            if (await pending.Task.WaitAsync(TimeSpan.FromSeconds(2), token) != enabled)
+                throw new InvalidDataException("Main input subscription acknowledgment did not match.");
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref _pendingMainInputSubscription, null, pending);
+        }
+    }
+
     private async Task WriteCommandAsync(string command, CancellationToken token = default)
     {
         await _inputGate.WaitAsync(token);
@@ -705,6 +729,18 @@ internal sealed class BridgeSession : IAsyncDisposable
                         // stall a controller process that is waiting for the focus command.
                         ManualFocusChanged?.Invoke(manualPad);
                     }
+                    else if (kind.GetString() == "main_input_subscription" &&
+                        root.TryGetProperty("enabled", out var subscriptionValue) &&
+                        subscriptionValue.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                    {
+                        var enabled = subscriptionValue.GetBoolean();
+                        Volatile.Write(ref _mainInputStreaming, enabled);
+                        Volatile.Read(ref _pendingMainInputSubscription)?.TrySetResult(enabled);
+                    }
+                    else if (kind.GetString() == "main_input" &&
+                        Volatile.Read(ref _mainInputStreaming) &&
+                        MainInputSample.TryParse(root, _allSlots, DateTime.UtcNow, out var input))
+                        MainInputChanged?.Invoke(input);
                     else if (kind.GetString() == "hybrid_focus_changed" && IsHybridMode &&
                         root.TryGetProperty("player", out var hybridPlayer) &&
                         hybridPlayer.TryGetInt32(out var player) && player is >= 1 and <= 6 &&
@@ -759,6 +795,8 @@ internal sealed class BridgeSession : IAsyncDisposable
                 new InvalidOperationException("Virtual controller bridge exited."));
             Volatile.Read(ref _pendingHybridPairingComplete)?.TrySetException(
                 new InvalidOperationException("Keyboard bridge exited before pairing completion."));
+            Volatile.Read(ref _pendingMainInputSubscription)?.TrySetException(
+                new InvalidOperationException("Controller bridge exited before main input subscription."));
             if (!_stopping)
             {
                 Dispatcher.UIThread.Post(() => Ended?.Invoke(failure ?? "Virtual controller bridge exited."));

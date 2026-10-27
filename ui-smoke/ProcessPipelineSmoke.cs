@@ -36,6 +36,7 @@ internal static class ProcessPipelineSmoke
         Directory.CreateDirectory(directory);
         var log = Path.Combine(directory, "bridge-input.jsonl");
         var bridgeExe = Path.Combine(directory, "fake-bridge");
+        var mainInputBridgeExe = Path.Combine(directory, "fake-main-input-bridge");
         var couchBridgeExe = Path.Combine(directory, "fake-couch-bridge");
         var wgiBridgeExe = Path.Combine(directory, "fake-wgi-bridge");
         var client3BridgeExe = Path.Combine(directory, "fake-client3-bridge");
@@ -58,6 +59,16 @@ internal static class ProcessPipelineSmoke
                 "if '--disable-menu-guard' not in sys.argv: sys.exit(2)\n" +
                 "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"menu_guard_enabled\":false,\"last_focused_leads\":false,\"auto_flask_enabled\":true,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
                 $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(log)}, 'a') as out: out.write(line)\n");
+            File.WriteAllText(mainInputBridgeExe, "#!/usr/bin/env python3\nimport sys,json\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"menu_guard_enabled\":true,\"last_focused_leads\":false,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
+                "for line in sys.stdin:\n" +
+                "    command=json.loads(line)\n" +
+                "    if command.get('type') != 'main_input_subscription': continue\n" +
+                "    enabled=command['enabled']\n" +
+                "    print(json.dumps({'event':'main_input_subscription','enabled':enabled}), flush=True)\n" +
+                "    if enabled:\n" +
+                "        print('{\"event\":\"main_input\",\"slot\":1,\"left_x\":40000,\"left_y\":0,\"b_down\":true,\"blocked\":false}', flush=True)\n" +
+                "        print('{\"event\":\"main_input\",\"slot\":1,\"left_x\":1234,\"left_y\":-2345,\"b_down\":true,\"blocked\":false}', flush=True)\n");
             File.WriteAllText(followExe, "#!/usr/bin/env python3\nimport sys,json\n" +
                 "if '-auto-flask' not in sys.argv: sys.exit(2)\n" +
                 "if '-classic-sprint-catchup' in sys.argv: sys.exit(2)\n" +
@@ -145,6 +156,7 @@ internal static class ProcessPipelineSmoke
                 "print('{\"event\":\"ready\",\"slots\":[1,3,4],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"menu_guard_enabled\":true,\"last_focused_leads\":false,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3,3:4,4:5,5:6\",\"private_client3_pid\":103,\"private_client3_window_handle\":203,\"private_client3_slots\":[5,6]}', flush=True)\n" +
                 "for line in sys.stdin: pass\n");
             File.SetUnixFileMode(bridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(mainInputBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(followExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(terrainFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(dynamicBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -158,6 +170,20 @@ internal static class ProcessPipelineSmoke
             File.SetUnixFileMode(client3BridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             Console.WriteLine("Pipeline smoke: starting fake bridge.");
             var topology = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-split");
+            await using (var mainInputBridge = await BridgeSession.StartAsync(mainInputBridgeExe,
+                topology.Slots, 0, @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"], false))
+            {
+                var sampleReceived = new TaskCompletionSource<MainInputSample>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                mainInputBridge.MainInputChanged += sample => sampleReceived.TrySetResult(sample);
+                mainInputBridge.StartReading();
+                await mainInputBridge.SetMainInputSubscriptionAsync(true);
+                var sample = await sampleReceived.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                if (sample.Pad != 1 || sample.LeftX != 1234 || sample.LeftY != -2345 ||
+                    !sample.BDown || sample.Blocked || sample.ReceivedAtUtc.Kind != DateTimeKind.Utc)
+                    throw new Exception("Main input event was not bound to the physical pad sample.");
+                await mainInputBridge.SetMainInputSubscriptionAsync(false);
+            }
             await using var bridge = await BridgeSession.StartAsync(bridgeExe, topology.Slots, 0,
                 @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"], false, true,
                 menuGuardEnabled: false);
