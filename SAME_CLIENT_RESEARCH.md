@@ -1,5 +1,15 @@
 # 同窗口双角色位置与身份核对
 
+## 实机分段运动取证（只读）
+
+在同一窗口两个角色均进入同一区域后，同时录制 `PartyPilot-SensorLog.exe` 和 `PartyPilot-OrderedMotionLog.exe` 的 JSONL 输出。记录开始后，先让 P1 单独移动，再停下；随后让 P2 单独移动，其他角色保持不动。记下两段相对**该进程第一条快速位置帧**的秒数，例如 P1 为 5–15 秒、P2 为 20–30 秒，然后运行：
+
+```powershell
+.\release\PartyPilot-SlotAudit.exe -input sensorlog.jsonl -fast-input orderedmotionlog.jsonl -p1-only 5:15 -p2-only 20:30 > slot-audit.json
+```
+
+结果中的 `controlledMovement` 按进程列出两段各自的完整帧数、同区域连续步数和两个候选槽位的世界坐标累计移动距离。先核对进程、区域、完整帧、换区与时间倒退；再比较 P1 独动时槽位 1、P2 独动时槽位 2 是否分别移动。它只提供可复核的观测数据，不会自动判定身份，也不会让未验证的双角色报文进入实时跟随。不要在日志中附带账号密码。
+
 ## 事实：所提供 0.6.17 的静态实现
 
 `memory-probe/MultiPilotMemoryProbe.dll` 中的 `PlayerSlotVectorResolver` 从目标进程的本地玩家向量取得有序实体指针，并核对指针、角色实体路径及完整的 1–2 槽位序列。`Poe2Coop.Services/MemoryReaderService.cs` 只在 `playerOrderReliable` 成立时发布用于控制的有序玩家位置；单纯枚举到两个玩家实体或看见角色名字，不等于确认了 P1/P2 本地槽位。

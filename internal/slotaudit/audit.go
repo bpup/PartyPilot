@@ -159,7 +159,7 @@ func (a *Audit) Observe(s telemetry.Sample) {
 func (a *Audit) ObserveFast(f live.OrderedClientFrame) bool {
 	if f.ProcessID <= 0 || f.SeenUTC.IsZero() || f.PlayerOrderReliable ||
 		f.PlayerOrderSource != "unverified_exilecore_local_slot_candidate" ||
-		f.CoordinateSpace != "world" || len(f.Players) > 2 {
+		f.CoordinateSpace != "world" || len(f.Players) > 2 || !finitePlayers(f.Players) {
 		return false
 	}
 	a.fast[f.ProcessID] = append(a.fast[f.ProcessID], f)
