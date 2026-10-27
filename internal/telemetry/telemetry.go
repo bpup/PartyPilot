@@ -25,8 +25,12 @@ type Sample struct {
 	Z                          float64                `json:"Z"`
 	Life                       *float64               `json:"Life,omitempty"`
 	LifeMax                    *float64               `json:"LifeMax,omitempty"`
+	LifeReservedFlat           *int                   `json:"LifeReservedFlat,omitempty"`
+	LifeReservedPercent        *int                   `json:"LifeReservedPercent,omitempty"`
 	Mana                       *float64               `json:"Mana,omitempty"`
 	ManaMax                    *float64               `json:"ManaMax,omitempty"`
+	ManaReservedFlat           *int                   `json:"ManaReservedFlat,omitempty"`
+	ManaReservedPercent        *int                   `json:"ManaReservedPercent,omitempty"`
 	EnergyShield               *float64               `json:"EnergyShield,omitempty"`
 	EnergyShieldMax            *float64               `json:"EnergyShieldMax,omitempty"`
 	IngameDataAddress          string                 `json:"IngameDataAddress,omitempty"`
