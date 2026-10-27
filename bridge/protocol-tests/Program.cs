@@ -87,6 +87,17 @@ if (!Client3AttachRequest.TryParsePreResume(["--prepare-private-client3", "--pid
     throw new Exception("Client 3 pre-resume binding arguments were accepted ambiguously.");
 
 Expect("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", true, 2, true);
+if (!BridgeProtocol.TryParseMainInputSubscription(
+        "{\"type\":\"main_input_subscription\",\"enabled\":true}", out var streamEnabled) ||
+    !streamEnabled ||
+    !BridgeProtocol.TryParseMainInputSubscription(
+        "{\"type\":\"main_input_subscription\",\"enabled\":false}", out streamEnabled) ||
+    streamEnabled ||
+    BridgeProtocol.TryParseMainInputSubscription(
+        "{\"type\":\"main_input_subscription\",\"enabled\":1}", out _) ||
+    BridgeProtocol.TryParseMainInputSubscription(
+        "{\"type\":\"main_input_subscription\",\"enabled\":true,\"slot\":1}", out _))
+    throw new Exception("Main input subscription accepted an ambiguous bridge command.");
 if (!BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"catching_up\",\"x\":1,\"y\":0,\"sprint_down\":true}", out var sprintCommand) ||
     !sprintCommand.SprintDown ||
     BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0,\"sprint_down\":true}", out _) ||

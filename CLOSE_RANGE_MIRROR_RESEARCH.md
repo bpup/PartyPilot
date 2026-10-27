@@ -9,7 +9,7 @@
 ## 独立版现状与接入条件
 
 - `internal/follow/close_mirror.go` 已实现上述状态机的独立决策部分，并用受控帧检查短时镜像、接手、冲刺释放和输入失效。当前没有调用者，**不能在桌面或游戏中启用**。
-- `bridge/Program.cs` 已读取实体手柄，但只向桌面输出配对和聚焦等事件；`ui/BridgeSession.cs`、`ui/LiveFollowSession.cs` 与 `cmd/livefollow/main.go` 尚未传递带时间戳的主摇杆样本。必须保证配对完成、来源明确、样本新鲜、失焦和菜单状态可核验。
+- `bridge/Program.cs` 已能在受保护配对完成后接收 `main_input_subscription`，以最多每 50 ms 一帧输出主手柄摇杆、B 键及菜单阻断状态；默认不发送。`ui/BridgeSession.cs`、`ui/LiveFollowSession.cs` 与 `cmd/livefollow/main.go` 尚未订阅或传递这些样本。下游仍须核验来源、样本新鲜度、失焦和菜单状态。
 - `bridge/BridgeProtocol.cs` 会把 `holding` 状态的方向强制置零。镜像接入时必须为有效的停靠镜像方向设计明确的桥接表示，并验证松手、超时、角色切换时立即回中。
 - `internal/follow/follow.go` 尚未接收镜像结束后的连续跟随请求。接入时需复现目标版 250 ms 队长运动门禁，以及同一帧从镜像切到跟随时不插入空白移动帧。
 

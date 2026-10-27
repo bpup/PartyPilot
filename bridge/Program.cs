@@ -532,6 +532,8 @@ try
             focus_pad_map = focusPads is null ? "" : string.Join(',', focusPads.OrderBy(entry => entry.Key)
                 .Select(entry => $"{entry.Key}:{entry.Value}")) }));
 
+        var publishMainInput = false;
+        var nextMainInput = DateTime.MinValue;
         Task<string?> pendingLine = Console.In.ReadLineAsync();
         while (true)
         {
@@ -596,6 +598,21 @@ try
                         return 1;
                     }
                     Console.WriteLine(JsonSerializer.Serialize(new { @event = "hybrid_pairing_complete" }));
+                    continue;
+                }
+                if (BridgeProtocol.TryParseMainInputSubscription(line, out var subscriptionEnabled))
+                {
+                    if (subscriptionEnabled && (!physicalMode ||
+                        pairingGate?.Phase != ProtectedPairingPhase.Complete))
+                    {
+                        Console.Error.WriteLine("Main input stream requires completed protected physical pairing.");
+                        router.NeutralAll();
+                        return 1;
+                    }
+                    publishMainInput = subscriptionEnabled;
+                    nextMainInput = DateTime.MinValue;
+                    Console.WriteLine(JsonSerializer.Serialize(new { @event = "main_input_subscription",
+                        enabled = publishMainInput }));
                     continue;
                 }
                 if (pairingGate is not null && BridgeProtocol.TryParsePairingControl(line, out var control))
@@ -836,6 +853,18 @@ try
                     Console.WriteLine(JsonSerializer.Serialize(new { @event = "focus_changed", slot = router.FocusedSlot }));
                 if (router.LastManualFocusSlot != previousManualFocusSlot)
                     Console.WriteLine(JsonSerializer.Serialize(new { @event = "manual_focus", slot = router.LastManualFocusSlot }));
+                var inputAt = DateTime.UtcNow;
+                if (publishMainInput && pairingGate?.Phase == ProtectedPairingPhase.Complete &&
+                    inputAt >= nextMainInput)
+                {
+                    nextMainInput = inputAt.AddMilliseconds(50);
+                    var leaderSlot = lastFocusedLeads ? router.LastManualFocusSlot : mainSlot;
+                    Console.WriteLine(JsonSerializer.Serialize(new { @event = "main_input",
+                        slot = leaderSlot, left_x = gamepad.LeftX, left_y = gamepad.LeftY,
+                        b_down = (gamepad.Buttons & 0x2000) != 0,
+                        blocked = router.AutoPartyActive || menuGuard.AnyActive ||
+                            router.FocusedSlot != leaderSlot }));
+                }
             }
             var autoPartyWasActive = router.AutoPartyActive;
             router.Tick(DateTime.UtcNow);
