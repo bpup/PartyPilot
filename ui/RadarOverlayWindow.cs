@@ -109,6 +109,31 @@ public sealed class RadarOverlayWindow : Window
         _ => label
     };
 
+    public static string DisplayTerrainLabel(RadarTerrainRoom room)
+    {
+        var label = room.Label switch
+        {
+            "Checkpoint" => "检查点",
+            "Boss arena" or "Map boss" => "首领区域",
+            "Transition" or "Campaign transition" => "区域入口",
+            "Stairs up" => "上行楼梯",
+            "Stairs down" => "下行楼梯",
+            _ when room.Label.StartsWith("Area exit · ", StringComparison.Ordinal) =>
+                "区域出口 · " + room.Label["Area exit · ".Length..],
+            _ => LocalizeGenericLabel(room.Label) ?? room.Label
+        };
+        var description = room.Category switch
+        {
+            "quest" => "任务线索 · " + label,
+            "boss" when label != "首领区域" => "首领地点 · " + label,
+            "transition" when !label.StartsWith("区域", StringComparison.Ordinal) &&
+                              label is not ("上行楼梯" or "下行楼梯") => "区域入口 · " + label,
+            "campaign" => "战役地点 · " + label,
+            _ => label
+        };
+        return "候选 · " + description;
+    }
+
     public void Apply(RadarFrame frame)
     {
         if (frame.ProcessId != _client.Pid) return;
@@ -245,7 +270,7 @@ public sealed class RadarOverlayWindow : Window
                     if (string.IsNullOrEmpty(room.Label)) continue;
                     var label = new TextBlock
                     {
-                        Text = room.Label,
+                        Text = DisplayTerrainLabel(room),
                         Foreground = Brushes.White,
                         Background = new SolidColorBrush(Color.FromArgb(190, 8, 12, 20)),
                         FontSize = 12

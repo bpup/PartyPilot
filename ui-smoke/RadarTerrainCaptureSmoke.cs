@@ -201,11 +201,11 @@ internal static class RadarTerrainCaptureSmoke
             if (!terrainWindow.TerrainVisible ||
                 terrainWindow.GetLogicalDescendants().OfType<Image>().Count() != 1 ||
                 !terrainWindow.GetLogicalDescendants().OfType<TextBlock>()
-                    .Any(label => label.Text == "Boss arena") ||
+                    .Any(label => label.Text == "候选 · 首领区域") ||
                 !terrainWindow.GetLogicalDescendants().OfType<TextBlock>()
-                    .Any(label => label.Text == "Soul Core Generator") ||
+                    .Any(label => label.Text == "候选 · 任务线索 · Soul Core Generator") ||
                 !terrainWindow.GetLogicalDescendants().OfType<TextBlock>()
-                    .Any(label => label.Text == "MausoleumBoss_ArenaFloor") ||
+                    .Any(label => label.Text == "候选 · 战役地点 · MausoleumBoss_ArenaFloor") ||
                 terrainWindow.CaptureRenderedFrame() is null)
                 throw new Exception("Matching terrain was not drawn behind radar markers.");
             var firstTerrainImage = terrainWindow.GetLogicalDescendants().OfType<Image>().Single();
