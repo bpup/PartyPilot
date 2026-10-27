@@ -9,8 +9,8 @@ internal enum MenuGuardPhase
 
 internal readonly record struct MenuGuardChange(int Slot, MenuGuardPhase Phase);
 
-// Tracks only menu controls seen on the physical pad. Other ways of opening a
-// game menu require an independent UI signal before automation can be armed.
+// Tracks Start/View and B edges from the routed controller report. Menus opened
+// through native keyboard or mouse input require a separate observation source.
 internal sealed class MenuGuardTracker
 {
     private sealed class SlotState
@@ -25,13 +25,18 @@ internal sealed class MenuGuardTracker
     private bool _lastB;
 
     public bool AnyActive => _slots.Values.Any(state => state.Phase != MenuGuardPhase.Clear);
+    public bool IsActive(int slot) => _slots.TryGetValue(slot, out var state) &&
+        state.Phase != MenuGuardPhase.Clear;
 
-    public void Reset()
+    public IReadOnlyList<MenuGuardChange> Reset()
     {
+        var changes = _slots.Where(entry => entry.Value.Phase != MenuGuardPhase.Clear)
+            .Select(entry => new MenuGuardChange(entry.Key, MenuGuardPhase.Clear)).ToArray();
         _slots.Clear();
         _observedSlot = 0;
         _lastMenu = false;
         _lastB = false;
+        return changes;
     }
 
     public IReadOnlyList<MenuGuardChange> Observe(int slot, ushort buttons, DateTime nowUtc)

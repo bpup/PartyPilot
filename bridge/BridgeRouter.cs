@@ -103,6 +103,7 @@ internal sealed class BridgeRouter
         _autoPartyButtons != 0 && nowUtc.Kind == DateTimeKind.Utc &&
         nowUtc < _autoPartyButtonsUntilUtc;
     public bool HybridPairingComplete => _hybridKeyboard?.PairingComplete == true;
+    public ushort HybridMenuButtons => _hybridKeyboard?.MenuButtons ?? 0;
     public int HybridFocusForKey(int key) => _hybridBindings.FocusForKey(key);
     public int HybridFocusedPlayer => _hybridKeyboard?.FocusedPlayer ?? 0;
     public bool HybridFocusRequested => _hybridFocusRequested;
@@ -189,6 +190,11 @@ internal sealed class BridgeRouter
         if (!gameForeground) ClearHybridAutomation();
         _hybridKeyboard.SetForeground(gameForeground);
         RenderAll();
+    }
+
+    public void SetHybridMenuOpen(bool open)
+    {
+        if (_hybridKeyboard?.SetMenuOpen(open) == true) RenderAll();
     }
 
     private void ClearHybridAutomation()
@@ -467,6 +473,7 @@ internal sealed class BridgeRouter
         _hybridFocusRequested = false;
         _hybridConfirmReleased = false;
         _hybridKeyboard?.SetForeground(false);
+        _hybridKeyboard?.SetMenuOpen(false);
         _autoPartyActive = false;
         _autoPartyExpiresUtc = default;
         _autoPartySlot = 0;

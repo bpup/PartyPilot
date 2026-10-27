@@ -285,5 +285,79 @@ internal static class HybridKeyboardInputTests
         if (firstFollower.Report.Buttons != 0x1000 || secondFollower.Report.Buttons != 0x1000 ||
             neutralClient1.Report != default || neutralClient1Second.Report != default)
             throw new Exception("Native P1 confirm did not mirror to both followers with neutral placeholders.");
+
+        var menuState = new HybridKeyboardState([2]);
+        menuState.Handle(0x71, true, true);
+        menuState.Handle(0x71, false, true);
+        menuState.Handle(65538, true, true);
+        if (menuState.Snapshot().Report.RightTrigger != 255)
+            throw new Exception("Hybrid RT did not reach a manually focused follower before opening a menu.");
+        var hybridMenu = new MenuGuardTracker();
+        hybridMenu.Observe(2, 0, now);
+        menuState.Handle(0x0D, true, true);
+        var opened = hybridMenu.Observe(2, menuState.MenuButtons, now.AddMilliseconds(1));
+        if (opened.Count != 1 || opened[0].Phase != MenuGuardPhase.MenuDetected ||
+            !menuState.SetMenuOpen(hybridMenu.IsActive(2)) ||
+            menuState.Snapshot().Report.RightTrigger != 0 ||
+            (menuState.Snapshot().Report.Buttons & 0x0010) == 0)
+            throw new Exception("Hybrid menu opening did not suppress held RT while preserving Start.");
+        var resetProbe = new MenuGuardTracker();
+        resetProbe.Observe(2, 0, now);
+        resetProbe.Observe(2, 0x0010, now.AddMilliseconds(1));
+        if (!resetProbe.Reset().SequenceEqual(
+                [new MenuGuardChange(2, MenuGuardPhase.Clear)]) || resetProbe.IsActive(2))
+            throw new Exception("Stopping Hybrid menu ownership did not publish a clear state.");
+        menuState.Handle(0x0D, false, true);
+        hybridMenu.Observe(2, menuState.MenuButtons, now.AddMilliseconds(2));
+        menuState.Handle(0x51, true, true);
+        var closing = hybridMenu.Observe(2, menuState.MenuButtons, now.AddMilliseconds(3));
+        if (closing.Count != 1 || closing[0].Phase != MenuGuardPhase.Settling)
+            throw new Exception("Hybrid B did not enter the target-version menu settling phase.");
+        menuState.Handle(0x51, false, true);
+        hybridMenu.Observe(2, menuState.MenuButtons, now.AddMilliseconds(4));
+        hybridMenu.Advance(now.AddMilliseconds(654));
+        menuState.SetMenuOpen(hybridMenu.IsActive(2));
+        if (menuState.Snapshot().Report.RightTrigger != 0)
+            throw new Exception("A held RT resumed without release after Hybrid menu settlement.");
+        menuState.Handle(65538, false, true);
+        menuState.Handle(65538, true, true);
+        if (menuState.Snapshot().Report.RightTrigger != 255)
+            throw new Exception("Hybrid RT did not rearm after release following a menu.");
+        if (!HybridBindingConfig.TryCreate(HybridBindingConfig.Definitions
+                .Select(item => item.DefaultKey).ToArray(),
+                [new HybridCustomAction("RT+A", "", 65538, 11)], out var layered) || layered is null)
+            throw new Exception("Shared Hybrid RT/action key was rejected.");
+        var layeredState = new HybridKeyboardState([2], layered);
+        layeredState.Handle(0x71, true, true);
+        layeredState.Handle(0x71, false, true);
+        layeredState.Handle(65538, true, true);
+        layeredState.SetMenuOpen(true);
+        if (layeredState.Snapshot().Report.RightTrigger != 0 ||
+            layeredState.Snapshot().Report.Buttons != 0x1000)
+            throw new Exception("Hybrid menu RT suppression also erased an unrelated shared action.");
+        var menuNeutral = new FakePad();
+        var menuFollower = new FakePad();
+        var menuRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
+        {
+            [1] = menuNeutral, [2] = menuFollower
+        });
+        if (!menuRouter.ConfigureHybridKeyboard(new Dictionary<int, int> { [2] = 2 }))
+            throw new Exception("Hybrid menu router could not bind its follower pad.");
+        menuRouter.ApplyHybridKey(0x71, true, true);
+        menuRouter.ApplyHybridKey(0x71, false, true);
+        menuRouter.SetHybridForeground(true);
+        menuRouter.ApplyHybridKey(65538, true, true);
+        if (menuFollower.Report.RightTrigger != 255 || menuNeutral.Report != default)
+            throw new Exception("Hybrid RT did not reach only its focused virtual pad.");
+        menuRouter.SetHybridMenuOpen(true);
+        if (menuFollower.Report.RightTrigger != 0)
+            throw new Exception("Bridge output retained RT after Hybrid menu detection.");
+        menuRouter.SetHybridMenuOpen(false);
+        if (menuFollower.Report.RightTrigger != 0)
+            throw new Exception("Bridge output resumed a held RT after Hybrid menu closure.");
+        menuRouter.ApplyHybridKey(65538, false, true);
+        menuRouter.ApplyHybridKey(65538, true, true);
+        if (menuFollower.Report.RightTrigger != 255)
+            throw new Exception("Bridge output did not rearm RT after explicit release.");
     }
 }

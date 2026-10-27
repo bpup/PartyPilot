@@ -478,6 +478,19 @@ try
                         Console.WriteLine(JsonSerializer.Serialize(new { @event = "hybrid_confirm_released",
                             player = focusedPlayer, pid = target.Pid, window_handle = target.Handle }));
                     }
+                    if (router.AutoPartyActive)
+                    {
+                        PublishMenuChanges(menuGuard.Reset());
+                        router.SetHybridMenuOpen(false);
+                    }
+                    else if (focusedPlayer > 1)
+                    {
+                        var menuSlot = hybridPlan.PlayerPads[focusedPlayer];
+                        PublishMenuChanges(menuGuard.Observe(menuSlot, router.HybridMenuButtons,
+                            DateTime.UtcNow));
+                        router.SetHybridMenuOpen(menuGuard.IsActive(menuSlot));
+                    }
+                    else router.SetHybridMenuOpen(false);
                     continue;
                 }
                 if (hybridPlan is not null && BridgeProtocol.IsHybridPairingComplete(line))
@@ -505,7 +518,7 @@ try
                         nextLoginCapture = DateTime.MinValue;
                         reportedLoginSource = LoginReadinessSource.Waiting;
                         router.NeutralAll();
-                        menuGuard.Reset();
+                        PublishMenuChanges(menuGuard.Reset());
                         router.ApplyLine(JsonSerializer.Serialize(new { type = "focus", slot = control.Slot }), DateTime.UtcNow);
                         Console.WriteLine(JsonSerializer.Serialize(new { @event = "pairing_armed", slot = control.Slot,
                             pid = pairingTargetPid, window_handle = pairingTargetWindow }));
@@ -516,7 +529,7 @@ try
                         pairingTargetWindow = 0;
                         windowStability.Reset();
                         router.NeutralAll();
-                        menuGuard.Reset();
+                        PublishMenuChanges(menuGuard.Reset());
                         router.ApplyLine(JsonSerializer.Serialize(new { type = "focus", slot = mainSlot }), DateTime.UtcNow);
                         Console.WriteLine(JsonSerializer.Serialize(new { @event = "pairing_settling" }));
                     }
@@ -605,6 +618,18 @@ try
                 }
                 var target = hybridPlan.PlayerWindows[router.HybridFocusedPlayer];
                 router.SetHybridForeground(ForegroundWindowProbe.IsExpectedForeground(target.Pid, target.Handle));
+                if (router.AutoPartyActive)
+                {
+                    PublishMenuChanges(menuGuard.Reset());
+                    router.SetHybridMenuOpen(false);
+                }
+                else
+                {
+                    PublishMenuChanges(menuGuard.Advance(DateTime.UtcNow));
+                    var focusedPlayer = router.HybridFocusedPlayer;
+                    router.SetHybridMenuOpen(focusedPlayer > 1 &&
+                        menuGuard.IsActive(hybridPlan.PlayerPads[focusedPlayer]));
+                }
                 if (router.AutoPartyPulseActive(DateTime.UtcNow) &&
                     (!hybridPlan.TryGetAutoPartyWindow(router.AutoPartySlot, out var pulseWindow) ||
                      !ForegroundWindowProbe.IsExpectedForeground(pulseWindow.Pid, pulseWindow.Handle)))
@@ -680,7 +705,7 @@ try
                         allowDirectRightStick: pairingGate.Phase == ProtectedPairingPhase.Complete);
                     if (router.AutoPartyActive)
                     {
-                        menuGuard.Reset();
+                        PublishMenuChanges(menuGuard.Reset());
                         router.SetMenuGuardActive(false);
                     }
                     else if (pairingGate.Phase == ProtectedPairingPhase.Complete)
@@ -691,7 +716,7 @@ try
                     }
                     else
                     {
-                        menuGuard.Reset();
+                        PublishMenuChanges(menuGuard.Reset());
                         router.SetMenuGuardActive(false);
                     }
                     if (observation.ReleasedSlot != 0)
