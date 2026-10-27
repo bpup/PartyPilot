@@ -87,6 +87,11 @@ var window = new MainWindow(followPreferenceStore, stopPreferenceStore,
     followInputPreferenceStore);
 window.Show();
 window.UpdateLayout();
+if (window.GetLogicalDescendants().OfType<TextBox>()
+        .Single(box => box.Name == "follow-stop-global").Text != "9" ||
+    window.GetLogicalDescendants().OfType<TextBox>()
+        .Single(box => box.Name == "follow-catchup-global").Text != "90")
+    throw new Exception("The observed 0.6.17 distance values were not prefilled.");
 var priorityChoice = window.GetLogicalDescendants().OfType<CheckBox>()
     .Single(box => box.Content?.ToString()?.StartsWith("追赶优先", StringComparison.Ordinal) == true);
 var attackChoice = window.GetLogicalDescendants().OfType<CheckBox>()

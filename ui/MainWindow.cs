@@ -898,9 +898,14 @@ public sealed class MainWindow : Window
     private Border BuildFollowStep()
     {
         var panel = Step("4", "自动跟随与追赶", "先完成配对，并在每个客户端启用只读位置传感器。4 人和 6 人布局可启动双角色跟随链路；当前传感器的本地双角色顺序仍是候选数据，未核验前引擎会等待并停止自动方向。距离与时效需要按实际游戏校准。");
+        _followStop.Name = "follow-stop-global";
+        _followStop.Text = "9";
+        _followCatchup.Name = "follow-catchup-global";
+        _followCatchup.Text = "90";
         var fields = new (TextBox Box, string Label)[]
         {
-            (_followStop, "停止距离"), (_followCatchup, "追赶距离"),
+            (_followStop, "停止距离（0.6.17 静态值 9）"),
+            (_followCatchup, "追赶距离（0.6.17 静态值 90）"),
             (_followMaxAge, "位置有效期（ms/s/m/h）"), (_followLogAge, "区域日志有效期（ms/s/m/h）")
         };
         foreach (var (box, label) in fields)
