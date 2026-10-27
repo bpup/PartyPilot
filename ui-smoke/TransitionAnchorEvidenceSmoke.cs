@@ -47,6 +47,11 @@ internal static class TransitionAnchorEvidenceSmoke
         var live = new FollowBridgeFrame(waiting, "waiting", null)
         {
             FocusedPlayer = 1,
+            Positions =
+            [
+                new FollowPositionWitness(3, 202, 42, now.AddMilliseconds(-200), 200, 200),
+                new FollowPositionWitness(4, 202, 42, now.AddMilliseconds(-200), 190, 200)
+            ],
             PadCommands =
             [
                 new FollowPadCommand(3, 3, waiting, "waiting", "different or unknown instance"),
@@ -68,6 +73,23 @@ internal static class TransitionAnchorEvidenceSmoke
                 FocusedPlayer = 2
             }, topology, moving, true, false, now).PadCommands[0].Status != "waiting")
             throw new Exception("Transition routing escaped its opt-in, area or local-role guard.");
+        var movingSecond = new TransitionAnchorEvidence();
+        movingSecond.Observe(1, Frame(101, now.AddMilliseconds(-400), 41, 100, 100, entrance));
+        movingSecond.Observe(2, Frame(202, now.AddMilliseconds(-300), 42, 200, 200,
+            entrance with { Id = 20, X = 400, Y = 201 }));
+        movingSecond.Observe(1, Frame(101, now.AddMilliseconds(-100), 43, 300, 300));
+        var secondLeads = TransitionApproachPlan.Apply(live with
+        {
+            Positions =
+            [
+                live.Positions[0],
+                live.Positions[1] with { X = 300 }
+            ]
+        }, topology, movingSecond, true, false, now);
+        if (secondLeads.PadCommands[1].Status != "approaching_transition" ||
+            secondLeads.PadCommands[0].Status != "approaching_transition" ||
+            movingSecond.SelectDriver(movingSecond.Match(1, 2, now)!, 3, 1, 4, 100) != 4)
+            throw new Exception("Nearer P4 did not lead while P3 followed the driver.");
         if (evidence.Match(handoff, topology, now.AddSeconds(13)) is not null)
             throw new Exception("Expired transition remained eligible.");
         evidence.Observe(2, Frame(202, now, 42, 200, 200,
@@ -88,9 +110,6 @@ internal static class TransitionAnchorEvidenceSmoke
         inactive.Observe(2, Frame(202, now, 42, 200, 200, entrance));
         if (inactive.Match(handoff, topology, now) is not null)
             throw new Exception("Non-targetable entrance was accepted as used.");
-        if (TransitionApproachPlan.BuildInteraction(live, topology, evidence, true,
-                false, now) is not null)
-            throw new Exception("Dual-character destination was allowed to interact without partner position.");
         var dualEvidence = new TransitionAnchorEvidence();
         dualEvidence.Observe(1, Frame(101, now.AddMilliseconds(-400), 41,
             100, 100, entrance));
@@ -98,22 +117,50 @@ internal static class TransitionAnchorEvidenceSmoke
             200, 200, entrance with { Id = 20, X = 205, Y = 201 }));
         dualEvidence.Observe(1, Frame(101, now.AddMilliseconds(-100), 43,
             300, 300));
+        if (TransitionApproachPlan.BuildInteraction(live with { Positions = [] },
+                topology, dualEvidence, true, false, now) is not null)
+            throw new Exception("Dual-character destination was allowed to interact without partner position.");
         var positions = new FollowPositionWitness[]
         {
             new(3, 202, 42, now.AddMilliseconds(-200), 200, 200),
             new(4, 202, 42, now.AddMilliseconds(-200), 205, 202)
         };
-        if (TransitionApproachPlan.BuildInteraction(live with { Positions = positions },
-                topology, dualEvidence, true, false, now)?.DriverPlayer != 3 ||
-            TransitionApproachPlan.BuildInteraction(live with
+        var nearCandidate = TransitionApproachPlan.BuildInteraction(live with
+            { Positions = positions }, topology, dualEvidence, true, false, now);
+        var wrongAreaCandidate = TransitionApproachPlan.BuildInteraction(live with
             {
                 Positions = [positions[0], positions[1] with { AreaHash = 99 }]
-            }, topology, dualEvidence, true, false, now) is not null ||
-            TransitionApproachPlan.BuildInteraction(live with
+            }, topology, dualEvidence, true, false, now);
+        var farCandidate = TransitionApproachPlan.BuildInteraction(live with
             {
                 Positions = [positions[0], positions[1] with { X = 1000 }]
-            }, topology, dualEvidence, true, false, now) is not null)
-            throw new Exception("Dual-character entry did not require a fresh, same-area nearby partner.");
+            }, topology, dualEvidence, true, false, now);
+        if (nearCandidate?.DriverPlayer != 4 || wrongAreaCandidate is not null ||
+            farCandidate is not null)
+            throw new Exception($"Dual-character entry guard failed: near={nearCandidate}, " +
+                $"wrongArea={wrongAreaCandidate}, far={farCandidate}.");
+        var spreadEvidence = new TransitionAnchorEvidence();
+        spreadEvidence.Observe(1, Frame(101, now.AddMilliseconds(-400), 41,
+            100, 100, entrance));
+        spreadEvidence.Observe(2, Frame(202, now.AddMilliseconds(-300), 42,
+            500, 200, entrance with { Id = 20, X = 205, Y = 201 }));
+        spreadEvidence.Observe(1, Frame(101, now.AddMilliseconds(-100), 43,
+            300, 300));
+        var spread = live with
+        {
+            Positions =
+            [
+                positions[0] with { X = 500 },
+                positions[1]
+            ]
+        };
+        var spreadRoute = TransitionApproachPlan.Apply(spread, topology,
+            spreadEvidence, true, false, now);
+        if (spreadRoute.PadCommands[0].Status != "approaching_transition" ||
+            spreadRoute.PadCommands[1].Status != "waiting" ||
+            TransitionApproachPlan.BuildInteraction(spreadRoute, topology,
+                spreadEvidence, true, false, now)?.DriverPlayer != 4)
+            throw new Exception("P4 entry did not wait for a valid following P3 within partner range.");
         var positionsJson = System.Text.Json.JsonSerializer.Serialize(new
         {
             positions = positions.Select(item => new

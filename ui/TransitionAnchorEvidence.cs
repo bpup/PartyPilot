@@ -13,6 +13,7 @@ internal sealed class TransitionAnchorEvidence
     private readonly object _gate = new();
     private readonly Dictionary<int, RadarFrame> _latest = new();
     private readonly Dictionary<int, (string Identity, DateTime ChangedUtc)> _used = new();
+    private readonly Dictionary<int, (DateTime ChangedUtc, int DriverPlayer)> _drivers = new();
 
     internal void Observe(int client, RadarFrame frame)
     {
@@ -26,12 +27,28 @@ internal sealed class TransitionAnchorEvidence
                 if (frame.AreaHash != previous.AreaHash)
                 {
                     _used.Remove(client);
+                    _drivers.Clear();
                     if (frame.SeenUtc - previous.SeenUtc <= TimeSpan.FromSeconds(2) &&
                         NearestVisibleAnchor(previous) is { } anchor)
                         _used[client] = (Identity(anchor), frame.SeenUtc);
                 }
             }
             _latest[client] = frame;
+        }
+    }
+
+    internal int SelectDriver(TransitionAnchorMatch match, int firstPlayer,
+        double firstDistance, int secondPlayer, double secondDistance)
+    {
+        lock (_gate)
+        {
+            if (_drivers.TryGetValue(match.DestinationClient, out var selected) &&
+                selected.ChangedUtc == match.SourceChangedUtc &&
+                (selected.DriverPlayer == firstPlayer || selected.DriverPlayer == secondPlayer))
+                return selected.DriverPlayer;
+            var driver = secondDistance < firstDistance ? secondPlayer : firstPlayer;
+            _drivers[match.DestinationClient] = (match.SourceChangedUtc, driver);
+            return driver;
         }
     }
 
