@@ -35,7 +35,7 @@ func (session *FlaskSession) ConfigureCustomRules(rules []flask.CustomRule) erro
 }
 
 // ObserveMainAttack records only a validated, unblocked input for a bound role.
-// The target's combat-only custom rules use a 20-second recent attack window.
+// The target tracks combat per P1/P2, P3/P4, or P5/P6 pair, with a 20-second window.
 func (session *FlaskSession) ObserveMainAttack(slot int, observedAt time.Time, active bool) error {
 	if _, bound := session.menuOpen[slot]; !bound || observedAt.IsZero() {
 		return errors.New("combat input refers to an unbound player or invalid time")
@@ -46,14 +46,15 @@ func (session *FlaskSession) ObserveMainAttack(slot int, observedAt time.Time, a
 	if session.combatAt == nil {
 		session.combatAt = make(map[int]time.Time)
 	}
-	if observedAt.After(session.combatAt[slot]) {
-		session.combatAt[slot] = observedAt
+	pair := (slot - 1) / 2
+	if observedAt.After(session.combatAt[pair]) {
+		session.combatAt[pair] = observedAt
 	}
 	return nil
 }
 
 func (session *FlaskSession) combatRecent(slot int, now time.Time) bool {
-	last := session.combatAt[slot]
+	last := session.combatAt[(slot-1)/2]
 	return !last.IsZero() && !now.Before(last) && now.Sub(last) <= 20*time.Second
 }
 

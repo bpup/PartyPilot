@@ -113,21 +113,41 @@ func TestCustomRecoveryNeedsBoundRecentAttack(t *testing.T) {
 	if err := session.ObserveMainAttack(2, start.Add(time.Second), true); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(start.Add(time.Second)); len(got) != 0 {
-		t.Fatalf("another player's attack armed P1: %+v", got)
+	if got := read(start.Add(time.Second)); len(got) != 1 ||
+		got[0].Resource != "action" || got[0].DirectInput != "X" {
+		t.Fatalf("same-pair attack did not arm P1 custom X: %+v", got)
 	}
 	if err := session.ObserveMainAttack(1, start.Add(2*time.Second), true); err != nil {
 		t.Fatal(err)
 	}
-	if got := read(start.Add(2 * time.Second)); len(got) != 1 ||
-		got[0].Resource != "action" || got[0].DirectInput != "X" {
-		t.Fatalf("bound recent attack did not activate custom X: %+v", got)
+	if !session.combatRecent(2, start.Add(2*time.Second)) {
+		t.Fatal("P1 attack did not refresh the shared pair combat window")
 	}
 	if got := read(start.Add(23 * time.Second)); len(got) != 0 {
 		t.Fatalf("combat-only rule survived the target 20-second window: %+v", got)
 	}
 	if err := session.ObserveMainAttack(3, start, true); err == nil {
 		t.Fatal("unbound combat role accepted")
+	}
+}
+
+func TestCustomCombatWindowSeparatesPlayerPairs(t *testing.T) {
+	session := &FlaskSession{menuOpen: map[int]bool{1: true, 2: true, 3: true}}
+	start := time.Unix(100, 0)
+	if err := session.ObserveMainAttack(2, start, true); err != nil {
+		t.Fatal(err)
+	}
+	if !session.combatRecent(1, start.Add(20*time.Second)) ||
+		session.combatRecent(3, start.Add(time.Second)) ||
+		session.combatRecent(1, start.Add(20*time.Second+time.Nanosecond)) {
+		t.Fatal("custom combat window did not follow the target pair boundary")
+	}
+	if err := session.ObserveMainAttack(3, start.Add(time.Second), true); err != nil {
+		t.Fatal(err)
+	}
+	if !session.combatRecent(3, start.Add(2*time.Second)) ||
+		!session.combatRecent(1, start.Add(2*time.Second)) {
+		t.Fatal("one pair's attack changed the other pair's combat window")
 	}
 }
 
