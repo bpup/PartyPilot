@@ -28,6 +28,8 @@ internal sealed class BridgeRouter
     private readonly IReportBatch? _reportBatch;
     private IReadOnlyDictionary<int, int> _focusPads = new Dictionary<int, int>();
     private bool _physicalMode;
+    private HybridKeyboardState? _hybridKeyboard;
+    private IReadOnlyDictionary<int, int> _hybridPlayerPads = new Dictionary<int, int>();
     private bool _menuGuardActive;
     private bool _rightStickFollowerOverride;
     private bool _lastFocusedLeads;
@@ -91,6 +93,7 @@ internal sealed class BridgeRouter
     public int FocusedSlot => _physicalMode ? _focusedSlot : 0;
     public int LastManualFocusSlot => _physicalMode ? _lastManualFocusSlot : 0;
     public bool AutoPartyActive => _autoPartyActive;
+    public int HybridFocusedPlayer => _hybridKeyboard?.FocusedPlayer ?? 0;
 
     public BridgeRouter(IReadOnlyDictionary<int, IPadOutput> outputs, IReportBatch? reportBatch = null)
     {
@@ -102,7 +105,7 @@ internal sealed class BridgeRouter
         IReadOnlyDictionary<int, int>? focusPads = null, int directRightStickSlot = 0,
         bool lastFocusedLeads = false)
     {
-        if (!_routes.ContainsKey(mainSlot)) return false;
+        if (_hybridKeyboard is not null || !_routes.ContainsKey(mainSlot)) return false;
         if (directRightStickSlot != 0 && (!rightStickFollowerOverride ||
             directRightStickSlot == mainSlot || !_routes.ContainsKey(directRightStickSlot))) return false;
         var explicitFocusPads = focusPads is not null;
@@ -125,6 +128,35 @@ internal sealed class BridgeRouter
         _lastFocusToggleUtc = DateTime.MinValue;
         NeutralAll();
         return true;
+    }
+
+    public bool ConfigureHybridKeyboard(IReadOnlyDictionary<int, int> playerPads)
+    {
+        if (_physicalMode || playerPads.Count == 0 ||
+            playerPads.Any(entry => entry.Key is < 2 or > 6 || !_routes.ContainsKey(entry.Value)) ||
+            playerPads.Values.Distinct().Count() != playerPads.Count ||
+            playerPads.Count != _routes.Count) return false;
+        _hybridPlayerPads = new Dictionary<int, int>(playerPads);
+        _hybridKeyboard = new HybridKeyboardState(playerPads.Keys);
+        NeutralAll();
+        return true;
+    }
+
+    public bool ApplyHybridKey(int virtualKey, bool down, bool gameForeground)
+    {
+        if (_hybridKeyboard is null || virtualKey == 0 ||
+            (HybridKeyboardInput.FocusForKey(virtualKey) == 0 &&
+             HybridKeyboardInput.ActionForKey(virtualKey) == HybridAction.None)) return false;
+        _hybridKeyboard.Handle(virtualKey, down, gameForeground);
+        RenderAll();
+        return true;
+    }
+
+    public void SetHybridForeground(bool gameForeground)
+    {
+        if (_hybridKeyboard is null) return;
+        _hybridKeyboard.SetForeground(gameForeground);
+        RenderAll();
     }
 
     public bool ApplyLine(string line, DateTime nowUtc)
@@ -386,6 +418,7 @@ internal sealed class BridgeRouter
 
     public void NeutralAll()
     {
+        _hybridKeyboard?.SetForeground(false);
         _autoPartyActive = false;
         _autoPartyExpiresUtc = default;
         _autoPartySlot = 0;
@@ -430,6 +463,12 @@ internal sealed class BridgeRouter
 
     private void Render(int slot, PadRoute route)
     {
+        if (_hybridKeyboard is not null && _hybridKeyboard.FocusedPlayer != 1)
+        {
+            var focused = _hybridPlayerPads[_hybridKeyboard.FocusedPlayer];
+            route.Output.SetReport(slot == focused ? _hybridKeyboard.Snapshot().Report : default);
+            return;
+        }
         if (_autoPartyActive)
         {
             route.Output.SetReport(slot == _autoPartySlot && _autoPartyButtons != 0

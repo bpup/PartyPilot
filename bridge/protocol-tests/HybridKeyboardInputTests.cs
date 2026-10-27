@@ -60,5 +60,37 @@ internal static class HybridKeyboardInputTests
         if (state.Handle(0x70, true, true).FocusedPlayer != 1 ||
             state.Snapshot().Report != default)
             throw new Exception("F1 did not restore native keyboard focus.");
+
+        var pad2 = new FakePad();
+        var pad3 = new FakePad();
+        var router = new BridgeRouter(new Dictionary<int, IPadOutput>
+        {
+            [2] = pad2, [3] = pad3
+        });
+        if (!router.ConfigureHybridKeyboard(new Dictionary<int, int> { [2] = 2, [3] = 3 }) ||
+            router.ConfigurePhysical(2) ||
+            router.ApplyHybridKey(0x76, true, true))
+            throw new Exception("Hybrid router accepted conflicting or unmapped input.");
+        var now = DateTime.UtcNow;
+        if (!router.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", now) ||
+            pad2.X != 32767)
+            throw new Exception("Hybrid P1 focus did not preserve ordinary follower automation.");
+        router.ApplyHybridKey(0x71, true, true);
+        router.ApplyHybridKey(0x57, true, true);
+        if (router.HybridFocusedPlayer != 2 || pad2.Y != 32767 || pad3.Report != default)
+            throw new Exception("Hybrid P2 manual input did not isolate the other virtual pad.");
+        router.ApplyHybridKey(0x72, true, true);
+        if (router.HybridFocusedPlayer != 3 || pad2.Report != default || pad3.Report != default)
+            throw new Exception("Hybrid focus change retained a stale movement report.");
+        router.ApplyHybridKey(0x57, false, true);
+        router.ApplyHybridKey(0x57, true, true);
+        if (pad3.Y != 32767) throw new Exception("Hybrid P3 manual movement was not published.");
+        router.SetHybridForeground(false);
+        if (pad2.Report != default || pad3.Report != default)
+            throw new Exception("Hybrid output was not neutralized after game focus loss.");
+        router.ApplyHybridKey(0x57, false, true);
+        router.ApplyHybridKey(0x70, true, true);
+        if (router.HybridFocusedPlayer != 1 || pad2.X != 32767)
+            throw new Exception("F1 did not restore normal follower automation.");
     }
 }
