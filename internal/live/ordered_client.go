@@ -143,6 +143,7 @@ func (e *Engine) invalidateOrderedIfCurrent(roles []RoleBinding, frame OrderedCl
 	for _, role := range roles {
 		delete(e.samples, role.Slot)
 		delete(e.vitals, role.Slot)
+		delete(e.strictVitals, role.Slot)
 		delete(e.terrainStable, role.Slot)
 	}
 	e.coordinator.ResetFollow()

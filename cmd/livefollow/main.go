@@ -314,8 +314,16 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 		count, _, err := conn.ReadFromUDP(data)
 		if err == nil {
 			if ordered {
-				if orderedFrame, decodeErr := live.DecodeOrderedClient(data[:count], time.Now().UTC()); decodeErr == nil {
+				receivedAt := time.Now().UTC()
+				if orderedFrame, decodeErr := live.DecodeOrderedClient(data[:count], receivedAt); decodeErr == nil {
 					engine.ObserveOrderedClient(orderedFrame)
+				} else if vitalFrame, vitalErr := live.DecodeOrderedVitals(data[:count], receivedAt); vitalErr == nil {
+					if engine.ObserveOrderedVitals(vitalFrame) && flasks != nil {
+						activations, err = flasks.ObserveOrderedVitals(vitalFrame, receivedAt)
+						if err != nil {
+							return fail("ordered flask decision failed", err)
+						}
+					}
 				}
 			} else if sample, decodeErr := telemetry.Decode(data[:count]); decodeErr == nil {
 				sample.ReceivedAt = time.Now().UTC()
@@ -383,8 +391,8 @@ func main() {
 	flag.Var(&playerStops, "stop-player", "SLOT=VALUE; individual stop distance from 0 to 200")
 	flag.Parse()
 	if *orderedInput != (len(bindings) > 0) || *orderedInput && *rosterText != "" ||
-		!(*orderedInput) && *rosterText == "" || *orderedInput && *autoFlask {
-		fmt.Fprintln(os.Stderr, "choose either -roster or -experimental-ordered-input with -role-bind; ordered auto-flask is unavailable")
+		!(*orderedInput) && *rosterText == "" {
+		fmt.Fprintln(os.Stderr, "choose either -roster or -experimental-ordered-input with -role-bind")
 		os.Exit(2)
 	}
 	var roster map[int]int
@@ -459,7 +467,11 @@ func main() {
 	var flaskSession *live.FlaskSession
 	var menuCommands <-chan menuInput
 	if *autoFlask {
-		flaskSession, err = live.NewFlaskSession(roster, *maxAge)
+		if *orderedInput {
+			flaskSession, err = live.NewOrderedFlaskSession(engine, *maxAge)
+		} else {
+			flaskSession, err = live.NewFlaskSession(roster, *maxAge)
+		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)

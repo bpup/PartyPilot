@@ -31,6 +31,7 @@ type Engine struct {
 	slots            []int
 	samples          map[int]telemetry.Sample
 	vitals           map[int]telemetry.Sample
+	strictVitals     map[int]bool
 	areas            map[int]arealog.Signal
 	terrains         map[int]boundTerrain
 	terrainStable    map[int]terrainStability
@@ -235,7 +236,8 @@ func NewWithBindings(bindings []RoleBinding, leader int, config follow.Config,
 		logAge: logAge, sampleAge: config.MaxAge, memberNames: make(map[int]string),
 		pidToSlot: pidToSlot, pidToRoles: pidToRoles, slotToPID: slotToPID,
 		slots: slots, samples: make(map[int]telemetry.Sample),
-		vitals: make(map[int]telemetry.Sample), areas: make(map[int]arealog.Signal)}, nil
+		vitals: make(map[int]telemetry.Sample), strictVitals: make(map[int]bool),
+		areas: make(map[int]arealog.Signal)}, nil
 }
 
 func (e *Engine) ObserveSample(sample telemetry.Sample) bool {
@@ -265,8 +267,10 @@ func (e *Engine) storeSample(slot int, sample telemetry.Sample) {
 		delete(e.terrainStable, slot)
 	}
 	e.samples[slot] = sample
-	if sample.Life != nil {
+	if prior, exists := e.vitals[slot]; sample.Life != nil &&
+		(!exists || !sample.SeenUTC.Before(prior.SeenUTC) && sample.TickMS >= prior.TickMS) {
 		e.vitals[slot] = sample
+		delete(e.strictVitals, slot)
 	}
 }
 
@@ -287,6 +291,7 @@ func (e *Engine) ObserveArea(signal arealog.Signal) bool {
 		e.coordinator.ResetFollow()
 		delete(e.terrainStable, signal.Slot)
 		delete(e.vitals, signal.Slot)
+		delete(e.strictVitals, signal.Slot)
 	}
 	e.areas[signal.Slot] = signal
 	return true
@@ -458,10 +463,36 @@ func (e *Engine) currentLife(slot int, motion telemetry.Sample, area arealog.Sig
 	if !exists || vital.Life == nil || vital.SeenUTC.Before(area.ObservedAt) ||
 		vital.SeenUTC.After(now) || vital.ReceivedAt.After(now) ||
 		now.Sub(vital.ReceivedAt) > e.sampleAge ||
+		(e.strictVitals[slot] && (motion.AreaHash == 0 || vital.AreaHash == 0)) ||
 		(motion.AreaHash != 0 && vital.AreaHash != 0 && motion.AreaHash != vital.AreaHash) {
 		return nil
 	}
 	return vital.Life
+}
+
+// orderedVitalActionReady requires a fresh, area-bound motion and resource
+// observation for every local role before a slow frame can request input.
+func (e *Engine) orderedVitalActionReady(processID int, now time.Time) bool {
+	roles := e.pidToRoles[processID]
+	if len(roles) == 0 || e.stopped != "" {
+		return false
+	}
+	for _, role := range roles {
+		motion, hasMotion := e.samples[role.Slot]
+		vital, hasVital := e.vitals[role.Slot]
+		area, hasArea := e.areas[role.Slot]
+		if !hasMotion || !hasVital || !hasArea || area.Origin != "live" ||
+			area.ObservedAt.After(now) || now.Sub(area.ObservedAt) > e.logAge ||
+			motion.SeenUTC.Before(area.ObservedAt) || motion.SeenUTC.After(now) ||
+			motion.ReceivedAt.After(now) || now.Sub(motion.ReceivedAt) > e.sampleAge ||
+			vital.SeenUTC.Before(area.ObservedAt) || vital.SeenUTC.After(now) ||
+			vital.ReceivedAt.After(now) || now.Sub(vital.ReceivedAt) > e.sampleAge ||
+			motion.AreaHash == 0 || vital.AreaHash == 0 ||
+			motion.AreaHash != vital.AreaHash || vital.Life == nil {
+			return false
+		}
+	}
+	return true
 }
 
 func isometricStick(gridX, gridY float64) (float64, float64) {
