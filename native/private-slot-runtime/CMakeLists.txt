@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 project(PartyPilotPrivateSlots C)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 
 if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(FATAL_ERROR "Private slot runtime requires Windows x64")
