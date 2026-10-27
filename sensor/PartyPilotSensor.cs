@@ -31,6 +31,12 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     private SkillBindSourceScanner.Result? _skillBindSource;
     private string? _skillBindSourceStatus;
     private DateTime _lastRadarSentUtc;
+    private DateTime _lastDormantMapScanUtc;
+    private object? _dormantMapObservation;
+    private long _dormantMapStateAddress;
+    private long _dormantMapDataAddress;
+    private long _dormantMapLocalAddress;
+    private uint _dormantMapAreaHash;
     private readonly RadarMonsterTracker _monsterTracker = new();
     private uint? _monsterTrackerAreaHash;
     private DateTime _lastCardSentUtc;
@@ -53,6 +59,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         {
             _monsterTracker.Reset();
             _monsterTrackerAreaHash = null;
+            _dormantMapObservation = null;
+            _lastDormantMapScanUtc = default;
             return;
         }
         var now = DateTime.UtcNow;
@@ -272,6 +280,62 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         DateTime? uiObservationSeenUtc = null;
         object? groundHover = null;
         string? groundHoverStatus = null;
+        if (!Settings.DiagnoseDormantAreaMap.Value)
+        {
+            _dormantMapObservation = null;
+            _lastDormantMapScanUtc = default;
+        }
+        else if (_dormantMapStateAddress != frameStateAddress ||
+                 _dormantMapDataAddress != frameDataAddress ||
+                 _dormantMapLocalAddress != frameLocalAddress ||
+                 _dormantMapAreaHash != frameAreaHash)
+        {
+            _dormantMapObservation = null;
+            _lastDormantMapScanUtc = default;
+        }
+        if (Settings.DiagnoseDormantAreaMap.Value &&
+            now - _lastDormantMapScanUtc >= TimeSpan.FromSeconds(2))
+        {
+            _lastDormantMapScanUtc = now;
+            _dormantMapStateAddress = frameStateAddress;
+            _dormantMapDataAddress = frameDataAddress;
+            _dormantMapLocalAddress = frameLocalAddress;
+            _dormantMapAreaHash = frameAreaHash;
+            try
+            {
+                byte[]? ReadMap(long address, int size)
+                {
+                    try { return GameController.IngameState.Data.M.ReadMem(address, size); }
+                    catch { return null; }
+                }
+                var map = AreaEntityMapLocator.Locate(frameStateAddress,
+                    player!.Id, frameLocalAddress, ReadMap);
+                if (!SameAreaAndPlayer())
+                    _dormantMapObservation = new { Status = "game_identity_changed" };
+                else
+                {
+                    var samples = map.Sleeping.Take(16).Select(entry => new
+                    {
+                        EntityId = entry.Id,
+                        Address = FormatAddress(entry.Address),
+                        Path = RawMetadataPathReader.Read(entry.Address, ReadMap),
+                        Position = RawRenderPositionReader.Read(entry.Address, ReadMap)
+                    }).ToArray();
+                    _dormantMapObservation = new
+                    {
+                        map.Status,
+                        map.AreaAddress,
+                        map.EntityListOffset,
+                        map.AwakeCount,
+                        SleepingCount = map.Sleeping.Length,
+                        Samples = samples
+                    };
+                    if (!SameAreaAndPlayer())
+                        _dormantMapObservation = new { Status = "game_identity_changed" };
+                }
+            }
+            catch { _dormantMapObservation = new { Status = "scan_failed" }; }
+        }
         if (!Settings.DiagnoseRadarEntities.Value && _monsterTrackerAreaHash.HasValue)
         {
             _monsterTracker.Reset();
@@ -687,6 +751,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             SkillBindSourceSeenUtc = Settings.DiagnoseLocalSlotCandidates.Value &&
                 _skillBindSource != null ? _lastSkillBindScanUtc : (DateTime?)null,
             RadarEntities = radarEntities,
+            DormantAreaMap = Settings.DiagnoseDormantAreaMap.Value ? _dormantMapObservation : null,
             RadarStatus = radarStatus,
             RadarSeenUtc = radarSeenUtc,
             UiObservation = uiObservation,
