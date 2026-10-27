@@ -45,6 +45,7 @@ type Config struct {
 	RequireTerrain        bool
 	TargetTrail           bool
 	AsyncTargetPath       bool
+	NormalSprintCatchUp   bool
 	ClassicCollisionDodge bool
 }
 
@@ -79,6 +80,8 @@ func (e *Engine) Reset() {
 	e.sprint.Reset()
 	e.lastSprintObservation = time.Time{}
 	e.sprintDown = false
+	e.normalSprintDirection = point{}
+	e.normalSprintSince = time.Time{}
 	e.route = nil
 	e.routeTerrain = nil
 	e.planningTerrain = nil
@@ -109,6 +112,8 @@ type Engine struct {
 	sprint                classicSprint
 	lastSprintObservation time.Time
 	sprintDown            bool
+	normalSprintDirection point
+	normalSprintSince     time.Time
 	route                 []navigation.Waypoint
 	routeTerrain          *navigation.Grid
 	planOrigin            point
@@ -224,6 +229,8 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 		e.sprint.Reset()
 		e.sprintDown = false
 		e.lastSprintObservation = time.Time{}
+		e.normalSprintDirection = point{}
+		e.normalSprintSince = time.Time{}
 		e.route = nil
 		if e.config.TrailSpacing > 0 {
 			e.trail = []point{{leader.X, leader.Y}}
@@ -232,6 +239,7 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 	}
 	targetX, targetY := leader.X, leader.Y
 	reason := ""
+	directTrailClear := false
 	if e.config.TargetTrail {
 		target := e.trailingTarget(e.config.StopDistance)
 		targetX, targetY = target.x, target.y
@@ -249,9 +257,15 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 			e.sprint.Reset()
 			e.sprintDown = false
 			e.lastSprintObservation = time.Time{}
+			e.normalSprintDirection = point{}
+			e.normalSprintSince = time.Time{}
 			e.route = nil
 			return Command{State: Holding, Distance: distance}
 		}
+		directTrailClear = segmentDistance(leader.X, leader.Y,
+			follower.X, follower.Y, targetX, targetY) >= 5 &&
+			(terrain == nil || terrain.HasLineOfSightAvoid(follower.X, follower.Y,
+				targetX, targetY, leader.X, leader.Y, 5, 1))
 		// The supplied build detours around the leader when the direct trail
 		// segment passes within five grid units. Live input currently has no
 		// verified terrain, so this branch mirrors its terrain-free path.
@@ -277,6 +291,9 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 				dx, dy, state = e.asyncTargetRouteDirection(terrain,
 					follower.X, follower.Y, targetX, targetY, leader.X, leader.Y)
 				if state == navigation.PathPending {
+					e.sprintDown = false
+					e.normalSprintDirection = point{}
+					e.normalSprintSince = time.Time{}
 					return Command{State: Following, Distance: distance, Reason: "Planning route"}
 				}
 				ok = state == navigation.PathReady
@@ -314,14 +331,18 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 	}
 	e.moving = true
 	state := Following
-	// The supplied build ships with ClassicSprintCatchUp enabled: the hold
-	// branch above releases catch-up only at the configured stop distance.
 	entryDistance := math.Max(e.config.StopDistance+1, e.config.CatchUpDistance)
 	if e.config.TargetTrail {
 		entryDistance = math.Max(entryDistance, 20)
 	}
+	releaseDistance := e.config.StopDistance
+	if e.config.NormalSprintCatchUp {
+		releaseDistance = math.Max(releaseDistance, entryDistance*0.65)
+	}
 	if !e.catchingUp && distance >= entryDistance {
 		e.catchingUp = true
+	} else if e.catchingUp && distance <= releaseDistance {
+		e.catchingUp = false
 	}
 	if e.catchingUp {
 		state = CatchingUp
@@ -332,12 +353,21 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 			observedAt = follower.Seen
 		}
 		if observedAt.After(e.lastSprintObservation) {
-			collisionImminent := e.config.ClassicCollisionDodge && terrain != nil &&
-				terrain.SprintCollisionImminent(follower.X, follower.Y,
-					collisionTargetX, collisionTargetY)
-			e.sprintDown = e.sprint.Update(e.catchingUp,
-				distance >= e.config.StopDistance+5, collisionImminent,
-				point{follower.X, follower.Y}, observedAt)
+			if e.config.NormalSprintCatchUp {
+				e.sprint.Reset()
+				e.sprintDown = e.updateNormalSprint(dx, dy,
+					e.catchingUp && directTrailClear &&
+						math.Hypot(targetX-follower.X, targetY-follower.Y) > 30, observedAt)
+			} else {
+				e.normalSprintDirection = point{}
+				e.normalSprintSince = time.Time{}
+				collisionImminent := e.config.ClassicCollisionDodge && terrain != nil &&
+					terrain.SprintCollisionImminent(follower.X, follower.Y,
+						collisionTargetX, collisionTargetY)
+				e.sprintDown = e.sprint.Update(e.catchingUp,
+					distance >= e.config.StopDistance+5, collisionImminent,
+					point{follower.X, follower.Y}, observedAt)
+			}
 			e.lastSprintObservation = observedAt
 		}
 	}
@@ -349,6 +379,22 @@ func (e *Engine) StepWithTerrain(now time.Time, leader, follower Position, terra
 		Reason:     reason,
 		SprintDown: e.sprintDown,
 	}
+}
+
+func (e *Engine) updateNormalSprint(dx, dy float64, eligible bool, at time.Time) bool {
+	if !eligible || dx*dx+dy*dy < 0.5 {
+		e.normalSprintDirection = point{}
+		e.normalSprintSince = time.Time{}
+		return false
+	}
+	if e.normalSprintSince.IsZero() ||
+		e.normalSprintDirection.x*dx+e.normalSprintDirection.y*dy < 0.94 {
+		e.normalSprintDirection = point{dx, dy}
+		e.normalSprintSince = at
+		return false
+	}
+	e.normalSprintDirection = point{dx, dy}
+	return at.Sub(e.normalSprintSince) >= 200*time.Millisecond
 }
 
 func segmentDistance(px, py, sx, sy, ex, ey float64) float64 {

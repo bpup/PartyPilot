@@ -60,6 +60,7 @@ internal static class ProcessPipelineSmoke
                 $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(log)}, 'a') as out: out.write(line)\n");
             File.WriteAllText(followExe, "#!/usr/bin/env python3\nimport sys,json\n" +
                 "if '-auto-flask' not in sys.argv: sys.exit(2)\n" +
+                "if '-classic-sprint-catchup' in sys.argv: sys.exit(2)\n" +
                 "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"reason\":\"missing position\"}}}', flush=True)\n" +
                 "states = [json.loads(sys.stdin.readline()) for _ in range(2)]\n" +
                 "if {(s['slot'],s['state']) for s in states} != {(1,'clear'),(2,'clear')}: sys.exit(2)\n" +
@@ -72,7 +73,7 @@ internal static class ProcessPipelineSmoke
             File.WriteAllText(terrainFollowExe, "#!/usr/bin/env python3\nimport sys\n" +
                 $"expected = {{'1={terrainClient1}', '2={terrainClient2}'}}\n" +
                 "bindings = {sys.argv[i+1] for i, arg in enumerate(sys.argv[:-1]) if arg == '-terrain-binding'}\n" +
-                "if bindings != expected or '-classic-collision-dodge' not in sys.argv: sys.exit(2)\n" +
+                "if bindings != expected or '-classic-sprint-catchup' not in sys.argv or '-classic-collision-dodge' not in sys.argv: sys.exit(2)\n" +
                 "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}}}', flush=True)\n" +
                 "for line in sys.stdin: pass\n");
             File.WriteAllText(dynamicBridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
@@ -221,7 +222,7 @@ internal static class ProcessPipelineSmoke
                 terrainBindings: new Dictionary<int, string>
                 {
                     [1] = terrainClient1, [2] = terrainClient2
-                }, classicCollisionDodge: true))
+                }, classicCollisionDodge: true, classicSprintCatchUp: true))
             {
                 if (terrainFollow.Current.FocusedPlayer != 1)
                     throw new Exception("Bound terrain follow did not return its initial frame.");

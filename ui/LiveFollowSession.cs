@@ -92,7 +92,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         IReadOnlyDictionary<int, int>? followTargets = null,
         IReadOnlyDictionary<int, double>? playerStops = null,
         IReadOnlyDictionary<int, string>? terrainBindings = null,
-        bool classicCollisionDodge = false)
+        bool classicCollisionDodge = false,
+        bool classicSprintCatchUp = false)
     {
         if (topology.Id is not ("2-split" or "3-three-singles") ||
             clients.Count != topology.ClientCount ||
@@ -173,6 +174,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             start.ArgumentList.Add("-terrain-binding");
             start.ArgumentList.Add($"{player}={path}");
         }
+        if (classicSprintCatchUp) start.ArgumentList.Add("-classic-sprint-catchup");
         if (classicCollisionDodge) start.ArgumentList.Add("-classic-collision-dodge");
         if (bridge.AutoFlaskEnabled) start.ArgumentList.Add("-auto-flask");
         if (bridge.LastFocusedLeadsEnabled) start.ArgumentList.Add("-last-focused-leads");

@@ -128,10 +128,19 @@ var terrainPaths = window.GetLogicalDescendants().OfType<TextBox>()
     .OrderBy(box => box.Name).ToArray();
 var terrainDodge = window.GetLogicalDescendants().OfType<CheckBox>()
     .Single(box => box.Content?.ToString()?.StartsWith("启用经典冲刺地形碰撞闪避", StringComparison.Ordinal) == true);
+var classicSprint = window.GetLogicalDescendants().OfType<CheckBox>()
+    .Single(box => box.Content?.ToString()?.StartsWith("启用经典冲刺追赶", StringComparison.Ordinal) == true);
 if (terrainPaths.Length != 3 || !terrainPaths[0].IsEffectivelyVisible ||
     !terrainPaths[1].IsEffectivelyVisible || terrainPaths[2].IsEffectivelyVisible ||
-    terrainDodge.IsChecked != false)
-    throw new Exception("Two-client terrain controls did not default off with two visible bindings.");
+    terrainDodge.IsChecked != false || terrainDodge.IsEnabled || classicSprint.IsChecked != false)
+    throw new Exception("Two-client terrain and classic sprint controls did not default off.");
+classicSprint.IsChecked = true;
+if (!terrainDodge.IsEnabled)
+    throw new Exception("Classic sprint did not expose its optional terrain collision setting.");
+terrainDodge.IsChecked = true;
+classicSprint.IsChecked = false;
+if (terrainDodge.IsChecked != false || terrainDodge.IsEnabled)
+    throw new Exception("Disabling classic sprint kept collision recovery active.");
 inputMode.SelectedIndex = 0;
 playerCountChoice.SelectedIndex = -1;
 if (window.GetLogicalDescendants().OfType<TextBox>().Count(field =>
@@ -702,7 +711,7 @@ variant.SelectedIndex = 0;
 Dispatcher.UIThread.RunJobs();
 if (p2Target.IsEffectivelyVisible)
     throw new Exception("Couch layout exposed unsupported live follow targets.");
-if (terrainPaths.Any(box => box.IsEffectivelyVisible) || terrainDodge.IsEnabled)
+if (terrainPaths.Any(box => box.IsEffectivelyVisible) || terrainDodge.IsEnabled || classicSprint.IsEnabled)
     throw new Exception("Couch layout exposed unsupported live terrain controls.");
 if (prepare.IsEnabled) throw new Exception("Bridge preparation ignored missing device and game paths.");
 deviceInstance.Text = @"HID\VID_1234&PID_5678\DEVICE";

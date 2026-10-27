@@ -398,6 +398,8 @@ func main() {
 	logAge := flag.Duration("log-max-age", 0, "maximum area-log signal age")
 	leaderName := flag.String("leader-name", "", "configured character name of the followed leader, for departure detection")
 	lastFocusedLeads := flag.Bool("last-focused-leads", false, "use manually focused player as the current follow MAIN")
+	classicSprintCatchUp := flag.Bool("classic-sprint-catchup", false,
+		"use the classic sprint controller instead of the distributed client's normal sprint mode")
 	classicCollisionDodge := flag.Bool("classic-collision-dodge", false,
 		"opt into terrain-backed classic sprint collision recovery")
 	autoFlask := flag.Bool("auto-flask", false, "enable life and mana flask decisions for explicitly bound clients")
@@ -452,6 +454,7 @@ func main() {
 	}
 	config := follow.Config{StopDistance: *stop, ResumeDistance: *stop + 3, CatchUpDistance: *catchup,
 		MaxAge: *maxAge, TargetTrail: true, AsyncTargetPath: true,
+		NormalSprintCatchUp:   !*classicSprintCatchUp,
 		ClassicCollisionDodge: *classicCollisionDodge}
 	var engine *live.Engine
 	if *orderedInput {

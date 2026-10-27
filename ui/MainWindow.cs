@@ -115,6 +115,7 @@ public sealed class MainWindow : Window
     private readonly TextBox _followLogAge = new();
     private readonly TextBox[] _terrainBindingPaths = new TextBox[3];
     private readonly StackPanel[] _terrainBindingRows = new StackPanel[3];
+    private readonly CheckBox _classicSprintCatchUp = new();
     private readonly CheckBox _classicCollisionDodge = new();
     private readonly TextBlock _terrainBindingStatus = new();
     private readonly TextBox _followLeaderName = new();
@@ -828,6 +829,13 @@ public sealed class MainWindow : Window
             box.TextChanged += (_, _) => UpdateFollowControls();
             panel.Children.Add(box);
         }
+        _classicSprintCatchUp.Content = "启用经典冲刺追赶（0.6.17 分布式客户端默认关闭）";
+        _classicSprintCatchUp.IsCheckedChanged += (_, _) =>
+        {
+            if (_classicSprintCatchUp.IsChecked != true) _classicCollisionDodge.IsChecked = false;
+            UpdateFollowControls();
+        };
+        panel.Children.Add(_classicSprintCatchUp);
         panel.Children.Add(Label("候选地形绑定（可选；每个客户端都须使用已核对的独立文件）", 12, MutedBrush));
         for (var index = 0; index < _terrainBindingPaths.Length; index++)
         {
@@ -2142,8 +2150,11 @@ public sealed class MainWindow : Window
             if (stop is not null) stop.IsEnabled = _follow is null && !_busy;
         foreach (var binding in _terrainBindingPaths)
             if (binding is not null) binding.IsEnabled = _follow is null && !_busy;
-        _classicCollisionDodge.IsEnabled = _follow is null && !_busy &&
+        _classicSprintCatchUp.IsEnabled = _follow is null && !_busy &&
             _selectedTopology?.Id is ("2-split" or "3-three-singles");
+        _classicCollisionDodge.IsEnabled = _follow is null && !_busy &&
+            _selectedTopology?.Id is ("2-split" or "3-three-singles") &&
+            _classicSprintCatchUp.IsChecked == true;
         var valid = LiveFollowPlan.TryCreate(_followStop.Text, _followCatchup.Text,
             _followMaxAge.Text, _followLogAge.Text, _followLeaderName.Text, out _);
         if (_selectedTopology?.Id is "2-split" or "3-three-singles")
@@ -2837,7 +2848,8 @@ public sealed class MainWindow : Window
             }
             var session = await LiveFollowSession.StartAsync(executable, _selectedTopology,
                 _launchedClients, _bridge, plan, memberNames, followTargets, playerStops,
-                terrain, _classicCollisionDodge.IsChecked == true);
+                terrain, _classicCollisionDodge.IsChecked == true,
+                _classicSprintCatchUp.IsChecked == true);
             session.StatusChanged += FollowStatusChanged;
             session.Ended += FollowEnded;
             _follow = session;
