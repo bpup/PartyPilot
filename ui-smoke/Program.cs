@@ -27,6 +27,7 @@ RightStickDodgePreferenceSmoke.Run();
 FollowerMirrorPreferenceSmoke.Run();
 FlaskSupportPreferenceSmoke.Run();
 FlaskRulePreferenceSmoke.Run();
+FlaskCustomPreferenceSmoke.Run();
 AutoPartyCoordinatorSmoke.Run();
 AutoPartyHotkeySmoke.Run();
 AutoPartyKeyPreferenceSmoke.Run();
@@ -182,6 +183,24 @@ var chosenRules = await flaskRuleResult;
 if (chosenRules is null || chosenRules[0].LifeTrigger != 70 || chosenRules[1].LifeTrigger != 60 ||
     !chosenRules[1].CombinedDefence || chosenRules[0].CombinedDefence)
     throw new Exception("Flask rule editor changed another player or lost its setting.");
+var customDialog = new FlaskCustomDialog(2, [FlaskCustomPreferenceStore.DefaultRule()]);
+var customResult = customDialog.ShowDialog<FlaskCustomRule[]?>(window);
+customDialog.GetLogicalDescendants().OfType<Button>()
+    .Single(button => button.Content?.ToString() == "新增规则")
+    .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+customDialog.GetLogicalDescendants().OfType<TextBox>()
+    .Single(box => box.Name == "custom-threshold").Text = "55";
+customDialog.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(box => box.ItemsSource?.OfType<string>().Contains("Energy Shield") == true)
+    .SelectedItem = "Energy Shield";
+customDialog.GetLogicalDescendants().OfType<Button>()
+    .Single(button => button.Content?.ToString() == "保存")
+    .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+var chosenCustom = await customResult;
+if (chosenCustom is not { Length: 2 } || chosenCustom[0].Threshold != 45 ||
+    chosenCustom[1].Threshold != 55 || chosenCustom[1].Resource != "Energy Shield" ||
+    chosenCustom[0].Id == chosenCustom[1].Id)
+    throw new Exception("Custom recovery editor did not keep independent ordered rules.");
 var inputMode = window.GetLogicalDescendants().OfType<ComboBox>()
     .SingleOrDefault(box => box.ItemsSource?.OfType<string>()
         .Contains("Keyboard and mouse · 键鼠") == true);
