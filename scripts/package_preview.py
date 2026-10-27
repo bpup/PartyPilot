@@ -1,9 +1,11 @@
 """Bundle tracked PartyPilot sources with the built Windows preview artifacts."""
 
 from pathlib import Path
-from subprocess import check_output
+from subprocess import check_output, run
 from zipfile import ZIP_DEFLATED, ZipFile
+import argparse
 import os
+import shutil
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,7 +31,52 @@ REQUIRED = {
 }
 
 
+def refresh_binaries() -> None:
+    exilecore = os.environ.get("EXILECORE2_DIR")
+    if not exilecore or not (Path(exilecore) / "ExileCore2.dll").is_file():
+        raise SystemExit("--refresh requires EXILECORE2_DIR with ExileCore2.dll")
+    run(["dotnet", "publish", "ui/PartyPilot.Desktop.csproj", "-c", "Release",
+         "-r", "win-x64", "--self-contained", "true",
+         "-p:PublishSingleFile=true", "-p:IncludeNativeLibrariesForSelfExtract=true",
+         "-o", "release/desktop"], cwd=ROOT, check=True)
+    run(["dotnet", "build", "sensor/PartyPilot.Sensor.csproj", "-c", "Release"],
+        cwd=ROOT, env={**os.environ, "EXILECORE2_DIR": exilecore}, check=True)
+    built = ROOT / "sensor/bin/Release/net8.0-windows"
+    for name in ("PartyPilot.Sensor.dll", "PartyPilot.Sensor.deps.json"):
+        shutil.copy2(built / name, ROOT / "release" / name)
+
+
+def check_binaries_current() -> None:
+    def source_files(folder: str) -> list[Path]:
+        return [path for path in (ROOT / folder).rglob("*.cs")
+                if "obj" not in path.parts and "bin" not in path.parts]
+
+    shared = [*ROOT.glob("data/*.json"), ROOT / "sensor/QuestTileRules.cs",
+              ROOT / "sensor/GeneratedRoomClassifier.cs"]
+    binaries = {
+        ROOT / "release/desktop/PartyPilot.Desktop.exe":
+            [*source_files("ui"), *ROOT.glob("common/*.cs"), *shared,
+             ROOT / "ui/PartyPilot.Desktop.csproj"],
+        ROOT / "release/PartyPilot.Sensor.dll":
+            [*source_files("sensor"), *shared,
+             ROOT / "sensor/PartyPilot.Sensor.csproj"]
+    }
+    stale = [str(path.relative_to(ROOT)) for path, sources in binaries.items()
+             if not path.is_file() or not sources or
+             path.stat().st_mtime_ns < max(source.stat().st_mtime_ns for source in sources)]
+    if stale:
+        raise SystemExit("Preview binaries are older than source: " + ", ".join(stale)
+                         + "; rebuild with --refresh")
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--refresh", action="store_true",
+                        help="rebuild the desktop and sensor binaries before packaging")
+    args = parser.parse_args()
+    if args.refresh:
+        refresh_binaries()
+    check_binaries_current()
     tracked = {
         ROOT / Path(name.decode())
         for name in check_output(["git", "ls-files", "-z"], cwd=ROOT).split(b"\0")
