@@ -297,6 +297,23 @@ internal static class HybridKeyboardInputTests
         if (firstFollower.Report.Buttons != 0x1000 || secondFollower.Report.Buttons != 0x1000 ||
             neutralClient1.Report != default || neutralClient1Second.Report != default)
             throw new Exception("Native P1 confirm did not mirror to both followers with neutral placeholders.");
+        var filteredP2 = new FakePad();
+        var filteredP3 = new FakePad();
+        var filteredRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
+            { [1] = new FakePad(), [2] = filteredP2, [3] = filteredP3 });
+        var perPlayerMirror = FollowerMirrorConfig.Default.WithPlayer(2, 1 | 4)
+            .WithPlayer(3, 1 | 2);
+        if (!filteredRouter.ConfigureHybridKeyboard(new Dictionary<int, int> { [2] = 2, [3] = 3 },
+                followerMirror: perPlayerMirror) || !filteredRouter.EnableHybridMainFollowMirror())
+            throw new Exception("Hybrid per-player follower settings were rejected.");
+        filteredRouter.SetHybridForeground(true);
+        filteredRouter.ApplyHybridKey(0x45, true, true);
+        if (filteredP2.Report.Buttons != 0 || filteredP3.Report.Buttons != 0x1000)
+            throw new Exception("Hybrid MAIN A ignored P2/P3 follower settings.");
+        filteredRouter.ApplyHybridKey(0x45, false, true);
+        filteredRouter.ApplyHybridKey(0x51, true, true);
+        if (filteredP2.Report.Buttons != 0x2000 || filteredP3.Report.Buttons != 0)
+            throw new Exception("Hybrid MAIN B ignored P2/P3 follower settings.");
 
         var menuState = new HybridKeyboardState([2]);
         menuState.Handle(0x71, true, true);

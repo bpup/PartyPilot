@@ -37,6 +37,15 @@ internal static class HybridBridgeReadySmoke
             BridgeSession.IsExpectedHybridReady(confirmed, [1, 2, 3, 4], "2:3,3:4",
                 "1:10:100,2:20:200,3:20:200", bindings.Encode() + ",0"))
             throw new Exception("Desktop did not require the exact configured Hybrid key map.");
+        var followerMirror = FollowerMirrorConfig.Default.WithPlayer(2, 1 | 4);
+        var configured = ready[..^1] + ",\"follower_mirror\":\"" + followerMirror.Encode() + "\"}";
+        if (!BridgeSession.IsExpectedHybridReady(configured, [1, 2, 3, 4], "2:3,3:4",
+                "1:10:100,2:20:200,3:20:200", followerMirror: followerMirror) ||
+            BridgeSession.IsExpectedHybridReady(ready, [1, 2, 3, 4], "2:3,3:4",
+                "1:10:100,2:20:200,3:20:200", followerMirror: followerMirror) ||
+            BridgeSession.IsExpectedHybridReady(configured, [1, 2, 3, 4], "2:3,3:4",
+                "1:10:100,2:20:200,3:20:200", followerMirror: FollowerMirrorConfig.Default))
+            throw new Exception("Desktop did not require the exact Hybrid follower mirror setting.");
         var path = Path.Combine(Path.GetTempPath(), $"partypilot-hybrid-{Guid.NewGuid():N}.json");
         try
         {

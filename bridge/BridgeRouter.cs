@@ -150,12 +150,14 @@ internal sealed class BridgeRouter
     }
 
     public bool ConfigureHybridKeyboard(IReadOnlyDictionary<int, int> playerPads,
-        HybridBindingConfig? bindings = null)
+        HybridBindingConfig? bindings = null, FollowerMirrorConfig? followerMirror = null)
     {
         if (_physicalMode || playerPads.Count == 0 ||
             playerPads.Any(entry => entry.Key is < 2 or > 6 || !_routes.ContainsKey(entry.Value)) ||
             playerPads.Values.Distinct().Count() != playerPads.Count) return false;
         _hybridPlayerPads = new Dictionary<int, int>(playerPads);
+        _playerForPad = playerPads.ToDictionary(entry => entry.Value, entry => entry.Key);
+        _followerMirror = followerMirror ?? FollowerMirrorConfig.Default;
         _hybridBindings = bindings ?? HybridBindingConfig.Default;
         _hybridKeyboard = new HybridKeyboardState(playerPads.Keys, _hybridBindings);
         NeutralAll();
@@ -592,10 +594,11 @@ internal sealed class BridgeRouter
             return;
         }
         var automation = route.Automation;
-        if (_hybridKeyboard is not null)
+        if (_hybridKeyboard is not null && _playerForPad.TryGetValue(slot, out var hybridPlayer))
             automation = automation with
             {
-                Buttons = (ushort)(automation.Buttons | _hybridKeyboard.MainFollowMirrorButtons)
+                Buttons = (ushort)(automation.Buttons |
+                    (_hybridKeyboard.MainFollowMirrorButtons & _followerMirror.ButtonsForPlayer(hybridPlayer)))
             };
         route.Output.SetReport(WithFlasks(WithFollowerMirror(automation, slot, route), route));
     }

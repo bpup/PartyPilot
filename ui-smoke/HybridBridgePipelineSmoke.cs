@@ -29,17 +29,19 @@ internal static class HybridBridgePipelineSmoke
         var inputLog = Path.Combine(directory, "input.jsonl");
         var gameA = Path.Combine(directory, "GameA.exe");
         var gameB = Path.Combine(directory, "GameB.exe");
+        var followerMirror = FollowerMirrorConfig.Default.WithPlayer(2, 1 | 4);
         try
         {
             File.WriteAllText(executable, "#!/usr/bin/env python3\nimport sys,json\n" +
                 "def value(name): return sys.argv[sys.argv.index(name)+1] if name in sys.argv else None\n" +
                 "if '--hybrid-keyboard' not in sys.argv or value('--slots') != '1,2': sys.exit(2)\n" +
                 "if '--disable-menu-guard' not in sys.argv: sys.exit(2)\n" +
+                $"if value('--follower-mirror') != {JsonSerializer.Serialize(followerMirror.Encode())}: sys.exit(2)\n" +
                 "if value('--hybrid-player-pads') != '2:2' or value('--hybrid-window-map') != '1:101:201,2:102:202': sys.exit(2)\n" +
                 "games=[sys.argv[i+1] for i,arg in enumerate(sys.argv[:-1]) if arg=='--game-exe']\n" +
                 $"if games != [{JsonSerializer.Serialize(gameA)},{JsonSerializer.Serialize(gameB)}]: sys.exit(2)\n" +
                 "keys=value('--hybrid-binding-keys')\nif keys is None: sys.exit(2)\n" +
-                "print(json.dumps({'event':'ready','slots':[1,2],'physical_mode':False,'hybrid_mode':True,'menu_guard_enabled':False,'hybrid_player_pads':'2:2','hybrid_window_map':'1:101:201,2:102:202','hybrid_binding_keys':keys}), flush=True)\n" +
+                "print(json.dumps({'event':'ready','slots':[1,2],'physical_mode':False,'hybrid_mode':True,'menu_guard_enabled':False,'hybrid_player_pads':'2:2','hybrid_window_map':'1:101:201,2:102:202','hybrid_binding_keys':keys,'follower_mirror':value('--follower-mirror')}), flush=True)\n" +
                 $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(inputLog)}, 'a') as out: out.write(line)\n    message=json.loads(line)\n    if message.get('type') == 'hybrid_pairing_complete': print('{{\"event\":\"hybrid_pairing_complete\"}}', flush=True)\n    if message.get('type','').startswith('auto_party_'): print(json.dumps({{'event':'auto_party_control','type':message['type'],'slot':message.get('slot',0),'buttons':message.get('buttons',0)}}), flush=True)\n");
             File.WriteAllText(followExecutable, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '-roster' not in sys.argv or sys.argv[sys.argv.index('-roster')+1] != '1:101,2:102': sys.exit(2)\n" +
@@ -59,7 +61,7 @@ internal static class HybridBridgePipelineSmoke
                     [new HybridCustomAction("额外确认", "", 70, 11)], out var bindings) || bindings is null)
                 throw new Exception("Fake bridge could not create a custom keyboard map.");
             await using var bridge = await BridgeSession.StartHybridAsync(executable, topology.Slots,
-                clients, bindings, menuGuardEnabled: false);
+                clients, bindings, menuGuardEnabled: false, followerMirror: followerMirror);
             if (!bridge.IsHybridMode || !bridge.IsRunning)
                 throw new Exception("Desktop rejected a ready keyboard bridge.");
             bridge.StartReading();

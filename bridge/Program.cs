@@ -218,7 +218,7 @@ var physicalMode = wgiMode || args.Contains("--physical-index") || args.Contains
     args.Contains("--physical-hidden-confirmed") || args.Contains("--right-stick-follower-override");
 var mirrorPosition = Array.IndexOf(args, "--follower-mirror");
 FollowerMirrorConfig? requestedMirror = null;
-if (mirrorPosition >= 0 && (!physicalMode ||
+if (mirrorPosition >= 0 && (!(physicalMode || hybridMode) ||
     args.Count(arg => arg == "--follower-mirror") != 1 ||
     mirrorPosition + 1 >= args.Length ||
     !FollowerMirrorConfig.TryParse(args[mirrorPosition + 1], out requestedMirror)))
@@ -407,7 +407,8 @@ try
         if (physicalMode && !router.ConfigurePhysical(mainSlot, rightStickFollowerOverride, focusPads,
             directRightStickSlot, lastFocusedLeads, followerMirror))
             throw new InvalidOperationException("Focus pad mapping does not match the connected virtual controllers.");
-        if (hybridPlan is not null && !router.ConfigureHybridKeyboard(hybridPlan.PlayerPads, hybridBindings))
+        if (hybridPlan is not null && !router.ConfigureHybridKeyboard(hybridPlan.PlayerPads,
+            hybridBindings, followerMirror))
             throw new InvalidOperationException("Keyboard player mapping does not match the connected virtual controllers.");
         var pairingSignals = new PairingSignalTracker();
         var pairingGate = protectedPairing ? new ProtectedPairingGate() : null;
@@ -444,7 +445,7 @@ try
             menu_guard_enabled = menuGuardEnabled,
             right_stick_follower_override = rightStickFollowerOverride,
             last_focused_leads = lastFocusedLeads,
-            follower_mirror = physicalMode ? followerMirror.Encode() : "",
+            follower_mirror = physicalMode || hybridMode ? followerMirror.Encode() : "",
             direct_right_stick_slot = directRightStickSlot,
             private_client3_pid = client3Options?.Pid ?? 0,
             private_client3_slots = client3Options?.PrivateSlots ?? [],

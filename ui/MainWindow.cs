@@ -1638,7 +1638,7 @@ public sealed class MainWindow : Window
             ? "单人原生键鼠无需桥接" : HybridSelected ? "准备键鼠虚拟手柄" : "准备虚拟手柄";
         _prepareBridge.IsEnabled = !_busy && _bridge is null && gamePathsReady &&
             _menuGuardPreferenceReady && _menuGuard.IsChecked is bool &&
-            (HybridSelected || _followerMirrorPreferenceReady) &&
+            _followerMirrorPreferenceReady &&
             (HybridSelected ? hybridSupported && _gameHotkeys?.IsStarted == true :
                 supported && _leadershipPreferenceReady && _lastFocusedLeads.IsChecked is bool &&
                 (useWgi || _physicalIndex.SelectedIndex is >= 0 and <= 3) &&
@@ -2084,7 +2084,7 @@ public sealed class MainWindow : Window
             return;
         }
         if (!_menuGuardPreferenceReady || _menuGuard.IsChecked is not bool ||
-            (!HybridSelected && !_followerMirrorPreferenceReady))
+            !_followerMirrorPreferenceReady)
         {
             _pairingStatus.Text = "先确认并保存菜单保护及跟随按键设置，再准备桥接。";
             return;
@@ -2150,7 +2150,8 @@ public sealed class MainWindow : Window
         var clients = _launchedClients.ToArray();
         if (topology is null || !HybridTopologySupport.CanBridge(topology) ||
             clients.Length != topology.ClientCount || _gameHotkeys?.IsStarted != true ||
-            !_menuGuardPreferenceReady || _menuGuard.IsChecked is not bool)
+            !_menuGuardPreferenceReady || _menuGuard.IsChecked is not bool ||
+            !_followerMirrorPreferenceReady)
         {
             _pairingStatus.Text = "键鼠模式需要已绑定的游戏窗口与可用的键鼠监听；当前尚未就绪。";
             return;
@@ -2173,7 +2174,8 @@ public sealed class MainWindow : Window
         try
         {
             var session = await BridgeSession.StartHybridAsync(executable, topology.Slots, clients,
-                _hybridBindings, menuGuardEnabled: _menuGuard.IsChecked == true);
+                _hybridBindings, menuGuardEnabled: _menuGuard.IsChecked == true,
+                followerMirror: _followerMirror);
             Volatile.Write(ref _hybridFocusedPlayer, 1);
             Volatile.Write(ref _hybridFocusTransition, 0);
             _hybridFocusKeysDown.Clear();
@@ -2889,6 +2891,12 @@ public sealed class MainWindow : Window
         {
             if (action == ClientAction.Start && HybridSelected)
             {
+                if (!_menuGuardPreferenceReady || _menuGuard.IsChecked is not bool ||
+                    !_followerMirrorPreferenceReady)
+                {
+                    _status.Text = "先确认并保存菜单保护及跟随按键设置；游戏尚未启动。";
+                    return;
+                }
                 _status.Text = "正在启动并绑定游戏窗口；完成后准备键鼠虚拟手柄。";
             }
             else if (action == ClientAction.Start)

@@ -181,7 +181,8 @@ internal sealed class BridgeSession : IAsyncDisposable
 
     internal static async Task<BridgeSession> StartHybridAsync(string executable,
         IReadOnlyList<PartySlot> partySlots, IReadOnlyList<LaunchedClient> clients,
-        HybridBindingConfig? bindings = null, bool menuGuardEnabled = true)
+        HybridBindingConfig? bindings = null, bool menuGuardEnabled = true,
+        FollowerMirrorConfig? followerMirror = null)
     {
         if (partySlots.Count is < 2 or > 3 || clients.Count != 2 ||
             !partySlots.Select(slot => slot.PartyPlayer).SequenceEqual(Enumerable.Range(1, partySlots.Count)) ||
@@ -215,6 +216,11 @@ internal sealed class BridgeSession : IAsyncDisposable
             start.ArgumentList.Add(bindings.Encode());
         }
         if (!menuGuardEnabled) start.ArgumentList.Add("--disable-menu-guard");
+        if (followerMirror is not null)
+        {
+            start.ArgumentList.Add("--follower-mirror");
+            start.ArgumentList.Add(followerMirror.Encode());
+        }
         foreach (var client in clients)
         {
             start.ArgumentList.Add("--game-exe");
@@ -227,7 +233,7 @@ internal sealed class BridgeSession : IAsyncDisposable
         {
             var readyLine = await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15));
             if (readyLine is null || !IsExpectedHybridReady(readyLine, slots, playerPads,
-                    windowMap, bindings?.Encode(), menuGuardEnabled))
+                    windowMap, bindings?.Encode(), menuGuardEnabled, followerMirror))
                 throw new InvalidOperationException("Keyboard bridge did not confirm its pad and window binding.");
             return new BridgeSession(process, readError, false, false, slots, slots, hybridMode: true);
         }
@@ -244,7 +250,7 @@ internal sealed class BridgeSession : IAsyncDisposable
 
     internal static bool IsExpectedHybridReady(string line, int[] slots,
         string playerPads, string windowMap, string? bindingKeys = null,
-        bool menuGuardEnabled = true)
+        bool menuGuardEnabled = true, FollowerMirrorConfig? followerMirror = null)
     {
         try
         {
@@ -255,6 +261,8 @@ internal sealed class BridgeSession : IAsyncDisposable
                 root.TryGetProperty("physical_mode", out var physical) && !physical.GetBoolean() &&
                 root.TryGetProperty("menu_guard_enabled", out var menuGuard) &&
                 menuGuard.GetBoolean() == menuGuardEnabled &&
+                (followerMirror is null || root.TryGetProperty("follower_mirror", out var mirror) &&
+                 mirror.GetString() == followerMirror.Encode()) &&
                 root.TryGetProperty("slots", out var selected) &&
                 selected.EnumerateArray().Select(value => value.GetInt32()).SequenceEqual(slots.Order()) &&
                 root.TryGetProperty("hybrid_player_pads", out var pads) && pads.GetString() == playerPads &&
