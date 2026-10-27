@@ -26,7 +26,7 @@ internal static class LiveTerrainSelectionSmoke
             LiveTerrainSelection.TryCreate(fiveThird, ["", "", ""], true, out _, out _) ||
             LiveTerrainSelection.TryCreate(fiveMain, ["/candidate.json", "", ""], false, out _, out _) ||
             LiveTerrainSelection.TryCreate(six, ["/candidate.json", "", ""], false, out _, out _))
-            throw new Exception("Ordered two-player clients accepted unverified terrain bindings.");
+            throw new Exception("Ordered two-player clients accepted incomplete terrain or unsupported collision settings.");
         var directory = Path.Combine(Path.GetTempPath(),
             "partypilot-live-terrain-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -50,6 +50,29 @@ internal static class LiveTerrainSelectionSmoke
                     out var threeBound, out _) || threeBound[3] != third ||
                 LiveTerrainSelection.TryCreate(three, [first, second, ""], true, out _, out _))
                 throw new Exception("Three-client terrain mode accepted an incomplete role map.");
+            if (!LiveTerrainSelection.TryCreate(four, [first, second], false,
+                    out var fourBound, out _) ||
+                fourBound.Count != 4 || fourBound[1] != first || fourBound[2] != first ||
+                fourBound[3] != second || fourBound[4] != second ||
+                !LiveTerrainSelection.TryCreate(fiveThird, [first, second, third], false,
+                    out var fiveThirdBound, out _) ||
+                fiveThirdBound.Count != 5 || fiveThirdBound[1] != first ||
+                fiveThirdBound[2] != first || fiveThirdBound[3] != second ||
+                fiveThirdBound[4] != second || fiveThirdBound[5] != third ||
+                !LiveTerrainSelection.TryCreate(fiveMain, [first, second, third], false,
+                    out var fiveMainBound, out _) ||
+                fiveMainBound.Count != 5 || fiveMainBound[1] != first ||
+                fiveMainBound[2] != second || fiveMainBound[3] != second ||
+                fiveMainBound[4] != third || fiveMainBound[5] != third ||
+                !LiveTerrainSelection.TryCreate(six, [first, second, third], false,
+                    out var sixBound, out _) ||
+                sixBound.Count != 6 || sixBound[1] != first || sixBound[2] != first ||
+                sixBound[3] != second || sixBound[4] != second ||
+                sixBound[5] != third || sixBound[6] != third ||
+                LiveTerrainSelection.TryCreate(four, [first, first], false, out _, out _) ||
+                LiveTerrainSelection.TryCreate(six, [first, second, ""], false, out _, out _) ||
+                LiveTerrainSelection.TryCreate(six, [first, second, third], true, out _, out _))
+                throw new Exception("Ordered client terrain bindings did not map one file per client.");
         }
         finally { Directory.Delete(directory, recursive: true); }
     }

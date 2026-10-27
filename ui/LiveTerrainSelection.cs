@@ -17,10 +17,9 @@ internal static class LiveTerrainSelection
             return false;
         }
         var selected = paths.Take(topology.ClientCount).Select(path => path?.Trim() ?? "").ToArray();
-        if (orderedTopology)
+        if (orderedTopology && classicCollisionDodge)
         {
-            if (selected.All(string.IsNullOrEmpty) && !classicCollisionDodge) return true;
-            error = "双角色客户端的跟随地形绑定尚未核验；请清空地形路径并关闭经典碰撞闪避。";
+            error = "当前双角色客户端布局不支持经典碰撞闪避。";
             return false;
         }
         if (selected.All(string.IsNullOrEmpty))

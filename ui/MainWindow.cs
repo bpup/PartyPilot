@@ -2389,7 +2389,8 @@ public sealed class MainWindow : Window
                 FollowPlayerStop.TryRead(_followPlayerStops[slot.PartyPlayer - 1].Text, out _));
             var terrainValid = LiveTerrainSelection.TryCreate(_selectedTopology,
                 _terrainBindingPaths.Select(box => box?.Text).ToArray(),
-                _classicCollisionDodge.IsChecked == true && _sprintCatchUp.IsChecked == true,
+                _classicCollisionDodge.IsEnabled && _classicCollisionDodge.IsChecked == true &&
+                _sprintCatchUp.IsChecked == true,
                 out var terrain, out var terrainError);
             valid &= terrainValid;
             _terrainBindingStatus.Text = terrainValid
@@ -3154,6 +3155,7 @@ public sealed class MainWindow : Window
                 throw new InvalidOperationException(flaskCustom.Message);
             if (!LiveTerrainSelection.TryCreate(_selectedTopology,
                     _terrainBindingPaths.Select(box => box?.Text).ToArray(),
+                    _selectedTopology.Id is ("2-split" or "3-three-singles") &&
                     _classicCollisionDodge.IsChecked == true && _sprintCatchUp.IsChecked == true,
                     out var terrain, out var terrainError))
                 throw new InvalidOperationException(terrainError);
@@ -3175,7 +3177,8 @@ public sealed class MainWindow : Window
                 plan.LeaderName);
             var session = await LiveFollowSession.StartAsync(executable, _selectedTopology,
                 _launchedClients, _bridge, plan, memberNames, followTargets, playerStops,
-                terrain, _classicCollisionDodge.IsChecked == true,
+                terrain, _selectedTopology.Id is ("2-split" or "3-three-singles") &&
+                    _classicCollisionDodge.IsChecked == true,
                 _classicSprintCatchUp.IsChecked == true,
                 sprintCatchUp: _sprintCatchUp.IsChecked == true,
                 sprintCatchUpPriority: _sprintCatchUpPriority.IsChecked == true,

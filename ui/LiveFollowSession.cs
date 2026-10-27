@@ -205,15 +205,18 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             (!orderedTopology && (topology.Slots.Count != topology.ClientCount ||
                 topology.Slots.Any(slot => slot.LocalPlayer != 1))))
             throw new InvalidOperationException("Live control requires a supported layout.");
-        if (orderedTopology && terrainBindings is { Count: > 0 })
-            throw new ArgumentException("Two-player clients have no verified terrain binding.");
         var terrain = terrainBindings ?? new Dictionary<int, string>();
+        var terrainClients = topology.Slots.GroupBy(slot => slot.Client).ToArray();
         if ((terrain.Count != 0 &&
-             (terrain.Count != topology.ClientCount ||
+             (terrain.Count != topology.Slots.Count ||
               terrain.Keys.Any(player => !topology.Slots.Any(slot => slot.PartyPlayer == player)) ||
               terrain.Values.Any(path => !Path.IsPathFullyQualified(path) || !File.Exists(path)) ||
-              terrain.Values.Distinct(StringComparer.OrdinalIgnoreCase).Count() != terrain.Count)) ||
-            (classicCollisionDodge && sprintCatchUp && terrain.Count != topology.ClientCount))
+              terrainClients.Any(client => client.Select(slot => terrain[slot.PartyPlayer])
+                  .Distinct(StringComparer.OrdinalIgnoreCase).Count() != 1) ||
+              terrainClients.Select(client => terrain[client.First().PartyPlayer])
+                  .Distinct(StringComparer.OrdinalIgnoreCase).Count() != topology.ClientCount)) ||
+            (classicCollisionDodge && (orderedTopology ||
+                sprintCatchUp && terrain.Count != topology.ClientCount)))
             throw new ArgumentException("Live terrain requires one distinct binding file per client.");
         var start = new ProcessStartInfo(executable)
         {
