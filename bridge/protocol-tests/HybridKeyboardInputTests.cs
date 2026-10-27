@@ -76,6 +76,28 @@ internal static class HybridKeyboardInputTests
         if (customState.FocusedPlayer != 2 || customReport.LeftY != 32767 ||
             customReport.Buttons != 0x1000)
             throw new Exception("Custom Hybrid keys did not control the selected follower.");
+        var extra = new[]
+        {
+            new HybridCustomAction("同时上移", "", 82, 6),
+            new HybridCustomAction("另一个确认键", "", 70, 11),
+            new HybridCustomAction("聚焦键共用", "", 120, 11)
+        };
+        if (!HybridBindingConfig.TryCreate(customKeys, extra, out var withExtra) || withExtra is null ||
+            HybridKeyboardInput.ActionForKey(82, withExtra) !=
+                (HybridAction.Confirm | HybridAction.Up) ||
+            HybridKeyboardInput.ActionForKey(70, withExtra) != HybridAction.Confirm ||
+            !HybridBindingConfig.TryParse(withExtra.Encode(), out var parsedExtra) ||
+            parsedExtra?.Encode() != withExtra.Encode() ||
+            !BridgeProtocol.TryParseHybridKey("{\"type\":\"hybrid_key\",\"key\":70,\"down\":true}",
+                out _, withExtra) ||
+            HybridBindingConfig.TryCreate(customKeys,
+                [new HybridCustomAction("bad", "", 70, 1)], out _))
+            throw new Exception("Extra Hybrid action keys did not compose or validate correctly.");
+        var focusPrecedence = new HybridKeyboardState([2], withExtra);
+        var focusPress = focusPrecedence.Handle(120, true, true);
+        var focusRelease = focusPrecedence.Handle(120, false, true);
+        if (focusPress.Report != default || focusRelease.ConfirmReleased)
+            throw new Exception("A shared focus key incorrectly emitted its extra controller action.");
 
         var diagonal = HybridKeyboardInput.Map(HybridAction.Up | HybridAction.Right);
         if (diagonal.LeftX is < 23169 or > 23171 || diagonal.LeftY != diagonal.LeftX)

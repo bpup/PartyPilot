@@ -1,6 +1,8 @@
 namespace PartyPilot.Common;
 
 internal readonly record struct HybridBindingDefinition(string Id, string Label, int DefaultKey);
+internal readonly record struct HybridCustomAction(string Label, string Description,
+    int Key, int ActionIndex);
 
 internal sealed class HybridBindingConfig
 {
@@ -23,30 +25,47 @@ internal sealed class HybridBindingConfig
     ];
 
     private readonly int[] _keys;
-    internal static HybridBindingConfig Default { get; } = new(Definitions.Select(item => item.DefaultKey).ToArray());
+    private readonly HybridCustomAction[] _customActions;
+    internal static HybridBindingConfig Default { get; } = new(
+        Definitions.Select(item => item.DefaultKey).ToArray(), []);
 
-    private HybridBindingConfig(int[] keys) => _keys = keys;
+    private HybridBindingConfig(int[] keys, HybridCustomAction[] customActions)
+    {
+        _keys = keys;
+        _customActions = customActions;
+    }
 
     internal int KeyAt(int index) => _keys[index];
+    internal IReadOnlyList<HybridCustomAction> CustomActions => _customActions;
     internal int FocusForKey(int key)
     {
         for (var index = 0; index < 6; index++)
             if (Matches(_keys[index], key)) return index + 1;
         return 0;
     }
-    internal bool ContainsKey(int key) => _keys.Any(mapped => Matches(mapped, key));
+    internal bool ContainsKey(int key) => _keys.Any(mapped => Matches(mapped, key)) ||
+        _customActions.Any(action => Matches(action.Key, key));
     internal static bool Matches(int mapped, int key) => mapped != 0 &&
         (mapped == key || mapped == 160 && key == 16 ||
          mapped == 162 && key == 17 || mapped == 164 && key == 18);
-    internal string Encode() => string.Join(',', _keys);
+    internal string Encode() => string.Join(',', _keys) + (_customActions.Length == 0 ? "" :
+        "|" + string.Join(',', _customActions.Select(action =>
+            $"{action.Key}:{action.ActionIndex}")));
 
-    internal static bool TryCreate(IReadOnlyList<int> keys, out HybridBindingConfig? config)
+    internal static bool TryCreate(IReadOnlyList<int> keys, out HybridBindingConfig? config) =>
+        TryCreate(keys, [], out config);
+
+    internal static bool TryCreate(IReadOnlyList<int> keys,
+        IReadOnlyList<HybridCustomAction> customActions, out HybridBindingConfig? config)
     {
         config = null;
-        if (keys.Count != Definitions.Length || keys.Any(key => !AllowedKey(key))) return false;
+        if (keys.Count != Definitions.Length || keys.Any(key => !AllowedKey(key)) ||
+            customActions.Any(action => !AllowedKey(action.Key) ||
+                action.ActionIndex is < 6 or >= 26 || action.Label is null ||
+                action.Description is null)) return false;
         var assigned = keys.Where(key => key != 0).ToArray();
         if (assigned.Distinct().Count() != assigned.Length) return false;
-        config = new HybridBindingConfig(keys.ToArray());
+        config = new HybridBindingConfig(keys.ToArray(), customActions.ToArray());
         return true;
     }
 
@@ -54,12 +73,26 @@ internal sealed class HybridBindingConfig
     {
         config = null;
         if (encoded is null) return false;
-        var parts = encoded.Split(',');
+        var sections = encoded.Split('|');
+        if (sections.Length is < 1 or > 2) return false;
+        var parts = sections[0].Split(',');
         if (parts.Length != Definitions.Length) return false;
         var keys = new int[parts.Length];
         for (var index = 0; index < parts.Length; index++)
             if (!int.TryParse(parts[index], out keys[index])) return false;
-        return TryCreate(keys, out config);
+        var custom = new List<HybridCustomAction>();
+        if (sections.Length == 2)
+        {
+            if (sections[1].Length == 0) return false;
+            foreach (var entry in sections[1].Split(','))
+            {
+                var pair = entry.Split(':');
+                if (pair.Length != 2 || !int.TryParse(pair[0], out var key) ||
+                    !int.TryParse(pair[1], out var actionIndex)) return false;
+                custom.Add(new HybridCustomAction("", "", key, actionIndex));
+            }
+        }
+        return TryCreate(keys, custom, out config);
     }
 
     private static bool AllowedKey(int key) => key == 0 ||

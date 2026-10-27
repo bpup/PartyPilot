@@ -15,10 +15,12 @@ internal static class GameKeyboardShortcutSmoke
         using var hook = new GameKeyboardShortcutHook(() => true, () => { }, () => { });
         var customKeys = HybridBindingConfig.Definitions.Select(item => item.DefaultKey).ToArray();
         customKeys[6] = 73;
-        if (!HybridBindingConfig.TryCreate(customKeys, out var custom) || custom is null)
+        if (!HybridBindingConfig.TryCreate(customKeys,
+                [new HybridCustomAction("extra", "", 70, 11)], out var custom) || custom is null)
             throw new Exception("Custom keyboard map could not be created.");
         hook.SetHybridBindings(custom);
-        if (!hook.IsMappedHybridKey(73) || hook.IsMappedHybridKey(87) ||
+        if (!hook.IsMappedHybridKey(73) || !hook.IsMappedHybridKey(70) ||
+            hook.IsMappedHybridKey(87) ||
             !hook.IsMappedHybridKey(18))
             throw new Exception("The desktop hook ignored the configured keyboard map or modifier alias.");
         if (hook.SetKeys(0x77, 0x77) || !hook.SetKeys(0x77, 0x76) ||

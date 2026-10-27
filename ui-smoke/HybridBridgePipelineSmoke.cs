@@ -54,7 +54,8 @@ internal static class HybridBridgePipelineSmoke
             };
             var customKeys = HybridBindingConfig.Definitions.Select(item => item.DefaultKey).ToArray();
             customKeys[6] = 73;
-            if (!HybridBindingConfig.TryCreate(customKeys, out var bindings) || bindings is null)
+            if (!HybridBindingConfig.TryCreate(customKeys,
+                    [new HybridCustomAction("额外确认", "", 70, 11)], out var bindings) || bindings is null)
                 throw new Exception("Fake bridge could not create a custom keyboard map.");
             await using var bridge = await BridgeSession.StartHybridAsync(executable, topology.Slots,
                 clients, bindings);

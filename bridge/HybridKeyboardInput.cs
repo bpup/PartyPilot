@@ -33,9 +33,12 @@ internal static class HybridKeyboardInput
     internal static HybridAction ActionForKey(int key, HybridBindingConfig? bindings = null)
     {
         bindings ??= HybridBindingConfig.Default;
+        var actions = HybridAction.None;
         for (var index = 0; index < BoundActions.Length; index++)
-            if (HybridBindingConfig.Matches(bindings.KeyAt(index + 6), key)) return BoundActions[index];
-        return HybridAction.None;
+            if (HybridBindingConfig.Matches(bindings.KeyAt(index + 6), key)) actions |= BoundActions[index];
+        foreach (var custom in bindings.CustomActions)
+            if (HybridBindingConfig.Matches(custom.Key, key)) actions |= BoundActions[custom.ActionIndex - 6];
+        return actions;
     }
 
     internal static int FocusForKey(int key, HybridBindingConfig? bindings = null) =>
@@ -109,7 +112,8 @@ internal sealed class HybridKeyboardState
                 return 0;
             var actions = HybridAction.None;
             foreach (var key in _pressed)
-                if (!_blockedUntilRelease.Contains(key) && !_mainMirrorBlockedUntilRelease.Contains(key))
+                if (HybridKeyboardInput.FocusForKey(key, _bindings) == 0 &&
+                    !_blockedUntilRelease.Contains(key) && !_mainMirrorBlockedUntilRelease.Contains(key))
                     actions |= HybridKeyboardInput.ActionForKey(key, _bindings);
             return HybridKeyboardInput.MapMainFollowMirror(actions, true, false).Buttons;
         }
@@ -130,7 +134,8 @@ internal sealed class HybridKeyboardState
         {
             var confirmReleased = _gameForeground && FocusedPlayer > 1 &&
                 _pressed.Contains(virtualKey) && !_blockedUntilRelease.Contains(virtualKey) &&
-                HybridKeyboardInput.ActionForKey(virtualKey, _bindings) == HybridAction.Confirm;
+                HybridKeyboardInput.FocusForKey(virtualKey, _bindings) == 0 &&
+                (HybridKeyboardInput.ActionForKey(virtualKey, _bindings) & HybridAction.Confirm) != 0;
             _pressed.Remove(virtualKey);
             _blockedUntilRelease.Remove(virtualKey);
             _mainMirrorBlockedUntilRelease.Remove(virtualKey);
@@ -176,7 +181,9 @@ internal sealed class HybridKeyboardState
         if (!_gameForeground || FocusedPlayer == 1) return new(FocusedPlayer, default);
         var actions = HybridAction.None;
         foreach (var key in _pressed)
-            if (!_blockedUntilRelease.Contains(key)) actions |= HybridKeyboardInput.ActionForKey(key, _bindings);
+            if (HybridKeyboardInput.FocusForKey(key, _bindings) == 0 &&
+                !_blockedUntilRelease.Contains(key))
+                actions |= HybridKeyboardInput.ActionForKey(key, _bindings);
         return new(FocusedPlayer, HybridKeyboardInput.Map(actions));
     }
 
@@ -187,5 +194,7 @@ internal sealed class HybridKeyboardState
     }
 
     private bool IsMainMirrorAction(int key) =>
-        HybridKeyboardInput.ActionForKey(key, _bindings) is HybridAction.Confirm or HybridAction.Cancel;
+        HybridKeyboardInput.FocusForKey(key, _bindings) == 0 &&
+        (HybridKeyboardInput.ActionForKey(key, _bindings) &
+            (HybridAction.Confirm | HybridAction.Cancel)) != 0;
 }

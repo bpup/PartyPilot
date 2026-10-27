@@ -136,10 +136,15 @@ if (args.Contains("--ui-controls-only"))
     if (window.GetLogicalDescendants().OfType<Button>().Count(button =>
             button.Content?.ToString() == "设置键鼠按键映射") != 1)
         throw new Exception("The desktop did not expose the target-version keyboard map editor.");
-    var bindings = new HybridBindingDialog(PartyPilot.Common.HybridBindingConfig.Default);
+    if (!PartyPilot.Common.HybridBindingConfig.TryCreate(
+            PartyPilot.Common.HybridBindingConfig.Definitions.Select(item => item.DefaultKey).ToArray(),
+            [new PartyPilot.Common.HybridCustomAction("额外确认", "", 70, 11)],
+            out var customBindings) || customBindings is null)
+        throw new Exception("The Hybrid action editor could not construct an extra binding.");
+    var bindings = new HybridBindingDialog(customBindings);
     bindings.Show(window);
     if (bindings.GetLogicalDescendants().OfType<ComboBox>().Count() !=
-        PartyPilot.Common.HybridBindingConfig.Definitions.Length)
+        PartyPilot.Common.HybridBindingConfig.Definitions.Length + 2)
         throw new Exception("The keyboard map editor omitted a focus or controller action.");
     bindings.Close();
     var sample = new LoginCalibrationDialog(1,

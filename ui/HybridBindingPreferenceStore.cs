@@ -19,7 +19,14 @@ internal sealed class HybridBindingPreferenceStore
             if (json.RootElement.ValueKind != JsonValueKind.Object ||
                 !json.RootElement.TryGetProperty("keys", out var keys) ||
                 keys.ValueKind != JsonValueKind.String ||
-                !HybridBindingConfig.TryParse(keys.GetString(), out var bindings) || bindings is null)
+                !HybridBindingConfig.TryParse(keys.GetString(), out var baseBindings) ||
+                baseBindings is null || baseBindings.CustomActions.Count != 0)
+                return (false, HybridBindingConfig.Default);
+            var custom = json.RootElement.TryGetProperty("custom", out var customValue)
+                ? customValue.Deserialize<HybridCustomAction[]>() : [];
+            if (custom is null || !HybridBindingConfig.TryCreate(
+                    Enumerable.Range(0, HybridBindingConfig.Definitions.Length)
+                        .Select(baseBindings.KeyAt).ToArray(), custom, out var bindings) || bindings is null)
                 return (false, HybridBindingConfig.Default);
             return (true, bindings);
         }
@@ -35,7 +42,12 @@ internal sealed class HybridBindingPreferenceStore
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            File.WriteAllBytes(temporary, JsonSerializer.SerializeToUtf8Bytes(new { keys = bindings.Encode() }));
+            File.WriteAllBytes(temporary, JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                keys = string.Join(',', Enumerable.Range(0, HybridBindingConfig.Definitions.Length)
+                    .Select(bindings.KeyAt)),
+                custom = bindings.CustomActions
+            }));
             File.Move(temporary, _path, overwrite: true);
             return true;
         }

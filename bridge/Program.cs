@@ -208,7 +208,7 @@ if (hybridKeysPosition >= 0 && (!hybridMode ||
     hybridKeysPosition + 1 >= args.Length ||
     !HybridBindingConfig.TryParse(args[hybridKeysPosition + 1], out configuredBindings)))
 {
-    Console.Error.WriteLine("Keyboard bindings must contain 26 distinct supported virtual keys.");
+    Console.Error.WriteLine("Keyboard bindings require 26 distinct base keys and valid extra actions.");
     return 2;
 }
 var hybridBindings = configuredBindings ?? HybridBindingConfig.Default;
