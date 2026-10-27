@@ -25,7 +25,7 @@ type CustomRule struct {
 	Input           string  `json:"input"`
 }
 
-func validateCustomRules(rules []CustomRule) error {
+func ValidateCustomRules(rules []CustomRule) error {
 	seen := make(map[string]bool, len(rules))
 	for _, rule := range rules {
 		if strings.TrimSpace(rule.ID) == "" || seen[rule.ID] ||

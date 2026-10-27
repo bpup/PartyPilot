@@ -79,6 +79,35 @@ func TestFlaskRulesFileRequiresEveryExplicitField(t *testing.T) {
 	}
 }
 
+func TestFlaskCustomFileRequiresEveryTargetField(t *testing.T) {
+	rules, err := loadFlaskCustomRules("../../testdata/flask-custom-live.json")
+	if err != nil || len(rules) != 1 || rules[0].Input != "X" ||
+		!rules[0].CombatOnly || rules[0].Player != "P1" {
+		t.Fatalf("custom recovery fixture did not load: %+v %v", rules, err)
+	}
+	path := filepath.Join(t.TempDir(), "custom.json")
+	for _, contents := range []string{"{}", "{\"rules\":null}",
+		"{\"rules\":[{\"id\":\"one\"}]}",
+		"{\"rules\":[],\"unknown\":true}",
+		strings.ReplaceAll(string(mustReadCustomFixture(t)), `"input": "X"`, `"input": "A"`)} {
+		if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadFlaskCustomRules(path); err == nil {
+			t.Fatalf("invalid custom recovery file accepted: %s", contents)
+		}
+	}
+}
+
+func mustReadCustomFixture(t *testing.T) []byte {
+	t.Helper()
+	contents, err := os.ReadFile("../../testdata/flask-custom-live.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return contents
+}
+
 func TestClassicCollisionDodgeRequiresAllBoundTerrain(t *testing.T) {
 	roster := map[int]int{1: 101, 2: 202}
 	if err := validateClassicCollisionBindings(false, roster, nil); err != nil {

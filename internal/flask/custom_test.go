@@ -99,7 +99,7 @@ func TestCustomRecoveryRejectsUnverifiedInputs(t *testing.T) {
 	} {
 		copyRules := append([]CustomRule(nil), rules...)
 		changed(&copyRules[0])
-		if err := validateCustomRules(copyRules); err == nil {
+		if err := ValidateCustomRules(copyRules); err == nil {
 			t.Fatalf("unsupported custom recovery setting accepted: %+v", copyRules[0])
 		}
 	}

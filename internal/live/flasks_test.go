@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"partypilot/internal/arealog"
+	"partypilot/internal/flask"
 	"partypilot/internal/follow"
 	"partypilot/internal/telemetry"
 )
@@ -64,6 +65,69 @@ func TestLiveFlasksRequireBoundFreshVitalsAndClearMenu(t *testing.T) {
 	check(sample(202, start.Add(5*time.Second), 30), start.Add(5*time.Second), 1)
 	if err := session.SetMenuGuard(3, "clear"); err == nil {
 		t.Fatal("unbound player accepted a menu state")
+	}
+}
+
+func TestCustomRecoveryNeedsBoundRecentAttack(t *testing.T) {
+	liveEngine, err := New(map[int]int{1: 101, 2: 202}, 1,
+		follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10,
+			MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer liveEngine.Close()
+	session, err := NewFlaskSession(liveEngine, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := flask.CustomRule{ID: "es-recovery-x", Enabled: true, Player: "P1",
+		Resource: "Energy Shield", Comparator: "≤", Threshold: 50,
+		CooldownSeconds: 1, Priority: 50, MinDeficit: 0, Dependency: "None",
+		CombatOnly: true, Input: "X"}
+	if err := session.ConfigureCustomRules([]flask.CustomRule{rule}); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.SetMenuGuard(1, "clear"); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Unix(100, 0)
+	liveEngine.ObserveArea(arealog.Signal{Slot: 1, AreaID: "G2_4", Seed: 123,
+		ObservedAt: start, Origin: "live"})
+	read := func(at time.Time) []flask.Activation {
+		t.Helper()
+		sample := telemetry.Sample{ProcessID: 101, SeenUTC: at, ReceivedAt: at,
+			TickMS: at.UnixMilli(), CoordinateSpace: "world", AreaHash: 55,
+			Life: ptr(100), LifeMax: ptr(100), EnergyShield: ptr(30), EnergyShieldMax: ptr(100)}
+		if !liveEngine.ObserveSample(sample) {
+			t.Fatal("custom recovery sample was rejected")
+		}
+		got, err := session.ObserveSample(sample, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := read(start); len(got) != 0 {
+		t.Fatalf("combat-only rule fired without attack evidence: %+v", got)
+	}
+	if err := session.ObserveMainAttack(2, start.Add(time.Second), true); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(start.Add(time.Second)); len(got) != 0 {
+		t.Fatalf("another player's attack armed P1: %+v", got)
+	}
+	if err := session.ObserveMainAttack(1, start.Add(2*time.Second), true); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(start.Add(2 * time.Second)); len(got) != 1 ||
+		got[0].Resource != "action" || got[0].DirectInput != "X" {
+		t.Fatalf("bound recent attack did not activate custom X: %+v", got)
+	}
+	if got := read(start.Add(23 * time.Second)); len(got) != 0 {
+		t.Fatalf("combat-only rule survived the target 20-second window: %+v", got)
+	}
+	if err := session.ObserveMainAttack(3, start, true); err == nil {
+		t.Fatal("unbound combat role accepted")
 	}
 }
 

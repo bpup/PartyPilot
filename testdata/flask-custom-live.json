@@ -1,0 +1,18 @@
+{
+  "rules": [
+    {
+      "id": "es-recovery-x",
+      "enabled": true,
+      "player": "P1",
+      "resource": "Energy Shield",
+      "comparator": "≤",
+      "threshold": 50,
+      "cooldown_seconds": 1,
+      "priority": 50,
+      "min_deficit": 0,
+      "dependency": "None",
+      "combat_only": true,
+      "input": "X"
+    }
+  ]
+}

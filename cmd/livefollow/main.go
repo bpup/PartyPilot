@@ -100,6 +100,49 @@ func loadFlaskRuleBindings(path string) ([]live.FlaskRuleBinding, error) {
 	return document.Players, nil
 }
 
+func loadFlaskCustomRules(path string) ([]flask.CustomRule, error) {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(contents, &raw); err != nil {
+		return nil, err
+	}
+	if len(raw) != 1 || raw["rules"] == nil {
+		return nil, errors.New("custom flask file requires only rules")
+	}
+	var entries []map[string]json.RawMessage
+	if err := json.Unmarshal(raw["rules"], &entries); err != nil || entries == nil {
+		return nil, errors.New("custom flask file needs a rules array")
+	}
+	fields := []string{"id", "enabled", "player", "resource", "comparator",
+		"threshold", "cooldown_seconds", "priority", "min_deficit", "dependency",
+		"combat_only", "input"}
+	for _, entry := range entries {
+		if len(entry) != len(fields) {
+			return nil, errors.New("custom flask rule has missing or unknown fields")
+		}
+		for _, field := range fields {
+			if entry[field] == nil {
+				return nil, errors.New("custom flask rule has missing fields")
+			}
+		}
+	}
+	var document struct {
+		Rules []flask.CustomRule `json:"rules"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(contents))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&document); err != nil {
+		return nil, err
+	}
+	if err := flask.ValidateCustomRules(document.Rules); err != nil {
+		return nil, err
+	}
+	return document.Rules, nil
+}
+
 func parseMirrorBPlayers(value string, roster map[int]int) (map[int]bool, error) {
 	allowed := make(map[int]bool)
 	if value == "none" {
@@ -378,6 +421,12 @@ func applyMenuInput(session *live.FlaskSession, engine *live.Engine, input <-cha
 				}, now) {
 					return errors.New("invalid main input control")
 				}
+				if session != nil {
+					if err := session.ObserveMainAttack(command.Slot, observedAt,
+						*command.AttackActive && !command.Blocked); err != nil {
+						return err
+					}
+				}
 			case "menu_guard":
 				if session == nil {
 					return errors.New("menu guard is not enabled")
@@ -526,6 +575,7 @@ func main() {
 	autoFlask := flag.Bool("auto-flask", false, "enable life and mana flask decisions for explicitly bound clients")
 	flaskSupportFile := flag.String("flask-support-file", "", "explicit Drinker support rules in a JSON file; requires -auto-flask")
 	flaskRulesFile := flag.String("flask-rules-file", "", "explicit per-player life and mana rules in a JSON file; requires -auto-flask")
+	flaskCustomFile := flag.String("flask-custom-file", "", "explicit custom recovery rules in a JSON file; requires -auto-flask")
 	allowFollowPause := flag.Bool("allow-follow-pause", false, "accept explicit pause/resume controls on stdin")
 	acceptMainInput := flag.Bool("accept-main-input", false, "accept bound main-controller samples without enabling mirror output")
 	mirrorAttackDirection := flag.Bool("mirror-attack-direction", false,
@@ -555,6 +605,10 @@ func main() {
 	}
 	if *flaskRulesFile != "" && !*autoFlask {
 		fmt.Fprintln(os.Stderr, "flask rules require -auto-flask")
+		os.Exit(2)
+	}
+	if *flaskCustomFile != "" && !*autoFlask {
+		fmt.Fprintln(os.Stderr, "custom recovery rules require -auto-flask")
 		os.Exit(2)
 	}
 	if *mirrorAttackDirection && !*acceptMainInput {
@@ -700,6 +754,17 @@ func main() {
 				os.Exit(2)
 			}
 			if err := flaskSession.ConfigureRules(ownRules); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+		}
+		if *flaskCustomFile != "" {
+			customRules, readErr := loadFlaskCustomRules(*flaskCustomFile)
+			if readErr != nil {
+				fmt.Fprintln(os.Stderr, readErr)
+				os.Exit(2)
+			}
+			if err := flaskSession.ConfigureCustomRules(customRules); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(2)
 			}

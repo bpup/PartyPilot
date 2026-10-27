@@ -19,9 +19,42 @@ type FlaskSession struct {
 	menuOpen       map[int]bool
 	seen           map[int]time.Time
 	maxAge         time.Duration
+	custom         []flask.CustomRule
+	combatAt       map[int]time.Time
 	support        []FlaskSupportBinding
 	supportOptions map[int]FlaskSupportBinding
 	ownRules       map[int]flask.Settings
+}
+
+func (session *FlaskSession) ConfigureCustomRules(rules []flask.CustomRule) error {
+	if err := flask.ValidateCustomRules(rules); err != nil {
+		return err
+	}
+	session.custom = append([]flask.CustomRule(nil), rules...)
+	return nil
+}
+
+// ObserveMainAttack records only a validated, unblocked input for a bound role.
+// The target's combat-only custom rules use a 20-second recent attack window.
+func (session *FlaskSession) ObserveMainAttack(slot int, observedAt time.Time, active bool) error {
+	if _, bound := session.menuOpen[slot]; !bound || observedAt.IsZero() {
+		return errors.New("combat input refers to an unbound player or invalid time")
+	}
+	if !active {
+		return nil
+	}
+	if session.combatAt == nil {
+		session.combatAt = make(map[int]time.Time)
+	}
+	if observedAt.After(session.combatAt[slot]) {
+		session.combatAt[slot] = observedAt
+	}
+	return nil
+}
+
+func (session *FlaskSession) combatRecent(slot int, now time.Time) bool {
+	last := session.combatAt[slot]
+	return !last.IsZero() && !now.Before(last) && now.Sub(last) <= 20*time.Second
 }
 
 type FlaskSupportBinding struct {
@@ -160,8 +193,8 @@ func (session *FlaskSession) ObserveSample(sample telemetry.Sample, now time.Tim
 	}
 	// The target's local and distributed live calls pass recovering=false;
 	// Ward has no verified live source here.
-	activations, err := session.engine.Step(slot, sample.SeenUTC, data, rules,
-		session.menuOpen[slot], false)
+	activations, err := session.engine.StepWithCustom(slot, sample.SeenUTC, data, rules,
+		session.menuOpen[slot], false, session.custom, session.combatRecent(slot, now))
 	if err != nil {
 		return nil, err
 	}
@@ -218,8 +251,9 @@ func (session *FlaskSession) ObserveOrderedVitals(frame OrderedVitalsFrame,
 			Mana:         flask.Pool{Current: player.Mana, Maximum: player.ManaMax},
 			EnergyShield: flask.Pool{Current: player.EnergyShield, Maximum: player.EnergyShieldMax},
 		}
-		requested, err := session.engine.Step(role.Slot, frame.SeenUTC,
-			data, rules, session.menuOpen[role.Slot], false)
+		requested, err := session.engine.StepWithCustom(role.Slot, frame.SeenUTC,
+			data, rules, session.menuOpen[role.Slot], false, session.custom,
+			session.combatRecent(role.Slot, now))
 		if err != nil {
 			return nil, err
 		}

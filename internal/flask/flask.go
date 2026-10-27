@@ -141,7 +141,7 @@ func (engine *Engine) StepWithCustom(player int, now time.Time, vitals Vitals, r
 		!validPool(vitals.Life) || !validPool(vitals.Mana) || !validPool(vitals.EnergyShield) || !validWard(vitals.Ward) {
 		return nil, errors.New("invalid player, time, rule, or vitals")
 	}
-	if err := validateCustomRules(custom); err != nil {
+	if err := ValidateCustomRules(custom); err != nil {
 		return nil, err
 	}
 	state := engine.players[player]
