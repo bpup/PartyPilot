@@ -35,7 +35,7 @@ Windows CI 现用 `native/private-slot-runtime/CMakeLists.txt` 从同一源码�
 
 Windows CI 另构建一个只含窗口与 XInput 轮询的独立测试进程 `PathOfExile_x64.exe`，由真实 `Client3RuntimeAttach.AttachAsync` 路径加载私有 DLL，并检查 P5/P6 两槽按键、回中与停止断连。测试进程只借用被允许的可执行文件名以覆盖绑定检查，不含游戏代码；PR 检查 `40531944978` 的跨进程附加步骤和整套 Windows smoke 均已通过。
 
-立即重连检查在 PR 检查 `40533727919` 曾复现旧命名映射未释放导致 `MemoryMappedFile.CreateNew` 抛出文件已存在异常。附加路径现对该映射创建异常做有界重试，最多等待 3 秒；过时仍失败，不接管旧映射。修复后的 Windows 检查与真实 PoE2 重连效果分别待验证。
+立即重连检查在 PR 检查 `40533727919` 曾复现旧命名映射未释放导致 `MemoryMappedFile.CreateNew` 抛出文件已存在异常。附加路径现对该映射创建异常做有界重试，最多等待 3 秒；过时仍失败，不接管旧映射。PR 检查 `40535005932` 在 Windows 测试进程中完成连续四次立即重连，真实 PoE2 重连效果仍待验证。
 
 ## 待确认
 
