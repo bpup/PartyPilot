@@ -96,6 +96,10 @@ using (var fast = System.Text.Json.JsonDocument.Parse(FastOrderedCandidateFrame.
     Require(root.GetProperty("Kind").GetString() == "ordered_client" &&
         !root.GetProperty("PlayerOrderReliable").GetBoolean() &&
         root.GetProperty("PlayerOrderSource").GetString() == FastOrderedCandidateFrame.Source &&
+        root.GetProperty("AreaInstanceAddress").GetString() == "0x100000" &&
+        root.GetProperty("VectorHeaderAddress").GetString() == "0x1005C8" &&
+        root.GetProperty("OrderedAddresses").EnumerateArray().Select(item => item.GetString())
+            .SequenceEqual(["0x200000", "0x300000"]) &&
         root.GetProperty("Players").GetArrayLength() == 2 &&
         root.GetProperty("Players")[1].GetProperty("X").GetSingle() == 30,
         "Fast candidate packet promoted an unverified order or lost P2 motion.");
@@ -103,6 +107,7 @@ using (var fast = System.Text.Json.JsonDocument.Parse(FastOrderedCandidateFrame.
 using (var fast = System.Text.Json.JsonDocument.Parse(FastOrderedCandidateFrame.Encode(
     101, 42, "TestArea", null, motionSeen, motionSeen.Ticks)))
     Require(!fast.RootElement.GetProperty("PlayerOrderReliable").GetBoolean() &&
+        fast.RootElement.GetProperty("OrderedAddresses").GetArrayLength() == 0 &&
         fast.RootElement.GetProperty("Players").GetArrayLength() == 0,
         "Missing local slots produced a trusted or partial fast frame.");
 secondWorldX = 35;

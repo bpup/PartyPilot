@@ -2,6 +2,7 @@ package slotaudit
 
 import (
 	"math"
+	"slices"
 	"time"
 
 	"partypilot/internal/live"
@@ -17,14 +18,16 @@ type MovementWindow struct {
 }
 
 type MovementWindowReport struct {
-	Label             string     `json:"label"`
-	StartSeconds      float64    `json:"startSeconds"`
-	EndSeconds        float64    `json:"endSeconds"`
-	CompleteFrames    int        `json:"completeFrames"`
-	SameAreaSteps     int        `json:"sameAreaSteps"`
-	AreaChanges       int        `json:"areaChanges"`
-	TimeRegressions   int        `json:"timeRegressions"`
-	PathDistanceWorld [2]float64 `json:"pathDistanceWorld"`
+	Label                      string     `json:"label"`
+	StartSeconds               float64    `json:"startSeconds"`
+	EndSeconds                 float64    `json:"endSeconds"`
+	CompleteFrames             int        `json:"completeFrames"`
+	SameAreaSteps              int        `json:"sameAreaSteps"`
+	AreaChanges                int        `json:"areaChanges"`
+	VectorChanges              int        `json:"vectorChanges"`
+	MissingVectorIdentitySteps int        `json:"missingVectorIdentitySteps"`
+	TimeRegressions            int        `json:"timeRegressions"`
+	PathDistanceWorld          [2]float64 `json:"pathDistanceWorld"`
 }
 
 func (a *Audit) ControlledMovement(windows []MovementWindow) map[int][]MovementWindowReport {
@@ -50,6 +53,12 @@ func (a *Audit) ControlledMovement(windows []MovementWindow) map[int][]MovementW
 						report.TimeRegressions++
 					} else if frame.AreaHash != previous.AreaHash {
 						report.AreaChanges++
+					} else if !hasVectorIdentity(*frame) || !hasVectorIdentity(*previous) {
+						report.MissingVectorIdentitySteps++
+					} else if frame.AreaInstanceAddress != previous.AreaInstanceAddress ||
+						frame.VectorHeaderAddress != previous.VectorHeaderAddress ||
+						!slices.Equal(frame.OrderedAddresses, previous.OrderedAddresses) {
+						report.VectorChanges++
 					} else {
 						report.SameAreaSteps++
 						for slot := 0; slot < 2; slot++ {
@@ -65,6 +74,12 @@ func (a *Audit) ControlledMovement(windows []MovementWindow) map[int][]MovementW
 		}
 	}
 	return result
+}
+
+func hasVectorIdentity(frame live.OrderedClientFrame) bool {
+	return frame.AreaInstanceAddress != "" && frame.VectorHeaderAddress != "" &&
+		len(frame.OrderedAddresses) == 2 && frame.OrderedAddresses[0] != "" &&
+		frame.OrderedAddresses[1] != "" && frame.OrderedAddresses[0] != frame.OrderedAddresses[1]
 }
 
 func completeTwoSlots(frame live.OrderedClientFrame) bool {

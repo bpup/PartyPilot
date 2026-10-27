@@ -31,6 +31,9 @@ type OrderedClientFrame struct {
 	TickMS              int64                `json:"TickMs"`
 	AreaName            string               `json:"AreaName"`
 	AreaHash            uint32               `json:"AreaHash"`
+	AreaInstanceAddress string               `json:"AreaInstanceAddress"`
+	VectorHeaderAddress string               `json:"VectorHeaderAddress"`
+	OrderedAddresses    []string             `json:"OrderedAddresses"`
 	CoordinateSpace     string               `json:"CoordinateSpace"`
 	PlayerOrderReliable bool                 `json:"PlayerOrderReliable"`
 	PlayerOrderSource   string               `json:"PlayerOrderSource"`

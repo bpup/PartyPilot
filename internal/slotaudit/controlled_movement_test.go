@@ -15,6 +15,8 @@ func TestControlledMovementMeasuresEachSlotWithoutVerdict(t *testing.T) {
 		at := start.Add(time.Duration(second) * time.Second)
 		return live.OrderedClientFrame{ProcessID: 17, SeenUTC: at, TickMS: at.UnixMilli(),
 			AreaHash: area, CoordinateSpace: "world",
+			AreaInstanceAddress: "0x1000", VectorHeaderAddress: "0x2000",
+			OrderedAddresses:  []string{"0x3000", "0x4000"},
 			PlayerOrderSource: "unverified_exilecore_local_slot_candidate",
 			Players: []live.OrderedLocalPlayer{{LocalPlayer: 1, X: first},
 				{LocalPlayer: 2, X: secondPlayer}}}
@@ -40,5 +42,40 @@ func TestControlledMovementMeasuresEachSlotWithoutVerdict(t *testing.T) {
 	stale := frame(4, 2, math.NaN(), 9)
 	if a.ObserveFast(stale) {
 		t.Fatal("non-finite candidate accepted")
+	}
+}
+
+func TestControlledMovementDoesNotJoinChangedOrUnidentifiedVectors(t *testing.T) {
+	start := time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC)
+	a := New()
+	frame := func(second int, x float64) live.OrderedClientFrame {
+		at := start.Add(time.Duration(second) * time.Second)
+		return live.OrderedClientFrame{ProcessID: 17, SeenUTC: at, TickMS: at.UnixMilli(),
+			AreaHash: 1, CoordinateSpace: "world",
+			AreaInstanceAddress: "0x1000", VectorHeaderAddress: "0x2000",
+			OrderedAddresses:  []string{"0x3000", "0x4000"},
+			PlayerOrderSource: "unverified_exilecore_local_slot_candidate",
+			Players:           []live.OrderedLocalPlayer{{LocalPlayer: 1, X: x}, {LocalPlayer: 2}}}
+	}
+	first := frame(0, 0)
+	changed := frame(1, 100)
+	changed.OrderedAddresses = []string{"0x4000", "0x3000"}
+	missing := frame(2, 200)
+	missing.VectorHeaderAddress = ""
+	for _, f := range []live.OrderedClientFrame{first, changed, missing} {
+		if !a.ObserveFast(f) {
+			t.Fatal("candidate frame rejected")
+		}
+	}
+	report := a.ControlledMovement([]MovementWindow{{Label: "P1 only", End: 3 * time.Second}})[17][0]
+	if report.CompleteFrames != 3 || report.VectorChanges != 1 ||
+		report.MissingVectorIdentitySteps != 1 || report.SameAreaSteps != 0 ||
+		report.PathDistanceWorld != [2]float64{} {
+		t.Fatalf("changed vectors contributed to a controlled movement path: %+v", report)
+	}
+	fast := a.Reports()[0].FastMotion
+	if fast == nil || fast.VectorChanges != 1 ||
+		fast.MissingVectorIdentitySteps != 1 || fast.SlotMovementFrames != [2]int{} {
+		t.Fatalf("changed vectors contributed to fast movement counts: %+v", fast)
 	}
 }

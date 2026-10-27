@@ -22,7 +22,7 @@
 
 该选项现在还输出 ExileCore2 公开的 `IngameState.Data.Address`、`GameController.Player.Address`，以及各可见玩家实体的 `Address`/`Path`。地址以十六进制字符串传输，避免 64 位整数在其他 JSON 工具中丢失精度；接收端会拒绝格式错误或与已标记当前角色不一致的地址。地址只用于同窗口实机取证，未被解释为本地槽位，未进入自动跟随决策。当前没有证据证明 ExileCore2 的 `IngameState.Data.Address` 与目标探针的 `areaInstance` 是同一基址。
 
-另一个默认关闭的 `DiagnoseLocalSlotCandidates` 选项每秒只读扫描一次：以 ExileCore2 的上述数据地址为实验基址，在所提供版本静态公开默认结构偏移 1408/2552、向量偏移 72 的 ±128 字节内寻找 1–2 项指针向量。它只接纳路径可验证为角色、包含当前角色且顺序无冲突的候选；路径可来自当帧可见实体，也可在原始内存中读取。结果明确标为 `single_slot_candidate` / `two_slot_candidate`，而不是可靠 P1/P2。偏移来自静态默认值，目标运行时配置可能不同；实验基址与目标 `areaInstance` 的关系也未经实机证明。合成内存测试覆盖有序双角色、冲突向量、未观察实体、非角色路径及过长向量。该诊断不会改变跟随或手柄输入。
+另一个默认关闭的 `DiagnoseLocalSlotCandidates` 选项每秒只读扫描一次：以 ExileCore2 的上述数据地址为实验基址，在所提供版本静态公开默认结构偏移 1408/2552、向量偏移 72 的 ±128 字节内寻找 1–2 项指针向量。它只接纳路径可验证为角色且顺序无冲突的候选；路径可来自当帧可见实体，也可在原始内存中读取。结果明确标为 `single_slot_candidate` / `two_slot_candidate`，而不是可靠 P1/P2。偏移来自静态默认值，目标运行时配置可能不同；实验基址与目标 `areaInstance` 的关系也未经实机证明。合成内存测试覆盖有序双角色、冲突向量、未观察实体、非角色路径及过长向量。该诊断不会改变跟随或手柄输入。
 
 候选扫描已有对可见集合外角色读取原始路径的回退。现在连可见集合中的路径无效时也会尝试原始路径，并记录选中向量的结构/字段偏移，以及由可见路径或原始路径验证的槽位数量。`PartyPilot-SlotAudit` 的 `rawPathFrames` 统计完整帧中使用了原始路径的次数。目标探针的 `EntityPathCache` 实际通过 `ServerInventoryReader.ReadEntityPath` 读取路径，并按实体 ID 缓存；独立版尚未复制其完整区域实体列表和缓存生命周期，也没有实机证据证明偏移及路径一致。
 
@@ -41,6 +41,8 @@
 现在全量候选搜索仍最多每秒一次，但缓存向量会在每次 10Hz 传感器发送前后各重验一次，并重读两名候选的原始位置；向量、路径或顺序在采样期间变化就清空该帧候选，下一帧重新搜索。`RawPositionsSeenUtc` 随实际重读更新，合成内存检查覆盖连续帧位置变化和采样中途角色调序。这仍是只读候选诊断，不会发布 `ordered_client` 控制报文。
 
 新增默认关闭的 `DiagnoseFastOrderedMotion`，须同时开启 `DiagnoseLocalSlotCandidates`。传感器在 `Render` 回调中以 20 毫秒为最短间隔重验已缓存向量、重读候选位置，并向独立的本机 UDP 端口 47620 输出目标形状的 `ordered_client` **诊断报文**；实际频率受渲染回调频率限制。报文强制 `PlayerOrderReliable=false` 和固定的未验证来源，无完整位置时输出空 `Players`；区域/角色身份或向量在读取中变化则跳过该帧。`PartyPilot-OrderedMotionLog.exe` 只记录这种未验证报文为 JSONL，拒绝看似可靠或来源不符的报文。该端口与实时控制端口隔离，不能用作自动跟随输入。尚无 Windows/PoE2 录制，也没有证据把候选槽位认定为可靠 P1/P2。
+
+快速诊断帧现在还携带候选区域实例地址、向量头地址和有序角色实体地址。`SlotAudit` 在 `fastMotion` 与 `controlledMovement` 中分别报告同一区域内的向量变更、向量身份缺失；这些相邻帧不会贡献逐槽移动次数或受控路程。它能指出采集链在操作期间换源，仍不能单凭地址稳定证明角色身份正确。
 
 新增 `PartyPilot-SlotAudit.exe -input sensorlog.jsonl` 离线核对工具，读取 `PartyPilot-SensorLog.exe` 保存的逐行 JSON。报告按进程统计候选状态、完整位置帧、当前角色对 ExileCore2 坐标的世界/网格距离最大值、同区域顺序变化、换区、源时间倒退及每槽坐标变化次数。它只呈现观测量，不给出“可靠”裁决，也不产生控制报文。Windows 实测时应分别录制角色静止、P1 单独移动、P2 单独移动、两人移动、切区和重进游戏的片段，并人工核对游戏画面与报告；录制文件含角色和进程信息，不要公开上传原始文件。
 

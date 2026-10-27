@@ -47,6 +47,8 @@ func TestFastCandidateCorrelationStaysDiagnostic(t *testing.T) {
 	frame := func(at time.Time, area uint32, first float64) live.OrderedClientFrame {
 		return live.OrderedClientFrame{ProcessID: 17, SeenUTC: at, TickMS: at.UnixMilli(),
 			AreaHash: area, CoordinateSpace: "world",
+			AreaInstanceAddress: "0x1000", VectorHeaderAddress: "0x2000",
+			OrderedAddresses:  []string{"0x3000", "0x4000"},
 			PlayerOrderSource: "unverified_exilecore_local_slot_candidate",
 			Players: []live.OrderedLocalPlayer{{LocalPlayer: 1, X: first},
 				{LocalPlayer: 2, X: 13, Y: 20}}}
