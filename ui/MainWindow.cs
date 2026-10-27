@@ -3177,7 +3177,8 @@ public sealed class MainWindow : Window
                     ? int.Parse(_aggressiveSprintRetryDelay.Text!, CultureInfo.InvariantCulture) : 800,
                 relayMainInput: !_bridge.IsHybridMode,
                 closeRangeMirror: enableCloseMirror,
-                closeMirrorDuration: int.Parse(_closeMirrorDuration.Text!, CultureInfo.InvariantCulture),
+                closeMirrorDuration: enableCloseMirror
+                    ? int.Parse(_closeMirrorDuration.Text!, CultureInfo.InvariantCulture) : 400,
                 followerMirror: _followerMirror,
                 flaskSupportFile: _bridge.AutoFlaskEnabled ? flaskSupport.RuntimeFile : null,
                 flaskRulesFile: _bridge.AutoFlaskEnabled ? flaskRules.RuntimeFile : null,
