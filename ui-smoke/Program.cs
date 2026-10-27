@@ -299,7 +299,7 @@ radarVisibility.Observe(false, false);
 radarVisibility.Observe(false, true);
 if (!radarVisibility.Enabled) throw new Exception("Tab outside the game changed radar visibility.");
 var radarWindow = new RadarOverlayWindow(new LaunchedClient(123, 1, "C:/Game.exe"), radarScale,
-    radarVisibility);
+    radarVisibility, renderOnly: true);
 radarWindow.Show();
 radarWindow.Apply(radarFrame);
 radarWindow.UpdateLayout();
@@ -349,7 +349,7 @@ if (privacyBoxes.Count != 2 ||
     PrivacyMaskPlan.TryParse(string.Join('\n', Enumerable.Repeat("1,10,5,20,6", 17)), 1, out _))
     throw new Exception("Privacy box geometry or client binding validation failed.");
 var privacyWindow = new PrivacyMaskOverlayWindow(new LaunchedClient(123, 1, "C:/Game.exe"),
-    privacyBoxes.Where(box => box.Client == 1).ToArray());
+    privacyBoxes.Where(box => box.Client == 1).ToArray(), renderOnly: true);
 privacyWindow.Show();
 privacyWindow.UpdateLayout();
 var renderedMask = privacyWindow.GetLogicalDescendants().OfType<Border>().SingleOrDefault();

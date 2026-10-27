@@ -17,6 +17,7 @@ public sealed class RadarOverlayWindow : Window
     private readonly LaunchedClient _client;
     private readonly double _scale;
     private readonly RadarVisibility _visibility;
+    private readonly bool _renderOnly;
     private readonly Canvas _canvas = new();
     private readonly DispatcherTimer _positionTimer = new() { Interval = TimeSpan.FromMilliseconds(50) };
     private RadarFrame? _frame;
@@ -24,11 +25,13 @@ public sealed class RadarOverlayWindow : Window
 
     public event Action? TargetLost;
 
-    public RadarOverlayWindow(LaunchedClient client, double scale, RadarVisibility visibility)
+    public RadarOverlayWindow(LaunchedClient client, double scale, RadarVisibility visibility,
+        bool renderOnly = false)
     {
         _client = client;
         _scale = scale;
         _visibility = visibility;
+        _renderOnly = renderOnly;
         Title = $"PartyPilot Radar · {client.Pid}";
         SystemDecorations = SystemDecorations.None;
         ShowInTaskbar = false;
@@ -42,7 +45,7 @@ public sealed class RadarOverlayWindow : Window
         Height = 600;
         Opened += (_, _) =>
         {
-            if (OperatingSystem.IsWindows())
+            if (OperatingSystem.IsWindows() && !_renderOnly)
             {
                 EnableClickThrough();
                 _positionTimer.Start();
