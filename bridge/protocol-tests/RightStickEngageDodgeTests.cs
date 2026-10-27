@@ -68,6 +68,15 @@ internal static class RightStickEngageDodgeTests
         if (At(50, 24000, player: 2, main: 3) != steering ||
             (At(90, 24000, player: 2, main: 3).Buttons & 0x2000) != 0)
             throw new Exception("Changing MAIN replayed a held right-stick gesture.");
+        control.Reset();
+        At(0, 0, player: 2);
+        At(0, 0, player: 4);
+        At(10, 24000, player: 2);
+        At(10, 24000, player: 4);
+        control.ResetPlayer(2);
+        if (At(50, 24000, player: 2) != steering ||
+            At(50, 24000, player: 4).LeftX != 24000)
+            throw new Exception("One follower's combat reset cancelled another follower's dodge.");
 
         var outputs = new Dictionary<int, IPadOutput> { [1] = new Capture(), [3] = new Capture() };
         var router = new BridgeRouter(outputs);
@@ -87,6 +96,19 @@ internal static class RightStickEngageDodgeTests
         if ((((Capture)outputs[3]).Report.Buttons & 0x2000) == 0 ||
             (((Capture)outputs[1]).Report.Buttons & 0x2000) != 0)
             throw new Exception("Bridge did not route the synthetic dodge only to its eligible follower.");
+        if (!router.BeginCombat(3, epoch.AddMilliseconds(60)) ||
+            !router.PulseCombat(3, new PadReport(0x1000, 0, 0, 0, 0, 0, 0), 80,
+                epoch.AddMilliseconds(70)))
+            throw new Exception("Combat pulse could not take ownership of the follower input.");
+        router.Tick(epoch.AddMilliseconds(151));
+        if ((((Capture)outputs[3]).Report.Buttons & 0x2000) != 0)
+            throw new Exception("Old right-stick engagement replayed after a combat pulse.");
+        router.EndCombat(3);
+        router.SetPhysical(new XInputGamepad { RightX = 0 }, epoch.AddMilliseconds(160));
+        router.SetPhysical(new XInputGamepad { RightX = 24000 }, epoch.AddMilliseconds(170));
+        router.Tick(epoch.AddMilliseconds(210));
+        if ((((Capture)outputs[3]).Report.Buttons & 0x2000) == 0)
+            throw new Exception("Fresh engagement after combat did not remain available.");
         router.SetMenuGuardActive(true);
         if ((((Capture)outputs[3]).Report.Buttons & 0x2000) != 0)
             throw new Exception("Menu protection did not cancel a synthetic dodge.");

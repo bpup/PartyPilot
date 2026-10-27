@@ -39,6 +39,14 @@ internal sealed class RightStickEngageDodge
         }
     }
 
+    internal void ResetPlayer(int player)
+    {
+        if (player is < 1 or > 6) return;
+        var lane = _lanes[player - 1];
+        lane.Initialized = false;
+        lane.Started = lane.PressStarted = long.MinValue;
+    }
+
     internal PadReport Apply(int player, int main, bool enabled, bool eligible, string binding,
         short rightX, short rightY, PadReport output, long now)
     {

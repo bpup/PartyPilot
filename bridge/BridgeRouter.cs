@@ -74,6 +74,7 @@ internal sealed class BridgeRouter
         route.CombatPulseUntilUtc = default;
         route.CombatPulse = default;
         route.LifeUntilUtc = route.ManaUntilUtc = DateTime.MinValue;
+        ResetEngageDodgeForSlot(slot);
         Render(slot, route);
         return true;
     }
@@ -89,6 +90,7 @@ internal sealed class BridgeRouter
         route.CombatPulse = pulse;
         route.CombatPulseUntilUtc = nowUtc.AddMilliseconds(holdMilliseconds);
         route.CombatLeaseUntilUtc = nowUtc.AddSeconds(10);
+        ResetEngageDodgeForSlot(slot);
         Render(slot, route);
         return true;
     }
@@ -598,7 +600,7 @@ internal sealed class BridgeRouter
         if (route.CombatPulseUntilUtc != default)
         {
             route.DodgeSprint.Reset();
-            route.Output.SetReport(route.CombatPulse);
+            route.Output.SetReport(WithEngageDodge(route.CombatPulse, slot, false));
             return;
         }
         if (_rightStickFollowerOverride && _physicalConnected && _isolatedSlot == 0 &&
@@ -630,6 +632,12 @@ internal sealed class BridgeRouter
             eligible && _physicalConnected && _isolatedSlot == 0 && !_menuGuardActive,
             _engageDodgeBinding, _manualX, _manualY, report,
             _engageDodgeNow == 0 ? DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond : _engageDodgeNow);
+    }
+
+    private void ResetEngageDodgeForSlot(int slot)
+    {
+        if (_playerForPad.TryGetValue(slot, out var player))
+            _engageDodge.ResetPlayer(player);
     }
 
     private PadReport WithFollowerMirror(PadReport automation, int slot, PadRoute route)
