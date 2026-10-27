@@ -8,9 +8,34 @@ internal readonly record struct PairingControl(string Type, int Slot, int Pid, l
 internal readonly record struct FlaskCommand(int Slot, string Resource);
 internal readonly record struct AutoPartyControl(string Type, int Slot, ushort Buttons, int HoldMilliseconds);
 internal readonly record struct CombatControl(string Type, int Slot, PadReport Pulse, int HoldMilliseconds);
+internal readonly record struct HybridKeyControl(int VirtualKey, bool Down);
 
 internal static class BridgeProtocol
 {
+    public static bool TryParseHybridKey(string line, out HybridKeyControl command)
+    {
+        command = default;
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("type", out var type) ||
+                type.ValueKind != JsonValueKind.String || type.GetString() != "hybrid_key" ||
+                !root.TryGetProperty("key", out var key) || !key.TryGetInt32(out var virtualKey) ||
+                !root.TryGetProperty("down", out var down) ||
+                down.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
+                (HybridKeyboardInput.FocusForKey(virtualKey) == 0 &&
+                 HybridKeyboardInput.ActionForKey(virtualKey) == HybridAction.None)) return false;
+            command = new HybridKeyControl(virtualKey, down.GetBoolean());
+            return true;
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException)
+        {
+            return false;
+        }
+    }
+
     public static bool TryParseCombat(string line, out CombatControl command)
     {
         command = default;

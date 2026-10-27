@@ -14,6 +14,7 @@
     <Compile Include="../FocusPadMap.cs" Link="FocusPadMap.cs" />
     <Compile Include="../BridgeRouter.cs" Link="BridgeRouter.cs" />
     <Compile Include="../HybridKeyboardInput.cs" Link="HybridKeyboardInput.cs" />
+    <Compile Include="../HybridKeyboardPlan.cs" Link="HybridKeyboardPlan.cs" />
     <Compile Include="../Client3FocusRouting.cs" Link="Client3FocusRouting.cs" />
     <Compile Include="../Client3InputPublisher.cs" Link="Client3InputPublisher.cs" />
     <Compile Include="../Client3PadOutputs.cs" Link="Client3PadOutputs.cs" />

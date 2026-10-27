@@ -154,7 +154,7 @@ internal sealed class BridgeRouter
 
     public void SetHybridForeground(bool gameForeground)
     {
-        if (_hybridKeyboard is null) return;
+        if (_hybridKeyboard is null || _hybridKeyboard.GameForeground == gameForeground) return;
         _hybridKeyboard.SetForeground(gameForeground);
         RenderAll();
     }

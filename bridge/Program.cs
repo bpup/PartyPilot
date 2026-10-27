@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Diagnostics;
 using Nefarius.ViGEm.Client;
 using Nefarius.ViGEm.Client.Targets;
 using Nefarius.ViGEm.Client.Targets.Xbox360;
@@ -198,6 +199,7 @@ if (!args.Contains("--enable-controller") || !BridgeSlots.TryParse(args, out var
     Console.Error.WriteLine("Usage: PartyPilot.Bridge --enable-controller --slots 1,2 [--focus-pad-map 1:1,2:2] [--physical-index 0 --main-slot 1 --physical-hidden-confirmed --device-instance HID\\... --game-exe C:\\Game\\PathOfExile.exe [--pairing-protected] [--enable-combat] [--client3-pid PID --client3-window-handle HANDLE --client3-game-exe PATH --client3-players 5[,6]] [--right-stick-follower-override --direct-right-stick-slot 2]]");
     return 2;
 }
+var hybridMode = args.Contains("--hybrid-keyboard");
 var wgiMode = args.Contains("--physical-wgi");
 var physicalMode = wgiMode || args.Contains("--physical-index") || args.Contains("--main-slot") ||
     args.Contains("--physical-hidden-confirmed") || args.Contains("--right-stick-follower-override");
@@ -215,6 +217,13 @@ if (directSlotPosition >= 0 && (args.Count(arg => arg == "--direct-right-stick-s
     return 2;
 }
 var protectedPairing = args.Contains("--pairing-protected");
+if (hybridMode && (physicalMode || protectedPairing || autoFlaskEnabled || combatEnabled ||
+    rightStickFollowerOverride || client3Options is not null || focusPads is not null ||
+    !HybridKeyboardPlan.TryParse(args, slots, out _)))
+{
+    Console.Error.WriteLine("Keyboard and mouse mode requires an exact player pad and game window map, without physical controller options.");
+    return 2;
+}
 if (autoFlaskEnabled && (!physicalMode || !protectedPairing))
 {
     Console.Error.WriteLine("Automatic flask input requires physical mode and protected pairing.");
@@ -233,6 +242,14 @@ var gamePaths = args.Select((value, index) => (value, index))
     .Where(item => item.value == "--game-exe")
     .Select(item => item.index + 1 < args.Length ? args[item.index + 1] : "")
     .ToArray();
+HybridKeyboardPlan? hybridPlan = null;
+if (hybridMode && (!HybridKeyboardPlan.TryParse(args, slots, out hybridPlan) ||
+    gamePaths.Length is < 1 or > 3 ||
+    gamePaths.Any(path => !Path.IsPathFullyQualified(path) || !File.Exists(path))))
+{
+    Console.Error.WriteLine("Keyboard and mouse mode requires existing game executables and exact player/window bindings.");
+    return 2;
+}
 if (client3Options is { } privatePlan &&
     (!physicalMode || !protectedPairing || !privatePlan.MatchesThirdGamePath(gamePaths)))
 {
@@ -272,6 +289,26 @@ if (!OperatingSystem.IsWindows())
 
 try
 {
+    if (hybridPlan is not null &&
+        (hybridPlan.PlayerWindows.Values.Any(window =>
+            !ForegroundWindowProbe.IsExistingTarget(window.Pid, window.Handle)) ||
+         !hybridPlan.MatchesGameProcesses(gamePaths, pid =>
+         {
+             try
+             {
+                 using var process = Process.GetProcessById(pid);
+                 return process.MainModule?.FileName;
+             }
+             catch (Exception error) when (error is InvalidOperationException or
+                 System.ComponentModel.Win32Exception or UnauthorizedAccessException)
+             {
+                 return null;
+             }
+         })))
+    {
+        Console.Error.WriteLine("Keyboard game windows do not match the selected running game executables.");
+        return 2;
+    }
     if (physicalMode)
     {
         var bridgeExe = Environment.ProcessPath ?? throw new InvalidOperationException("Bridge executable path is unavailable.");
@@ -325,7 +362,7 @@ try
         PhysicalSlotGuard? physicalGuard = null;
         PublicSlotGuard? publicGuard = null;
         var initialIndices = pads.ToDictionary(entry => entry.Key, entry => entry.Value.UserIndex);
-        var indicesValid = wgiMode
+        var indicesValid = wgiMode || hybridMode
             ? PublicSlotGuard.TryCreate(initialIndices, out publicGuard)
             : !physicalMode || PhysicalSlotGuard.TryCreate(physicalIndex, initialIndices, out physicalGuard);
         if (!indicesValid)
@@ -346,6 +383,8 @@ try
         if (physicalMode && !router.ConfigurePhysical(mainSlot, rightStickFollowerOverride, focusPads,
             directRightStickSlot, lastFocusedLeads))
             throw new InvalidOperationException("Focus pad mapping does not match the connected virtual controllers.");
+        if (hybridPlan is not null && !router.ConfigureHybridKeyboard(hybridPlan.PlayerPads))
+            throw new InvalidOperationException("Keyboard player mapping does not match the connected virtual controllers.");
         var pairingSignals = new PairingSignalTracker();
         var pairingGate = protectedPairing ? new ProtectedPairingGate() : null;
         var menuGuard = new MenuGuardTracker();
@@ -369,6 +408,7 @@ try
         var pairingTargetPid = 0;
         long pairingTargetWindow = 0;
         Console.WriteLine(JsonSerializer.Serialize(new { @event = "ready", slots, physical_mode = physicalMode,
+            hybrid_mode = hybridMode,
             physical_wgi = wgiMode,
             pairing_protected = protectedPairing, hidhide_preflight = physicalMode,
             auto_flask_enabled = autoFlaskEnabled,
@@ -396,6 +436,26 @@ try
                 var line = await pendingLine;
                 if (line is null) break;
                 pendingLine = Console.In.ReadLineAsync();
+                if (hybridPlan is not null && BridgeProtocol.TryParseHybridKey(line, out var hybridKey))
+                {
+                    var previousPlayer = router.HybridFocusedPlayer;
+                    var focusKey = HybridKeyboardInput.FocusForKey(hybridKey.VirtualKey) != 0;
+                    var eventForeground = focusKey
+                        ? hybridPlan.PlayerWindows.Values.Any(window =>
+                            ForegroundWindowProbe.IsExpectedForeground(window.Pid, window.Handle))
+                        : hybridPlan.PlayerWindows.TryGetValue(previousPlayer, out var expectedWindow) &&
+                          ForegroundWindowProbe.IsExpectedForeground(expectedWindow.Pid, expectedWindow.Handle);
+                    router.ApplyHybridKey(hybridKey.VirtualKey, hybridKey.Down, eventForeground);
+                    var focusedPlayer = router.HybridFocusedPlayer;
+                    if (focusedPlayer != previousPlayer)
+                    {
+                        var target = hybridPlan.PlayerWindows[focusedPlayer];
+                        router.SetHybridForeground(ForegroundWindowProbe.IsExpectedForeground(target.Pid, target.Handle));
+                        Console.WriteLine(JsonSerializer.Serialize(new { @event = "hybrid_focus_changed",
+                            player = focusedPlayer, pid = target.Pid, window_handle = target.Handle }));
+                    }
+                    continue;
+                }
                 if (pairingGate is not null && BridgeProtocol.TryParsePairingControl(line, out var control))
                 {
                     if (control.Type == "arm_pairing" && outputs.ContainsKey(control.Slot) &&
@@ -490,6 +550,20 @@ try
                     Console.Error.WriteLine("Invalid or unassigned command; all controllers neutral.");
                     return 1;
                 }
+            }
+            if (hybridPlan is not null)
+            {
+                var currentIndices = pads.ToDictionary(entry => entry.Key, entry => entry.Value.UserIndex);
+                if (publicGuard is null || !publicGuard.Matches(currentIndices) ||
+                    hybridPlan.PlayerWindows.Values.Any(window =>
+                        !ForegroundWindowProbe.IsExistingTarget(window.Pid, window.Handle)))
+                {
+                    router.NeutralAll();
+                    Console.Error.WriteLine("Keyboard game window or virtual XInput assignment changed; controllers stopped.");
+                    return 1;
+                }
+                var target = hybridPlan.PlayerWindows[router.HybridFocusedPlayer];
+                router.SetHybridForeground(ForegroundWindowProbe.IsExpectedForeground(target.Pid, target.Handle));
             }
             if (physicalMode)
             {

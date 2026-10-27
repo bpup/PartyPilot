@@ -4,6 +4,28 @@ internal static class HybridKeyboardInputTests
 {
     internal static void Run()
     {
+        if (!HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:3,3:4",
+                "--hybrid-window-map", "1:10:100,2:20:200,3:20:200"], [3, 4], out var plan) ||
+            plan?.PlayerPads[2] != 3 || plan.PlayerWindows[3] != new HybridGameWindow(20, 200) ||
+            HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:3,3:3",
+                "--hybrid-window-map", "1:10:100,2:20:200,3:20:200"], [3, 4], out _) ||
+            HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:3",
+                "--hybrid-window-map", "2:20:200"], [3], out _))
+            throw new Exception("Hybrid player-to-pad or exact window map was accepted ambiguously.");
+        var gameA = Path.GetFullPath("PoE2.exe");
+        var gameB = Path.GetFullPath("PoE2B.exe");
+        var wrongGame = Path.GetFullPath("Other.exe");
+        if (!plan.MatchesGameProcesses([gameA, gameB],
+                pid => pid == 10 ? gameA : gameB) ||
+            plan.MatchesGameProcesses([gameA], _ => gameA) ||
+            plan.MatchesGameProcesses([gameA, gameB], _ => gameA) ||
+            plan.MatchesGameProcesses([gameA, gameB], _ => wrongGame))
+            throw new Exception("Hybrid game process paths did not match the bound window set.");
+        if (!BridgeProtocol.TryParseHybridKey("{\"type\":\"hybrid_key\",\"key\":87,\"down\":true}", out var keyEvent) ||
+            keyEvent != new HybridKeyControl(87, true) ||
+            BridgeProtocol.TryParseHybridKey("{\"type\":\"hybrid_key\",\"key\":87,\"down\":1}", out _) ||
+            BridgeProtocol.TryParseHybridKey("{\"type\":\"hybrid_key\",\"key\":86,\"down\":true}", out _))
+            throw new Exception("Hybrid key protocol accepted malformed or unmapped input.");
         if (HybridKeyboardInput.FocusForKey(0x70) != 1 ||
             HybridKeyboardInput.FocusForKey(0x75) != 6 ||
             HybridKeyboardInput.FocusForKey(0x76) != 0 ||

@@ -86,6 +86,7 @@ internal sealed class HybridKeyboardState
     }
 
     internal int FocusedPlayer { get; private set; } = 1;
+    internal bool GameForeground => _gameForeground;
 
     internal HybridKeyboardSnapshot Handle(int virtualKey, bool down, bool gameForeground)
     {
