@@ -138,6 +138,7 @@ public sealed class MainWindow : Window
     private readonly TextBox _closeMirrorDuration = new();
     private readonly CheckBox _classicCollisionDodge = new();
     private readonly CheckBox _experimentalWarpClick = new();
+    private readonly Button _manualWarpToMain = new();
     private readonly TextBlock _terrainBindingStatus = new();
     private readonly TextBox _followLeaderName = new();
     private readonly ComboBox[] _followTargets = new ComboBox[6];
@@ -1058,6 +1059,9 @@ public sealed class MainWindow : Window
         _pauseFollow.Content = "暂停跟随";
         _pauseFollow.Click += (_, _) => ToggleFollowPause();
         actions.Children.Add(_pauseFollow);
+        _manualWarpToMain.Content = "实验：手动追到 MAIN / 再按取消";
+        _manualWarpToMain.Click += (_, _) => ToggleManualWarpToMain();
+        actions.Children.Add(_manualWarpToMain);
         actions.Children.Add(_stopFollow);
         panel.Children.Add(actions);
         _followStatus.Text = "等待配对完成；真实游戏中的方向与角色绑定尚未验证。";
@@ -2489,6 +2493,10 @@ public sealed class MainWindow : Window
         _stopFollow.IsEnabled = _follow is not null;
         _pauseFollow.IsEnabled = _follow is not null && !_followStopping;
         _pauseFollow.Content = _follow?.Paused == true ? "恢复跟随" : "暂停跟随";
+        _manualWarpToMain.IsEnabled = _follow is { Paused: false } && !_followStopping &&
+            _experimentalWarpClick.IsChecked != true &&
+            _selectedTopology?.Id is ("4-balanced" or "5-third-solo" or
+                "5-main-solo" or "6-balanced");
     }
 
     private async Task PrepareBridgeAsync(Client3PreResumeSession? pendingPrivate = null)
@@ -3315,7 +3323,9 @@ public sealed class MainWindow : Window
         {
             var requests = string.Join(" · ", frame.Handoffs.Select(item =>
                 $"客户端 {item.DestinationClient} 的 P{item.DriverPlayer} 需传送至 P{item.TargetPlayer}"));
-            var warpState = _experimentalWarpClick.IsChecked != true
+            var warpState = _follow?.ManualWarpActive == true
+                ? "正在执行手动追到 MAIN"
+                : _experimentalWarpClick.IsChecked != true
                 ? "自动传送未开启"
                 : _selectedTopology is not null &&
                   (PartyWarpRoutes.FromFrame(frame, _selectedTopology) is not null ||
@@ -3403,6 +3413,22 @@ public sealed class MainWindow : Window
         catch (InvalidOperationException error)
         {
             _followStatus.Text = $"跟随状态未切换：{error.Message}";
+        }
+    }
+
+    private void ToggleManualWarpToMain()
+    {
+        if (_follow is not { } session) return;
+        try
+        {
+            var started = session.ToggleManualWarpToMain();
+            _followStatus.Text = started
+                ? "已请求手动追到 MAIN；仅处理当前已确认的跨区传送请求。"
+                : "已请求取消手动追到 MAIN。";
+        }
+        catch (InvalidOperationException error)
+        {
+            _followStatus.Text = $"手动追到 MAIN 未启动：{error.Message}";
         }
     }
 

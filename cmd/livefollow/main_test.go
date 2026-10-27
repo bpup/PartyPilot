@@ -309,6 +309,18 @@ func TestFollowPauseControlRequiresOptInAndExplicitState(t *testing.T) {
 	if err := applyMenuInput(nil, engine, input, true); err != nil || engine.FollowPaused() {
 		t.Fatalf("explicit resume was lost: %v", err)
 	}
+	input <- menuInput{Type: "warp_main", State: "start"}
+	if err := applyMenuInput(nil, engine, input, true); err != nil || !engine.ManualWarpToMain() {
+		t.Fatalf("manual warp request was lost: %v", err)
+	}
+	input <- menuInput{Type: "warp_main", State: "cancel"}
+	if err := applyMenuInput(nil, engine, input, true); err != nil || engine.ManualWarpToMain() {
+		t.Fatalf("manual warp cancellation was lost: %v", err)
+	}
+	input <- menuInput{Type: "warp_main", State: "start", Slot: 2}
+	if err := applyMenuInput(nil, engine, input, true); err == nil || engine.ManualWarpToMain() {
+		t.Fatal("unbound manual warp control was accepted")
+	}
 }
 
 func TestMainInputControlRequiresOptInAndCurrentLeader(t *testing.T) {

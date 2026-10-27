@@ -5,6 +5,15 @@ internal static class ProcessPipelineSmoke
 {
     public static async Task RunAsync()
     {
+        if (!LiveFollowFrame.ParseManualWarpToMain("{\"manual_warp_to_main\":true}") ||
+            LiveFollowFrame.ParseManualWarpToMain("{}"))
+            throw new Exception("Manual warp acknowledgement was not parsed exactly.");
+        try
+        {
+            LiveFollowFrame.ParseManualWarpToMain("{\"manual_warp_to_main\":false}");
+            throw new Exception("Invalid manual warp acknowledgement was accepted.");
+        }
+        catch (InvalidDataException) { }
         var paired = PartyTopologies.ForPlayerCount(4)
             .Single(item => item.Id == "4-balanced");
         static FollowPadCommand Waiting(int player) => new(player, player, "{}", "waiting", null);

@@ -54,6 +54,22 @@ func (e *Engine) CurrentPositions(now time.Time) []PositionWitness {
 // CrossAreaRequests reports only confirmed differences between fresh,
 // log-bound client observations. It does not infer a route or click a portrait.
 func (e *Engine) CrossAreaRequests(now time.Time) []HandoffRequest {
+	return e.crossAreaRequests(now, e.coordinator.ResolvedTargets())
+}
+
+// WarpToMainRequests evaluates every other client against the current MAIN,
+// independently of each follower's configured movement target.
+func (e *Engine) WarpToMainRequests(now time.Time) []HandoffRequest {
+	targets := make(map[int]int, len(e.slots))
+	for _, slot := range e.slots {
+		if slot != e.leader {
+			targets[slot] = e.leader
+		}
+	}
+	return e.crossAreaRequests(now, targets)
+}
+
+func (e *Engine) crossAreaRequests(now time.Time, targets map[int]int) []HandoffRequest {
 	if e.stopped != "" || e.followPaused {
 		return nil
 	}
@@ -65,7 +81,7 @@ func (e *Engine) CrossAreaRequests(now time.Time) []HandoffRequest {
 	}
 	requests := make(map[int]HandoffRequest)
 	conflicted := make(map[int]bool)
-	for slot, target := range e.coordinator.ResolvedTargets() {
+	for slot, target := range targets {
 		follower := bindings[slot]
 		leader := bindings[target]
 		if follower.Client == 0 || leader.Client == 0 || follower.Client == leader.Client {
@@ -86,6 +102,11 @@ func (e *Engine) CrossAreaRequests(now time.Time) []HandoffRequest {
 			}
 		}
 		if driver == 0 {
+			continue
+		}
+		driverArea, driverOK := e.confirmedArea(driver, now)
+		if !driverOK || !strings.EqualFold(driverArea.AreaID, followerArea.AreaID) ||
+			driverArea.Seed != followerArea.Seed {
 			continue
 		}
 		request := HandoffRequest{DestinationClient: follower.Client,

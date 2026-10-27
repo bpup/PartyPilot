@@ -41,6 +41,7 @@ type Engine struct {
 	memberNames           map[int]string
 	stopped               string
 	followPaused          bool
+	manualWarpToMain      bool
 	mainInput             MainInput
 	mainInputValid        bool
 	acceptMainInput       bool
@@ -57,11 +58,22 @@ type Engine struct {
 func (e *Engine) SetFollowPaused(paused bool) {
 	e.followPaused = paused
 	if paused {
+		e.manualWarpToMain = false
 		e.mainInputValid = false
 		e.resetCloseMirrors()
 	}
 }
 func (e *Engine) FollowPaused() bool { return e.followPaused }
+
+func (e *Engine) SetManualWarpToMain(active bool) error {
+	if active && (e.followPaused || e.stopped != "") {
+		return fmt.Errorf("manual warp requires an active follow session")
+	}
+	e.manualWarpToMain = active
+	return nil
+}
+
+func (e *Engine) ManualWarpToMain() bool { return e.manualWarpToMain }
 
 // Target 0.6.17 uses grid coordinates for follow distances. Its distributed
 // core maps grid deltas to world deltas with this factor. Render.Pos from the

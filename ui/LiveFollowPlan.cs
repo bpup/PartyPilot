@@ -35,6 +35,7 @@ public sealed record FollowPositionWitness(int Player, int ProcessId, uint AreaH
 
 public sealed record FollowBridgeFrame(string Command, string Status, string? Reason)
 {
+    public bool ManualWarpToMain { get; init; }
     public IReadOnlyList<FlaskBridgeRequest> Flasks { get; init; } = [];
     public int FocusedPlayer { get; init; }
     public int FollowerPad { get; init; }
@@ -45,6 +46,16 @@ public sealed record FollowBridgeFrame(string Command, string Status, string? Re
 
 public static class LiveFollowFrame
 {
+    public static bool ParseManualWarpToMain(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        if (!root.TryGetProperty("manual_warp_to_main", out var value)) return false;
+        if (value.ValueKind != JsonValueKind.True)
+            throw new InvalidDataException("Invalid manual warp acknowledgement.");
+        return true;
+    }
+
     public static IReadOnlyList<FollowPositionWitness> ParsePositions(string json,
         PartyTopology topology)
     {

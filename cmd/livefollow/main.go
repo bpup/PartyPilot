@@ -370,11 +370,12 @@ func verifyProcessBindings(roster map[int]int, paths map[int]string) error {
 }
 
 type frame struct {
-	Focused   int                    `json:"focused"`
-	Commands  map[int]follow.Command `json:"commands"`
-	Flasks    []flask.Activation     `json:"flasks,omitempty"`
-	Handoffs  []live.HandoffRequest  `json:"handoffs,omitempty"`
-	Positions []live.PositionWitness `json:"positions,omitempty"`
+	Focused          int                    `json:"focused"`
+	ManualWarpToMain bool                   `json:"manual_warp_to_main,omitempty"`
+	Commands         map[int]follow.Command `json:"commands"`
+	Flasks           []flask.Activation     `json:"flasks,omitempty"`
+	Handoffs         []live.HandoffRequest  `json:"handoffs,omitempty"`
+	Positions        []live.PositionWitness `json:"positions,omitempty"`
 }
 
 type menuInput struct {
@@ -397,7 +398,8 @@ func readMenuInput(reader io.Reader, output chan<- menuInput) {
 		var input menuInput
 		if err := json.Unmarshal(scanner.Bytes(), &input); err != nil ||
 			(input.Type != "menu_guard" && input.Type != "manual_focus" &&
-				input.Type != "follow_pause" && input.Type != "main_input") {
+				input.Type != "follow_pause" && input.Type != "main_input" &&
+				input.Type != "warp_main") {
 			output <- menuInput{Err: errors.New("invalid live control command")}
 			return
 		}
@@ -465,6 +467,14 @@ func applyMenuInput(session *live.FlaskSession, engine *live.Engine, input <-cha
 					return errors.New("invalid follow pause control")
 				}
 				engine.SetFollowPaused(command.State == "paused")
+			case "warp_main":
+				if !allowFollowPause || command.Slot != 0 ||
+					(command.State != "start" && command.State != "cancel") {
+					return errors.New("invalid manual warp control")
+				}
+				if err := engine.SetManualWarpToMain(command.State == "start"); err != nil {
+					return err
+				}
 			default:
 				return errors.New("invalid live control command")
 			}
@@ -617,8 +627,13 @@ func run(address string, roster map[int]int, paths map[int]string, offsets logSt
 			}
 		}
 		commands := engine.Step(now)
-		if err := encoder.Encode(frame{Focused: engine.Leader(), Commands: commands,
-			Flasks: activations, Handoffs: engine.CrossAreaRequests(now),
+		handoffs := engine.CrossAreaRequests(now)
+		if engine.ManualWarpToMain() {
+			handoffs = engine.WarpToMainRequests(now)
+		}
+		if err := encoder.Encode(frame{Focused: engine.Leader(),
+			ManualWarpToMain: engine.ManualWarpToMain(), Commands: commands,
+			Flasks: activations, Handoffs: handoffs,
 			Positions: engine.CurrentPositions(now)}); err != nil {
 			return err
 		}

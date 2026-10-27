@@ -95,6 +95,14 @@ func TestCrossAreaRequestUsesFirstLocalPlayerAsDriver(t *testing.T) {
 	if got := engine.CrossAreaRequests(now.Add(time.Millisecond)); !reflect.DeepEqual(got, want) {
 		t.Fatalf("dual-role client requested the wrong driver: %+v", got)
 	}
+	driverSample := engine.samples[3]
+	staleDriver := driverSample
+	staleDriver.SeenUTC = now.Add(-2 * time.Second)
+	engine.samples[3] = staleDriver
+	if got := engine.CrossAreaRequests(now.Add(time.Millisecond)); len(got) != 0 {
+		t.Fatalf("client requested warp with a stale local driver: %+v", got)
+	}
+	engine.samples[3] = driverSample
 	positions := engine.CurrentPositions(now.Add(time.Millisecond))
 	if len(positions) != 4 || positions[2].Slot != 3 || positions[2].ProcessID != 202 ||
 		positions[2].AreaHash != 202 || positions[2].X != 100 ||
@@ -114,5 +122,11 @@ func TestCrossAreaRequestUsesFirstLocalPlayerAsDriver(t *testing.T) {
 	}
 	if got := engine.CrossAreaRequests(now.Add(time.Millisecond)); len(got) != 0 {
 		t.Fatalf("conflicting targets on one client requested an ambiguous warp: %+v", got)
+	}
+	if got := engine.WarpToMainRequests(now.Add(time.Millisecond)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("manual warp to MAIN did not override follower movement targets: %+v", got)
+	}
+	if got := engine.WarpToMainRequests(now.Add(2 * time.Second)); len(got) != 0 {
+		t.Fatalf("stale evidence authorized manual warp to MAIN: %+v", got)
 	}
 }

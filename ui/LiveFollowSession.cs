@@ -18,6 +18,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     private readonly ConcurrentQueue<(int Player, string State)> _pendingMenu = new();
     private readonly ConcurrentQueue<int> _pendingFocus = new();
     private readonly ConcurrentQueue<bool> _pendingPause = new();
+    private int _manualWarpControl;
     private readonly object _mainInputGate = new();
     private MainInputSample? _pendingMainInput;
     private readonly bool _relayMainInput;
@@ -34,6 +35,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     private readonly TransitionInteractionBudget _entryBudget = new();
     private readonly HashSet<FollowHandoffRequest> _attemptedWarps = [];
     private FollowHandoffRequest? _activeWarp;
+    private int _manualWarpDesired;
+    private bool _manualWarpExecuting;
     private int _inputSubscriptionActive;
     private readonly SemaphoreSlim _controlSignal = new(0);
     private readonly CancellationTokenSource _controlCancellation = new();
@@ -45,6 +48,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
 
     public FollowBridgeFrame Current { get; private set; }
     public bool Paused { get; private set; }
+    public bool ManualWarpActive => Volatile.Read(ref _manualWarpDesired) != 0;
     public event Action<FollowBridgeFrame>? StatusChanged;
     public event Action<string>? WarpStatusChanged;
     public event Action<string>? Ended;
@@ -139,9 +143,33 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     {
         if (_stopping || _process.HasExited) throw new InvalidOperationException("Live follow has stopped.");
         Paused = paused;
-        if (paused) _warpAttemptCancellation?.Cancel();
+        if (paused)
+        {
+            _warpAttemptCancellation?.Cancel();
+            if (ManualWarpActive) StopManualWarpToMain();
+        }
         if (paused) _entryAttemptCancellation?.Cancel();
         _pendingPause.Enqueue(paused);
+        _controlSignal.Release();
+    }
+
+    public bool ToggleManualWarpToMain()
+    {
+        if (_stopping || _process.HasExited || Paused)
+            throw new InvalidOperationException("实时跟随已停止或暂停。");
+        var cancel = ManualWarpActive;
+        if (!cancel && !_warpTask.IsCompleted)
+            throw new InvalidOperationException("另一项跨区传送仍在执行。");
+        Volatile.Write(ref _manualWarpDesired, cancel ? 0 : 1);
+        Interlocked.Exchange(ref _manualWarpControl, cancel ? -1 : 1);
+        _controlSignal.Release();
+        return !cancel;
+    }
+
+    private void StopManualWarpToMain()
+    {
+        Volatile.Write(ref _manualWarpDesired, 0);
+        Interlocked.Exchange(ref _manualWarpControl, -1);
         _controlSignal.Release();
     }
 
@@ -194,7 +222,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             ? LiveFollowFrame.ParseDynamic(json, topology, customRuleCount)
             : LiveFollowFrame.Parse(json, 2, topology.Slots[1].RuntimePad,
                 customRuleCount: customRuleCount);
-        return parsed with { Handoffs = LiveFollowFrame.ParseHandoffs(json, topology),
+        return parsed with { ManualWarpToMain = LiveFollowFrame.ParseManualWarpToMain(json),
+            Handoffs = LiveFollowFrame.ParseHandoffs(json, topology),
             Positions = LiveFollowFrame.ParsePositions(json, topology) };
     }
 
@@ -551,7 +580,25 @@ internal sealed class LiveFollowSession : IAsyncDisposable
 
     private void QueueVisualWarp(FollowBridgeFrame frame)
     {
-        if (!_experimentalWarpClick || _stopping) return;
+        if (_stopping) return;
+        var manual = ManualWarpActive && frame.ManualWarpToMain;
+        if (!manual && _manualWarpExecuting)
+        {
+            _warpAttemptCancellation?.Cancel();
+            _attemptedWarps.Clear();
+            _activeWarp = null;
+            _manualWarpExecuting = false;
+            Dispatcher.UIThread.Post(() => WarpStatusChanged?.Invoke("手动追到 MAIN 已取消。"));
+        }
+        else if (manual && !_manualWarpExecuting)
+        {
+            _manualWarpExecuting = true;
+            _attemptedWarps.Clear();
+        }
+        if (!_experimentalWarpClick && !manual) return;
+        if (manual)
+            frame = frame with { Handoffs = frame.Handoffs.Where(request =>
+                request.TargetPlayer == frame.FocusedPlayer).ToArray() };
         var visualRoute = PartyWarpRoutes.FromFrame(frame, _topology);
         var controllerRoutes = PartyWarpControllerPlan.FromFrameAll(frame, _topology);
         var available = visualRoute is null
@@ -562,6 +609,13 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             _warpAttemptCancellation?.Cancel();
             _attemptedWarps.Clear();
             _activeWarp = null;
+            if (manual)
+            {
+                StopManualWarpToMain();
+                _manualWarpExecuting = false;
+                Dispatcher.UIThread.Post(() => WarpStatusChanged?.Invoke(
+                    "手动追到 MAIN 未执行：没有符合当前 MAIN 和等待状态的跨区传送请求。"));
+            }
             return;
         }
         _attemptedWarps.IntersectWith(available);
@@ -575,7 +629,17 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             !_attemptedWarps.Contains(route.Request));
         var request = visualRoute is { } visual && !_attemptedWarps.Contains(visual.Request)
             ? visual.Request : controllerRoute?.Request;
-        if (request is null) return;
+        if (request is null)
+        {
+            if (manual)
+            {
+                StopManualWarpToMain();
+                _manualWarpExecuting = false;
+                Dispatcher.UIThread.Post(() => WarpStatusChanged?.Invoke(
+                    "手动追到 MAIN 的已确认传送请求均已发送；请核对区域日志。"));
+            }
+            return;
+        }
         _attemptedWarps.Add(request);
         _activeWarp = request;
         _warpAttemptCancellation?.Dispose();
@@ -674,6 +738,10 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         while (_pendingPause.TryDequeue(out var paused))
             await _process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new
                 { type = "follow_pause", state = paused ? "paused" : "following" }));
+        var manualWarp = Interlocked.Exchange(ref _manualWarpControl, 0);
+        if (manualWarp != 0)
+            await _process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new
+                { type = "warp_main", state = manualWarp > 0 ? "start" : "cancel" }));
         while (_pendingFocus.TryDequeue(out var player))
             await _process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new
                 { type = "manual_focus", slot = player }));
