@@ -18,6 +18,9 @@ internal static class RadarHotkeySmoke
             modified.IsDown(key => key is 120 or 0x11) ||
             modified.IsDown(key => key is 120 or 0x11 or 0x10 or 0x12))
             throw new Exception("Radar hotkey parser or modifier matching changed.");
+        if (!RadarRegisteredHotkey.UsesPassThroughPolling(tab) ||
+            RadarRegisteredHotkey.UsesPassThroughPolling(modified))
+            throw new Exception("The game's Tab map key must remain pass-through.");
 
         var folder = Path.Combine(Path.GetTempPath(), "partypilot-radar-key-" + Guid.NewGuid().ToString("N"));
         var path = Path.Combine(folder, "key.json");

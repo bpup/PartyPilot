@@ -29,13 +29,18 @@ internal sealed class RadarRegisteredHotkey : IDisposable
 
     internal static RadarRegisteredHotkey? TryStart(RadarHotkeyBinding binding, Action pressed)
     {
-        if (!OperatingSystem.IsWindows()) return null;
+        // Tab is also the game's map key. Keep it in RadarSession's key-state
+        // path so the game can receive the original key press.
+        if (!OperatingSystem.IsWindows() || UsesPassThroughPolling(binding)) return null;
         var monitor = new RadarRegisteredHotkey(binding, pressed);
         if (monitor._ready.Task.Wait(TimeSpan.FromSeconds(2)) && monitor._ready.Task.Result)
             return monitor;
         monitor.Dispose();
         return null;
     }
+
+    internal static bool UsesPassThroughPolling(RadarHotkeyBinding binding) =>
+        binding.VirtualKey == 9;
 
     private void Run()
     {
