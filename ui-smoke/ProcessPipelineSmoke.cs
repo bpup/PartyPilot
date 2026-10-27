@@ -61,6 +61,12 @@ internal static class ProcessPipelineSmoke
         var fourFrame = LiveFollowFrame.ParseDynamic(
             "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0}," +
             "\"3\":{\"state\":\"following\",\"x\":0,\"y\":1},\"4\":{\"state\":\"waiting\"}}}", fourTopology);
+        var fixedFourFrame = LiveFollowSession.ParseFrame(
+            "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0}," +
+            "\"3\":{\"state\":\"following\",\"x\":0,\"y\":1},\"4\":{\"state\":\"waiting\"}}}",
+            fourTopology, lastFocusedLeads: false);
+        if (!fixedFourFrame.PadCommands.Select(command => command.Player).SequenceEqual([2, 3, 4]))
+            throw new Exception("Fixed P1 leadership lost followers in the four-player layout.");
         var fourSwitched = LiveFollowFrame.ParseDynamic(
             "{\"focused\":4,\"commands\":{\"1\":{\"state\":\"waiting\"}," +
             "\"2\":{\"state\":\"waiting\"},\"3\":{\"state\":\"waiting\"}}}", fourTopology);
@@ -98,6 +104,13 @@ internal static class ProcessPipelineSmoke
             "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0,\"sprint_down\":true}," +
             "\"3\":{\"state\":\"following\",\"x\":0,\"y\":1},\"4\":{\"state\":\"waiting\"}," +
             "\"5\":{\"state\":\"waiting\"},\"6\":{\"state\":\"following\",\"x\":0,\"y\":-1}}}", six);
+        var fixedSixFrame = LiveFollowSession.ParseFrame(
+            "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0}," +
+            "\"3\":{\"state\":\"following\",\"x\":0,\"y\":1},\"4\":{\"state\":\"waiting\"}," +
+            "\"5\":{\"state\":\"waiting\"},\"6\":{\"state\":\"following\",\"x\":0,\"y\":-1}}}",
+            six, lastFocusedLeads: false);
+        if (!fixedSixFrame.PadCommands.Select(command => command.Player).SequenceEqual([2, 3, 4, 5, 6]))
+            throw new Exception("Fixed P1 leadership lost followers in the six-player layout.");
         var sixPriority = LiveFollowFrame.ApplyCatchUpPriority(sixFrame, enabled: true);
         var sixSwitched = LiveFollowFrame.ParseDynamic(
             "{\"focused\":6,\"commands\":{\"1\":{\"state\":\"waiting\"},\"2\":{\"state\":\"waiting\"}," +

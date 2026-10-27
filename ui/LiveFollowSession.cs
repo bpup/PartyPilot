@@ -147,6 +147,13 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             new[] { "-exe", $"{slot.PartyPlayer}={clients[slot.Client - 1].Executable}" })];
     }
 
+    internal static FollowBridgeFrame ParseFrame(string json, PartyTopology topology,
+        bool lastFocusedLeads, int customRuleCount = 0) =>
+        lastFocusedLeads || topology.PlayerCount > 2
+            ? LiveFollowFrame.ParseDynamic(json, topology, customRuleCount)
+            : LiveFollowFrame.Parse(json, 2, topology.Slots[1].RuntimePad,
+                customRuleCount: customRuleCount);
+
     public static async Task<LiveFollowSession> StartAsync(string executable, PartyTopology topology,
         IReadOnlyList<LaunchedClient> clients, BridgeSession bridge, LiveFollowPlan plan,
         IReadOnlyDictionary<int, string>? memberNames = null,
@@ -195,9 +202,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         if (topology.Id is not ("2-split" or "3-three-singles" or "4-balanced" or "6-balanced") ||
             clients.Count != topology.ClientCount ||
             (!orderedTopology && (topology.Slots.Count != topology.ClientCount ||
-                topology.Slots.Any(slot => slot.LocalPlayer != 1))) ||
-            (orderedTopology || topology.ClientCount == 3) && !bridge.LastFocusedLeadsEnabled)
-            throw new InvalidOperationException("Live control requires a supported layout and dynamic MAIN focus.");
+                topology.Slots.Any(slot => slot.LocalPlayer != 1))))
+            throw new InvalidOperationException("Live control requires a supported layout.");
         if (orderedTopology && terrainBindings is { Count: > 0 })
             throw new ArgumentException("Two-player clients have no verified terrain binding.");
         var terrain = terrainBindings ?? new Dictionary<int, string>();
@@ -335,10 +341,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 {
                     var first = await process.StandardOutput.ReadLineAsync(startup.Token);
                     if (first is null) throw new InvalidDataException("Live follow exited without a decision frame.");
-                    frame = bridge.LastFocusedLeadsEnabled
-                        ? LiveFollowFrame.ParseDynamic(first, topology, customRuleCount)
-                        : LiveFollowFrame.Parse(first, 2, topology.Slots[1].RuntimePad,
-                            customRuleCount: customRuleCount);
+                    frame = ParseFrame(first, topology, bridge.LastFocusedLeadsEnabled,
+                        customRuleCount);
                     frame = LiveFollowFrame.ApplyCatchUpPriority(frame,
                         sprintCatchUp && sprintCatchUpPriority);
                 } while (frame.FocusedPlayer != initialLeader);
@@ -429,10 +433,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             {
                 var line = await _process.StandardOutput.ReadLineAsync();
                 if (line is null) break;
-                var frame = _bridge.LastFocusedLeadsEnabled
-                    ? LiveFollowFrame.ParseDynamic(line, _topology, _customRuleCount)
-                    : LiveFollowFrame.Parse(line, 2, _topology.Slots[1].RuntimePad,
-                        customRuleCount: _customRuleCount);
+                var frame = ParseFrame(line, _topology, _bridge.LastFocusedLeadsEnabled,
+                    _customRuleCount);
                 frame = LiveFollowFrame.ApplyCatchUpPriority(frame, _catchUpPriority);
                 if (_stopping) break;
                 var nextPads = frame.PadCommands.Select(command => command.Pad).ToHashSet();

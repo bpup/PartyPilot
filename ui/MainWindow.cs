@@ -601,7 +601,7 @@ public sealed class MainWindow : Window
             UpdateBridgeControls();
         };
         panel.Children.Add(_lastFocusedLeads);
-        panel.Children.Add(Label("若希望 P1 始终带路，关闭上方选项；默认规则会让最近手动聚焦的角色成为主控。", 12, MutedBrush));
+        panel.Children.Add(Label("默认由 P1 带路，P2–P6 跟随；开启上方选项后，最近手动聚焦的角色会成为主控。", 12, MutedBrush));
         panel.Children.Add(_leadershipPreferenceStatus);
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12, LineSpacing = 8 };
         _prepareBridge.Content = "准备虚拟手柄";
@@ -2394,9 +2394,7 @@ public sealed class MainWindow : Window
             _bridge is not null && _pairingSettled &&
             (!_bridge.IsHybridMode || _hybridPairing?.Phase == HybridPairingPhase.Complete &&
              Volatile.Read(ref _hybridFocusedPlayer) == 1 && Volatile.Read(ref _hybridFocusTransition) == 0) &&
-            (_selectedTopology?.Id is "2-split" or "3-three-singles" ||
-             _selectedTopology?.Id is "4-balanced" or "6-balanced" &&
-             _bridge.LastFocusedLeadsEnabled) &&
+            (_selectedTopology?.Id is "2-split" or "3-three-singles" or "4-balanced" or "6-balanced") &&
             _launchedClients.Count == _selectedTopology.ClientCount && valid &&
             (_bridge.AutoFlaskEnabled != true ||
              _flaskSupportPreferences.Load(_selectedTopology.PlayerCount).Success &&
