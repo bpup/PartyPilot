@@ -182,24 +182,26 @@ if (!FocusPadMap.TryParse(["--focus-pad-map", "1:1,2:3,3:5,4:6"],
     FocusPadMap.TryParse(["--focus-pad-map", "1:1,2:3,3:6"], [1, 3], [5], out _) ||
     FocusPadMap.TryParse(["--focus-pad-map", "1:1,2:3,4:5"], [1, 3], [5], out _))
     throw new Exception("Composite focus map accepted an omitted or unassigned private slot.");
+var client3GamePath = Path.Combine(Path.GetTempPath(), "PathOfExile_x64.exe");
+var firstGamePath = Path.Combine(Path.GetTempPath(), "first.exe");
+var secondGamePath = Path.Combine(Path.GetTempPath(), "second.exe");
+var unrelatedGamePath = Path.Combine(Path.GetTempPath(), "unrelated.exe");
 if (!CompositeClient3Options.TryParse([], out var absentClient3) || absentClient3 is not null ||
     !CompositeClient3Options.TryParse(["--client3-pid", "123", "--client3-window-handle", "456",
-        "--client3-game-exe", "/tmp/PathOfExile_x64.exe", "--client3-players", "5,6"],
+        "--client3-game-exe", client3GamePath, "--client3-players", "5,6"],
         out var compositeOptions) || compositeOptions is not { IncludeP6: true, Pid: 123,
             WindowHandle: 456 } ||
     CompositeClient3Options.TryParse(["--client3-pid", "123"], out _) ||
     CompositeClient3Options.TryParse(["--client3-pid", "123", "--client3-pid", "456",
         "--client3-window-handle", "456", "--client3-game-exe",
-        "/tmp/PathOfExile_x64.exe", "--client3-players", "5"], out _) ||
+        client3GamePath, "--client3-players", "5"], out _) ||
     CompositeClient3Options.TryParse(["--client3-pid", "123", "--client3-window-handle", "456",
-        "--client3-game-exe", "/tmp/PathOfExile_x64.exe", "--client3-players", "6"], out _))
+        "--client3-game-exe", client3GamePath, "--client3-players", "6"], out _))
     throw new Exception("Composite Client 3 binding arguments were accepted ambiguously.");
 if (compositeOptions is not { } boundClient3 ||
-    !boundClient3.MatchesThirdGamePath(["/tmp/first.exe", "/tmp/second.exe",
-        "/tmp/PathOfExile_x64.exe"]) ||
-    boundClient3.MatchesThirdGamePath(["/tmp/PathOfExile_x64.exe"]) ||
-    boundClient3.MatchesThirdGamePath(["/tmp/first.exe", "/tmp/second.exe",
-        "/tmp/unrelated.exe"]) ||
+    !boundClient3.MatchesThirdGamePath([firstGamePath, secondGamePath, client3GamePath]) ||
+    boundClient3.MatchesThirdGamePath([client3GamePath]) ||
+    boundClient3.MatchesThirdGamePath([firstGamePath, secondGamePath, unrelatedGamePath]) ||
     !boundClient3.MatchesPairingTarget(new PairingControl("arm_pairing", 5, 123, 456)) ||
     !boundClient3.MatchesPairingTarget(new PairingControl("arm_pairing", 6, 123, 456)) ||
     boundClient3.MatchesPairingTarget(new PairingControl("arm_pairing", 5, 999, 456)) ||
