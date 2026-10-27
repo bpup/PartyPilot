@@ -55,6 +55,33 @@ internal sealed class Client3RuntimeAttach : IDisposable, IClient3PadOutput
         string expectedExecutable, bool includeP6, CancellationToken cancellationToken = default) =>
         AttachCoreAsync(pid, 0, expectedExecutable, includeP6, true, cancellationToken);
 
+    internal static Client3RuntimeAttach AdoptExisting(int pid, long windowHandle,
+        string expectedExecutable, bool includeP6)
+    {
+        if (!OperatingSystem.IsWindows() || !Environment.Is64BitProcess || pid <= 0 ||
+            windowHandle <= 0 || !ForegroundWindowProbe.IsExistingTarget(pid, windowHandle) ||
+            !Path.IsPathFullyQualified(expectedExecutable) ||
+            !IsKnownGameExecutable(expectedExecutable) || !File.Exists(expectedExecutable))
+            throw new InvalidOperationException("Client 3 handoff needs the verified running PoE2 window.");
+        var process = Process.GetProcessById(pid);
+        try
+        {
+            if (process.HasExited ||
+                !string.Equals(process.MainModule?.FileName, Path.GetFullPath(expectedExecutable),
+                    StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Client 3 process path changed before private mapping handoff.");
+            var publisher = Client3InputPublisher.OpenExistingForProcess(process, includeP6);
+            return new Client3RuntimeAttach(process, publisher);
+        }
+        catch
+        {
+            process.Dispose();
+            throw;
+        }
+    }
+
+    internal void Relinquish() => _publisher.Relinquish();
+
     private static async Task<Client3RuntimeAttach> AttachCoreAsync(int pid, long windowHandle,
         string expectedExecutable, bool includeP6, bool preResume, CancellationToken cancellationToken)
     {

@@ -16,10 +16,11 @@ internal sealed class PrivateSlotPublisher : IDisposable
     private readonly Func<bool> _processAlive;
     private readonly uint _connected;
     private bool _disposed;
+    private bool _stopOnDispose = true;
 
     private PrivateSlotPublisher(MemoryMappedFile? mapping, MemoryMappedViewAccessor view,
         MemoryMappedFile? configMapping, MemoryMappedViewAccessor? configView,
-        Func<bool> processAlive, bool includeP6)
+        Func<bool> processAlive, bool includeP6, bool initialize = true)
     {
         _mapping = mapping;
         _view = view;
@@ -27,11 +28,14 @@ internal sealed class PrivateSlotPublisher : IDisposable
         _configView = configView;
         _processAlive = processAlive;
         _connected = includeP6 ? PrivateSlotFrame.P5 | PrivateSlotFrame.P6 : PrivateSlotFrame.P5;
-        var initial = new byte[PrivateSlotFrame.Size];
-        PrivateSlotFrame.Initialize(initial, includeP6);
-        _view.WriteArray(0, initial, 0, initial.Length);
-        WritePadCore(5, default);
-        if (includeP6) WritePadCore(6, default);
+        if (initialize)
+        {
+            var initial = new byte[PrivateSlotFrame.Size];
+            PrivateSlotFrame.Initialize(initial, includeP6);
+            _view.WriteArray(0, initial, 0, initial.Length);
+            WritePadCore(5, default);
+            if (includeP6) WritePadCore(6, default);
+        }
     }
 
     internal static PrivateSlotPublisher OpenForProcess(Process gameProcess, bool includeP6,
@@ -67,9 +71,40 @@ internal sealed class PrivateSlotPublisher : IDisposable
         }
     }
 
+    internal static PrivateSlotPublisher OpenExistingForProcess(Process gameProcess, bool includeP6)
+    {
+        if (!OperatingSystem.IsWindows() || gameProcess.Id <= 0 || gameProcess.HasExited)
+            throw new InvalidOperationException("A live Windows Client 3 process is required.");
+        var mapping = MemoryMappedFile.OpenExisting($"Local\\PartyPilot.PrivateSlots.{gameProcess.Id}",
+            MemoryMappedFileRights.ReadWrite);
+        try
+        {
+            var view = mapping.CreateViewAccessor(0, PrivateSlotFrame.Size,
+                MemoryMappedFileAccess.ReadWrite);
+            var publisher = new PrivateSlotPublisher(mapping, view, null, null,
+                () => !gameProcess.HasExited, includeP6, initialize: false);
+            if (!publisher.IsReady)
+            {
+                publisher.Relinquish();
+                publisher.Dispose();
+                throw new InvalidOperationException("Client 3 pre-resume mapping is not ready for handoff.");
+            }
+            return publisher;
+        }
+        catch
+        {
+            mapping.Dispose();
+            throw;
+        }
+    }
+
     // Anonymous view keeps the memory protocol testable without Windows.
     internal static PrivateSlotPublisher CreateForTest(MemoryMappedViewAccessor view,
         Func<bool> processAlive, bool includeP6) => new(null, view, null, null, processAlive, includeP6);
+
+    internal static PrivateSlotPublisher CreateExistingForTest(MemoryMappedViewAccessor view,
+        Func<bool> processAlive, bool includeP6) =>
+        new(null, view, null, null, processAlive, includeP6, initialize: false);
 
     internal bool IsReady
     {
@@ -126,7 +161,7 @@ internal sealed class PrivateSlotPublisher : IDisposable
         lock (_sync)
         {
             if (_disposed) return;
-            if (HasValidFrame())
+            if (_stopOnDispose && HasValidFrame())
             {
                 WritePadCore(5, default);
                 if ((_connected & PrivateSlotFrame.P6) != 0) WritePadCore(6, default);
@@ -139,6 +174,11 @@ internal sealed class PrivateSlotPublisher : IDisposable
             _configView?.Dispose();
             _configMapping?.Dispose();
         }
+    }
+
+    internal void Relinquish()
+    {
+        lock (_sync) _stopOnDispose = false;
     }
 
     private bool HasValidFrame()

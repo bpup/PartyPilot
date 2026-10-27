@@ -76,7 +76,7 @@ internal sealed class BridgeSession : IAsyncDisposable
         string deviceInstance, IReadOnlyList<string> gameExecutables, bool rightStickFollowerOverride,
         bool autoFlaskEnabled = false, bool useWgi = false, PrivateClient3Plan? privatePlan = null,
         bool lastFocusedLeads = false, bool menuGuardEnabled = true,
-        FollowerMirrorConfig? followerMirror = null)
+        FollowerMirrorConfig? followerMirror = null, bool adoptExistingPrivate = false)
     {
         var slots = partySlots.Where(item => item.Client != 3).Select(item => item.RuntimePad).ToArray();
         var privateSlots = partySlots.Where(item => item.Client == 3)
@@ -87,7 +87,7 @@ internal sealed class BridgeSession : IAsyncDisposable
             !partySlots.Select(item => item.PartyPlayer).SequenceEqual(Enumerable.Range(1, partySlots.Count)) ||
             string.IsNullOrWhiteSpace(deviceInstance) || gameExecutables.Count is < 1 or > 3 ||
             gameExecutables.Any(string.IsNullOrWhiteSpace) ||
-            (privatePlan is null && privateSlots.Length != 0) ||
+            (privatePlan is null && (privateSlots.Length != 0 || adoptExistingPrivate)) ||
             (privatePlan is not null &&
              (!privateSlots.SequenceEqual(privatePlan.IncludePad6 ? [5, 6] : [5]) ||
               gameExecutables.Count != 3 ||
@@ -138,6 +138,7 @@ internal sealed class BridgeSession : IAsyncDisposable
                 "--client3-game-exe", privatePlan.Executable,
                 "--client3-players", privatePlan.IncludePad6 ? "5,6" : "5"
             }) start.ArgumentList.Add(argument);
+            if (adoptExistingPrivate) start.ArgumentList.Add("--client3-adopt-existing");
         }
         if (rightStickFollowerOverride) start.ArgumentList.Add("--right-stick-follower-override");
         if (autoFlaskEnabled) start.ArgumentList.Add("--enable-auto-flask");
@@ -161,7 +162,7 @@ internal sealed class BridgeSession : IAsyncDisposable
                 TimeSpan.FromSeconds(privatePlan is null ? 15 : 45));
             if (readyLine is null || !IsExpectedReady(readyLine, slots, focusPadMap,
                 rightStickFollowerOverride, directRightStickSlot, autoFlaskEnabled, useWgi, privatePlan,
-                lastFocusedLeads, menuGuardEnabled, followerMirror))
+                lastFocusedLeads, menuGuardEnabled, followerMirror, adoptExistingPrivate))
             {
                 throw new InvalidOperationException("Virtual controller bridge did not confirm the requested pad slots.");
             }
@@ -249,7 +250,8 @@ internal sealed class BridgeSession : IAsyncDisposable
 
     internal async Task BindHybridAsync(IReadOnlyList<PartySlot> partySlots,
         IReadOnlyList<LaunchedClient> clients, HybridBindingConfig bindings,
-        bool menuGuardEnabled, FollowerMirrorConfig followerMirror)
+        bool menuGuardEnabled, FollowerMirrorConfig followerMirror,
+        bool adoptExistingPrivate = false)
     {
         if (!_hybridPrelaunchPending || !IsRunning || _hybridPrelaunchSlots is null ||
             _hybridPrelaunchPads is null || clients.Count is < 2 or > 3 ||
@@ -263,6 +265,7 @@ internal sealed class BridgeSession : IAsyncDisposable
         await WriteCommandAsync(JsonSerializer.Serialize(new
         {
             type = "bind_hybrid", player_pads = _hybridPrelaunchPads, window_map = windowMap,
+            adopt_private_client3 = adoptExistingPrivate,
             client3 = privatePlan is null ? null : new
             {
                 pid = privatePlan.Pid, window_handle = privatePlan.WindowHandle,
@@ -274,7 +277,7 @@ internal sealed class BridgeSession : IAsyncDisposable
         var line = await _process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(45));
         if (line is null || !IsExpectedHybridReady(line, _hybridPrelaunchSlots,
                 _hybridPrelaunchPads, windowMap, bindings.Encode(), menuGuardEnabled,
-                followerMirror, privatePlan))
+                followerMirror, privatePlan, adoptExistingPrivate))
             throw new InvalidOperationException("Keyboard bridge did not confirm bound game windows.");
         _hybridPrelaunchPending = false;
     }
@@ -309,7 +312,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     internal static async Task<BridgeSession> StartHybridAsync(string executable,
         IReadOnlyList<PartySlot> partySlots, IReadOnlyList<LaunchedClient> clients,
         HybridBindingConfig? bindings = null, bool menuGuardEnabled = true,
-        FollowerMirrorConfig? followerMirror = null)
+        FollowerMirrorConfig? followerMirror = null, bool adoptExistingPrivate = false)
     {
         var runtimePads = partySlots.Select(slot => slot.RuntimePad).ToArray();
         var supportedLayout = runtimePads.SequenceEqual([1, 3]) ||
@@ -332,6 +335,8 @@ internal sealed class BridgeSession : IAsyncDisposable
         var privatePlan = clients.Count == 3 ? new PrivateClient3Plan(clients[2].Pid,
             clients[2].WindowHandle, Path.GetFullPath(clients[2].Executable),
             runtimePads.Contains(6)) : null;
+        if (adoptExistingPrivate && privatePlan is null)
+            throw new ArgumentException("Existing private input requires Client 3.");
         var windowMap = string.Join(',', partySlots.Select(slot =>
             $"{slot.PartyPlayer}:{clients[slot.Client - 1].Pid}:{clients[slot.Client - 1].WindowHandle}"));
         var start = new ProcessStartInfo(executable)
@@ -368,6 +373,7 @@ internal sealed class BridgeSession : IAsyncDisposable
                 "--client3-game-exe", privatePlan.Executable,
                 "--client3-players", privatePlan.IncludePad6 ? "5,6" : "5"
             }) start.ArgumentList.Add(argument);
+            if (adoptExistingPrivate) start.ArgumentList.Add("--client3-adopt-existing");
         }
         foreach (var client in clients)
         {
@@ -382,7 +388,8 @@ internal sealed class BridgeSession : IAsyncDisposable
             var readyLine = await process.StandardOutput.ReadLineAsync().WaitAsync(
                 TimeSpan.FromSeconds(privatePlan is null ? 15 : 45));
             if (readyLine is null || !IsExpectedHybridReady(readyLine, slots, playerPads,
-                    windowMap, bindings?.Encode(), menuGuardEnabled, followerMirror, privatePlan))
+                    windowMap, bindings?.Encode(), menuGuardEnabled, followerMirror, privatePlan,
+                    adoptExistingPrivate))
                 throw new InvalidOperationException("Keyboard bridge did not confirm its pad and window binding.");
             return new BridgeSession(process, readError, false, false, slots,
                 [1, ..outputForRuntime.Values], hybridMode: true,
@@ -402,7 +409,7 @@ internal sealed class BridgeSession : IAsyncDisposable
     internal static bool IsExpectedHybridReady(string line, int[] slots,
         string playerPads, string windowMap, string? bindingKeys = null,
         bool menuGuardEnabled = true, FollowerMirrorConfig? followerMirror = null,
-        PrivateClient3Plan? privatePlan = null)
+        PrivateClient3Plan? privatePlan = null, bool adoptExistingPrivate = false)
     {
         try
         {
@@ -423,6 +430,8 @@ internal sealed class BridgeSession : IAsyncDisposable
                  root.TryGetProperty("private_client3_slots", out var privatePads) &&
                  privatePads.EnumerateArray().Select(value => value.GetInt32())
                      .SequenceEqual(privatePlan.IncludePad6 ? [5, 6] : [5])) &&
+                (!adoptExistingPrivate || root.TryGetProperty("private_client3_adopted", out var adopted) &&
+                 adopted.GetBoolean()) &&
                 root.TryGetProperty("slots", out var selected) &&
                 selected.EnumerateArray().Select(value => value.GetInt32()).SequenceEqual(slots.Order()) &&
                 root.TryGetProperty("hybrid_player_pads", out var pads) && pads.GetString() == playerPads &&
@@ -439,7 +448,8 @@ internal sealed class BridgeSession : IAsyncDisposable
     internal static bool IsExpectedReady(string line, int[] slots, string focusPadMap,
         bool rightStickFollowerOverride, int directRightStickSlot, bool autoFlaskEnabled, bool useWgi,
         PrivateClient3Plan? privatePlan, bool lastFocusedLeads = false,
-        bool menuGuardEnabled = true, FollowerMirrorConfig? followerMirror = null)
+        bool menuGuardEnabled = true, FollowerMirrorConfig? followerMirror = null,
+        bool adoptExistingPrivate = false)
     {
         try
         {
@@ -470,6 +480,8 @@ internal sealed class BridgeSession : IAsyncDisposable
                    privatePid.GetInt32() == (privatePlan?.Pid ?? 0) &&
                    root.TryGetProperty("private_client3_window_handle", out var privateWindow) &&
                    privateWindow.GetInt64() == (privatePlan?.WindowHandle ?? 0) &&
+                   (!adoptExistingPrivate || root.TryGetProperty("private_client3_adopted", out var adopted) &&
+                    adopted.GetBoolean()) &&
                    root.TryGetProperty("private_client3_slots", out var privatePads) &&
                    privatePads.EnumerateArray().Select(value => value.GetInt32())
                        .SequenceEqual(privatePlan is null ? [] :

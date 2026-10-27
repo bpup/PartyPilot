@@ -45,6 +45,29 @@ internal static class PrivateSlotPublisherTests
         if (!p5Only.IsReady || p5Only.WritePad(6, default) ||
             !p5Only.WritePad(5, new PadReport(1, 0, 0, 0, 0, 0, 0)))
             throw new Exception("P5-only private mapping exposed P6 or lost P5.");
+
+        using var transferMapping = MemoryMappedFile.CreateNew(null, PrivateSlotFrame.Size);
+        using var transferObserver = transferMapping.CreateViewAccessor(0, PrivateSlotFrame.Size);
+        var first = PrivateSlotPublisher.CreateForTest(
+            transferMapping.CreateViewAccessor(0, PrivateSlotFrame.Size), () => true, false);
+        transferObserver.Write(12, PrivateSlotFrame.Ready);
+        var held = new PadReport(0x1000, 0, 0, 0, 0, 0, 0);
+        if (!first.WritePad(5, held))
+            throw new Exception("Pre-resume publisher did not create a live private frame.");
+        using (var adopted = PrivateSlotPublisher.CreateExistingForTest(
+                   transferMapping.CreateViewAccessor(0, PrivateSlotFrame.Size), () => true, false))
+        {
+            if (!adopted.IsReady || !PrivateSlotFrame.TryReadPad(Snapshot(transferObserver),
+                    5, out var read, out _, out _) || read != held)
+                throw new Exception("Private mapping handoff reset the existing game frame.");
+            first.Relinquish();
+            first.Dispose();
+            if (!adopted.IsReady || transferObserver.ReadInt32(12) != PrivateSlotFrame.Ready ||
+                !adopted.WritePad(5, default))
+                throw new Exception("Old publisher stopped a private mapping already adopted by the bridge.");
+        }
+        if (transferObserver.ReadInt32(12) != PrivateSlotFrame.Stopping)
+            throw new Exception("Adopted publisher did not own final private mapping cleanup.");
     }
 
     private static byte[] Snapshot(MemoryMappedViewAccessor view)

@@ -15,6 +15,13 @@ internal static class PrivateClient3PlanSmoke
                 expectedGame, out _) ||
             Client3PreResumeSession.TryReadLauncherNotice(notice, Path.GetFullPath("other.exe"), out _))
             throw new Exception("Client 3 pre-resume notice accepted an invalid process binding.");
+        if (!Client3PreResumeSession.MatchesTransfer(
+                "{\"event\":\"private_client3_transferred\",\"pid\":103}", 103) ||
+            Client3PreResumeSession.MatchesTransfer(
+                "{\"event\":\"private_client3_transferred\",\"pid\":102}", 103) ||
+            Client3PreResumeSession.MatchesTransfer(
+                "{\"event\":\"private_client3_ready\",\"pid\":103}", 103))
+            throw new Exception("Client 3 mapping handoff accepted the wrong process or phase.");
         var clients = new[]
         {
             new LaunchedClient(101, 201, Path.GetFullPath("PathOfExile_x64.exe")),
@@ -52,6 +59,12 @@ internal static class PrivateClient3PlanSmoke
         """;
         if (!BridgeSession.IsExpectedReady(bridgeReady, [1, 2, 3, 4], focusMap,
                 false, 0, false, true, composite) ||
+            BridgeSession.IsExpectedReady(bridgeReady, [1, 2, 3, 4], focusMap,
+                false, 0, false, true, composite, adoptExistingPrivate: true) ||
+            !BridgeSession.IsExpectedReady(bridgeReady.Replace("\"private_client3_pid\":103",
+                "\"private_client3_adopted\":true,\"private_client3_pid\":103"),
+                [1, 2, 3, 4], focusMap, false, 0, false, true, composite,
+                adoptExistingPrivate: true) ||
             BridgeSession.IsExpectedReady(bridgeReady, [1, 2, 3, 4], focusMap,
                 false, 0, false, true, composite, menuGuardEnabled: false) ||
             !BridgeSession.IsExpectedReady(bridgeReady.Replace("\"menu_guard_enabled\":true",

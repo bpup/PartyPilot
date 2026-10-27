@@ -96,7 +96,7 @@ internal static class ProcessPipelineSmoke
                 "time.sleep(0.3)\n");
             File.WriteAllText(tripleBridgeExe, "#!/usr/bin/env python3\nimport sys,json\n" +
                 "if '--last-focused-leads' not in sys.argv or '--client3-players' not in sys.argv or sys.argv[sys.argv.index('--client3-players')+1] != '5': sys.exit(2)\n" +
-                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"menu_guard_enabled\":true,\"last_focused_leads\":true,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3,3:5\",\"private_client3_pid\":103,\"private_client3_window_handle\":203,\"private_client3_slots\":[5]}', flush=True)\n" +
+                "print(json.dumps({'event':'ready','slots':[1,3],'physical_mode':True,'pairing_protected':True,'hidhide_preflight':True,'menu_guard_enabled':True,'last_focused_leads':True,'auto_flask_enabled':False,'right_stick_follower_override':False,'direct_right_stick_slot':0,'focus_pad_map':'1:1,2:3,3:5','private_client3_pid':103,'private_client3_window_handle':203,'private_client3_slots':[5],'private_client3_adopted':'--client3-adopt-existing' in sys.argv}), flush=True)\n" +
                 "focused=False\n" +
                 $"for line in sys.stdin:\n    with open({JsonSerializer.Serialize(tripleLog)}, 'a') as out: out.write(line)\n" +
                 "    command=json.loads(line)\n" +
@@ -282,6 +282,14 @@ internal static class ProcessPipelineSmoke
                 !tripleCommands.Any(line => line.Contains("\"slot\":5,\"state\":\"waiting\"")))
                 throw new Exception("Three-client MAIN switch did not route P1/P3/P5 safely: " +
                     string.Join(" | ", tripleCommands));
+            await using (var adoptedBridge = await BridgeSession.StartAsync(tripleBridgeExe,
+                triple.Slots, 0, @"HID\VID_1234&PID_5678\DEVICE",
+                tripleClients.Select(client => client.Executable).ToArray(), false,
+                privatePlan: triplePlan, lastFocusedLeads: true, adoptExistingPrivate: true))
+            {
+                if (!adoptedBridge.IsRunning)
+                    throw new Exception("Three-client bridge did not retain adopted private input.");
+            }
             Console.WriteLine("Three independent clients and P5 private follow routing checked with local fake executables.");
             File.WriteAllText(tripleBridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "if '--enable-auto-flask' not in sys.argv or '--client3-players' not in sys.argv: sys.exit(2)\n" +

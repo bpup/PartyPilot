@@ -23,10 +23,11 @@ internal static class HybridBindRequest
 
     internal static bool TryParse(string? line, IReadOnlyCollection<int> slots,
         IReadOnlyList<string> gamePaths, out HybridKeyboardPlan? plan,
-        out CompositeClient3Options? privateOptions)
+        out CompositeClient3Options? privateOptions, out bool adoptExisting)
     {
         plan = null;
         privateOptions = null;
+        adoptExisting = false;
         if (string.IsNullOrWhiteSpace(line)) return false;
         try
         {
@@ -37,6 +38,11 @@ internal static class HybridBindRequest
                 !root.TryGetProperty("window_map", out var windows) ||
                 pads.ValueKind != JsonValueKind.String || windows.ValueKind != JsonValueKind.String)
                 return false;
+            if (root.TryGetProperty("adopt_private_client3", out var adoption))
+            {
+                if (adoption.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return false;
+                adoptExisting = adoption.GetBoolean();
+            }
             var arguments = new List<string> { "--hybrid-player-pads", pads.GetString()!,
                 "--hybrid-window-map", windows.GetString()! };
             if (root.TryGetProperty("client3", out var third))
@@ -56,7 +62,8 @@ internal static class HybridBindRequest
             return HybridKeyboardPlan.TryParse(arguments.ToArray(), slots, out plan) &&
                 CompositeClient3Options.TryParse(arguments.ToArray(), out privateOptions) &&
                 plan!.MatchesPrivateClient3(privateOptions) &&
-                (privateOptions is null || privateOptions.Value.MatchesThirdGamePath(gamePaths));
+                (privateOptions is null || privateOptions.Value.MatchesThirdGamePath(gamePaths)) &&
+                (!adoptExisting || privateOptions is not null);
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException)
         {

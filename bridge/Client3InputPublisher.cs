@@ -26,6 +26,11 @@ internal sealed class Client3InputPublisher : IDisposable, IClient3PadOutput
         new(PrivateSlotPublisher.OpenForProcess(client3, includeP6,
             p5LocalIndex, p6LocalIndex), includeP6);
 
+    internal static Client3InputPublisher OpenExistingForProcess(Process client3, bool includeP6) =>
+        new(PrivateSlotPublisher.OpenExistingForProcess(client3, includeP6), includeP6);
+
+    internal void Relinquish() => _publisher.Relinquish();
+
     internal static Client3InputPublisher CreateForTest(PrivateSlotPublisher publisher,
         bool includeP6) => new(publisher, includeP6);
 

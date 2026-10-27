@@ -2085,9 +2085,10 @@ public sealed class MainWindow : Window
         _pauseFollow.Content = _follow?.Paused == true ? "恢复跟随" : "暂停跟随";
     }
 
-    private async Task PrepareBridgeAsync()
+    private async Task PrepareBridgeAsync(Client3PreResumeSession? pendingPrivate = null)
     {
-        if (_busy || _bridge is not null || _selectedTopology is null || !OperatingSystem.IsWindows())
+        if ((_busy && pendingPrivate is null) || _bridge is not null ||
+            _selectedTopology is null || !OperatingSystem.IsWindows())
         {
             _pairingStatus.Text = "手柄桥接需要 Windows、已选布局与空闲桥接会话。";
             return;
@@ -2100,7 +2101,7 @@ public sealed class MainWindow : Window
         }
         if (HybridSelected)
         {
-            await PrepareHybridBridgeAsync();
+            await PrepareHybridBridgeAsync(adoptExistingPrivate: pendingPrivate is not null);
             return;
         }
         var slots = _selectedTopology.Slots.Where(slot => slot.Client != 3)
@@ -2128,6 +2129,7 @@ public sealed class MainWindow : Window
             _pairingStatus.Text = "找不到 PartyPilot.Bridge.exe；请使用完整发布目录。";
             return;
         }
+        var wasBusy = _busy;
         _busy = true;
         UpdateBridgeControls();
         _pairingStatus.Text = "正在检查 HidHide 隔离、实体手柄与虚拟手柄编号…";
@@ -2139,7 +2141,8 @@ public sealed class MainWindow : Window
                 _physicalDevice.Text.Trim(), gameExecutables, _rightStickFollowerOverride.IsChecked == true,
                 _selectedTopology.Id is "2-split" or "3-three-singles" && _autoFlask.IsChecked == true,
                 useWgi, privatePlan, lastFocusedLeads: _lastFocusedLeads.IsChecked == true,
-                menuGuardEnabled: _menuGuard.IsChecked == true, followerMirror: _followerMirror);
+                menuGuardEnabled: _menuGuard.IsChecked == true, followerMirror: _followerMirror,
+                adoptExistingPrivate: pendingPrivate is not null);
             ActivateBridge(session, _selectedTopology);
         }
         catch (Exception error)
@@ -2148,12 +2151,13 @@ public sealed class MainWindow : Window
         }
         finally
         {
-            _busy = false;
+            _busy = wasBusy;
             UpdateBridgeControls();
         }
     }
 
-    private async Task PrepareHybridBridgeAsync(BridgeSession? prelaunchBridge = null)
+    private async Task PrepareHybridBridgeAsync(BridgeSession? prelaunchBridge = null,
+        bool adoptExistingPrivate = false)
     {
         var topology = _selectedTopology;
         var clients = _launchedClients.ToArray();
@@ -2186,10 +2190,11 @@ public sealed class MainWindow : Window
         {
             session = prelaunchBridge ?? await BridgeSession.StartHybridAsync(executable,
                 topology.Slots, clients, _hybridBindings,
-                menuGuardEnabled: _menuGuard.IsChecked == true, followerMirror: _followerMirror);
+                menuGuardEnabled: _menuGuard.IsChecked == true, followerMirror: _followerMirror,
+                adoptExistingPrivate: adoptExistingPrivate);
             if (prelaunchBridge is not null)
                 await prelaunchBridge.BindHybridAsync(topology.Slots, clients, _hybridBindings,
-                    _menuGuard.IsChecked == true, _followerMirror);
+                    _menuGuard.IsChecked == true, _followerMirror, adoptExistingPrivate);
             Volatile.Write(ref _hybridFocusedPlayer, 1);
             Volatile.Write(ref _hybridFocusTransition, 0);
             _hybridFocusKeysDown.Clear();
@@ -2946,6 +2951,7 @@ public sealed class MainWindow : Window
             _ => "正在检查配置…"
         };
         BridgeSession? prelaunchBridge = null;
+        Client3PreResumeSession? pendingPrivate = null;
         try
         {
             if (action == ClientAction.Start && HybridSelected)
@@ -3064,11 +3070,11 @@ public sealed class MainWindow : Window
                     var privateBridge = BridgeSession.FindExecutable() ??
                         throw new InvalidOperationException("找不到第三客户端私有手柄桥接程序。");
                     var includeP6 = _selectedTopology.Slots.Count(slot => slot.Client == 3) == 2;
-                    await using var preparation = await Client3PreResumeSession.StartAsync(
+                    pendingPrivate = await Client3PreResumeSession.StartAsync(
                         privateBridge, pid, expectedGame, includeP6);
                     await process.StandardInput.WriteLineAsync($"resume {pid}");
                     await process.StandardInput.FlushAsync();
-                    await preparation.ConfirmResumeAsync();
+                    await pendingPrivate.ConfirmResumeAsync();
                     output = process.StandardOutput.ReadToEndAsync();
                 }
                 catch (Exception preparationError)
@@ -3134,13 +3140,27 @@ public sealed class MainWindow : Window
             {
                 if (prelaunchBridge?.IsHybridMode == true)
                 {
-                    await PrepareHybridBridgeAsync(prelaunchBridge);
+                    await PrepareHybridBridgeAsync(prelaunchBridge,
+                        adoptExistingPrivate: pendingPrivate is not null);
                     if (!ReferenceEquals(_bridge, prelaunchBridge))
                     {
                         if (prelaunchBridge.IsRunning) await prelaunchBridge.DisposeAsync();
                         _status.Text = "游戏窗口已识别，但键鼠桥接绑定失败：" + _pairingStatus.Text;
                         return;
                     }
+                }
+                else if (pendingPrivate is not null)
+                {
+                    await PrepareBridgeAsync(pendingPrivate);
+                    if (_bridge is null)
+                        throw new InvalidOperationException("第三客户端私有手柄未能接入主桥接：" +
+                            _pairingStatus.Text);
+                }
+                if (pendingPrivate is not null)
+                {
+                    await pendingPrivate.HandoffAsync();
+                    await pendingPrivate.DisposeAsync();
+                    pendingPrivate = null;
                 }
                 var preparation = await PrepareAutoLoginsAfterBindingAsync(_selectedTopology,
                     _launchedClients.ToArray());
@@ -3154,12 +3174,21 @@ public sealed class MainWindow : Window
                 await StopBridgeAsync();
             else if (prelaunchBridge?.IsRunning == true)
                 await prelaunchBridge.DisposeAsync();
+            else if (pendingPrivate is not null && _bridge is not null)
+                await StopBridgeAsync();
             _status.Text = $"启动或绑定失败：{exception.Message}";
         }
         finally
         {
-            _busy = false;
-            UpdateClientRows();
+            try
+            {
+                if (pendingPrivate is not null) await pendingPrivate.DisposeAsync();
+            }
+            finally
+            {
+                _busy = false;
+                UpdateClientRows();
+            }
         }
     }
 

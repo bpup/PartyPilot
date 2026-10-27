@@ -57,14 +57,14 @@ internal static class HybridKeyboardInputTests
                 [1, 2], out _) ||
             !HybridBindRequest.TryParse(
                 "{\"type\":\"bind_hybrid\",\"player_pads\":\"2:2\",\"window_map\":\"1:10:100,2:20:200\"}",
-                [1, 2], [gameA, gameB], out var bound, out var boundPrivate) ||
+                [1, 2], [gameA, gameB], out var bound, out var boundPrivate, out _) ||
             bound?.PlayerWindows[2] != new HybridGameWindow(20, 200) || boundPrivate is not null ||
             HybridBindRequest.TryParse(
                 "{\"type\":\"bind_hybrid\",\"player_pads\":\"2:2\",\"window_map\":\"1:10:100,2:10:100\"}",
-                [1, 2], [gameA, gameB], out _, out _) ||
+                [1, 2], [gameA, gameB], out _, out _, out _) ||
             HybridBindRequest.TryParse(
                 "{\"type\":\"bind_hybrid\",\"player_pads\":\"2:3,3:5\",\"window_map\":\"1:10:100,2:20:200,3:30:300\"}",
-                [1, 2, 3, 4], [gameA, gameB, Path.GetFullPath("PathOfExile.exe")], out _, out _))
+                [1, 2, 3, 4], [gameA, gameB, Path.GetFullPath("PathOfExile.exe")], out _, out _, out _))
             throw new Exception("Prelaunch keyboard pads or late game-window binding were accepted ambiguously.");
         var thirdGame = Path.GetFullPath("PathOfExile.exe");
         var thirdBinding = System.Text.Json.JsonSerializer.Serialize(new
@@ -74,9 +74,17 @@ internal static class HybridKeyboardInputTests
             client3 = new { pid = 30, window_handle = 300, game_exe = thirdGame, players = "5" }
         });
         if (!HybridBindRequest.TryParse(thirdBinding, [1, 2, 3, 4],
-                [gameA, gameB, thirdGame], out var boundThird, out var boundThirdOptions) ||
+                [gameA, gameB, thirdGame], out var boundThird, out var boundThirdOptions,
+                out var adopted) || adopted ||
             boundThird?.PlayerPads[3] != 5 || boundThirdOptions?.PrivateSlots.SequenceEqual([5]) != true)
             throw new Exception("Prelaunch rejected an exact private Client 3 binding.");
+        var transferred = thirdBinding.Replace("\"client3\":", "\"adopt_private_client3\":true,\"client3\":");
+        if (!HybridBindRequest.TryParse(transferred, [1, 2, 3, 4],
+                [gameA, gameB, thirdGame], out _, out _, out var transferredFlag) ||
+            !transferredFlag || HybridBindRequest.TryParse(
+                "{\"type\":\"bind_hybrid\",\"player_pads\":\"2:2\",\"window_map\":\"1:10:100,2:20:200\",\"adopt_private_client3\":true}",
+                [1, 2], [gameA, gameB], out _, out _, out _))
+            throw new Exception("Pre-resume mapping handoff accepted an unbound Client 3.");
         if (!plan.MatchesGameProcesses([gameA, gameB],
                 pid => pid == 10 ? gameA : gameB) ||
             plan.MatchesGameProcesses([gameA], _ => gameA) ||

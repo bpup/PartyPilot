@@ -28,6 +28,13 @@ if (args.Length > 0 && args[0] == "--prepare-private-client3")
             pid = request.Pid, players = request.IncludeP6 ? new[] { 5, 6 } : new[] { 5 },
             local_indices = request.IncludeP6 ? new[] { 0, 1 } : new[] { 0 } }));
         await Console.Out.FlushAsync();
+        var handoff = await Console.In.ReadLineAsync();
+        if (handoff != $"handoff {request.Pid}")
+            throw new InvalidOperationException("Client 3 private mapping was not handed to the running bridge.");
+        session.Relinquish();
+        Console.WriteLine(JsonSerializer.Serialize(new { @event = "private_client3_transferred",
+            pid = request.Pid }));
+        await Console.Out.FlushAsync();
         return 0;
     }
     catch (Exception error) when (error is InvalidOperationException or IOException or
@@ -194,6 +201,7 @@ if (args.Length == 4 && args[0] == "--probe-xinput" && args[2] == "--samples" &&
 
 var hybridMode = args.Contains("--hybrid-keyboard");
 var hybridPrelaunch = args.Contains("--hybrid-prelaunch");
+var adoptPrivateClient3 = args.Contains("--client3-adopt-existing");
 if (!args.Contains("--enable-controller") || !BridgeSlots.TryParse(args, out var slots) ||
     !CompositeClient3Options.TryParse(args, out var client3Options) ||
     !FocusPadMap.TryParse(args, slots, client3Options?.PrivateSlots ?? [], out var focusPads) ||
@@ -247,6 +255,11 @@ if (hybridPrelaunch && (!hybridMode || args.Contains("--hybrid-window-map") ||
     !HybridBindRequest.ValidPrelaunchPads(args, slots, out _)))
 {
     Console.Error.WriteLine("Keyboard prelaunch must bind game windows after virtual pads are ready.");
+    return 2;
+}
+if (adoptPrivateClient3 && (client3Options is null || hybridPrelaunch))
+{
+    Console.Error.WriteLine("Client 3 mapping handoff requires a bound private game process.");
     return 2;
 }
 if (hybridMode && (physicalMode || protectedPairing || autoFlaskEnabled || combatEnabled ||
@@ -412,7 +425,7 @@ try
                 follower_mirror = followerMirror.Encode() }));
             var bindLine = await Console.In.ReadLineAsync();
             if (!HybridBindRequest.TryParse(bindLine, slots, gamePaths,
-                out hybridPlan, out client3Options) || hybridPlan is null ||
+                out hybridPlan, out client3Options, out adoptPrivateClient3) || hybridPlan is null ||
                 string.Join(',', hybridPlan.PlayerPads.OrderBy(entry => entry.Key)
                     .Select(entry => $"{entry.Key}:{entry.Value}")) != prelaunchPads ||
                 hybridPlan.PlayerWindows.Values.Any(window =>
@@ -433,8 +446,12 @@ try
                 throw new InvalidOperationException("Keyboard window binding did not match the live game clients.");
         }
         using var privateClient3 = client3Options is { } attach
-            ? await Client3RuntimeAttach.AttachAsync(attach.Pid, attach.WindowHandle,
-                attach.GameExecutable, attach.IncludeP6) : null;
+            ? adoptPrivateClient3
+                ? Client3RuntimeAttach.AdoptExisting(attach.Pid, attach.WindowHandle,
+                    attach.GameExecutable, attach.IncludeP6)
+                : await Client3RuntimeAttach.AttachAsync(attach.Pid, attach.WindowHandle,
+                    attach.GameExecutable, attach.IncludeP6)
+            : null;
         var privateOutputs = new Client3PadOutputs();
         if (privateClient3 is not null &&
             !privateOutputs.Bind(privateClient3, client3Options!.Value.IncludeP6))
@@ -495,6 +512,7 @@ try
             private_client3_pid = client3Options?.Pid ?? 0,
             private_client3_slots = client3Options?.PrivateSlots ?? [],
             private_client3_window_handle = client3Options?.WindowHandle ?? 0,
+            private_client3_adopted = adoptPrivateClient3,
             focus_pad_map = focusPads is null ? "" : string.Join(',', focusPads.OrderBy(entry => entry.Key)
                 .Select(entry => $"{entry.Key}:{entry.Value}")) }));
 

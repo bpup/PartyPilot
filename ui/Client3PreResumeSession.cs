@@ -3,8 +3,7 @@ using System.Text.Json;
 
 namespace PartyPilot.Desktop;
 
-// The bridge owns the private mapping only until the game acknowledges its XInput hooks.
-// The normal bridge later creates a fresh mapping for ongoing input routing.
+// Retains the pre-resume private mapping until a bound bridge adopts that same mapping.
 internal sealed class Client3PreResumeSession : IAsyncDisposable
 {
     private readonly Process _process;
@@ -100,9 +99,36 @@ internal sealed class Client3PreResumeSession : IAsyncDisposable
                 ? "Client 3 private XInput hooks did not confirm readiness after resume."
                 : $"Client 3 private XInput hooks did not confirm readiness: {diagnostic}");
         }
+    }
+
+    internal async Task HandoffAsync()
+    {
+        if (_process.HasExited)
+            throw new InvalidOperationException("Client 3 private input ended before handoff.");
+        await _process.StandardInput.WriteLineAsync($"handoff {_plan.Pid}");
+        await _process.StandardInput.FlushAsync();
+        var receipt = await _process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        if (!MatchesTransfer(receipt, _plan.Pid))
+            throw new InvalidOperationException("Client 3 did not confirm private mapping ownership transfer.");
         await _process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(3));
         if (_process.ExitCode != 0)
-            throw new InvalidOperationException("Client 3 private input bridge exited with an error.");
+            throw new InvalidOperationException("Client 3 private input bridge exited during handoff.");
+    }
+
+    internal static bool MatchesTransfer(string? receipt, int expectedPid)
+    {
+        try
+        {
+            using var json = JsonDocument.Parse(receipt ?? "");
+            var root = json.RootElement;
+            return expectedPid > 0 && root.TryGetProperty("event", out var kind) &&
+                kind.GetString() == "private_client3_transferred" &&
+                root.TryGetProperty("pid", out var pid) && pid.GetInt32() == expectedPid;
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException)
+        {
+            return false;
+        }
     }
 
     private static bool MatchesLoaded(string? line, PrivateClient3Plan plan)
