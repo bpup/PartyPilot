@@ -2719,7 +2719,9 @@ public sealed class MainWindow : Window
             : _pairing!.AReleased
                 ? $"已观察到 P{current.PartyPlayer} 对应虚拟手柄 A 键松开。请在游戏中选角并确认角色已加入，再继续。"
                 : _pairing.Armed
-                    ? _loginStatus switch
+                    ? current.LocalPlayer == 2
+                        ? $"客户端 {current.Client} 的第二名角色：等待上一角色 A 键松开至少 2 秒；保持窗口前台、松开输入，提示出现后重新按一次 A 键。"
+                        : _loginStatus switch
                     {
                         "visual" => $"客户端 {current.Client} 登录控件画面特征已连续命中。保持窗口前台并松开输入，稳定后按一次 A 键。",
                         "fallback_timeout" => $"客户端 {current.Client} 等待 20 秒仍未识别登录控件，已进入超时回退。请自行核对当前确是登录/选角画面，保持前台并松开输入，稳定后按一次 A 键。",

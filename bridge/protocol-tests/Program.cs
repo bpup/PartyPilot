@@ -558,6 +558,8 @@ if (pairingSignals.Observe(true, 2) != 0 ||
     pairingSignals.Observe(false, 2) != 2)
     throw new Exception("Pairing signal survived a disconnect.");
 var gate = new ProtectedPairingGate();
+if (new ProtectedPairingGate().Arm(2))
+    throw new Exception("A second local player was armed without its first local player joining.");
 var heldA = new XInputGamepad { Buttons = 0x1000 };
 var blockedByLogin = new ProtectedPairingGate();
 blockedByLogin.Arm(1);
@@ -587,15 +589,19 @@ if (gate.Observe(heldA, now.AddMilliseconds(1260), true, true).Forwarded.Buttons
 if (gate.Observe(heldA, now.AddMilliseconds(1300), true, true).Forwarded.Buttons != 0)
     throw new Exception("Held A leaked into the next player after rearming.");
 gate.Observe(default, now.AddMilliseconds(1320), true, true);
-if (gate.Observe(heldA, now.AddMilliseconds(2100), true, true).Forwarded.Buttons != 0x1000 ||
-    gate.Observe(heldA, now.AddMilliseconds(2115), true, true).ReleasedSlot != 0 ||
-    gate.Observe(heldA, now.AddMilliseconds(2125), true, true).ReleasedSlot != 2 || !gate.Finish())
-    throw new Exception("Second local player did not receive its shorter join pulse.");
-gate.Observe(default, now.AddMilliseconds(2200), true, true);
-gate.Observe(new XInputGamepad { LeftX = 9000 }, now.AddMilliseconds(2450), true, true);
-gate.Observe(default, now.AddMilliseconds(2500), true, true);
-if (gate.Observe(default, now.AddMilliseconds(2899), true, true).Completed ||
-    !gate.Observe(default, now.AddMilliseconds(2900), true, true).Completed ||
+if (gate.Observe(heldA, now.AddMilliseconds(2100), true, true).Forwarded.Buttons != 0 ||
+    gate.Observe(heldA, now.AddMilliseconds(3230), true, true).Forwarded.Buttons != 0)
+    throw new Exception("Second local player received A before the two-second join prompt settled.");
+gate.Observe(default, now.AddMilliseconds(3231), true, true);
+if (gate.Observe(heldA, now.AddMilliseconds(3482), true, false).Forwarded.Buttons != 0x1000 ||
+    gate.Observe(heldA, now.AddMilliseconds(3500), true, true).ReleasedSlot != 0 ||
+    gate.Observe(heldA, now.AddMilliseconds(3507), true, true).ReleasedSlot != 2 || !gate.Finish())
+    throw new Exception("Second local player did not receive its shorter join pulse after the prompt settled.");
+gate.Observe(default, now.AddMilliseconds(3600), true, true);
+gate.Observe(new XInputGamepad { LeftX = 9000 }, now.AddMilliseconds(3850), true, true);
+gate.Observe(default, now.AddMilliseconds(3900), true, true);
+if (gate.Observe(default, now.AddMilliseconds(4299), true, true).Completed ||
+    !gate.Observe(default, now.AddMilliseconds(4300), true, true).Completed ||
     gate.Phase != ProtectedPairingPhase.Complete)
     throw new Exception("Final neutral settling did not reset and complete after 400 ms.");
 if (!BridgeProtocol.TryParsePairingControl("{\"type\":\"arm_pairing\",\"slot\":3,\"pid\":123,\"window_handle\":456}", out var arm) ||
@@ -618,6 +624,17 @@ var pairingChord = privateGate.Observe(new XInputGamepad { Buttons = 0x0001,
 if (pairingChord.Forwarded.Buttons != 0 || pairingChord.Forwarded.LeftTrigger != 0 ||
     !privateGate.Arm(6))
     throw new Exception("Private pairing forwarded a focus chord or rejected the next slot.");
+privateGate.Observe(default, now.AddMilliseconds(1170), true, true);
+if (privateGate.Observe(heldA, now.AddMilliseconds(3149), true, true).Forwarded.Buttons != 0)
+    throw new Exception("Private P6 received A before its second-local join prompt settled.");
+privateGate.Observe(default, now.AddMilliseconds(3150), true, true);
+if (privateGate.Observe(heldA, now.AddMilliseconds(3401), true, false).Forwarded.Buttons != 0x1000)
+    throw new Exception("Private P6 did not accept a new A press after its join prompt settled.");
+var crossClientGate = new ProtectedPairingGate();
+if (!crossClientGate.Arm(3)) throw new Exception("Cross-client P3 pairing could not be armed.");
+crossClientGate.Observe(default, now, true, true);
+if (crossClientGate.Observe(heldA, now.AddMilliseconds(800), true, true).Forwarded.Buttons != 0x1000)
+    throw new Exception("The second-local prompt delay was incorrectly applied to P3.");
 var focusGate = new ProtectedPairingGate();
 focusGate.Arm(1);
 focusGate.Observe(default, now, false, true);

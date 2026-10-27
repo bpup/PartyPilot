@@ -12,6 +12,7 @@ internal sealed class ProtectedPairingGate
     private static readonly TimeSpan ArmSettle = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan NeutralSettle = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan FinalSettle = TimeSpan.FromMilliseconds(400);
+    private static readonly TimeSpan SecondPadPromptSettle = TimeSpan.FromSeconds(2);
 
     private int _slot;
     private DateTime? _foregroundSince;
@@ -19,12 +20,15 @@ internal sealed class ProtectedPairingGate
     private DateTime _pulseUntil;
     private bool _wasADown;
     private bool _requireRelease;
+    private int _lastReleasedSlot;
+    private DateTime _lastReleaseAtUtc;
 
     public ProtectedPairingPhase Phase { get; private set; } = ProtectedPairingPhase.Idle;
 
     public bool Arm(int slot)
     {
-        if (slot is < 1 or > 6 || Phase is not (ProtectedPairingPhase.Idle or ProtectedPairingPhase.InGame)) return false;
+        if (slot is < 1 or > 6 || Phase is not (ProtectedPairingPhase.Idle or ProtectedPairingPhase.InGame) ||
+            slot % 2 == 0 && _lastReleasedSlot != slot - 1) return false;
         _slot = slot;
         _foregroundSince = null;
         _neutralSince = null;
@@ -60,7 +64,12 @@ internal sealed class ProtectedPairingGate
                     return default;
                 }
                 _foregroundSince ??= nowUtc;
-                if (!loginReady)
+                var secondPadPromptReady = _slot % 2 != 0 ||
+                    _lastReleasedSlot != _slot - 1 ||
+                    nowUtc - _lastReleaseAtUtc >= SecondPadPromptSettle;
+                // The second local player uses the prompt timer, not the
+                // first player's login-control image classifier.
+                if ((_slot % 2 != 0 && !loginReady) || !secondPadPromptReady)
                 {
                     _neutralSince = null;
                     if (aDown) _requireRelease = true;
@@ -108,6 +117,8 @@ internal sealed class ProtectedPairingGate
                     return new ProtectedPairingObservation(new XInputGamepad { Buttons = A }, 0, false);
                 Phase = ProtectedPairingPhase.InGame;
                 var releasedSlot = _slot;
+                _lastReleasedSlot = releasedSlot;
+                _lastReleaseAtUtc = nowUtc;
                 return new ProtectedPairingObservation(MaskHeldAAndFocus(physical), releasedSlot, false);
             case ProtectedPairingPhase.InGame:
                 if (!targetForeground)
