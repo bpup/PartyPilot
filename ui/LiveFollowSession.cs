@@ -29,6 +29,9 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     private readonly CancellationTokenSource _warpCancellation = new();
     private CancellationTokenSource? _warpAttemptCancellation;
     private Task _warpTask = Task.CompletedTask;
+    private CancellationTokenSource? _entryAttemptCancellation;
+    private Task _entryTask = Task.CompletedTask;
+    private readonly Dictionary<int, DateTime> _lastEntryPulseAtUtc = new();
     private FollowHandoffRequest? _attemptedWarp;
     private int _inputSubscriptionActive;
     private readonly SemaphoreSlim _controlSignal = new(0);
@@ -136,6 +139,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         if (_stopping || _process.HasExited) throw new InvalidOperationException("Live follow has stopped.");
         Paused = paused;
         if (paused) _warpAttemptCancellation?.Cancel();
+        if (paused) _entryAttemptCancellation?.Cancel();
         _pendingPause.Enqueue(paused);
         _controlSignal.Release();
     }
@@ -513,6 +517,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 Current = frame;
                 if (changed) Dispatcher.UIThread.Post(() => StatusChanged?.Invoke(frame));
                 QueueVisualWarp(frame);
+                QueueTransitionInteraction(frame);
             }
         }
         catch (Exception error)
@@ -561,6 +566,46 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             _warpCancellation.Token);
         _warpTask = RunCrossAreaWarpAsync(request, visualRoute, controllerRoute,
             _warpAttemptCancellation.Token);
+    }
+
+    private void QueueTransitionInteraction(FollowBridgeFrame frame)
+    {
+        if (!_experimentalWarpClick || _stopping) return;
+        var nowUtc = DateTime.UtcNow;
+        var candidate = TransitionApproachPlan.BuildInteraction(frame, _topology,
+            _transitionAnchors, true, Paused, nowUtc);
+        if (candidate is null)
+        {
+            _entryAttemptCancellation?.Cancel();
+            return;
+        }
+        if (!_entryTask.IsCompleted ||
+            _lastEntryPulseAtUtc.TryGetValue(candidate.DestinationClient, out var last) &&
+            nowUtc - last < TimeSpan.FromMilliseconds(650)) return;
+        _lastEntryPulseAtUtc[candidate.DestinationClient] = nowUtc;
+        _entryAttemptCancellation?.Dispose();
+        _entryAttemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            _warpCancellation.Token);
+        _entryTask = RunTransitionInteractionAsync(candidate,
+            _entryAttemptCancellation.Token);
+    }
+
+    private async Task RunTransitionInteractionAsync(TransitionInteractionCandidate candidate,
+        CancellationToken token)
+    {
+        try
+        {
+            await TransitionInteractionRunner.RunAsync(
+                new BridgeTransitionInteractionPort(_bridge), candidate.DriverPad, token);
+            Dispatcher.UIThread.Post(() => WarpStatusChanged?.Invoke(
+                $"已向 P{candidate.DriverPlayer} 发送一次入口 A 短按；等待区域变化确认。"));
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception error)
+        {
+            Dispatcher.UIThread.Post(() => WarpStatusChanged?.Invoke(
+                "入口交互未发出：" + error.Message));
+        }
     }
 
     private async Task RunCrossAreaWarpAsync(FollowHandoffRequest request,
@@ -654,6 +699,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         _stopping = true;
         _warpCancellation.Cancel();
         _warpAttemptCancellation?.Cancel();
+        _entryAttemptCancellation?.Cancel();
         _bridge.MenuGuardChanged -= OnMenuGuardChanged;
         _bridge.ManualFocusChanged -= OnManualFocusChanged;
         await StopMainInputAsync();
@@ -662,6 +708,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         await _process.WaitForExitAsync();
         await _readFrames;
         await _warpTask;
+        await _entryTask;
         await _writeControls;
         await _readError;
         try
@@ -673,6 +720,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         _process.Dispose();
         _controlCancellation.Dispose();
         _warpAttemptCancellation?.Dispose();
+        _entryAttemptCancellation?.Dispose();
         _warpCancellation.Dispose();
         _controlSignal.Dispose();
     }

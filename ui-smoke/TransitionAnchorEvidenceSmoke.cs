@@ -2,7 +2,7 @@ using PartyPilot.Desktop;
 
 internal static class TransitionAnchorEvidenceSmoke
 {
-    internal static void Run()
+    internal static async Task RunAsync()
     {
         var now = DateTime.UtcNow;
         var topology = PartyTopologies.DefaultFor(4);
@@ -88,6 +88,73 @@ internal static class TransitionAnchorEvidenceSmoke
         inactive.Observe(2, Frame(202, now, 42, 200, 200, entrance));
         if (inactive.Match(handoff, topology, now) is not null)
             throw new Exception("Non-targetable entrance was accepted as used.");
+        if (TransitionApproachPlan.BuildInteraction(live, topology, evidence, true,
+                false, now) is not null)
+            throw new Exception("Dual-character destination was allowed to interact without partner position.");
+        var singles = PartyTopologies.ForPlayerCount(3).Single(item =>
+            item.Id == "3-three-singles");
+        var singleEvidence = new TransitionAnchorEvidence();
+        singleEvidence.Observe(1, Frame(101, now.AddMilliseconds(-400), 41,
+            100, 100, entrance));
+        singleEvidence.Observe(2, Frame(202, now.AddMilliseconds(-300), 42,
+            200, 200, entrance with { Id = 20, X = 205, Y = 201 }));
+        singleEvidence.Observe(1, Frame(101, now.AddMilliseconds(-100), 43,
+            300, 300));
+        var singleWaiting = new FollowBridgeFrame("{\"slot\":3,\"state\":\"waiting\"}",
+            "waiting", null)
+        {
+            FocusedPlayer = 1,
+            PadCommands = [new FollowPadCommand(2, 3,
+                "{\"slot\":3,\"state\":\"waiting\"}", "waiting",
+                "different or unknown instance")]
+        };
+        var candidate = TransitionApproachPlan.BuildInteraction(singleWaiting,
+            singles, singleEvidence, true, false, now);
+        if (candidate is null || candidate.DriverPlayer != 2 || candidate.DriverPad != 3 ||
+            TransitionApproachPlan.BuildInteraction(singleWaiting, singles, singleEvidence,
+                false, false, now) is not null ||
+            TransitionApproachPlan.BuildInteraction(singleWaiting with
+            {
+                Handoffs = [new FollowHandoffRequest(2, 2, 1)]
+            }, singles, singleEvidence, true, false, now) is not null)
+            throw new Exception("Single-character entry interaction eligibility was incorrect.");
+        var port = new FakeInteractionPort();
+        await TransitionInteractionRunner.RunAsync(port, candidate.DriverPad,
+            CancellationToken.None, (_, _) => Task.CompletedTask);
+        if (!port.Calls.SequenceEqual(["begin", "pulse:3", "end"]))
+            throw new Exception("Entry A pulse did not hold and release the bridge lease.");
+        var failing = new FakeInteractionPort { FailPulse = true };
+        try
+        {
+            await TransitionInteractionRunner.RunAsync(failing, candidate.DriverPad,
+                CancellationToken.None, (_, _) => Task.CompletedTask);
+            throw new Exception("Failed entry pulse was accepted.");
+        }
+        catch (InvalidOperationException) { }
+        if (!failing.Calls.SequenceEqual(["begin", "pulse:3", "end"]))
+            throw new Exception("Failed entry pulse retained the bridge lease.");
         Console.WriteLine("Read-only transition evidence rejected stale, distant and mismatched entrances.");
+    }
+
+    private sealed class FakeInteractionPort : ITransitionInteractionPort
+    {
+        internal readonly List<string> Calls = [];
+        internal bool FailPulse;
+        public Task BeginAsync(CancellationToken token)
+        {
+            Calls.Add("begin");
+            return Task.CompletedTask;
+        }
+        public Task PulseAAsync(int pad, CancellationToken token)
+        {
+            Calls.Add($"pulse:{pad}");
+            if (FailPulse) throw new InvalidOperationException("pulse failed");
+            return Task.CompletedTask;
+        }
+        public Task EndAsync(CancellationToken token)
+        {
+            Calls.Add("end");
+            return Task.CompletedTask;
+        }
     }
 }

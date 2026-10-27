@@ -4,6 +4,8 @@ namespace PartyPilot.Desktop;
 
 internal sealed record TransitionApproachCommand(int DriverPlayer, int DriverPad,
     string Command, double DistanceGrid, DateTime SourceChangedUtc);
+internal sealed record TransitionInteractionCandidate(int DriverPlayer, int DriverPad,
+    int DestinationClient, DateTime SourceChangedUtc);
 
 internal static class TransitionApproachPlan
 {
@@ -59,5 +61,36 @@ internal static class TransitionApproachPlan
         });
         return new TransitionApproachCommand(driver.PartyPlayer, driver.RuntimePad,
             command, distance, match.SourceChangedUtc);
+    }
+
+    internal static TransitionInteractionCandidate? BuildInteraction(FollowBridgeFrame frame,
+        PartyTopology topology, TransitionAnchorEvidence evidence, bool enabled,
+        bool paused, DateTime nowUtc)
+    {
+        if (!enabled || paused || frame.Handoffs.Count != 0 ||
+            topology.Slots.FirstOrDefault(slot => slot.PartyPlayer == frame.FocusedPlayer)
+                is not { LocalPlayer: 1 } leader) return null;
+        foreach (var command in frame.PadCommands)
+        {
+            if (command.Status != "waiting" ||
+                command.Reason != "different or unknown instance" ||
+                topology.Slots.FirstOrDefault(slot => slot.PartyPlayer == command.Player)
+                    is not { LocalPlayer: 1 } driver ||
+                command.Pad != driver.RuntimePad ||
+                driver.Client == leader.Client || topology.Clients[driver.Client - 1].Count != 1)
+                continue;
+            var match = evidence.Match(leader.Client, driver.Client, nowUtc);
+            if (match is null || !match.Identity.StartsWith("transition|",
+                    StringComparison.OrdinalIgnoreCase) ||
+                nowUtc < match.DestinationSeenUtc ||
+                nowUtc - match.DestinationSeenUtc > TimeSpan.FromMilliseconds(750)) continue;
+            var distance = Math.Sqrt(Math.Pow(match.DestinationX - match.PlayerX, 2) +
+                Math.Pow(match.DestinationY - match.PlayerY, 2)) /
+                RadarProjection.WorldUnitsPerGridUnit;
+            if (double.IsFinite(distance) && distance <= 7)
+                return new TransitionInteractionCandidate(driver.PartyPlayer,
+                    driver.RuntimePad, driver.Client, match.SourceChangedUtc);
+        }
+        return null;
     }
 }
