@@ -21,6 +21,8 @@ internal sealed class TransitionAnchorEvidence
     private readonly Dictionary<int, (int ProcessId, uint AreaHash,
         List<TransitionPoint> Points)> _trails = new();
     private readonly Dictionary<int, (DateTime ChangedUtc, int DriverPlayer, int Index)> _replay = new();
+    private readonly Dictionary<int, (DateTime ChangedUtc, int DriverPlayer,
+        TransitionPoint Target, double BestDistance, DateTime ProgressUtc, bool Blocked)> _progress = new();
 
     internal void Observe(int client, RadarFrame frame)
     {
@@ -37,12 +39,14 @@ internal sealed class TransitionAnchorEvidence
                     _trails.Remove(client);
                     _drivers.Clear();
                     _replay.Clear();
+                    _progress.Clear();
                 }
                 if (frame.AreaHash != previous.AreaHash)
                 {
                     _used.Remove(client);
                     _drivers.Clear();
                     _replay.Clear();
+                    _progress.Clear();
                     if (frame.ProcessId == previous.ProcessId &&
                         frame.SeenUtc - previous.SeenUtc <= TimeSpan.FromSeconds(2) &&
                         NearestVisibleAnchor(previous) is { } anchor)
@@ -84,6 +88,51 @@ internal sealed class TransitionAnchorEvidence
                 if (DistanceSquared(x, y, points[i].X, points[i].Y) >=
                     Math.Pow(6 * WorldPerGridUnit, 2)) return points[i];
             return points[^1];
+        }
+    }
+
+    internal void ResetMovement()
+    {
+        lock (_gate)
+        {
+            _replay.Clear();
+            _progress.Clear();
+        }
+    }
+
+    internal bool AllowMovement(TransitionAnchorMatch match, int driverPlayer,
+        TransitionPoint current, TransitionPoint target, DateTime nowUtc)
+    {
+        if (nowUtc.Kind != DateTimeKind.Utc || !double.IsFinite(current.X) ||
+            !double.IsFinite(current.Y) || !double.IsFinite(target.X) ||
+            !double.IsFinite(target.Y)) return false;
+        var distance = Math.Sqrt(DistanceSquared(current.X, current.Y,
+            target.X, target.Y)) / WorldPerGridUnit;
+        lock (_gate)
+        {
+            if (!_progress.TryGetValue(match.DestinationClient, out var state) ||
+                state.ChangedUtc != match.SourceChangedUtc ||
+                state.DriverPlayer != driverPlayer ||
+                Math.Sqrt(DistanceSquared(target.X, target.Y,
+                    state.Target.X, state.Target.Y)) > WorldPerGridUnit ||
+                nowUtc < state.ProgressUtc)
+            {
+                _progress[match.DestinationClient] = (match.SourceChangedUtc,
+                    driverPlayer, target, distance, nowUtc, false);
+                return true;
+            }
+            if (state.Blocked) return false;
+            if (distance <= state.BestDistance - 0.75)
+            {
+                _progress[match.DestinationClient] = (state.ChangedUtc,
+                    state.DriverPlayer, state.Target, distance, nowUtc, false);
+                return true;
+            }
+            if (nowUtc - state.ProgressUtc < TimeSpan.FromSeconds(3)) return true;
+            _progress[match.DestinationClient] = (state.ChangedUtc,
+                state.DriverPlayer, state.Target, state.BestDistance,
+                state.ProgressUtc, true);
+            return false;
         }
     }
 

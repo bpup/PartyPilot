@@ -3316,6 +3316,13 @@ public sealed class MainWindow : Window
             _followStatus.Text = $"检测到跨区：{requests}；{warpState}，跨区自动方向已停止{anchorState}。";
             return;
         }
+        if (frame.PadCommands.Any(command => command.Status == "approach_blocked"))
+        {
+            var blocked = string.Join("、", frame.PadCommands.Where(command =>
+                command.Status == "approach_blocked").Select(command => $"P{command.Player}"));
+            _followStatus.Text = $"{blocked} 入口追赶无进展，自动方向已停止；请手动处理。";
+            return;
+        }
         if (_selectedTopology?.Id is "3-three-singles" or "4-balanced" or
             "5-third-solo" or "5-main-solo" or "6-balanced" &&
             frame.Reason is not ("party disbanded" or "local client left party" or "followed member left party"))

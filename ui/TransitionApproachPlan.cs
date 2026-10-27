@@ -11,13 +11,18 @@ internal static class TransitionApproachPlan
 {
     private sealed record PositionPair(PartySlot FirstSlot, PartySlot SecondSlot,
         FollowPositionWitness First, FollowPositionWitness Second);
+    private sealed record MovementDecision(string? Command, bool Blocked);
 
     internal static FollowBridgeFrame Apply(FollowBridgeFrame frame, PartyTopology topology,
         TransitionAnchorEvidence evidence, bool enabled, bool paused, DateTime nowUtc)
     {
         if (!enabled || paused || frame.Handoffs.Count != 0 ||
             topology.Slots.FirstOrDefault(slot => slot.PartyPlayer == frame.FocusedPlayer)
-                is not { LocalPlayer: 1 } leader) return frame;
+                is not { LocalPlayer: 1 } leader)
+        {
+            evidence.ResetMovement();
+            return frame;
+        }
         var replacements = new Dictionary<int, FollowPadCommand>();
         for (var client = 1; client <= topology.ClientCount; client++)
         {
@@ -31,10 +36,16 @@ internal static class TransitionApproachPlan
                 var command = WaitingCommand(frame, local[0]);
                 var approach = Build(match, topology, nowUtc);
                 if (command is not null && approach is not null)
-                    replacements[command.Player] = command with { Command =
-                        ReplayMovement(evidence, match!, local[0], match!.PlayerX,
-                            match.PlayerY) ?? approach.Command,
-                        Status = "approaching_transition", Reason = null };
+                {
+                    var singleDecision = ApproachMovement(evidence, match!, local[0],
+                        match!.PlayerX, match.PlayerY, nowUtc);
+                    if (singleDecision.Blocked)
+                        replacements[command.Player] = command with
+                            { Status = "approach_blocked", Reason = "no progress" };
+                    else if (singleDecision.Command is { } direction)
+                        replacements[command.Player] = command with
+                            { Command = direction, Status = "approaching_transition", Reason = null };
+                }
                 continue;
             }
             if (local.Length != 2 || WaitingCommand(frame, local[0]) is not { } firstCommand ||
@@ -54,12 +65,19 @@ internal static class TransitionApproachPlan
             var partnerPosition = secondLeads ? pair.First : pair.Second;
             var driverCommand = secondLeads ? secondCommand : firstCommand;
             var partnerCommand = secondLeads ? firstCommand : secondCommand;
-            if ((ReplayMovement(evidence, match, driverSlot,
-                    driverPosition.X, driverPosition.Y) ??
-                 BuildMovement(driverSlot, driverPosition.X, driverPosition.Y,
-                    match.DestinationX, match.DestinationY, 7)) is { } movement)
-                replacements[driverSlot.PartyPlayer] = driverCommand with { Command = movement,
-                    Status = "approaching_transition", Reason = null };
+            var driverMovement = ApproachMovement(evidence, match, driverSlot,
+                driverPosition.X, driverPosition.Y, nowUtc);
+            if (driverMovement.Blocked)
+            {
+                replacements[driverSlot.PartyPlayer] = driverCommand with
+                    { Status = "approach_blocked", Reason = "no progress" };
+                replacements[partnerSlot.PartyPlayer] = partnerCommand with
+                    { Status = "approach_blocked", Reason = "driver no progress" };
+                continue;
+            }
+            if (driverMovement.Command is { } movement)
+                replacements[driverSlot.PartyPlayer] = driverCommand with
+                    { Command = movement, Status = "approaching_transition", Reason = null };
             if (BuildMovement(partnerSlot, partnerPosition.X, partnerPosition.Y,
                     driverPosition.X, driverPosition.Y, 9) is { } partnerMovement)
                 replacements[partnerSlot.PartyPlayer] = partnerCommand with
@@ -175,15 +193,21 @@ internal static class TransitionApproachPlan
         Math.Sqrt(Math.Pow(x - otherX, 2) + Math.Pow(y - otherY, 2)) /
         RadarProjection.WorldUnitsPerGridUnit;
 
-    private static string? ReplayMovement(TransitionAnchorEvidence evidence,
-        TransitionAnchorMatch match, PartySlot slot, double x, double y)
+    private static MovementDecision ApproachMovement(TransitionAnchorEvidence evidence,
+        TransitionAnchorMatch match, PartySlot slot, double x, double y, DateTime nowUtc)
     {
         if (GridDistance(x, y, match.DestinationX, match.DestinationY) <= 7)
-            return null;
-        if (evidence.ReplayTarget(match, slot.PartyPlayer, x, y) is not { } target)
-            return null;
+            return new MovementDecision(null, false);
+        var target = evidence.ReplayTarget(match, slot.PartyPlayer, x, y) ??
+            new TransitionPoint(match.DestinationX, match.DestinationY);
         var final = target.X == match.DestinationX && target.Y == match.DestinationY;
-        return BuildMovement(slot, x, y, target.X, target.Y, final ? 7 : 1.5);
+        var command = BuildMovement(slot, x, y, target.X, target.Y, final ? 7 : 1.5);
+        return command is null
+            ? new MovementDecision(null, false)
+            : evidence.AllowMovement(match, slot.PartyPlayer,
+                new TransitionPoint(x, y), target, nowUtc)
+                ? new MovementDecision(command, false)
+                : new MovementDecision(null, true);
     }
 
     private static string? BuildMovement(PartySlot slot, double fromX, double fromY,

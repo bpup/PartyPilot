@@ -73,6 +73,40 @@ internal static class TransitionAnchorEvidenceSmoke
                 FocusedPlayer = 2
             }, topology, moving, true, false, now).PadCommands[0].Status != "waiting")
             throw new Exception("Transition routing escaped its opt-in, area or local-role guard.");
+        var firstProgress = now.AddSeconds(1);
+        moving.Observe(2, Frame(202, firstProgress, 42, 200, 200,
+            entrance with { Id = 20, X = 400, Y = 201 }));
+        var stationary = live with
+        {
+            Positions = live.Positions.Select(position => position with
+                { SeenUtc = firstProgress }).ToArray()
+        };
+        if (TransitionApproachPlan.Apply(stationary, topology, moving,
+                true, false, firstProgress).PadCommands[0].Status != "approaching_transition")
+            throw new Exception("Fresh entrance approach stopped before the progress window.");
+        var stallTime = firstProgress.AddMilliseconds(3100);
+        moving.Observe(2, Frame(202, stallTime, 42, 200, 200,
+            entrance with { Id = 20, X = 400, Y = 201 }));
+        var stalled = TransitionApproachPlan.Apply(stationary with
+        {
+            Positions = stationary.Positions.Select(position => position with
+                { SeenUtc = stallTime }).ToArray()
+        }, topology, moving, true, false, stallTime);
+        if (stalled.PadCommands.Any(command => command.Status != "approach_blocked" ||
+                !command.Command.Contains("\"waiting\"", StringComparison.Ordinal)))
+            throw new Exception("Stalled entrance approach kept moving a local character.");
+        moving.ResetMovement();
+        var progressing = new TransitionAnchorEvidence();
+        var target = new TransitionPoint(400, 201);
+        if (!progressing.AllowMovement(matched!, 3,
+                new TransitionPoint(200, 200), target, now) ||
+            !progressing.AllowMovement(matched!, 3,
+                new TransitionPoint(300, 200), target, now.AddSeconds(2)) ||
+            !progressing.AllowMovement(matched!, 3,
+                new TransitionPoint(300, 200), target, now.AddSeconds(4)) ||
+            progressing.AllowMovement(matched!, 3,
+                new TransitionPoint(300, 200), target, now.AddMilliseconds(5100)))
+            throw new Exception("Entrance progress did not reset the stall timer.");
         var movingSecond = new TransitionAnchorEvidence();
         movingSecond.Observe(1, Frame(101, now.AddMilliseconds(-400), 41, 100, 100, entrance));
         movingSecond.Observe(2, Frame(202, now.AddMilliseconds(-300), 42, 200, 200,
