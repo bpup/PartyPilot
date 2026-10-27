@@ -8,6 +8,7 @@ using Avalonia.Threading;
 using PartyPilot.Desktop;
 
 PartyRosterCounterSmoke.Run();
+SessionGameClientShutdownSmoke.Run();
 FollowTargetChoicesSmoke.Run();
 FollowTargetPreferenceSmoke.Run();
 FollowPlayerStopSmoke.Run();
@@ -142,6 +143,9 @@ if (window.GetLogicalDescendants().OfType<Button>().Count(button =>
 if (window.GetLogicalDescendants().OfType<Button>().Count(button =>
         button.Content?.ToString() == "暂停跟随") != 1)
     throw new Exception("The desktop did not expose temporary follow pause.");
+if (window.GetLogicalDescendants().OfType<Button>().Count(button =>
+        button.Content?.ToString() == "结束会话并关闭游戏") != 1)
+    throw new Exception("The desktop did not expose explicit game-session shutdown.");
 var pausedFrame = LiveFollowFrame.Parse(
     "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"reason\":\"follow paused\"}}}",
     2, 3);

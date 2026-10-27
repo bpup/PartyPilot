@@ -102,6 +102,7 @@ public sealed class MainWindow : Window
     private readonly Button _armPairing = new();
     private readonly Button _confirmRole = new();
     private readonly Button _stopBridge = new();
+    private readonly Button _endSession = new();
     private readonly TextBlock _pairingStatus = new();
     private readonly TextBox _followStop = new();
     private readonly TextBox _followCatchup = new();
@@ -167,6 +168,7 @@ public sealed class MainWindow : Window
     private PairingGuide? _pairing;
     private HybridPairingGuide? _hybridPairing;
     private IReadOnlyList<LaunchedClient> _launchedClients = [];
+    private IReadOnlyList<SessionGameClientIdentity> _sessionGameIdentities = [];
     private bool _pairingHasStarted;
     private bool _armRequested;
     private bool _pairingSettling;
@@ -480,11 +482,14 @@ public sealed class MainWindow : Window
         _armPairing.Click += async (_, _) => await ArmPairingAsync();
         _stopBridge.Content = "停止手柄桥接";
         _stopBridge.Click += async (_, _) => await StopBridgeAsync();
+        _endSession.Content = "结束会话并关闭游戏";
+        _endSession.Click += async (_, _) => await EndSessionAsync();
         _confirmRole.Content = "已在游戏内确认此角色";
         _confirmRole.Click += async (_, _) => await ConfirmRoleAsync();
         actions.Children.Add(_prepareBridge);
         actions.Children.Add(_armPairing);
         actions.Children.Add(_stopBridge);
+        actions.Children.Add(_endSession);
         actions.Children.Add(_confirmRole);
         panel.Children.Add(actions);
         _pairingStatus.Text = "选择输入方式、人数与布局后检查桥接支持情况。";
@@ -1031,6 +1036,7 @@ public sealed class MainWindow : Window
             _inviteCancellation?.Cancel();
             _autoPartyCancellation?.Cancel();
             _launchedClients = [];
+            _sessionGameIdentities = [];
             Array.Clear(_preparedAutoLoginWindows);
             Array.Clear(_manualAutoLoginWindows);
             _rosterStatus.Text = "绑定窗口后，可在游戏内打开 Current Party 面板再检查；结果仅是画面候选行数。";
@@ -1179,6 +1185,7 @@ public sealed class MainWindow : Window
         _inviteCancellation?.Cancel();
         _autoPartyCancellation?.Cancel();
         _launchedClients = [];
+        _sessionGameIdentities = [];
         Array.Clear(_preparedAutoLoginWindows);
         Array.Clear(_manualAutoLoginWindows);
         UpdateLoginCalibrationControls();
@@ -1644,6 +1651,8 @@ public sealed class MainWindow : Window
                 (useWgi || _physicalIndex.SelectedIndex is >= 0 and <= 3) &&
                 _isolationConfirmed.IsChecked == true && !string.IsNullOrWhiteSpace(_physicalDevice.Text));
         _stopBridge.IsEnabled = _bridge is not null;
+        _endSession.IsEnabled = OperatingSystem.IsWindows() && !_busy &&
+            (_bridge is not null || _launchedClients.Count > 0);
         _followerMirrorButton.IsEnabled = _bridge is null && !_busy;
         _armPairing.IsEnabled = !HybridSelected && _bridge is not null && _pairing?.Current is not null &&
             _launchedClients.Count == _selectedTopology?.ClientCount &&
@@ -2642,6 +2651,44 @@ public sealed class MainWindow : Window
             : "手柄桥接已停止，虚拟手柄已释放。";
     }
 
+    private async Task EndSessionAsync()
+    {
+        if (!OperatingSystem.IsWindows() || _busy ||
+            (_bridge is null && _launchedClients.Count == 0)) return;
+        _busy = true;
+        UpdateClientRows();
+        var boundCount = _launchedClients.Count;
+        var identities = _sessionGameIdentities.ToArray();
+        try
+        {
+            _status.Text = "正在停止输入并结束游戏会话…";
+            await StopBridgeAsync();
+            await StopRadarAsync();
+            StopPrivacy();
+            await StopAllResourcesAsync();
+            var results = await SessionGameClientShutdown.CloseAsync(identities);
+            var unverified = boundCount - identities.Length;
+            _status.Text = $"会话已停止；{results.Count(result => result.Closed)} 个游戏进程已关闭" +
+                (results.Any(result => result.Forced)
+                    ? $"（其中 {results.Count(result => result.Forced)} 个在正常关闭超时后终止）" : "") +
+                (unverified > 0 ? $"，{unverified} 个进程身份未核实、未尝试关闭" : "") +
+                (results.Any(result => !result.Closed)
+                    ? "；未关闭：" + string.Join("；", results.Where(result => !result.Closed)
+                        .Select(result => $"PID {result.Pid} {result.Detail}")) : "") + "。";
+            _launchedClients = [];
+            _sessionGameIdentities = [];
+        }
+        catch (Exception error)
+        {
+            _status.Text = $"结束会话未完成：{error.Message}";
+        }
+        finally
+        {
+            _busy = false;
+            UpdateClientRows();
+        }
+    }
+
     private async Task StartFollowAsync()
     {
         if (_bridge is null || !_pairingSettled || _selectedTopology is null || _follow is not null || _followStopping ||
@@ -2993,6 +3040,7 @@ public sealed class MainWindow : Window
                 StopPrivacy();
                 await StopAllResourcesAsync();
                 _launchedClients = [];
+                _sessionGameIdentities = [];
                 Array.Clear(_preparedAutoLoginWindows);
                 Array.Clear(_manualAutoLoginWindows);
                 _rosterStatus.Text = "正在重新识别游戏窗口；完成绑定后可检查 Current Party。";
@@ -3047,6 +3095,7 @@ public sealed class MainWindow : Window
                 try
                 {
                     _launchedClients = LaunchedClients.ParseSuccessfulLaunch(output.Result, _selectedTopology.ClientCount);
+                    _sessionGameIdentities = SessionGameClientShutdown.Capture(_launchedClients);
                     if (_pairing is not null) ShowCurrentPairingStep();
                 }
                 catch (Exception bindingError)
