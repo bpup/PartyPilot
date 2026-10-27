@@ -31,6 +31,9 @@ type Rule struct {
 type Settings struct {
 	Life                Rule
 	Mana                Rule
+	SupportBuild        bool
+	BuildHasNoMana      bool
+	SustainedUse        bool
 	EsTrigger           float64
 	ChaosInoculation    bool
 	CombinedDefence     bool
@@ -78,15 +81,25 @@ const (
 
 type Engine struct {
 	players map[int]*playerState
+	support map[supportKey]bool
 }
 
-func New() *Engine { return &Engine{players: make(map[int]*playerState)} }
+func New() *Engine {
+	return &Engine{players: make(map[int]*playerState), support: make(map[supportKey]bool)}
+}
 
 // ResetPlayer clears cooldown and threshold state after a player session changes.
-func (engine *Engine) ResetPlayer(player int) { delete(engine.players, player) }
+func (engine *Engine) ResetPlayer(player int) {
+	delete(engine.players, player)
+	for key := range engine.support {
+		if key.drinker == player || key.target == player {
+			delete(engine.support, key)
+		}
+	}
+}
 
 // ResetProfiles match the resource reset profiles observed in 0.6.17.
-// Custom actions, support and empty-flask detection are separate rules.
+// Support is opt-in and requires separate watched-player vitals.
 func ResetProfiles(player int) (Settings, error) {
 	if player < 1 || player > 6 {
 		return Settings{}, errors.New("player must be 1–6")
