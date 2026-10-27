@@ -13,6 +13,7 @@ public static class RadarClassifier
         if (path.StartsWith("Metadata/Effects/", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("Metadata/Projectiles/", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("Metadata/Items/", StringComparison.OrdinalIgnoreCase)) return null;
+        if (IsEssenceAnchor(path)) return "essence";
         if (IsPrimaryWorldObject(path)) return "league";
         if (path.StartsWith("Metadata/Monsters/", StringComparison.OrdinalIgnoreCase)) return "monster";
         if (path.Contains("Checkpoint", StringComparison.OrdinalIgnoreCase)) return "checkpoint";
@@ -30,7 +31,32 @@ public static class RadarClassifier
     }
 
     public static bool IsNavigation(string category) =>
-        category is "checkpoint" or "waypoint" or "portal" or "transition" or "quest" or "boss";
+        category is "checkpoint" or "waypoint" or "portal" or "transition" or "quest" or
+            "boss" or "essence";
+
+    // A path hint for dormant objects only. It does not assert that a quest is active.
+    public static string? DormantQuestLabel(string path)
+    {
+        var named = QuestLabel(path);
+        if (named != null) return named;
+        if (!path.StartsWith("Metadata/", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("Metadata/Monsters/", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("Metadata/Effects/", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("Metadata/Projectiles/", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("Metadata/Items/", StringComparison.OrdinalIgnoreCase)) return null;
+        return path.Contains("Quest", StringComparison.OrdinalIgnoreCase) ||
+            path.Contains("Objective", StringComparison.OrdinalIgnoreCase)
+            ? "任务目标" : null;
+    }
+
+    private static bool IsEssenceAnchor(string path) =>
+        path.Equals("Metadata/MiscellaneousObjects/Monolith", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains("/LeagueEssence/", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains("/Essence/", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains("EssenceEncounter", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains("EssenceMonolith", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains("EssenceCrystal", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains("FrozenInEssence", StringComparison.OrdinalIgnoreCase);
 
     public static string? BossLabel(string path) =>
         path.Equals("Metadata/Monsters/HyenaMonster/Objects/BossRoomMinimapIcon",

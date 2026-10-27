@@ -381,6 +381,22 @@ dormantCache.Apply(dormantRadarFrame with
 });
 if (dormantCache.Apply(dormantRadarFrame).Markers.Count != 5)
     throw new Exception("A retained visible waypoint duplicated its current dormant candidate.");
+var dormantEssenceText = dormantRadarText.Replace(
+    "\"EntityId\":40,\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\"",
+    "\"EntityId\":40,\"Category\":\"essence\",\"Path\":\"Metadata/MiscellaneousObjects/Monolith\"");
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(dormantEssenceText), 123,
+        DateTime.UtcNow, out var dormantEssence) ||
+    dormantEssence?.DormantCandidates.Count != 1 ||
+    RadarOverlayWindow.DisplayLabel(dormantEssence.DormantCandidates[0], true) != "候选 · 精华")
+    throw new Exception("A dormant essence anchor did not appear as a Chinese candidate marker.");
+var dormantQuestText = dormantRadarText.Replace(
+    "\"EntityId\":40,\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\",\"Label\":null",
+    "\"EntityId\":40,\"Category\":\"quest\",\"Path\":\"Metadata/Terrain/Gallows/Act1/Objects/QuestChestBase\",\"Label\":\"任务目标\"");
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(dormantQuestText), 123,
+        DateTime.UtcNow, out var dormantQuest) ||
+    dormantQuest?.DormantCandidates.Count != 1 ||
+    RadarOverlayWindow.DisplayLabel(dormantQuest.DormantCandidates[0], true) != "候选 · 任务目标")
+    throw new Exception("A dormant generic quest object did not appear as a candidate marker.");
 if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(gridRadarText), 123, DateTime.UtcNow, out var gridRadarFrame) ||
     gridRadarFrame?.GridX != 3 || gridRadarFrame.GridY != 4 ||
     gridRadarFrame.StateAreaAddress != "0x123456" ||

@@ -40,6 +40,21 @@ internal static class DormantNavigationSurveyTests
         Require(survey.Capture("area-two", [], ReadPath, ReadPosition, 100, 200)
                 .NavigationCandidates.Length == 0,
             "Reset left a dormant navigation candidate behind.");
+
+        var explicitPaths = new Dictionary<long, string>
+        {
+            [entries[0].Address] = "Metadata/Terrain/Gallows/Act1/Objects/QuestChestBase",
+            [entries[1].Address] = "Metadata/MiscellaneousObjects/Monolith",
+            [entries[2].Address] = "Metadata/Effects/QuestMarker"
+        };
+        var mapwide = new DormantNavigationSurvey().Capture("mapwide", entries[..3],
+            address => explicitPaths[address], ReadPosition, 100, 200);
+        Require(mapwide.SweepCompleted && mapwide.NavigationCandidates.Length == 2 &&
+            mapwide.NavigationCandidates[0].Category == "quest" &&
+            mapwide.NavigationCandidates[0].Label == "任务目标" &&
+            mapwide.NavigationCandidates[1].Category == "essence" &&
+            mapwide.NavigationCandidates.All(candidate => candidate.EntityId != 3),
+            "Dormant quest and essence anchors were not admitted, or an effect was treated as a world point.");
     }
 
     private static void Require(bool condition, string message)

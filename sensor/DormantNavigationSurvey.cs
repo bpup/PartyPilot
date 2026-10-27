@@ -81,12 +81,15 @@ internal sealed class DormantNavigationSurvey
         {
             var path = readPath(address);
             if (path == null || path.Length > 256) return null;
-            var category = RadarClassifier.Category(path);
+            if (path.StartsWith("Metadata/Effects/", StringComparison.OrdinalIgnoreCase) ||
+                path.StartsWith("Metadata/Projectiles/", StringComparison.OrdinalIgnoreCase)) return null;
+            var dormantQuestLabel = RadarClassifier.DormantQuestLabel(path);
+            var category = dormantQuestLabel != null ? "quest" : RadarClassifier.Category(path);
             if (category == null || !RadarClassifier.IsNavigation(category)) return null;
             var position = readPosition(address);
             if (position == null || !float.IsFinite(position.WorldX) ||
                 !float.IsFinite(position.WorldY) || !float.IsFinite(position.WorldZ)) return null;
-            var label = category == "quest" ? RadarClassifier.QuestLabel(path) :
+            var label = category == "quest" ? dormantQuestLabel :
                 category == "boss" ? RadarClassifier.BossLabel(path) : null;
             if (category is "quest" or "boss" && string.IsNullOrWhiteSpace(label)) return null;
             return new(id, category, path, label,
@@ -101,8 +104,9 @@ internal sealed class DormantNavigationSurvey
         "waypoint" => 1,
         "checkpoint" => 2,
         "transition" => 3,
-        "boss" => 4,
-        _ => 5
+        "essence" => 4,
+        "boss" => 5,
+        _ => 6
     };
 
     private static double Distance(Candidate marker, float x, float y)

@@ -79,12 +79,13 @@ public sealed class RadarOverlayWindow : Window
         {
             "player" => NamePrivacy.Mask(marker.Label),
             "loot" => marker.Label ?? string.Empty,
-            "quest" => "任务线索 · " + marker.Label,
+            "quest" => marker.Label == "任务目标" ? "任务目标" : "任务线索 · " + marker.Label,
             "boss" => "首领地点 · " + marker.Label,
             "waypoint" => "传送点",
             "checkpoint" => "检查点",
             "portal" => "传送门",
             "transition" => "区域入口",
+            "essence" => "精华",
             _ => marker.Path.Split('/').Last()
         };
         return dormantCandidate ? "候选 · " + label : label;
@@ -167,7 +168,8 @@ public sealed class RadarOverlayWindow : Window
                 x < 8 || y < 8 || x > Bounds.Width - 8 || y > Bounds.Height - 8) continue;
             AddDot(x, y, marker.Category == "monster" ? 7 : 10,
                 dormantCandidate ? Brushes.Orange : MarkerBrush(marker.Category));
-            if (marker.Category is "checkpoint" or "waypoint" or "portal" or "transition" or "player" or "loot" or "quest" or "boss")
+            if (marker.Category is "checkpoint" or "waypoint" or "portal" or "transition" or
+                "player" or "loot" or "quest" or "boss" or "essence")
             {
                 var label = new TextBlock
                 {
@@ -207,6 +209,7 @@ public sealed class RadarOverlayWindow : Window
         "quest" => Brushes.YellowGreen,
         "campaign" => Brushes.YellowGreen,
         "boss" => Brushes.Red,
+        "essence" => Brushes.MediumOrchid,
         "portal" => Brushes.MediumPurple,
         "waypoint" => Brushes.DeepSkyBlue,
         "checkpoint" => Brushes.LimeGreen,

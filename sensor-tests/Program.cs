@@ -291,7 +291,14 @@ Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
     RadarClassifier.IsWorldItemWrapperPath("Metadata/MiscellaneousObjects/WorldItem@123") &&
     !RadarClassifier.IsWorldItemWrapperPath("Metadata/Items/Weapons/Sword") &&
     RadarClassifier.IsNavigation("waypoint") && RadarClassifier.IsNavigation("quest") &&
-    RadarClassifier.IsNavigation("boss") && !RadarClassifier.IsNavigation("monster"),
+    RadarClassifier.IsNavigation("boss") && RadarClassifier.IsNavigation("essence") &&
+    RadarClassifier.Category("Metadata/MiscellaneousObjects/Monolith") == "essence" &&
+    RadarClassifier.Category("Metadata/Terrain/LeagueEssence/EssenceCrystal") == "essence" &&
+    RadarClassifier.Category("Metadata/Effects/EssenceCrystal") == null &&
+    RadarClassifier.DormantQuestLabel("Metadata/Terrain/Gallows/Act1/Objects/QuestChestBase") == "任务目标" &&
+    RadarClassifier.DormantQuestLabel("Metadata/Terrain/Gallows/Act1/Objects/OrdinaryInertProp") == null &&
+    RadarClassifier.DormantQuestLabel("Metadata/Items/QuestItems/GenericSideQuest") == null &&
+    !RadarClassifier.IsNavigation("monster"),
     "Path-only radar categories admitted unsupported entities or lost navigation markers.");
 
 void TestSkillBindTable()

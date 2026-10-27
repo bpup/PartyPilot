@@ -191,7 +191,8 @@ public static class RadarFrames
                 Encoding.UTF8.GetByteCount(path) > 256 ||
                 !item.TryGetProperty("Category", out var categoryValue) ||
                 categoryValue.GetString() is not string category ||
-                category is not ("waypoint" or "checkpoint" or "portal" or "transition" or "quest" or "boss") ||
+                category is not ("waypoint" or "checkpoint" or "portal" or "transition" or
+                    "quest" or "boss" or "essence") ||
                 !TryFinite(item, "X", out var x) || !TryFinite(item, "Y", out var y))
                 return [];
             string? label = null;
@@ -223,7 +224,7 @@ public static class RadarFrames
         address > 0;
 
     private static bool KnownCategory(string value) => value is
-        "monster" or "checkpoint" or "waypoint" or "portal" or "transition" or "npc" or "chest" or "shrine" or "player" or "league" or "loot" or "quest" or "boss";
+        "monster" or "checkpoint" or "waypoint" or "portal" or "transition" or "npc" or "chest" or "shrine" or "player" or "league" or "loot" or "quest" or "boss" or "essence";
 
     private static bool WorldItemWrapperPath(string path)
     {
