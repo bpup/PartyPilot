@@ -36,6 +36,7 @@ type Command struct {
 	MirrorMovement         bool    `json:"mirror_movement,omitempty"`
 	SuppressMirroredB      bool    `json:"suppress_mirrored_b,omitempty"`
 	MirrorIdle             bool    `json:"mirror_idle,omitempty"`
+	AttackDirection        bool    `json:"attack_direction,omitempty"`
 }
 
 type Config struct {

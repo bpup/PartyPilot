@@ -18,6 +18,12 @@ internal static class ProcessPipelineSmoke
             !priorityFrame.PadCommands[0].Command.Contains("\"catch_up_priority\":true", StringComparison.Ordinal) ||
             LiveFollowFrame.ApplyCatchUpPriority(plainPriorityFixture, enabled: false) != plainPriorityFixture)
             throw new Exception("Desktop did not pass through the observed catch-up priority option.");
+        var attackFrame = LiveFollowFrame.Parse(
+            "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"holding\",\"x\":0,\"y\":1,\"attack_direction\":true}}}",
+            2, 3);
+        if (!attackFrame.Command.Contains("\"attack_direction\":true", StringComparison.Ordinal) ||
+            !attackFrame.Command.Contains("\"y\":1", StringComparison.Ordinal))
+            throw new Exception("Desktop dropped attack direction during a trail hold.");
         var switchedTriple = LiveFollowFrame.ParseDynamic(
             "{\"focused\":3,\"commands\":{\"1\":{\"state\":\"waiting\"},\"2\":{\"state\":\"following\",\"x\":0,\"y\":1}}}",
             triple);
@@ -47,6 +53,8 @@ internal static class ProcessPipelineSmoke
         var mainInputBridgeExe = Path.Combine(directory, "fake-main-input-bridge");
         var mainInputFollowExe = Path.Combine(directory, "fake-main-input-follow");
         var mainInputLog = Path.Combine(directory, "main-input-control.jsonl");
+        var attackInputFollowExe = Path.Combine(directory, "fake-attack-input-follow");
+        var attackInputLog = Path.Combine(directory, "attack-input-control.jsonl");
         var couchBridgeExe = Path.Combine(directory, "fake-couch-bridge");
         var wgiBridgeExe = Path.Combine(directory, "fake-wgi-bridge");
         var client3BridgeExe = Path.Combine(directory, "fake-client3-bridge");
@@ -79,8 +87,8 @@ internal static class ProcessPipelineSmoke
                 "    enabled=command['enabled']\n" +
                 "    print(json.dumps({'event':'main_input_subscription','enabled':enabled}), flush=True)\n" +
                 "    if enabled:\n" +
-                "        print('{\"event\":\"main_input\",\"slot\":1,\"left_x\":40000,\"left_y\":0,\"b_down\":true,\"blocked\":false}', flush=True)\n" +
-                "        print('{\"event\":\"main_input\",\"slot\":1,\"left_x\":1234,\"left_y\":-2345,\"b_down\":true,\"blocked\":false}', flush=True)\n");
+                "        print('{\"event\":\"main_input\",\"slot\":1,\"left_x\":40000,\"left_y\":0,\"b_down\":true,\"attack_active\":false,\"blocked\":false}', flush=True)\n" +
+                "        print('{\"event\":\"main_input\",\"slot\":1,\"left_x\":1234,\"left_y\":-2345,\"b_down\":true,\"attack_active\":true,\"blocked\":false}', flush=True)\n");
             File.WriteAllText(mainInputFollowExe, "#!/usr/bin/env python3\nimport sys,json,time\n" +
                 "if '-accept-main-input' not in sys.argv or '-close-range-mirror' not in sys.argv: sys.exit(2)\n" +
                 "if '-close-mirror-duration' not in sys.argv or sys.argv[sys.argv.index('-close-mirror-duration')+1] != '650ms': sys.exit(2)\n" +
@@ -89,9 +97,18 @@ internal static class ProcessPipelineSmoke
                 "for line in sys.stdin:\n" +
                 "    control=json.loads(line)\n" +
                 "    if control.get('type') == 'main_input':\n" +
-                "        if control.get('slot') != 1 or abs(control.get('left_x',0)-1234/32767) > 0.0001 or abs(control.get('left_y',0)+2345/32767) > 0.0001 or not control.get('b_down') or control.get('blocked') or control.get('observed_at_unix_ms',0) <= 0: sys.exit(2)\n" +
+                "        if control.get('slot') != 1 or abs(control.get('left_x',0)-1234/32767) > 0.0001 or abs(control.get('left_y',0)+2345/32767) > 0.0001 or not control.get('b_down') or not control.get('attack_active') or control.get('blocked') or control.get('observed_at_unix_ms',0) <= 0: sys.exit(2)\n" +
                 $"        open({JsonSerializer.Serialize(mainInputLog)}, 'w').write(line)\n" +
                 "        time.sleep(0.5)\n        break\n");
+            File.WriteAllText(attackInputFollowExe, "#!/usr/bin/env python3\nimport sys,json\n" +
+                "if '-accept-main-input' not in sys.argv or '-mirror-attack-direction' not in sys.argv or '-close-range-mirror' in sys.argv: sys.exit(2)\n" +
+                "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}}}', flush=True)\n" +
+                "for line in sys.stdin:\n" +
+                "    command=json.loads(line)\n" +
+                "    if command.get('type')!='main_input': continue\n" +
+                "    if not command.get('attack_active') or command.get('blocked'): sys.exit(2)\n" +
+                $"    open({JsonSerializer.Serialize(attackInputLog)}, 'w').write(line)\n" +
+                "    break\n");
             File.WriteAllText(followExe, "#!/usr/bin/env python3\nimport sys,json\n" +
                 "if '-auto-flask' not in sys.argv: sys.exit(2)\n" +
                 "if '-classic-sprint-catchup' in sys.argv: sys.exit(2)\n" +
@@ -192,6 +209,7 @@ internal static class ProcessPipelineSmoke
             File.SetUnixFileMode(bridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(mainInputBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(mainInputFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(attackInputFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(followExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(terrainFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(disabledClassicExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -217,7 +235,8 @@ internal static class ProcessPipelineSmoke
                 await mainInputBridge.SetMainInputSubscriptionAsync(true);
                 var sample = await sampleReceived.Task.WaitAsync(TimeSpan.FromSeconds(2));
                 if (sample.Pad != 1 || sample.LeftX != 1234 || sample.LeftY != -2345 ||
-                    !sample.BDown || sample.Blocked || sample.ReceivedAtUtc.Kind != DateTimeKind.Utc)
+                    !sample.BDown || !sample.AttackActive || sample.Blocked ||
+                    sample.ReceivedAtUtc.Kind != DateTimeKind.Utc)
                     throw new Exception("Main input event was not bound to the physical pad sample.");
                 await mainInputBridge.SetMainInputSubscriptionAsync(false);
             }
@@ -249,6 +268,21 @@ internal static class ProcessPipelineSmoke
                     throw new Exception("Main controller sample did not reach the live follow process.");
             }
             Console.WriteLine("Main controller input passed through bridge, desktop, and live process fakes.");
+            await using (var attackBridge = await BridgeSession.StartAsync(mainInputBridgeExe,
+                topology.Slots, 0, @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"], false))
+            {
+                attackBridge.StartReading();
+                await using var attackFollow = await LiveFollowSession.StartAsync(attackInputFollowExe,
+                    topology, clients, attackBridge, plan, mirrorAttackDirection: true,
+                    relayMainInput: true);
+                attackFollow.StartReading();
+                var attackDeadline = DateTime.UtcNow.AddSeconds(3);
+                while (!File.Exists(attackInputLog) && DateTime.UtcNow < attackDeadline)
+                    await Task.Delay(20);
+                if (!File.Exists(attackInputLog))
+                    throw new Exception("Attack direction did not subscribe to main input independently.");
+            }
+            Console.WriteLine("Attack direction subscribed without close-range mirroring.");
             Console.WriteLine("Pipeline smoke: starting fake follow.");
             await using (var follow = await LiveFollowSession.StartAsync(followExe, topology, clients, bridge, plan))
             {

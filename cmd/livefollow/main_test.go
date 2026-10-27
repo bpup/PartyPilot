@@ -221,8 +221,9 @@ func TestMainInputControlRequiresOptInAndCurrentLeader(t *testing.T) {
 	defer engine.Close()
 	at := time.Now().UTC()
 	input := make(chan menuInput, 1)
+	attack := true
 	control := menuInput{Type: "main_input", Slot: 1, LeftX: 0.5,
-		LeftY: -0.25, BDown: true, ObservedAtMS: at.UnixMilli()}
+		LeftY: -0.25, BDown: true, AttackActive: &attack, ObservedAtMS: at.UnixMilli()}
 	input <- control
 	if err := applyMenuInput(nil, engine, input, false); err == nil {
 		t.Fatal("main controller sample bypassed opt-in")
@@ -233,7 +234,7 @@ func TestMainInputControlRequiresOptInAndCurrentLeader(t *testing.T) {
 		t.Fatalf("bound main controller sample was rejected: %v", err)
 	}
 	if got, ok := engine.CurrentMainInput(time.Now().UTC()); !ok ||
-		got.Slot != 1 || got.LeftX != 0.5 || !got.BDown {
+		got.Slot != 1 || got.LeftX != 0.5 || !got.BDown || !got.AttackActive {
 		t.Fatalf("accepted input was not retained: %+v %v", got, ok)
 	}
 	control.Slot = 2

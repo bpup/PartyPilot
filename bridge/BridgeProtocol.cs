@@ -304,6 +304,13 @@ internal static class BridgeProtocol
                 mirrorMovement = mirrorValue.GetBoolean();
             }
             if (mirrorMovement && state != "holding") return false;
+            var attackDirection = false;
+            if (root.TryGetProperty("attack_direction", out var attackValue))
+            {
+                if (attackValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return false;
+                attackDirection = attackValue.GetBoolean();
+            }
+            if (attackDirection && (state == "waiting" || mirrorMovement || sprintDown)) return false;
             var suppressMirroredB = false;
             if (root.TryGetProperty("suppress_mirrored_b", out var suppressValue))
             {
@@ -319,7 +326,7 @@ internal static class BridgeProtocol
             }
             if (mirrorIdle)
             {
-                if (state is not ("following" or "catching_up") || sprintDown || mirrorMovement ||
+                if (state is not ("following" or "catching_up") || sprintDown || mirrorMovement || attackDirection ||
                     !root.TryGetProperty("x", out var idleX) || !idleX.TryGetDouble(out var x) || x != 0 ||
                     !root.TryGetProperty("y", out var idleY) || !idleY.TryGetDouble(out var y) || y != 0)
                     return false;
@@ -330,7 +337,7 @@ internal static class BridgeProtocol
             if (state is "waiting" or "holding")
             {
                 if (state == "waiting" && manualEligible) return false;
-                if (mirrorMovement) return TryParseMovement(root, slot, manualEligible, false,
+                if (mirrorMovement || attackDirection) return TryParseMovement(root, slot, manualEligible, false,
                     suppressMirroredB, catchUpPriority, out command);
                 command = new BridgeCommand(slot, 0, 0, false, manualEligible, false, suppressMirroredB);
                 return true;

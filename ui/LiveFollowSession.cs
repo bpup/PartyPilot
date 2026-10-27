@@ -118,6 +118,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         bool classicSprintCatchUp = false,
         bool sprintCatchUp = true,
         bool sprintCatchUpPriority = true,
+        bool mirrorAttackDirection = false,
         bool aggressiveBlinkCatchUp = false,
         int aggressiveSprintRetryDelay = 800,
         bool relayMainInput = false,
@@ -131,6 +132,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             throw new ArgumentOutOfRangeException(nameof(aggressiveSprintRetryDelay));
         if (closeRangeMirror && !relayMainInput)
             throw new ArgumentException("Close-range mirror requires main-controller input.");
+        if (mirrorAttackDirection && !relayMainInput)
+            throw new ArgumentException("Attack direction requires main-controller input.");
         if (closeRangeMirror && closeMirrorDuration is < 50 or > 5000)
             throw new ArgumentOutOfRangeException(nameof(closeMirrorDuration));
         if (topology.Id is not ("2-split" or "3-three-singles") ||
@@ -214,6 +217,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         }
         if (classicSprintCatchUp) start.ArgumentList.Add("-classic-sprint-catchup");
         if (!sprintCatchUp) start.ArgumentList.Add("-disable-sprint-catchup");
+        if (!sprintCatchUpPriority) start.ArgumentList.Add("-disable-catch-up-priority");
+        if (mirrorAttackDirection) start.ArgumentList.Add("-mirror-attack-direction");
         if (aggressiveBlinkCatchUp)
         {
             start.ArgumentList.Add("-aggressive-blink-catchup");
@@ -428,6 +433,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 left_x = Math.Clamp(sample.LeftX / 32767.0, -1.0, 1.0),
                 left_y = Math.Clamp(sample.LeftY / 32767.0, -1.0, 1.0),
                 b_down = sample.BDown, blocked = sample.Blocked,
+                attack_active = sample.AttackActive,
                 observed_at_unix_ms = new DateTimeOffset(sample.ReceivedAtUtc).ToUnixTimeMilliseconds()
             }));
         await _process.StandardInput.FlushAsync();

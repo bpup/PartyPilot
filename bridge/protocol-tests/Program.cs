@@ -260,6 +260,11 @@ var sprintRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
 if (!sprintRouter.ConfigurePhysical(1)) throw new Exception("Sprint focus setup failed.");
 sprintRouter.SetPhysical(default, now);
 var sprintLine = "{\"slot\":2,\"state\":\"catching_up\",\"x\":1,\"y\":0,\"sprint_down\":true}";
+if (!BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"holding\",\"x\":0,\"y\":1,\"attack_direction\":true}",
+        out var holdingAttack) || !holdingAttack.Active || holdingAttack.Y != 32767 ||
+    BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"waiting\",\"attack_direction\":true}", out _) ||
+    BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"holding\",\"x\":0,\"y\":1,\"attack_direction\":true,\"mirror_movement\":true}", out _))
+    throw new Exception("Attack direction command was not constrained to valid follower movement.");
 if (!sprintRouter.ApplyLine(sprintLine, now) || sprintFollower.Report.Buttons != 0x2000)
     throw new Exception("Catch-up did not press the follower sprint button.");
 if (!sprintRouter.ApplyLine("{\"slot\":2,\"state\":\"holding\"}", now.AddMilliseconds(100)) ||

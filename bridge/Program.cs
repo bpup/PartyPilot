@@ -862,6 +862,8 @@ try
                     Console.WriteLine(JsonSerializer.Serialize(new { @event = "main_input",
                         slot = leaderSlot, left_x = gamepad.LeftX, left_y = gamepad.LeftY,
                         b_down = (gamepad.Buttons & 0x2000) != 0,
+                        attack_active = (gamepad.Buttons & 0xC700) != 0 ||
+                            gamepad.LeftTrigger > 30 || gamepad.RightTrigger > 30,
                         blocked = router.AutoPartyActive || menuGuard.AnyActive ||
                             router.FocusedSlot != leaderSlot }));
                 }

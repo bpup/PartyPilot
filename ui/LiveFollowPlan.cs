@@ -114,6 +114,15 @@ public static class LiveFollowFrame
         }
         if (mirrorMovement && state != "holding")
             throw new InvalidDataException("Mirror movement requires a holding follower.");
+        var attackDirection = false;
+        if (follower.TryGetProperty("attack_direction", out var attackValue))
+        {
+            if (attackValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                throw new InvalidDataException("Live follow returned an invalid attack direction flag.");
+            attackDirection = attackValue.GetBoolean();
+        }
+        if (attackDirection && (state == "waiting" || mirrorMovement || sprintDown))
+            throw new InvalidDataException("Attack direction conflicts with follow state or sprint.");
         var suppressMirroredB = false;
         if (follower.TryGetProperty("suppress_mirrored_b", out var suppressValue))
         {
@@ -157,7 +166,7 @@ public static class LiveFollowFrame
         }
         if (mirrorIdle)
         {
-            if (state is not ("following" or "catching_up") || sprintDown || mirrorMovement ||
+            if (state is not ("following" or "catching_up") || sprintDown || mirrorMovement || attackDirection ||
                 !follower.TryGetProperty("x", out var idleX) || !idleX.TryGetDouble(out var idleAxisX) || idleAxisX != 0 ||
                 !follower.TryGetProperty("y", out var idleY) || !idleY.TryGetDouble(out var idleAxisY) || idleAxisY != 0)
                 throw new InvalidDataException("Live follow returned an invalid idle mirror direction.");
@@ -172,14 +181,18 @@ public static class LiveFollowFrame
         {
             if (state == "waiting" && manualEligible)
                 throw new InvalidDataException("Waiting follower cannot receive manual movement.");
-            if (mirrorMovement)
+            if (mirrorMovement || attackDirection)
             {
                 if (!follower.TryGetProperty("x", out var mirrorXValue) || !mirrorXValue.TryGetDouble(out var mirrorX) ||
                     !follower.TryGetProperty("y", out var mirrorYValue) || !mirrorYValue.TryGetDouble(out var mirrorY) ||
                     !double.IsFinite(mirrorX) || !double.IsFinite(mirrorY) ||
                     Math.Sqrt(mirrorX * mirrorX + mirrorY * mirrorY) is < 0.001 or > 1.001)
                     throw new InvalidDataException("Live follow returned an invalid mirror direction.");
-                var mirrored = suppressMirroredB
+                var mirrored = attackDirection
+                    ? JsonSerializer.Serialize(new { slot = followerPad, state, x = mirrorX, y = mirrorY,
+                        manual_override_eligible = manualEligible, attack_direction = true,
+                        suppress_mirrored_b = suppressMirroredB })
+                    : suppressMirroredB
                     ? JsonSerializer.Serialize(new { slot = followerPad, state, x = mirrorX, y = mirrorY,
                         manual_override_eligible = manualEligible, mirror_movement = true, suppress_mirrored_b = true })
                     : manualEligible
@@ -217,6 +230,13 @@ public static class LiveFollowFrame
             : manualEligible
                 ? JsonSerializer.Serialize(new { slot = followerPad, state, x, y, manual_override_eligible = true })
                 : JsonSerializer.Serialize(new { slot = followerPad, state, x, y });
+        if (attackDirection)
+        {
+            var value = JsonNode.Parse(movement)?.AsObject() ??
+                throw new InvalidDataException("Invalid attack direction command.");
+            value["attack_direction"] = true;
+            movement = value.ToJsonString();
+        }
         return new FollowBridgeFrame(movement, state, reason)
             { Flasks = flasks, FocusedPlayer = expectedLeader, FollowerPad = followerPad,
                 PadCommands = [new FollowPadCommand(followerPartyPlayer, followerPad, movement, state, reason)] };

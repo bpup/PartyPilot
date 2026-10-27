@@ -118,6 +118,7 @@ public sealed class MainWindow : Window
     private readonly CheckBox _classicSprintCatchUp = new();
     private readonly CheckBox _sprintCatchUp = new();
     private readonly CheckBox _sprintCatchUpPriority = new();
+    private readonly CheckBox _mirrorAttackDirection = new();
     private readonly CheckBox _aggressiveBlinkCatchUp = new();
     private readonly TextBox _aggressiveSprintRetryDelay = new();
     private readonly CheckBox _closeRangeMirror = new();
@@ -845,6 +846,9 @@ public sealed class MainWindow : Window
         _sprintCatchUpPriority.Content = "追赶优先，暂停镜像施法按键（目标版默认开启）";
         _sprintCatchUpPriority.IsChecked = true;
         panel.Children.Add(_sprintCatchUpPriority);
+        _mirrorAttackDirection.Content = "攻击时同步主控移动方向（目标版默认开启；实体手柄）";
+        _mirrorAttackDirection.IsChecked = true;
+        panel.Children.Add(_mirrorAttackDirection);
         _classicSprintCatchUp.Content = "启用经典冲刺追赶（0.6.17 分布式客户端默认关闭）";
         _classicSprintCatchUp.IsCheckedChanged += (_, _) =>
         {
@@ -2194,6 +2198,8 @@ public sealed class MainWindow : Window
         _sprintCatchUp.IsEnabled = _classicSprintCatchUp.IsEnabled;
         _sprintCatchUpPriority.IsEnabled = _sprintCatchUp.IsEnabled &&
             _sprintCatchUp.IsChecked == true;
+        _mirrorAttackDirection.IsEnabled = _classicSprintCatchUp.IsEnabled &&
+            _bridge is { IsHybridMode: false };
         _aggressiveBlinkCatchUp.IsEnabled = _classicSprintCatchUp.IsEnabled;
         _aggressiveSprintRetryDelay.IsEnabled = _aggressiveBlinkCatchUp.IsEnabled &&
             _aggressiveBlinkCatchUp.IsChecked == true;
@@ -2912,6 +2918,8 @@ public sealed class MainWindow : Window
         var enableCloseMirror = _selectedTopology.Id is ("2-split" or "3-three-singles") &&
             !_bridge.IsHybridMode &&
             _closeRangeMirror.IsChecked == true;
+        var enableAttackMirror = _selectedTopology.Id is ("2-split" or "3-three-singles") &&
+            !_bridge.IsHybridMode && _mirrorAttackDirection.IsChecked == true;
         if (enableCloseMirror && (!int.TryParse(_closeMirrorDuration.Text, NumberStyles.None,
                 CultureInfo.InvariantCulture, out var mirrorDuration) || mirrorDuration is < 50 or > 5000))
         {
@@ -2958,10 +2966,11 @@ public sealed class MainWindow : Window
                 _classicSprintCatchUp.IsChecked == true,
                 sprintCatchUp: _sprintCatchUp.IsChecked == true,
                 sprintCatchUpPriority: _sprintCatchUpPriority.IsChecked == true,
+                mirrorAttackDirection: enableAttackMirror,
                 aggressiveBlinkCatchUp: _aggressiveBlinkCatchUp.IsChecked == true,
                 aggressiveSprintRetryDelay: _aggressiveBlinkCatchUp.IsChecked == true
                     ? int.Parse(_aggressiveSprintRetryDelay.Text!, CultureInfo.InvariantCulture) : 800,
-                relayMainInput: enableCloseMirror,
+                relayMainInput: enableCloseMirror || enableAttackMirror,
                 closeRangeMirror: enableCloseMirror,
                 closeMirrorDuration: int.Parse(_closeMirrorDuration.Text!, CultureInfo.InvariantCulture),
                 followerMirror: _followerMirror);

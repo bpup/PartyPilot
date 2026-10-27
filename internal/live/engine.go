@@ -19,33 +19,35 @@ import (
 // Engine joins one read-only sensor and one independent log per game client.
 // Its output is a movement decision; it does not establish game input mapping.
 type Engine struct {
-	coordinator         *party.Coordinator
-	leader              int
-	baseLeader          int
-	lastFocusedLeads    bool
-	logAge              time.Duration
-	sampleAge           time.Duration
-	pidToSlot           map[int]int
-	pidToRoles          map[int][]RoleBinding
-	slotToPID           map[int]int
-	slots               []int
-	samples             map[int]telemetry.Sample
-	vitals              map[int]telemetry.Sample
-	strictVitals        map[int]bool
-	areas               map[int]arealog.Signal
-	terrains            map[int]boundTerrain
-	terrainStable       map[int]terrainStability
-	leaderName          string
-	memberNames         map[int]string
-	stopped             string
-	followPaused        bool
-	mainInput           MainInput
-	mainInputValid      bool
-	acceptMainInput     bool
-	closeMirrorEnabled  bool
-	closeMirrorDuration time.Duration
-	closeMirrors        map[int]*follow.CloseMirror
-	closeMirrorBAllowed map[int]bool
+	coordinator           *party.Coordinator
+	leader                int
+	baseLeader            int
+	lastFocusedLeads      bool
+	logAge                time.Duration
+	sampleAge             time.Duration
+	pidToSlot             map[int]int
+	pidToRoles            map[int][]RoleBinding
+	slotToPID             map[int]int
+	slots                 []int
+	samples               map[int]telemetry.Sample
+	vitals                map[int]telemetry.Sample
+	strictVitals          map[int]bool
+	areas                 map[int]arealog.Signal
+	terrains              map[int]boundTerrain
+	terrainStable         map[int]terrainStability
+	leaderName            string
+	memberNames           map[int]string
+	stopped               string
+	followPaused          bool
+	mainInput             MainInput
+	mainInputValid        bool
+	acceptMainInput       bool
+	closeMirrorEnabled    bool
+	closeMirrorDuration   time.Duration
+	closeMirrors          map[int]*follow.CloseMirror
+	closeMirrorBAllowed   map[int]bool
+	mirrorAttackDirection bool
+	catchUpPriority       bool
 }
 
 // SetFollowPaused temporarily releases movement without discarding process,
@@ -486,6 +488,22 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 			command.ManualOverrideEligible = true
 		}
 		command = e.applyCloseMirror(slot, command, now, positions, terrains)
+		if e.mirrorAttackDirection &&
+			(command.State == follow.Holding || command.State == follow.Following ||
+				command.State == follow.CatchingUp) &&
+			!(command.State == follow.CatchingUp && e.catchUpPriority) {
+			if input, ok := e.CurrentMainInput(now); ok && !input.Blocked && input.AttackActive {
+				command.SprintDown = false
+				length := math.Hypot(input.LeftX, input.LeftY)
+				if length*length > 0.03 {
+					command.X, command.Y = input.LeftX/length, input.LeftY/length
+					command.Reason = "Attack direction"
+					command.AttackDirection = true
+					command.MirrorMovement = false
+					command.MirrorIdle = false
+				}
+			}
+		}
 		commands[slot] = command
 	}
 	return commands

@@ -8,12 +8,13 @@ import (
 // MainInput is a controller sample relayed by the protected bridge. It is
 // stored separately from position telemetry until close mirroring is enabled.
 type MainInput struct {
-	Slot       int
-	LeftX      float64
-	LeftY      float64
-	BDown      bool
-	Blocked    bool
-	ObservedAt time.Time
+	Slot         int
+	LeftX        float64
+	LeftY        float64
+	BDown        bool
+	AttackActive bool
+	Blocked      bool
+	ObservedAt   time.Time
 }
 
 const mainInputMaxAge = 500 * time.Millisecond
@@ -24,6 +25,11 @@ func (e *Engine) SetAcceptMainInput(enabled bool) {
 		e.mainInputValid = false
 		e.resetCloseMirrors()
 	}
+}
+
+func (e *Engine) SetMirrorAttackDirection(enabled, catchUpPriority bool) {
+	e.mirrorAttackDirection = enabled
+	e.catchUpPriority = enabled && catchUpPriority
 }
 
 func (e *Engine) ObserveMainInput(input MainInput, now time.Time) bool {

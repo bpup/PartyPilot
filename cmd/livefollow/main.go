@@ -254,6 +254,7 @@ type menuInput struct {
 	LeftX        float64 `json:"left_x"`
 	LeftY        float64 `json:"left_y"`
 	BDown        bool    `json:"b_down"`
+	AttackActive *bool   `json:"attack_active"`
 	Blocked      bool    `json:"blocked"`
 	ObservedAtMS int64   `json:"observed_at_unix_ms"`
 	Err          error   `json:"-"`
@@ -293,7 +294,7 @@ func applyMenuInput(session *live.FlaskSession, engine *live.Engine, input <-cha
 			}
 			switch command.Type {
 			case "main_input":
-				if command.ObservedAtMS <= 0 {
+				if command.ObservedAtMS <= 0 || command.AttackActive == nil {
 					return errors.New("invalid main input control")
 				}
 				observedAt := time.UnixMilli(command.ObservedAtMS).UTC()
@@ -306,7 +307,8 @@ func applyMenuInput(session *live.FlaskSession, engine *live.Engine, input <-cha
 				if !engine.ObserveMainInput(live.MainInput{
 					Slot: command.Slot, LeftX: command.LeftX, LeftY: command.LeftY,
 					BDown: command.BDown, Blocked: command.Blocked,
-					ObservedAt: observedAt,
+					AttackActive: *command.AttackActive,
+					ObservedAt:   observedAt,
 				}, now) {
 					return errors.New("invalid main input control")
 				}
@@ -458,6 +460,10 @@ func main() {
 	autoFlask := flag.Bool("auto-flask", false, "enable life and mana flask decisions for explicitly bound clients")
 	allowFollowPause := flag.Bool("allow-follow-pause", false, "accept explicit pause/resume controls on stdin")
 	acceptMainInput := flag.Bool("accept-main-input", false, "accept bound main-controller samples without enabling mirror output")
+	mirrorAttackDirection := flag.Bool("mirror-attack-direction", false,
+		"mirror the main controller's attack direction during safe follow")
+	disableCatchUpPriority := flag.Bool("disable-catch-up-priority", false,
+		"allow attack direction to override catch-up movement")
 	closeRangeMirror := flag.Bool("close-range-mirror", false, "enable optional per-follower close-range stick mirror")
 	closeMirrorDuration := flag.Duration("close-mirror-duration", 400*time.Millisecond, "close-range stick burst duration")
 	mirrorBPlayers := flag.String("mirror-b-players", "all", "roster slots allowed to mirror B; all, none, or comma-separated slots")
@@ -475,6 +481,10 @@ func main() {
 	flag.Var(&targets, "follow-target", "SLOT=TARGET; 0 means Current MAIN")
 	flag.Var(&playerStops, "stop-player", "SLOT=VALUE; individual stop distance from 0 to 200")
 	flag.Parse()
+	if *mirrorAttackDirection && !*acceptMainInput {
+		fmt.Fprintln(os.Stderr, "attack direction requires main-controller input")
+		os.Exit(2)
+	}
 	if *aggressiveBlinkCatchUp && *classicSprintCatchUp ||
 		*aggressiveBlinkCatchUp && (*aggressiveRetryDelay < 500 || *aggressiveRetryDelay > 1500) {
 		fmt.Fprintln(os.Stderr, "aggressive sprint requires normal sprint and a retry delay from 500 to 1500 ms")
@@ -552,6 +562,8 @@ func main() {
 	}
 	engine.SetLastFocusedLeads(*lastFocusedLeads)
 	engine.SetAcceptMainInput(*acceptMainInput)
+	engine.SetMirrorAttackDirection(*mirrorAttackDirection,
+		!*disableSprintCatchUp && !*disableCatchUpPriority)
 	if *closeRangeMirror {
 		if !*acceptMainInput {
 			fmt.Fprintln(os.Stderr, "close-range mirror requires main input")
