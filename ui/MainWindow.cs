@@ -158,6 +158,11 @@ public sealed class MainWindow : Window
     private readonly Button _stopFollow = new();
     private readonly TextBlock _followStatus = new();
     private readonly TextBox _radarScale = new();
+    private readonly TextBox _radarMapOpacity = new();
+    private readonly TextBox _radarBorderOpacity = new();
+    private readonly TextBox _radarBackgroundOpacity = new();
+    private readonly TextBlock _radarAppearanceStatus = new();
+    private readonly RadarAppearancePreferenceStore _radarAppearancePreferences = new();
     private readonly TextBox[] _radarTerrainPaths = new TextBox[3];
     private readonly CheckBox _radarAutoTerrain = new();
     private readonly TextBox _radarHotkeyText = new();
@@ -334,6 +339,13 @@ public sealed class MainWindow : Window
             : RadarKeyConflicts(_radarHotkey)
                 ? "雷达快捷键与自动组队或暂停跟随冲突；请重新设置。"
                 : $"雷达显隐快捷键：{_radarHotkey.DisplayText}；仅在已绑定游戏窗口前台生效。";
+        var appearancePreference = _radarAppearancePreferences.Load();
+        _radarMapOpacity.Text = appearancePreference.Settings.MapOpacity.ToString(CultureInfo.InvariantCulture);
+        _radarBorderOpacity.Text = appearancePreference.Settings.BorderOpacity.ToString(CultureInfo.InvariantCulture);
+        _radarBackgroundOpacity.Text = appearancePreference.Settings.BackgroundOpacity.ToString(CultureInfo.InvariantCulture);
+        _radarAppearanceStatus.Text = appearancePreference.Success
+            ? "地图外观已加载；修改后保存，可立即更新已启动的覆盖层。"
+            : "地图外观设置文件无效；当前使用目标版首次启动值，请重新保存。";
         _playerCount.SelectionChanged += (_, _) => UpdateTopologyOptions();
         _topologyVariant.SelectionChanged += (_, _) => UpdateClientRows();
         _applyLayout.IsCheckedChanged += (_, _) => UpdateLayoutControls();
@@ -1082,6 +1094,34 @@ public sealed class MainWindow : Window
         _radarScale.HorizontalAlignment = HorizontalAlignment.Left;
         _radarScale.TextChanged += (_, _) => UpdateRadarControls();
         panel.Children.Add(_radarScale);
+        panel.Children.Add(Label("候选地形透明度（目标版首次启动：地图 58%、边线 26%、背景 6%；暂不改变标记）", 12, MutedBrush));
+        var appearanceRow = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
+        foreach (var (field, label, initial) in new[]
+                 {
+                     (_radarMapOpacity, "地图 %", "58"),
+                     (_radarBorderOpacity, "边线 %", "26"),
+                     (_radarBackgroundOpacity, "背景 %", "6")
+                 })
+        {
+            var group = new StackPanel { Spacing = 4 };
+            group.Children.Add(Label(label, 12, MutedBrush));
+            field.Text = initial;
+            field.Width = 100;
+            field.TextChanged += (_, _) =>
+            {
+                _radarAppearanceStatus.Text = "地图外观已修改，保存后应用到已启动的覆盖层。";
+                UpdateRadarControls();
+            };
+            group.Children.Add(field);
+            appearanceRow.Children.Add(group);
+        }
+        var saveAppearance = new Button { Content = "保存地图外观" };
+        saveAppearance.Click += (_, _) => SaveRadarAppearance();
+        appearanceRow.Children.Add(saveAppearance);
+        panel.Children.Add(appearanceRow);
+        _radarAppearanceStatus.Foreground = MutedBrush;
+        _radarAppearanceStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_radarAppearanceStatus);
         _radarAutoTerrain.Content = "自动查找当前进程与区域的候选地形（实验性）";
         _radarAutoTerrain.IsChecked = true;
         panel.Children.Add(_radarAutoTerrain);
@@ -1511,7 +1551,9 @@ public sealed class MainWindow : Window
     {
         var ready = _selectedTopology is not null &&
             _launchedClients.Count == _selectedTopology.ClientCount &&
-            RadarProjection.TryScale(_radarScale.Text, out _);
+            RadarProjection.TryScale(_radarScale.Text, out _) &&
+            RadarAppearanceSettings.TryParse(_radarMapOpacity.Text,
+                _radarBorderOpacity.Text, _radarBackgroundOpacity.Text, out _);
         _startRadar.IsEnabled = OperatingSystem.IsWindows() && !_busy && !_radarStopping &&
             _radar is null && ready;
         _stopRadar.IsEnabled = _radar is not null;
@@ -1777,7 +1819,9 @@ public sealed class MainWindow : Window
     {
         if (_radar is not null || _busy || _radarStopping || !OperatingSystem.IsWindows() ||
             _selectedTopology is null || _launchedClients.Count != _selectedTopology.ClientCount ||
-            !RadarProjection.TryScale(_radarScale.Text, out var gridScale)) return;
+            !RadarProjection.TryScale(_radarScale.Text, out var gridScale) ||
+            !RadarAppearanceSettings.TryParse(_radarMapOpacity.Text,
+                _radarBorderOpacity.Text, _radarBackgroundOpacity.Text, out var appearance)) return;
         if (RadarKeyConflicts(_radarHotkey))
         {
             _radarHotkeyStatus.Text = "雷达快捷键与自动组队或暂停跟随冲突；请重新设置。";
@@ -1799,7 +1843,7 @@ public sealed class MainWindow : Window
                 ? new RadarTerrainCatalog(RadarTerrainCatalog.SensorDirectory) : null;
             var worldScale = gridScale / RadarProjection.WorldUnitsPerGridUnit;
             var session = RadarSession.Start(_launchedClients, worldScale, _radarHotkey,
-                captures, catalog);
+                captures, catalog, appearance);
             session.Ended += RadarEnded;
             session.FrameReceived += RadarFrameReceived;
             _radar = session;
@@ -2078,6 +2122,26 @@ public sealed class MainWindow : Window
     private bool RadarKeyConflicts(RadarHotkeyBinding binding) =>
         binding.VirtualKey == AutoPartyKeyBinding.VirtualKey(_autoPartyKeyValue) ||
         binding.VirtualKey == AutoPartyKeyBinding.VirtualKey(_followPauseKeyValue);
+
+    private void SaveRadarAppearance()
+    {
+        if (!RadarAppearanceSettings.TryParse(_radarMapOpacity.Text,
+                _radarBorderOpacity.Text, _radarBackgroundOpacity.Text, out var appearance))
+        {
+            _radarAppearanceStatus.Text = "请输入整数：地图 2–100%，边线与背景 0–100%。";
+            return;
+        }
+        if (!_radarAppearancePreferences.Save(appearance))
+        {
+            _radarAppearanceStatus.Text = "地图外观保存失败，当前覆盖层未更改。";
+            return;
+        }
+        _radar?.SetAppearance(appearance);
+        _radarAppearanceStatus.Text = _radar is null
+            ? "地图外观已保存；下次启动覆盖层时生效。"
+            : "地图外观已保存并应用到当前覆盖层；游戏内效果仍需核对。";
+        UpdateRadarControls();
+    }
 
     private void SaveRadarHotkey()
     {

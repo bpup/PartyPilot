@@ -19,6 +19,7 @@ public sealed class RadarOverlayWindow : Window
     private readonly LaunchedClient _client;
     private readonly double _scale;
     private readonly RadarVisibility _visibility;
+    private RadarAppearanceSettings _appearance;
     private RadarTerrainCapture? _terrain;
     private readonly bool _renderOnly;
     private readonly Canvas _canvas = new();
@@ -38,11 +39,12 @@ public sealed class RadarOverlayWindow : Window
 
     public RadarOverlayWindow(LaunchedClient client, double scale, RadarVisibility visibility,
         RadarTerrainCapture? terrain = null,
-        bool renderOnly = false)
+        bool renderOnly = false, RadarAppearanceSettings? appearance = null)
     {
         _client = client;
         _scale = scale;
         _visibility = visibility;
+        _appearance = appearance ?? RadarAppearanceSettings.Default;
         _terrain = terrain;
         _renderOnly = renderOnly;
         Title = $"PartyPilot Radar · {client.Pid}";
@@ -121,6 +123,14 @@ public sealed class RadarOverlayWindow : Window
         Apply(frame);
     }
 
+    internal void SetAppearance(RadarAppearanceSettings appearance)
+    {
+        if (_appearance == appearance) return;
+        _appearance = appearance;
+        ReleaseTerrainBitmap();
+        Draw();
+    }
+
     public void ApplyMotion(RadarFrame frame, RadarTerrainCapture? terrain)
     {
         if (frame.ProcessId != _client.Pid) return;
@@ -194,7 +204,7 @@ public sealed class RadarOverlayWindow : Window
                 {
                     ReleaseTerrainBitmap();
                     var pixels = RadarTerrainRaster.Render(_terrain, _frame, width, height,
-                        _scale * RadarProjection.WorldUnitsPerGridUnit);
+                        _scale * RadarProjection.WorldUnitsPerGridUnit, _appearance);
                     var bitmap = new WriteableBitmap(new PixelSize(width, height), new Vector(96, 96),
                         PixelFormats.Bgra8888, AlphaFormat.Premul);
                     using (var locked = bitmap.Lock())

@@ -62,6 +62,11 @@ internal sealed class RadarSession : IAsyncDisposable
             () => Dispatcher.UIThread.Post(OnRegisteredHotkey));
     }
 
+    internal void SetAppearance(RadarAppearanceSettings appearance)
+    {
+        foreach (var window in _windows.Values) window.SetAppearance(appearance);
+    }
+
     private void OnRegisteredHotkey()
     {
         if (_disposed) return;
@@ -82,7 +87,8 @@ internal sealed class RadarSession : IAsyncDisposable
 
     public static RadarSession Start(IReadOnlyList<LaunchedClient> clients, double scale,
         RadarHotkeyBinding hotkey, IReadOnlyDictionary<int, RadarTerrainCapture>? terrains = null,
-        RadarTerrainCatalog? terrainCatalog = null)
+        RadarTerrainCatalog? terrainCatalog = null,
+        RadarAppearanceSettings? appearance = null)
     {
         if (!OperatingSystem.IsWindows() || clients.Count is < 1 or > 3 ||
             clients.Any(client => client.Pid <= 0 || client.WindowHandle == 0) ||
@@ -100,7 +106,8 @@ internal sealed class RadarSession : IAsyncDisposable
             {
                 RadarTerrainCapture? terrain = null;
                 if (terrains is not null) terrains.TryGetValue(client.Pid, out terrain);
-                var window = new RadarOverlayWindow(client, scale, visibility, terrain);
+                var window = new RadarOverlayWindow(client, scale, visibility, terrain,
+                    appearance: appearance);
                 windows.Add(client.Pid, window);
             }
             session = new RadarSession(receiver, windows,

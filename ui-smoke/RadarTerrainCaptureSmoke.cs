@@ -13,6 +13,18 @@ internal static class RadarTerrainCaptureSmoke
         Directory.CreateDirectory(directory);
         try
         {
+            var appearancePath = Path.Combine(directory, "appearance.json");
+            var appearanceStore = new RadarAppearancePreferenceStore(appearancePath);
+            if (appearanceStore.Load() != (true, RadarAppearanceSettings.Default) ||
+                RadarAppearanceSettings.TryParse("101", "26", "6", out _) ||
+                RadarAppearanceSettings.TryParse("58", "-1", "6", out _) ||
+                !RadarAppearanceSettings.TryParse("70", "0", "0", out var clearStyle) ||
+                !appearanceStore.Save(clearStyle) ||
+                appearanceStore.Load() != (true, clearStyle))
+                throw new Exception("Radar appearance range or saved settings changed.");
+            File.WriteAllText(appearancePath, "[]");
+            if (appearanceStore.Load().Success)
+                throw new Exception("Invalid radar appearance settings were accepted.");
             var dataPath = Path.Combine(directory, "capture.packed");
             var metadataPath = Path.Combine(directory, "capture.json");
             var data = Enumerable.Repeat((byte)0x11, 4096).ToArray();
@@ -119,6 +131,10 @@ internal static class RadarTerrainCaptureSmoke
             var interior = RadarTerrainRaster.Render(capture, matching, 1, 1, 1);
             if (!interior.SequenceEqual(new byte[] { 5, 4, 3, 21 }))
                 throw new Exception("Radar terrain interior did not use the target's default fill colour and opacity.");
+            if (RadarTerrainRaster.Render(capture, matching, 1, 1, 1, clearStyle)[3] != 0 ||
+                RadarTerrainRaster.Render(capture,
+                    matching with { GridX = 1, GridY = 0 }, 1, 1, 1, clearStyle)[3] != 0)
+                throw new Exception("Zero terrain layer opacity did not clear the map fill and border.");
             var diagonal = RadarTerrainRaster.Render(capture,
                 matching with { GridX = 1, GridY = 1 }, 1, 1, 1);
             if (diagonal[3] != 21)
