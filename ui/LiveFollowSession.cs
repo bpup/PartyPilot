@@ -21,6 +21,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     private readonly object _mainInputGate = new();
     private MainInputSample? _pendingMainInput;
     private readonly bool _relayMainInput;
+    private readonly bool _catchUpPriority;
     private int _inputSubscriptionActive;
     private readonly SemaphoreSlim _controlSignal = new(0);
     private readonly CancellationTokenSource _controlCancellation = new();
@@ -36,7 +37,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     public event Action<string>? Ended;
 
     private LiveFollowSession(Process process, BridgeSession bridge, PartyTopology topology,
-        Task<string> readError, FollowBridgeFrame initialFrame, bool relayMainInput)
+        Task<string> readError, FollowBridgeFrame initialFrame, bool relayMainInput,
+        bool catchUpPriority)
     {
         _process = process;
         _bridge = bridge;
@@ -46,6 +48,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         _playerToPad = topology.Slots.ToDictionary(slot => slot.PartyPlayer, slot => slot.RuntimePad);
         _readError = readError;
         _relayMainInput = relayMainInput;
+        _catchUpPriority = catchUpPriority;
         Current = initialFrame;
         if (bridge.AutoFlaskEnabled)
         {
@@ -114,6 +117,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         bool classicCollisionDodge = false,
         bool classicSprintCatchUp = false,
         bool sprintCatchUp = true,
+        bool sprintCatchUpPriority = true,
         bool aggressiveBlinkCatchUp = false,
         int aggressiveSprintRetryDelay = 800,
         bool relayMainInput = false,
@@ -258,6 +262,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                     frame = bridge.LastFocusedLeadsEnabled
                         ? LiveFollowFrame.ParseDynamic(first, topology)
                         : LiveFollowFrame.Parse(first, 2, topology.Slots[1].RuntimePad);
+                    frame = LiveFollowFrame.ApplyCatchUpPriority(frame,
+                        sprintCatchUp && sprintCatchUpPriority);
                 } while (frame.FocusedPlayer != initialLeader);
             }
             initialFrame = frame;
@@ -271,7 +277,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                     await bridge.SendFlaskAsync(pad, request.Resource);
                 }
             }
-            session = new LiveFollowSession(process, bridge, topology, readError, frame, relayMainInput);
+            session = new LiveFollowSession(process, bridge, topology, readError, frame,
+                relayMainInput, sprintCatchUp && sprintCatchUpPriority);
             if (relayMainInput)
             {
                 await bridge.SetMainInputSubscriptionAsync(true);
@@ -345,6 +352,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 var frame = _bridge.LastFocusedLeadsEnabled
                     ? LiveFollowFrame.ParseDynamic(line, _topology)
                     : LiveFollowFrame.Parse(line, 2, _topology.Slots[1].RuntimePad);
+                frame = LiveFollowFrame.ApplyCatchUpPriority(frame, _catchUpPriority);
                 if (_stopping) break;
                 var nextPads = frame.PadCommands.Select(command => command.Pad).ToHashSet();
                 foreach (var oldPad in _followerPads.Except(nextPads))

@@ -266,6 +266,7 @@ internal sealed class BridgeRouter
         route.Active = command.Active;
         route.EligibleForManualMovement = command.EligibleForManualMovement;
         route.SuppressMirroredB = command.SuppressMirroredB;
+        route.CatchUpPriority = command.CatchUpPriority;
         route.LastUpdateUtc = nowUtc;
         Render(command.Slot, route);
         return true;
@@ -500,6 +501,7 @@ internal sealed class BridgeRouter
                 route.Active = false;
                 route.EligibleForManualMovement = false;
                 route.SuppressMirroredB = false;
+                route.CatchUpPriority = false;
                 Render(slot, route);
             }
             else if (expired || _engageDodgeEnabled) Render(slot, route);
@@ -536,6 +538,7 @@ internal sealed class BridgeRouter
                 route.Active = false;
                 route.EligibleForManualMovement = false;
                 route.SuppressMirroredB = false;
+                route.CatchUpPriority = false;
                 route.LifeUntilUtc = route.ManaUntilUtc = DateTime.MinValue;
                 route.CombatLeaseUntilUtc = route.CombatPulseUntilUtc = default;
                 route.CombatPulse = default;
@@ -613,7 +616,7 @@ internal sealed class BridgeRouter
             (Math.Abs((int)_manualX) > 8000 || Math.Abs((int)_manualY) > 8000))
         {
             route.Output.SetReport(WithEngageDodge(WithFlasks(WithFollowerMirror(
-                PadReport.FromMovement(_manualX, _manualY), slot, route), route), slot, true));
+                PadReport.FromMovement(_manualX, _manualY), slot, route, allowPriority: false), route), slot, true));
             return;
         }
         var automation = route.Automation;
@@ -644,7 +647,8 @@ internal sealed class BridgeRouter
             _engageDodge.ResetPlayer(player);
     }
 
-    private PadReport WithFollowerMirror(PadReport automation, int slot, PadRoute route)
+    private PadReport WithFollowerMirror(PadReport automation, int slot, PadRoute route,
+        bool allowPriority = true)
     {
         if (!_followerMirrorEnabled || !_physicalConnected)
         {
@@ -657,14 +661,17 @@ internal sealed class BridgeRouter
             return automation;
         }
         var input = (ushort)(_physicalReport.Buttons & _followerMirror.ButtonsForPlayer(player));
+        if (allowPriority && route.CatchUpPriority) input &= 0x38FF;
         if (route.SuppressMirroredB) input = (ushort)(input & ~0x2000);
         var buttons = route.DodgeSprint.Resolve(input,
             (automation.Buttons & 0x2000) != 0, DateTime.UtcNow);
         return automation with
         {
             Buttons = (ushort)((automation.Buttons & ~0x2000) | buttons),
-            LeftTrigger = _followerMirror.LeftTriggerForPlayer(player) ? _physicalReport.LeftTrigger : (byte)0,
-            RightTrigger = _followerMirror.RightTriggerForPlayer(player) ? _physicalReport.RightTrigger : (byte)0
+            LeftTrigger = allowPriority && route.CatchUpPriority ? (byte)0 :
+                _followerMirror.LeftTriggerForPlayer(player) ? _physicalReport.LeftTrigger : (byte)0,
+            RightTrigger = allowPriority && route.CatchUpPriority ? (byte)0 :
+                _followerMirror.RightTriggerForPlayer(player) ? _physicalReport.RightTrigger : (byte)0
         };
     }
 
@@ -694,6 +701,7 @@ internal sealed class BridgeRouter
         public bool Active { get; set; }
         public bool EligibleForManualMovement { get; set; }
         public bool SuppressMirroredB { get; set; }
+        public bool CatchUpPriority { get; set; }
         public DateTime LifeUntilUtc { get; set; }
         public DateTime ManaUntilUtc { get; set; }
         public DateTime CombatLeaseUntilUtc { get; set; }

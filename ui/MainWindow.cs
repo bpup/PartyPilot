@@ -117,6 +117,7 @@ public sealed class MainWindow : Window
     private readonly StackPanel[] _terrainBindingRows = new StackPanel[3];
     private readonly CheckBox _classicSprintCatchUp = new();
     private readonly CheckBox _sprintCatchUp = new();
+    private readonly CheckBox _sprintCatchUpPriority = new();
     private readonly CheckBox _aggressiveBlinkCatchUp = new();
     private readonly TextBox _aggressiveSprintRetryDelay = new();
     private readonly CheckBox _closeRangeMirror = new();
@@ -841,6 +842,9 @@ public sealed class MainWindow : Window
         _sprintCatchUp.IsChecked = true;
         _sprintCatchUp.IsCheckedChanged += (_, _) => UpdateFollowControls();
         panel.Children.Add(_sprintCatchUp);
+        _sprintCatchUpPriority.Content = "追赶优先，暂停镜像施法按键（目标版默认开启）";
+        _sprintCatchUpPriority.IsChecked = true;
+        panel.Children.Add(_sprintCatchUpPriority);
         _classicSprintCatchUp.Content = "启用经典冲刺追赶（0.6.17 分布式客户端默认关闭）";
         _classicSprintCatchUp.IsCheckedChanged += (_, _) =>
         {
@@ -2188,6 +2192,8 @@ public sealed class MainWindow : Window
         _classicSprintCatchUp.IsEnabled = _follow is null && !_busy &&
             _selectedTopology?.Id is ("2-split" or "3-three-singles");
         _sprintCatchUp.IsEnabled = _classicSprintCatchUp.IsEnabled;
+        _sprintCatchUpPriority.IsEnabled = _sprintCatchUp.IsEnabled &&
+            _sprintCatchUp.IsChecked == true;
         _aggressiveBlinkCatchUp.IsEnabled = _classicSprintCatchUp.IsEnabled;
         _aggressiveSprintRetryDelay.IsEnabled = _aggressiveBlinkCatchUp.IsEnabled &&
             _aggressiveBlinkCatchUp.IsChecked == true;
@@ -2951,6 +2957,7 @@ public sealed class MainWindow : Window
                 terrain, _classicCollisionDodge.IsChecked == true,
                 _classicSprintCatchUp.IsChecked == true,
                 sprintCatchUp: _sprintCatchUp.IsChecked == true,
+                sprintCatchUpPriority: _sprintCatchUpPriority.IsChecked == true,
                 aggressiveBlinkCatchUp: _aggressiveBlinkCatchUp.IsChecked == true,
                 aggressiveSprintRetryDelay: _aggressiveBlinkCatchUp.IsChecked == true
                     ? int.Parse(_aggressiveSprintRetryDelay.Text!, CultureInfo.InvariantCulture) : 800,

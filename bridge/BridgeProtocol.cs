@@ -4,7 +4,8 @@ using PartyPilot.Common;
 namespace PartyPilot.Bridge;
 
 internal readonly record struct BridgeCommand(int Slot, short X, short Y, bool Active,
-    bool EligibleForManualMovement, bool SprintDown, bool SuppressMirroredB);
+    bool EligibleForManualMovement, bool SprintDown, bool SuppressMirroredB,
+    bool CatchUpPriority = false);
 internal readonly record struct PairingControl(string Type, int Slot, int Pid, long WindowHandle);
 internal readonly record struct FlaskCommand(int Slot, string Resource);
 internal readonly record struct AutoPartyControl(string Type, int Slot, ushort Buttons, int HoldMilliseconds);
@@ -289,6 +290,13 @@ internal static class BridgeProtocol
                 sprintDown = sprintValue.GetBoolean();
             }
             if (sprintDown && state != "catching_up") return false;
+            var catchUpPriority = false;
+            if (root.TryGetProperty("catch_up_priority", out var priorityValue))
+            {
+                if (priorityValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return false;
+                catchUpPriority = priorityValue.GetBoolean();
+            }
+            if (catchUpPriority && state != "catching_up") return false;
             var mirrorMovement = false;
             if (root.TryGetProperty("mirror_movement", out var mirrorValue))
             {
@@ -315,19 +323,21 @@ internal static class BridgeProtocol
                     !root.TryGetProperty("x", out var idleX) || !idleX.TryGetDouble(out var x) || x != 0 ||
                     !root.TryGetProperty("y", out var idleY) || !idleY.TryGetDouble(out var y) || y != 0)
                     return false;
-                command = new BridgeCommand(slot, 0, 0, false, manualEligible, false, suppressMirroredB);
+                command = new BridgeCommand(slot, 0, 0, false, manualEligible, false,
+                    suppressMirroredB, catchUpPriority);
                 return true;
             }
             if (state is "waiting" or "holding")
             {
                 if (state == "waiting" && manualEligible) return false;
                 if (mirrorMovement) return TryParseMovement(root, slot, manualEligible, false,
-                    suppressMirroredB, out command);
+                    suppressMirroredB, catchUpPriority, out command);
                 command = new BridgeCommand(slot, 0, 0, false, manualEligible, false, suppressMirroredB);
                 return true;
             }
             if (state is not ("following" or "catching_up")) return false;
-            return TryParseMovement(root, slot, manualEligible, sprintDown, suppressMirroredB, out command);
+            return TryParseMovement(root, slot, manualEligible, sprintDown, suppressMirroredB,
+                catchUpPriority, out command);
         }
         catch (JsonException)
         {
@@ -336,7 +346,7 @@ internal static class BridgeProtocol
     }
 
     private static bool TryParseMovement(JsonElement root, int slot, bool manualEligible,
-        bool sprintDown, bool suppressMirroredB, out BridgeCommand command)
+        bool sprintDown, bool suppressMirroredB, bool catchUpPriority, out BridgeCommand command)
     {
         command = default;
         if (!root.TryGetProperty("x", out var xElement) ||
@@ -354,7 +364,7 @@ internal static class BridgeProtocol
                 slot,
                 (short)Math.Clamp(Math.Round(x * 32767), short.MinValue, short.MaxValue),
                 (short)Math.Clamp(Math.Round(y * 32767), short.MinValue, short.MaxValue),
-                true, manualEligible, sprintDown, suppressMirroredB);
+                true, manualEligible, sprintDown, suppressMirroredB, catchUpPriority);
             return true;
     }
 }

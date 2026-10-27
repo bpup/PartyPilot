@@ -10,6 +10,14 @@ internal static class ProcessPipelineSmoke
         var tripleFrame = LiveFollowFrame.ParseDynamic(
             "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0},\"3\":{\"state\":\"waiting\"}}}",
             triple);
+        var plainPriorityFixture = LiveFollowFrame.Parse(
+            "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0}}}",
+            2, 3);
+        var priorityFrame = LiveFollowFrame.ApplyCatchUpPriority(plainPriorityFixture, enabled: true);
+        if (!priorityFrame.Command.Contains("\"catch_up_priority\":true", StringComparison.Ordinal) ||
+            !priorityFrame.PadCommands[0].Command.Contains("\"catch_up_priority\":true", StringComparison.Ordinal) ||
+            LiveFollowFrame.ApplyCatchUpPriority(plainPriorityFixture, enabled: false) != plainPriorityFixture)
+            throw new Exception("Desktop did not pass through the observed catch-up priority option.");
         var switchedTriple = LiveFollowFrame.ParseDynamic(
             "{\"focused\":3,\"commands\":{\"1\":{\"state\":\"waiting\"},\"2\":{\"state\":\"following\",\"x\":0,\"y\":1}}}",
             triple);
@@ -274,6 +282,7 @@ internal static class ProcessPipelineSmoke
                 !lines[1].Contains("\"slot\":3,\"state\":\"catching_up\"") ||
                 !lines[1].Contains("\"manual_override_eligible\":true") ||
                 !lines[1].Contains("\"sprint_down\":true") ||
+                !lines[1].Contains("\"catch_up_priority\":true") ||
                 !lines[2].Contains("\"type\":\"flask\",\"slot\":3,\"resource\":\"life\"") ||
                 !lines.Any(line => line.Contains("\"slot\":3,\"state\":\"following\"")) ||
                 !lines.Any(line => line.Contains("\"slot\":3,\"state\":\"waiting\"")) ||

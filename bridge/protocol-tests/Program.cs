@@ -289,6 +289,32 @@ if (mirroredMain.Report.Buttons != 0xD010 || mirroredFollower.Report.Buttons != 
     mirroredFollower.Report.LeftTrigger != 42 || mirroredFollower.Report.RightTrigger != 80 ||
     mirroredFollower.Report.LeftX != 32767)
     throw new Exception("Default follower mirror lost buttons, triggers, movement, or leaked Start.");
+if (!mirroredRouter.ApplyLine("{\"slot\":2,\"state\":\"catching_up\",\"x\":1,\"y\":0,\"catch_up_priority\":true}", now) ||
+    BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"holding\",\"catch_up_priority\":true}", out _) ||
+    BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"catching_up\",\"x\":1,\"y\":0,\"catch_up_priority\":\"yes\"}", out _))
+    throw new Exception("Catch-up priority command was not constrained to an active catch-up state.");
+mirroredRouter.SetPhysical(new XInputGamepad
+    { Buttons = 0xD310, LeftTrigger = 42, RightTrigger = 80 }, now);
+if (mirroredMain.Report.Buttons != 0xD310 || mirroredFollower.Report.Buttons != 0x1000 ||
+    mirroredFollower.Report.LeftTrigger != 0 || mirroredFollower.Report.RightTrigger != 0)
+    throw new Exception("Catch-up priority did not pause mirrored casts and triggers.");
+mirroredRouter.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", now);
+if (mirroredFollower.Report.Buttons != 0xD300 ||
+    mirroredFollower.Report.LeftTrigger != 42 || mirroredFollower.Report.RightTrigger != 80)
+    throw new Exception("Catch-up priority did not release after catch-up ended.");
+var manualPriorityFollower = new FakePad();
+var manualPriorityRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
+    { [1] = new FakePad(), [2] = manualPriorityFollower });
+if (!manualPriorityRouter.ConfigurePhysical(1, rightStickFollowerOverride: true) ||
+    !manualPriorityRouter.ApplyLine("{\"slot\":2,\"state\":\"catching_up\",\"x\":1,\"y\":0,\"manual_override_eligible\":true,\"catch_up_priority\":true}", now))
+    throw new Exception("Manual catch-up priority test could not arm the follower.");
+manualPriorityRouter.SetPhysical(new XInputGamepad
+    { Buttons = 0xD310, LeftTrigger = 42, RightTrigger = 80, RightX = 10000 }, now);
+manualPriorityRouter.SetFollowerMirrorEnabled(true);
+if (manualPriorityFollower.Report.Buttons != 0xD300 ||
+    manualPriorityFollower.Report.LeftTrigger != 42 || manualPriorityFollower.Report.RightTrigger != 80 ||
+    manualPriorityFollower.Report.LeftX != 10000)
+    throw new Exception("Manual right-stick override remained suppressed by catch-up priority.");
 mirroredRouter.SetPhysical(new XInputGamepad { Buttons = 0x2000 }, now);
 Thread.Sleep(180); // The target arbiter guarantees at least 125 ms for the initial B press.
 if (!mirroredRouter.ApplyLine("{\"slot\":2,\"state\":\"holding\",\"suppress_mirrored_b\":true}",

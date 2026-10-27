@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
 namespace PartyPilot.Desktop;
@@ -39,6 +40,21 @@ public sealed record FollowBridgeFrame(string Command, string Status, string? Re
 
 public static class LiveFollowFrame
 {
+    public static FollowBridgeFrame ApplyCatchUpPriority(FollowBridgeFrame frame, bool enabled)
+    {
+        if (!enabled) return frame;
+        var commands = frame.PadCommands.Select(command =>
+        {
+            if (command.Status != "catching_up") return command;
+            var value = JsonNode.Parse(command.Command)?.AsObject() ??
+                throw new InvalidDataException("Invalid follow command for catch-up priority.");
+            value["catch_up_priority"] = true;
+            return command with { Command = value.ToJsonString() };
+        }).ToArray();
+        return frame with { Command = commands.Length == 0 ? frame.Command : commands[0].Command,
+            PadCommands = commands };
+    }
+
     public static FollowBridgeFrame Waiting(int followerPad)
     {
         if (followerPad is < 1 or > 6) throw new ArgumentOutOfRangeException(nameof(followerPad));
