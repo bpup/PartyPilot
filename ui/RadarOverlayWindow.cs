@@ -22,6 +22,9 @@ public sealed class RadarOverlayWindow : Window
     private RadarTerrainCapture? _terrain;
     private readonly bool _renderOnly;
     private readonly Canvas _canvas = new();
+    private Canvas? _terrainLayer;
+    private Canvas? _markerLayer;
+    private RadarFrame? _drawnFrame;
     private readonly DispatcherTimer _positionTimer = new() { Interval = TimeSpan.FromMilliseconds(50) };
     private RadarFrame? _frame;
     private WriteableBitmap? _terrainBitmap;
@@ -118,9 +121,49 @@ public sealed class RadarOverlayWindow : Window
         Apply(frame);
     }
 
+    public void ApplyMotion(RadarFrame frame, RadarTerrainCapture? terrain)
+    {
+        if (frame.ProcessId != _client.Pid) return;
+        var drawn = _drawnFrame;
+        var previousTerrain = _terrain;
+        _frame = frame;
+        _terrain = terrain;
+        if (drawn is null || _markerLayer is null || _terrainLayer is null ||
+            !ReferenceEquals(previousTerrain, terrain) ||
+            terrain?.Matches(frame) != terrain?.Matches(drawn) ||
+            terrain != null && _terrainRenderKey is { } rendered &&
+                (rendered.GridX != frame.GridX || rendered.GridY != frame.GridY) &&
+                frame.SeenUtc - _terrainRenderedAt >= TimeSpan.FromMilliseconds(250))
+        {
+            Draw();
+            return;
+        }
+        var centerX = Bounds.Width / 2;
+        var centerY = Bounds.Height / 2;
+        var (markerX, markerY) = RadarProjection.ProjectGrid(
+            frame.PlayerX / RadarProjection.WorldUnitsPerGridUnit,
+            frame.PlayerY / RadarProjection.WorldUnitsPerGridUnit,
+            drawn.PlayerX / RadarProjection.WorldUnitsPerGridUnit,
+            drawn.PlayerY / RadarProjection.WorldUnitsPerGridUnit,
+            centerX, centerY, _scale * RadarProjection.WorldUnitsPerGridUnit);
+        Canvas.SetLeft(_markerLayer, markerX - centerX);
+        Canvas.SetTop(_markerLayer, markerY - centerY);
+        if (terrain != null && frame.GridX is { } newX && frame.GridY is { } newY &&
+            drawn.GridX is { } oldX && drawn.GridY is { } oldY)
+        {
+            var (terrainX, terrainY) = RadarProjection.ProjectGrid(newX, newY,
+                oldX, oldY, centerX, centerY, _scale * RadarProjection.WorldUnitsPerGridUnit);
+            Canvas.SetLeft(_terrainLayer, terrainX - centerX);
+            Canvas.SetTop(_terrainLayer, terrainY - centerY);
+        }
+    }
+
     private void Draw()
     {
         _canvas.Children.Clear();
+        _drawnFrame = null;
+        _terrainLayer = null;
+        _markerLayer = null;
         if (_frame == null || DateTime.UtcNow - _frame.SeenUtc > TimeSpan.FromSeconds(2))
         {
             ReleaseTerrainBitmap();
@@ -128,6 +171,10 @@ public sealed class RadarOverlayWindow : Window
         }
         var centerX = Bounds.Width / 2;
         var centerY = Bounds.Height / 2;
+        _drawnFrame = _frame;
+        _terrainLayer = new Canvas { Width = Bounds.Width, Height = Bounds.Height };
+        _markerLayer = new Canvas { Width = Bounds.Width, Height = Bounds.Height };
+        _canvas.Children.Add(_terrainLayer);
         var terrainDrawn = false;
         if (_terrain?.Matches(_frame) == true &&
             Bounds.Width is >= 1 and <= 4096 && Bounds.Height is >= 1 and <= 4096)
@@ -175,7 +222,7 @@ public sealed class RadarOverlayWindow : Window
                     Canvas.SetLeft(image, offsetX - centerX);
                     Canvas.SetTop(image, offsetY - centerY);
                 }
-                _canvas.Children.Add(image);
+                _terrainLayer.Children.Add(image);
                 terrainDrawn = true;
                 foreach (var room in _terrain.Rooms)
                 {
@@ -184,7 +231,7 @@ public sealed class RadarOverlayWindow : Window
                         _scale * RadarProjection.WorldUnitsPerGridUnit);
                     if (!double.IsFinite(x) || !double.IsFinite(y) ||
                         x < 8 || y < 8 || x > Bounds.Width - 8 || y > Bounds.Height - 8) continue;
-                    AddDot(x, y, 10, MarkerBrush(room.Category));
+                    AddDot(_terrainLayer, x, y, 10, MarkerBrush(room.Category));
                     if (string.IsNullOrEmpty(room.Label)) continue;
                     var label = new TextBlock
                     {
@@ -195,12 +242,13 @@ public sealed class RadarOverlayWindow : Window
                     };
                     Canvas.SetLeft(label, x + 9);
                     Canvas.SetTop(label, y - 8);
-                    _canvas.Children.Add(label);
+                    _terrainLayer.Children.Add(label);
                 }
             }
         }
         if (!terrainDrawn) ReleaseTerrainBitmap();
-        AddDot(centerX, centerY, 12, Brushes.White);
+        AddDot(_canvas, centerX, centerY, 12, Brushes.White);
+        _canvas.Children.Add(_markerLayer);
         foreach (var marker in _frame.Markers.Concat(_frame.DormantCandidates))
         {
             var dormantCandidate = _frame.DormantCandidates.Contains(marker);
@@ -208,7 +256,7 @@ public sealed class RadarOverlayWindow : Window
                 marker, centerX, centerY, _scale);
             if (!double.IsFinite(x) || !double.IsFinite(y) ||
                 x < 8 || y < 8 || x > Bounds.Width - 8 || y > Bounds.Height - 8) continue;
-            AddDot(x, y, marker.Category == "monster" ? 7 : 10,
+            AddDot(_markerLayer, x, y, marker.Category == "monster" ? 7 : 10,
                 dormantCandidate ? Brushes.Orange : MarkerBrush(marker.Category));
             if (marker.Category is "checkpoint" or "waypoint" or "portal" or "transition" or
                 "player" or "loot" or "quest" or "boss" or "essence")
@@ -222,7 +270,7 @@ public sealed class RadarOverlayWindow : Window
                 };
                 Canvas.SetLeft(label, x + 9);
                 Canvas.SetTop(label, y - 8);
-                _canvas.Children.Add(label);
+                _markerLayer.Children.Add(label);
             }
         }
     }
@@ -234,7 +282,7 @@ public sealed class RadarOverlayWindow : Window
         _terrainRenderKey = null;
     }
 
-    private void AddDot(double x, double y, double diameter, IBrush brush)
+    private static void AddDot(Canvas layer, double x, double y, double diameter, IBrush brush)
     {
         var circle = new Ellipse
         {
@@ -246,7 +294,7 @@ public sealed class RadarOverlayWindow : Window
         };
         Canvas.SetLeft(circle, x - diameter / 2);
         Canvas.SetTop(circle, y - diameter / 2);
-        _canvas.Children.Add(circle);
+        layer.Children.Add(circle);
     }
 
     private static IBrush MarkerBrush(string category) => category switch

@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Avalonia.Controls;
+using Avalonia.LogicalTree;
 using PartyPilot.Desktop;
 
 internal static class RadarMotionSmoke
@@ -41,5 +43,32 @@ internal static class RadarMotionSmoke
                 out var wrongStateArea) || wrongStateArea!.TryApply(full, out _) ||
             motion.TryApply(full with { SeenUtc = now.AddSeconds(-3) }, out _))
             throw new Exception("Radar motion accepted stale or mismatched game identity.");
+
+        var window = new RadarOverlayWindow(new LaunchedClient(123, 1, "C:/Game.exe"),
+            2, new RadarVisibility(), renderOnly: true);
+        window.Show();
+        try
+        {
+            window.Apply(full);
+            window.UpdateLayout();
+            var label = window.GetLogicalDescendants().OfType<TextBlock>()
+                .Single(item => item.Text == "传送点");
+            var layer = label.Parent as Canvas ?? throw new Exception("Radar marker has no map layer.");
+            window.ApplyMotion(moved, null);
+            var shifted = window.GetLogicalDescendants().OfType<TextBlock>()
+                .Single(item => item.Text == "传送点");
+            if (!ReferenceEquals(label, shifted) ||
+                !double.IsFinite(Canvas.GetLeft(layer)) ||
+                !double.IsFinite(Canvas.GetTop(layer)) ||
+                Math.Abs(Canvas.GetLeft(layer)) + Math.Abs(Canvas.GetTop(layer)) < 0.01)
+                throw new Exception($"Motion did not move the existing map layer: " +
+                    $"same={ReferenceEquals(label, shifted)}, left={Canvas.GetLeft(layer)}, " +
+                    $"top={Canvas.GetTop(layer)}.");
+            window.Apply(moved with { Markers = [] });
+            if (window.GetLogicalDescendants().OfType<TextBlock>()
+                .Any(item => item.Text == "传送点"))
+                throw new Exception("A new full scan did not remove an obsolete marker.");
+        }
+        finally { window.Close(); }
     }
 }

@@ -172,7 +172,7 @@ internal sealed class RadarSession : IAsyncDisposable
                             return;
                         _lastTerrains.TryGetValue(pid, out var terrain);
                         if (terrain != null && !terrain.MetadataUnchanged()) terrain = null;
-                        window.Apply(moved, terrain);
+                        window.ApplyMotion(moved, terrain);
                         FrameReceived?.Invoke(pid, moved.Markers.Count, window.TerrainVisible);
                     });
                     break;
