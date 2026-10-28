@@ -28,63 +28,70 @@ var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     "PathOfExile", "PathOfExile_x64", "PathOfExileSteam", "PathOfExile_x64Steam",
     "PathOfExileEGS", "PathOfExile_x64EGS"
 };
-var processes = new List<Process>();
-foreach (var process in Process.GetProcesses())
+var watch = args is ["--watch"];
+var sessions = new Dictionary<int, DiagnosticSession>();
+var reportedEmpty = false;
+void Discover()
 {
-    try
-    {
-        if (names.Contains(process.ProcessName)) processes.Add(process);
-        else process.Dispose();
-    }
-    catch (InvalidOperationException)
-    {
-        process.Dispose(); // Process exited during enumeration.
-    }
-}
-processes.Sort((left, right) => left.Id.CompareTo(right.Id));
-if (processes.Count == 0)
-{
-    Console.WriteLine(JsonSerializer.Serialize(new { status = "game_not_running" }));
-    return;
-}
-
-var sessions = new List<DiagnosticSession>();
-try
-{
-    foreach (var process in processes)
+    foreach (var process in Process.GetProcesses())
     {
         try
         {
-            sessions.Add(DiagnosticSession.Open(process));
-        }
-        catch (Exception error) when (error is InvalidOperationException or Win32Exception or
-                                      IOException or UnauthorizedAccessException)
-        {
-            Console.WriteLine(JsonSerializer.Serialize(new
+            if (!names.Contains(process.ProcessName) || sessions.ContainsKey(process.Id))
             {
-                pid = process.Id, status = "attach_failed", error = error.Message
-            }));
-            process.Dispose();
+                process.Dispose();
+                continue;
+            }
+            try
+            {
+                sessions.Add(process.Id, DiagnosticSession.Open(process));
+                reportedEmpty = false;
+            }
+            catch (Exception error) when (error is InvalidOperationException or Win32Exception or
+                                          IOException or UnauthorizedAccessException)
+            {
+                Console.WriteLine(JsonSerializer.Serialize(new
+                {
+                    pid = process.Id, status = "attach_failed", error = error.Message
+                }));
+                process.Dispose();
+            }
+        }
+        catch (Exception error) when (error is InvalidOperationException or Win32Exception)
+        {
+            process.Dispose(); // Process exited or became inaccessible.
         }
     }
+    if (sessions.Count == 0 && !reportedEmpty)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(new { status = "game_not_running" }));
+        reportedEmpty = true;
+    }
+}
 
-    var watch = args is ["--watch"];
+try
+{
+    Discover();
+    if (!watch && sessions.Count == 0) return;
     using var cancellation = new CancellationTokenSource();
     if (watch) Console.CancelKeyPress += (_, eventArgs) =>
     {
         eventArgs.Cancel = true;
         cancellation.Cancel();
     };
-    var exited = new HashSet<int>();
+    var lastDiscovery = DateTime.UtcNow;
     do
     {
-        foreach (var session in sessions)
+        foreach (var (pid, session) in sessions.OrderBy(entry => entry.Key).ToArray())
         {
-            if (exited.Contains(session.ProcessId)) continue;
             try
             {
                 Console.WriteLine(JsonSerializer.Serialize(session.Capture()));
-                if (session.HasExited) exited.Add(session.ProcessId);
+                if (session.HasExited)
+                {
+                    sessions.Remove(pid);
+                    session.Dispose();
+                }
             }
             catch (Exception error) when (error is InvalidOperationException or Win32Exception or
                                           IOException or UnauthorizedAccessException)
@@ -95,12 +102,17 @@ try
                 }));
             }
         }
-        if (!watch || cancellation.IsCancellationRequested || exited.Count == sessions.Count) break;
+        if (!watch || cancellation.IsCancellationRequested) break;
+        if (DateTime.UtcNow - lastDiscovery >= TimeSpan.FromSeconds(2))
+        {
+            Discover();
+            lastDiscovery = DateTime.UtcNow;
+        }
         try { await Task.Delay(100, cancellation.Token); }
         catch (OperationCanceledException) { break; }
     } while (!cancellation.IsCancellationRequested);
 }
 finally
 {
-    foreach (var session in sessions) session.Dispose();
+    foreach (var session in sessions.Values) session.Dispose();
 }
