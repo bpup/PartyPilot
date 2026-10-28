@@ -78,6 +78,18 @@ public sealed class DiagnosticSession : IDisposable
         var roles = validated
             ? RoleCandidateDiagnostic.Capture(gameStateAddress, layout!,
                 _memory.TryRead) : null;
+        if (validated &&
+            (!AnchorCandidateScanner.TryReadCurrentGameState(_anchors[0],
+                _memory.TryRead, out var stateAfterAddress) ||
+             stateAfterAddress != gameStateAddress ||
+             !StateCandidateValidator.TryRead(gameStateAddress, layout!,
+                 _memory.TryRead, out var stateAfter) ||
+             stateAfter?.IngameStateAddress != state!.IngameStateAddress ||
+             stateAfter.AreaInstanceAddress != state.AreaInstanceAddress))
+        {
+            validated = false;
+            roles = null;
+        }
         var status = roles?.Status == "role_position_candidates_unverified"
             ? (_recognizedBuild ? "role_position_candidates_unverified" :
                 "role_position_candidates_unverified_unknown_build") :

@@ -13,6 +13,7 @@ alignas(8) volatile unsigned char signature[64] = {
     0, 0, 0, 0, 0x0F, 0x85, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xE8};
 alignas(8) volatile std::uintptr_t game_state_pointer = 0;
 alignas(8) unsigned char game_state[4096] = {};
+alignas(8) unsigned char next_game_state[4096] = {};
 alignas(8) unsigned char ingame_state[4096] = {};
 alignas(8) unsigned char area_instance[4096] = {};
 alignas(8) unsigned char entity[2][256] = {};
@@ -50,6 +51,7 @@ bool initialize() {
         signature[11 + index] = bytes[index];
 
     put(game_state, 136, reinterpret_cast<std::uintptr_t>(ingame_state));
+    put(next_game_state, 136, reinterpret_cast<std::uintptr_t>(ingame_state));
     put(ingame_state, 656, reinterpret_cast<std::uintptr_t>(area_instance));
     put(area_instance, 192, std::int32_t{12});
     put(area_instance, 196, std::int32_t{14});
@@ -85,6 +87,8 @@ int main() {
     // The probe must recover after discovering a process before its state is ready.
     std::this_thread::sleep_for(std::chrono::seconds(3));
     game_state_pointer = reinterpret_cast<std::uintptr_t>(game_state);
-    std::this_thread::sleep_for(std::chrono::seconds(30));
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+    game_state_pointer = reinterpret_cast<std::uintptr_t>(next_game_state);
+    std::this_thread::sleep_for(std::chrono::seconds(25));
     return 0;
 }

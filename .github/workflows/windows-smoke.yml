@@ -120,6 +120,13 @@ jobs:
             })) {
               throw "Probe did not read both fixture roles for process $($target.Id)"
             }
+            $states = @($frames | Where-Object {
+              $_.pid -eq $target.Id -and
+              $_.status -eq "role_position_candidates_unverified_unknown_build"
+            } | Select-Object -ExpandProperty gameStateAddress -Unique)
+            if ($states.Count -ne 2) {
+              throw "Probe did not follow the updated GameState pointer for process $($target.Id)"
+            }
             if (-not ($frames | Where-Object { $_.pid -eq $target.Id -and $_.status -eq "game_exited" })) {
               throw "Probe did not release fixture $($target.Id)"
             }
