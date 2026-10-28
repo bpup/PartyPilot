@@ -49,3 +49,5 @@
 | 主界面 | `MainWindow` 与 `SetupView`/`PlayView` 是 Avalonia 视图；`ShellViewModel` 有人数、客户端、输入、账号、启动条件和状态绑定。 | PartyPilot 也是 Avalonia，但布局与文案只做了简化，尚无 0.6.17 逐页实机截图对比。 | 静态结构已读；视觉/交互 1:1 待确认 |
 
 **研究结论：** 本轮目标功能的主要静态调用链均已找到，可以明确独立实现应替代哪些来源与流程；不能把“主要链路找到”表述为“全部代码已恢复”。完整 1:1 仍缺目标版与 PartyPilot 在同一 Windows/PoE2 环境下的逐项画面、输入和结果对照。尤其是目标版的独立位置/地图探针、PartyPilot 的手动插件依赖，是最先需要解决的结构性差距。
+
+**用户确认的例外：游戏目录选择。** `ShellViewModel.ChooseConfiguredClientExecutableAsync` 的 0.6.17 静态代码实际调用 Avalonia 的 `OpenFilePickerAsync`，让用户选择 `PathOfExile*.exe`；Epic 客户端则先尝试从安装清单自动发现。用户明确要求 PartyPilot 用“打开目录选择”而非填写完整路径，因此独立版采用文件夹选择后列出发现的游戏程序。此处按用户要求改善交互，不声称与目标版选择器完全一样。
