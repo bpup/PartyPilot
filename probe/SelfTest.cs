@@ -1,3 +1,6 @@
+using System.Text;
+using PartyPilot.Sensor;
+
 namespace PartyPilot.Probe;
 
 internal static class SelfTest
@@ -93,6 +96,45 @@ internal static class SelfTest
         }
         Require(!StateCandidateValidator.TryRead(0x300000, layout!, UnstableState, out _),
             "changing state pointer rejected");
+
+        var vectorAddress = 0x500000 + 1408 + 72;
+        var vectorHeader = new byte[24];
+        BitConverter.GetBytes(0x800000L).CopyTo(vectorHeader, 0);
+        BitConverter.GetBytes(0x800010L).CopyTo(vectorHeader, 8);
+        BitConverter.GetBytes(0x800010L).CopyTo(vectorHeader, 16);
+        Write(vectorAddress, vectorHeader);
+        Write(0x800000, BitConverter.GetBytes(0x900000L));
+        Write(0x800008, BitConverter.GetBytes(0x910000L));
+        void WriteCharacterPath(long entity, long details, long text, string path)
+        {
+            Write(entity + 8, BitConverter.GetBytes(details));
+            var header = new byte[32];
+            BitConverter.GetBytes(text).CopyTo(header, 0);
+            BitConverter.GetBytes((long)path.Length).CopyTo(header, 16);
+            BitConverter.GetBytes((long)path.Length + 1).CopyTo(header, 24);
+            Write(details + 8, header);
+            Write(text, Encoding.Unicode.GetBytes(path));
+        }
+        WriteCharacterPath(0x900000, 0xA00000, 0xB00000,
+            "Metadata/Characters/PlayerOne");
+        WriteCharacterPath(0x910000, 0xA10000, 0xB10000,
+            "Metadata/Characters/PlayerTwo");
+        RawRenderPositionReader.Position? Position(long entity, Func<long, int, byte[]?> _)
+            => entity switch
+            {
+                0x900000 => new(100, 200, 0, 9.2f, 18.4f, "0xC00000"),
+                0x910000 => new(120, 220, 0, 11.0f, 20.2f, "0xC10000"),
+                _ => null
+            };
+        var roleResult = RoleCandidateDiagnostic.Capture(0x300000, layout!, ReadState, Position);
+        Require(roleResult.Status == "role_position_candidates_unverified" &&
+                roleResult.Positions.Length == 2 &&
+                roleResult.Positions[0].EntityAddress == "0x900000" &&
+                roleResult.Positions[1].EntityAddress == "0x910000", "ordered role candidates");
+        Require(RoleCandidateDiagnostic.Capture(0x300000, layout!, ReadState,
+                (entity, reader) => entity == 0x900000 ? Position(entity, reader) : null)
+            is { Status: "position_unavailable", Positions.Length: 0 },
+            "partial positions rejected");
     }
 
     private static void Require(bool condition, string name)

@@ -56,9 +56,9 @@
 
 **事实：** `AnchorScanRunner.Run` 从 `NoddPilot.Offsets.dll` 内嵌的 `signatures.json` 读取 `GameStatePattern` 与 `FileRootPattern`，扫描游戏进程模块，把匹配点转换为指针存储地址，再读取 `GameState` 指针。找到它后，优先检查指定的 `IngameState` 子状态，失败时做形状校验搜索；找不到会明确返回未解析。`GameBuildOffsetOverrides.Apply` 先计算游戏 EXE 的 SHA-256；静态代码内明确列有一个原始构建哈希和两个 2026-09-05 PoE2 0.5.5 客户端哈希。未知哈希在目标版会尝试最近的布局并继续做实时校验，不能因此认定当前游戏版本兼容。
 
-**事实：** 本仓库新增 `probe/`，它独立于 ExileCore2，用只读进程权限查找上述已知哈希的游戏进程，并验证 `GameState` 定位候选是否唯一。它随后按对应静态布局读取 `IngameState → AreaInstance`，核对区域等级范围并重读两个指针，发生变化即拒绝。未知构建、零候选、多候选或区域校验失败均不输出可供跟随使用的位置。此程序目前只输出诊断 JSON；它不发布运动帧、不读取角色位置，也不接入桌面的一键启动。
+**事实：** 本仓库新增 `probe/`，它独立于 ExileCore2，用只读进程权限查找上述已知哈希的游戏进程，并验证 `GameState` 定位候选是否唯一。它随后按对应静态布局读取 `IngameState → AreaInstance`，核对区域等级范围并重读两个指针，发生变化即拒绝。对通过区域校验的进程，它复用仓库内已有的角色向量、角色路径与 Render 坐标解析器，只有同帧全部候选位置可读且区域未变化时才输出 `role_position_candidates_unverified`。未知构建、零候选、多候选、区域校验失败或部分坐标缺失均不输出可供跟随使用的位置。此程序目前只输出诊断 JSON；它不发布运动帧，也不接入桌面的一键启动。
 
-**待确认：** 当前 PoE2 EXE 哈希、签名是否仍匹配、`GameState → IngameState → AreaInstance` 的有效偏移、同窗口角色向量与位置坐标、雷达地形来源和 Windows 下读取权限。本机没有 Windows/PoE2，合成自测只能证明字节匹配、跨块读取、指针与等级校验的实现行为，不能证明游戏内可用。
+**待确认：** 当前 PoE2 EXE 哈希、签名是否仍匹配、`GameState → IngameState → AreaInstance` 的有效偏移、同窗口角色向量与位置坐标、雷达地形来源和 Windows 下读取权限。本机没有 Windows/PoE2，合成自测只能证明字节匹配、跨块读取、指针/等级校验、候选顺序及缺帧拒收的实现行为，不能证明游戏内可用。
 
 ## 本机文件再核对（2026-10-28）
 

@@ -56,10 +56,15 @@ foreach (var process in processes)
             var validated = candidates.Count == 1 &&
                 StateCandidateValidator.TryRead(candidates[0].GameStateAddress, layout,
                     memory.TryRead, out state);
+            var roles = validated
+                ? RoleCandidateDiagnostic.Capture(candidates[0].GameStateAddress, layout,
+                    memory.TryRead) : null;
             Console.WriteLine(JsonSerializer.Serialize(new
             {
                 pid = process.Id,
-                status = validated ? "area_candidate_only" :
+                status = roles?.Status == "role_position_candidates_unverified"
+                    ? "role_position_candidates_unverified" :
+                    validated ? "area_candidate_only" :
                     candidates.Count == 0 ? "anchor_missing" :
                     candidates.Count > 1 ? "anchor_ambiguous" : "state_unverified",
                 exeSha256 = hash,
@@ -69,7 +74,10 @@ foreach (var process in processes)
                 gameStateAddress = validated ? $"0x{candidates[0].GameStateAddress:X}" : null,
                 areaInstanceAddress = validated ? $"0x{state!.AreaInstanceAddress:X}" : null,
                 baseAreaLevel = validated ? state!.BaseAreaLevel : (int?)null,
-                monsterLevel = validated ? state!.MonsterLevel : (int?)null
+                monsterLevel = validated ? state!.MonsterLevel : (int?)null,
+                roleCandidateStatus = roles?.Status,
+                roleCandidateHeaders = roles?.MatchingHeaders,
+                roleCandidates = roles?.Positions
             }));
         }
     }
