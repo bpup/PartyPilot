@@ -7,6 +7,22 @@ using Avalonia.Themes.Fluent;
 using Avalonia.Threading;
 using PartyPilot.Desktop;
 
+var installFixture = Path.Combine(Path.GetTempPath(), "partypilot-install-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(installFixture);
+try
+{
+    File.WriteAllText(Path.Combine(installFixture, "PathOfExile_x64.exe"), "");
+    File.WriteAllText(Path.Combine(installFixture, "PathOfExile_x64Steam.exe"), "");
+    File.WriteAllText(Path.Combine(installFixture, "unrelated.exe"), "");
+    var found = GameInstallDiscovery.FindExecutables(installFixture);
+    if (found.Count != 2 || found.Any(path => Path.GetFileName(path) == "unrelated.exe"))
+        throw new Exception("Folder selection did not limit choices to known PoE2 executables.");
+}
+finally
+{
+    Directory.Delete(installFixture, recursive: true);
+}
+
 PartyRosterCounterSmoke.Run();
 await PairingInGameWitnessSmoke.RunAsync();
 SessionGameClientShutdownSmoke.Run();
@@ -248,7 +264,7 @@ var playerCountChoice = window.GetLogicalDescendants().OfType<ComboBox>()
     .Single(box => box.ItemsSource?.OfType<string>().Contains("2 人") == true);
 playerCountChoice.SelectedIndex = 1;
 var launchButton = window.GetLogicalDescendants().OfType<Button>()
-    .Single(button => button.Content?.ToString() == "启动游戏窗口");
+    .Single(button => button.Content?.ToString() == "一键启动");
 if (launchButton.IsEnabled)
     throw new Exception("Keyboard mode exposed a couch layout with P2 on native Client 1.");
 var topologyChoice = window.GetLogicalDescendants().OfType<ComboBox>()
@@ -769,7 +785,7 @@ var radarGridScaleField = window.GetLogicalDescendants().OfType<TextBox>()
 if (radarGridScaleField?.Text != "0.66")
     throw new Exception("Target radar grid scale was not prefilled in the desktop UI.");
 if (!labels.Contains("开始使用") || !labels.Any(item => item?.Contains("选择人数与客户端") == true) ||
-    !labels.Any(item => item?.Contains("准备并开始") == true) ||
+    !labels.Any(item => item == "开始") ||
     !labels.Any(item => item?.Contains("自动跟随与追赶") == true) ||
     !labels.Any(item => item?.Contains("Tab 地图覆盖层") == true) ||
     !labels.Any(item => item?.Contains("帧率设置") == true) ||
@@ -1029,11 +1045,18 @@ Dispatcher.UIThread.RunJobs();
 Dispatcher.UIThread.RunJobs();
 if (prepare.IsEnabled) throw new Exception("Four virtual pads ignored missing game paths.");
 var pathFields = window.GetLogicalDescendants().OfType<TextBox>()
-    .Where(item => item.Watermark?.ToString()?.Contains("PathOfExile_x64.exe") == true)
+    .Where(item => item.Watermark?.ToString()?.Contains("游戏程序完整路径") == true)
     .ToArray();
-if (pathFields.Length != 3 || !pathFields[0].IsEffectivelyVisible || !pathFields[1].IsEffectivelyVisible || pathFields[2].IsEffectivelyVisible)
+var folderButtons = window.GetLogicalDescendants().OfType<Button>()
+    .Where(item => item.Content?.ToString() == "选择游戏目录").ToArray();
+var oneClick = window.GetLogicalDescendants().OfType<Button>()
+    .SingleOrDefault(item => item.Content?.ToString() == "一键启动");
+if (pathFields.Length != 3 || folderButtons.Length != 3 ||
+    oneClick is null ||
+    !folderButtons[0].IsEffectivelyVisible || !folderButtons[1].IsEffectivelyVisible ||
+    folderButtons[2].IsEffectivelyVisible)
 {
-    throw new Exception($"Client selection did not show exactly two game path fields: {pathFields.Length} fields, effective visibility {string.Join(',', pathFields.Select(field => field.IsEffectivelyVisible))}.");
+    throw new Exception("Client selection did not show exactly two game directory buttons.");
 }
 pathFields[0].Text = "C:/GameA.exe";
 pathFields[1].Text = "D:/GameB.exe";

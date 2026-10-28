@@ -6,6 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using PartyPilot.Common;
 
@@ -28,6 +29,9 @@ public sealed class MainWindow : Window
     private readonly CheckBox _applyLayout = new();
     private readonly TextBox _monitors = new();
     private readonly TextBox[] _paths = new TextBox[3];
+    private readonly Button[] _folderButtons = new Button[3];
+    private readonly ComboBox[] _gameChoices = new ComboBox[3];
+    private readonly TextBlock[] _gameLocations = new TextBlock[3];
     private readonly TextBox[] _uris = new TextBox[3];
     private readonly TextBox[] _attachPids = new TextBox[3];
     private readonly TextBlock[] _clientLabels = new TextBlock[3];
@@ -230,11 +234,13 @@ public sealed class MainWindow : Window
     private bool _closing;
     private string _loginStatus = "waiting";
     private bool _busy;
+    private bool _oneClickFollowRequested;
     private int _hybridFocusedPlayer = 1;
     private int _hybridFocusTransition;
     private int _hybridFocusGeneration;
     private readonly HashSet<int> _hybridFocusKeysDown = [];
     private readonly StackPanel _pairingPanel = new() { Spacing = 10 };
+    private Border? _pairingCard;
     private bool HybridSelected => _inputMode.SelectedIndex == 1;
 
     public MainWindow() : this(new FollowTargetPreferenceStore()) { }
@@ -273,7 +279,7 @@ public sealed class MainWindow : Window
         _hideNames.Click += (_, _) => NamePrivacy.Enabled = !NamePrivacy.Enabled;
         heading.Children.Add(_hideNames);
         content.Children.Add(heading);
-        content.Children.Add(Label("选择输入和人数，指定游戏程序，启动后完成角色配对，再开始跟随。", 13, MutedBrush));
+        content.Children.Add(Label("选人数和游戏目录，然后一键启动。", 13, MutedBrush));
         content.Children.Add(BuildInputStep());
         content.Children.Add(BuildClientStep());
         content.Children.Add(OptionalSection("账号自动填入 · 可选", BuildAccountStep()));
@@ -466,7 +472,7 @@ public sealed class MainWindow : Window
 
     private Border BuildInputStep()
     {
-        var panel = Step("1", "选择输入", "选择实体手柄，或让 P1 使用原生键鼠并为其他角色创建虚拟手柄。");
+        var panel = Step("1", "选择输入", "你用手柄，还是键盘鼠标？");
         _inputMode.ItemsSource = new[] { "实体手柄", "键盘与鼠标" };
         _inputMode.SelectedIndex = 0;
         _inputMode.MinWidth = 260;
@@ -482,7 +488,6 @@ public sealed class MainWindow : Window
             UpdateBridgeControls();
         };
         panel.Children.Add(_inputMode);
-        panel.Children.Add(Label("手柄用 L3/R3 切换角色；键鼠用 F1–F6。详细按键可在高级设置中查看。", 12, MutedBrush));
         var advancedStart = panel.Children.Count;
         _focusGuide.Name = "focus-help";
         _focusGuide.Text = "手柄操作：按下左摇杆 L3 控制 P1，按下右摇杆 R3 控制 P2；LT+L3/R3 切换 P3/P4，LT+方向键上/下切换 P5/P6。单独控制后松开并再按同一聚焦键，即可返回共同控制，让跟随者继续追近；快速连按也生效。切换到其他角色仍需间隔 350 毫秒，P3–P6 组合键除外。";
@@ -649,14 +654,16 @@ public sealed class MainWindow : Window
 
     private Border BuildPairingStep()
     {
-        var panel = Step("3A", "确认游戏角色", "游戏窗口已启动或绑定后，逐个完成角色配对。游戏内确认每个角色加入后，再开始跟随。");
+        var panel = Step("4", "确认游戏角色", "按游戏画面提示逐个确认。");
         panel.Children.Add(_pairingPanel);
-        return Card(panel);
+        _pairingCard = Card(panel);
+        _pairingCard.IsVisible = false;
+        return _pairingCard;
     }
 
     private Border BuildClientStep()
     {
-        var panel = Step("2", "选择人数与客户端", "选择总人数，再确认每个客户端的角色分布。");
+        var panel = Step("2", "选择人数与客户端", "每个游戏客户端最多两名角色。");
         _playerCount.PlaceholderText = "选择 1–6 人";
         _playerCount.ItemsSource = Enumerable.Range(1, 6).Select(count => $"{count} 人").ToArray();
         _playerCount.Width = 190;
@@ -673,13 +680,38 @@ public sealed class MainWindow : Window
 
         for (var index = 0; index < 3; index++)
         {
+            var clientIndex = index;
             var row = new StackPanel { Spacing = 7, Margin = new Thickness(0, 8, 0, 0) };
             var clientLabel = Label($"客户端 {index + 1} · 游戏程序", 13, Brushes.White, FontWeight.SemiBold);
             row.Children.Add(clientLabel);
-            var path = new TextBox { Watermark = "PathOfExile_x64.exe 完整路径" };
-            path.TextChanged += (_, _) => ClearLaunchedClients();
-            row.Children.Add(path);
+            var browse = new Button { Content = "选择游戏目录", HorizontalAlignment = HorizontalAlignment.Left };
+            browse.Click += async (_, _) => await ChooseGameFolderAsync(clientIndex);
+            row.Children.Add(browse);
+            var location = Label("尚未选择游戏目录", 12, MutedBrush);
+            location.TextWrapping = TextWrapping.Wrap;
+            row.Children.Add(location);
+            var choice = new ComboBox { IsVisible = false, HorizontalAlignment = HorizontalAlignment.Left,
+                MinWidth = 270 };
+            choice.SelectionChanged += (_, _) =>
+            {
+                if (choice.SelectedItem is string executable)
+                {
+                    _paths[clientIndex].Text = executable;
+                    location.Text = $"已选择：{Path.GetFileName(executable)} · {Path.GetDirectoryName(executable)}";
+                }
+            };
+            row.Children.Add(choice);
+            var path = new TextBox { Watermark = "游戏程序完整路径（高级选项）" };
+            path.TextChanged += (_, _) =>
+            {
+                ClearLaunchedClients();
+                location.Text = string.IsNullOrWhiteSpace(path.Text)
+                    ? "尚未选择游戏目录"
+                    : $"已选择：{Path.GetFileName(path.Text.Trim())} · {Path.GetDirectoryName(path.Text.Trim())}";
+            };
             var advanced = new StackPanel { Spacing = 7 };
+            advanced.Children.Add(Label("游戏程序路径（仅在目录选择无法使用时修改）", 12, MutedBrush));
+            advanced.Children.Add(path);
             advanced.Children.Add(Label("Steam/Epic 启动 URI（可选；须与上方程序对应）", 12, MutedBrush));
             var uri = new TextBox { Watermark = "steam://rungameid/2694490 或 Epic 清单 URI" };
             uri.TextChanged += (_, _) => ClearLaunchedClients();
@@ -691,6 +723,9 @@ public sealed class MainWindow : Window
             row.Children.Add(new Expander { Header = "启动与绑定的高级选项", IsExpanded = false,
                 Content = advanced });
             _paths[index] = path;
+            _folderButtons[index] = browse;
+            _gameChoices[index] = choice;
+            _gameLocations[index] = location;
             _uris[index] = uri;
             _attachPids[index] = attachPid;
             _clientLabels[index] = clientLabel;
@@ -698,6 +733,46 @@ public sealed class MainWindow : Window
             panel.Children.Add(row);
         }
         return Card(panel);
+    }
+
+    private async Task ChooseGameFolderAsync(int index)
+    {
+        if (!StorageProvider.CanPickFolder)
+        {
+            _gameLocations[index].Text = "当前系统无法打开目录选择器。";
+            return;
+        }
+        try
+        {
+            var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = "选择流放之路 2 游戏目录",
+                AllowMultiple = false
+            });
+            if (folders.Count == 0) return;
+            using var folder = folders[0];
+            var directory = folder.TryGetLocalPath();
+            if (directory is null)
+            {
+                _gameLocations[index].Text = "此目录无法作为本机游戏目录，请重新选择。";
+                return;
+            }
+            var executables = GameInstallDiscovery.FindExecutables(directory);
+            _paths[index].Text = string.Empty;
+            _gameChoices[index].ItemsSource = executables;
+            _gameChoices[index].IsVisible = executables.Count > 1;
+            _gameChoices[index].SelectedIndex = executables.Count == 1 ? 0 : -1;
+            _gameLocations[index].Text = executables.Count switch
+            {
+                0 => "所选目录没有找到流放之路 2 游戏程序，请选择安装目录。",
+                1 => $"已选择：{Path.GetFileName(executables[0])} · {directory}",
+                _ => "发现多个游戏程序，请选择要启动的版本。"
+            };
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            _gameLocations[index].Text = "无法读取所选目录，请检查权限后重试。";
+        }
     }
 
     private Border BuildAccountStep()
@@ -824,7 +899,7 @@ public sealed class MainWindow : Window
 
     private Border BuildLaunchStep()
     {
-        var panel = Step("3", "准备并开始", "选择每个客户端的游戏程序路径，然后启动游戏或绑定已运行的窗口。");
+        var panel = Step("3", "开始", "启动后按画面提示确认角色。");
         _applyLayout.Content = "对游戏窗口应用布局";
         var advanced = new StackPanel { Spacing = 8 };
         advanced.Children.Add(_applyLayout);
@@ -839,17 +914,17 @@ public sealed class MainWindow : Window
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12, LineSpacing = 8, Margin = new Thickness(0, 10, 0, 0) };
         _check.Content = "检查配置";
         _check.Click += async (_, _) => await RunLauncherAsync(ClientAction.Check);
-        _launch.Content = "启动游戏窗口";
-        _launch.Click += async (_, _) => await RunLauncherAsync(ClientAction.Start);
+        _launch.Content = "一键启动";
+        _launch.Click += async (_, _) => await RunOneClickStartAsync();
         _attach.Content = "绑定已运行窗口";
         _attach.Click += async (_, _) => await RunLauncherAsync(ClientAction.Attach);
         _cancelAutoLogin.Content = "取消账号准备";
         _cancelAutoLogin.IsEnabled = false;
         _cancelAutoLogin.Click += (_, _) => _autoLoginFillCancellation?.Cancel();
         actions.Children.Add(_launch);
-        actions.Children.Add(_attach);
-        actions.Children.Add(_cancelAutoLogin);
         panel.Children.Add(actions);
+        advanced.Children.Add(_attach);
+        advanced.Children.Add(_cancelAutoLogin);
         advanced.Children.Add(_check);
         _probeRoster.Content = "检查 Current Party 人数";
         _probeRoster.Click += async (_, _) => await ProbeRosterAsync();
@@ -1353,6 +1428,7 @@ public sealed class MainWindow : Window
                     : "目标版键鼠模式要求客户端 1 仅有 P1；此布局的键鼠桥接尚未接入。";
         if (_bridge is null && topologyChanged) _autoFlask.IsChecked = selection?.Id is "2-split" or "3-three-singles";
         var count = _selectedTopology?.ClientCount ?? 0;
+        if (_pairingCard is not null) _pairingCard.IsVisible = _launchedClients.Count > 0;
         _assignment.Text = _selectedTopology is null
             ? "选择人数后显示角色与客户端分布。"
             : $"{_selectedTopology.PlayerCount} 人 · {count} 个客户端 · {_selectedTopology.Summary}";
@@ -2045,6 +2121,8 @@ public sealed class MainWindow : Window
         for (var index = 0; index < _paths.Length; index++)
         {
             if (_paths[index] is not null) _paths[index].IsEnabled = _bridge is null && !_pairingHasStarted && !_busy;
+            if (_folderButtons[index] is not null) _folderButtons[index].IsEnabled = _bridge is null && !_pairingHasStarted && !_busy;
+            if (_gameChoices[index] is not null) _gameChoices[index].IsEnabled = _bridge is null && !_pairingHasStarted && !_busy;
             if (_uris[index] is not null) _uris[index].IsEnabled = _bridge is null && !_pairingHasStarted && !_busy;
             if (_attachPids[index] is not null) _attachPids[index].IsEnabled = _bridge is null && !_pairingHasStarted && !_busy;
         }
@@ -3005,6 +3083,7 @@ public sealed class MainWindow : Window
         ShowCurrentPairingStep();
         UpdateFollowControls();
         UpdateAutoPartyControls();
+        _ = ContinueOneClickFollowAsync();
     }
 
     private async void BridgeEnded(string reason)
@@ -3079,6 +3158,7 @@ public sealed class MainWindow : Window
         UpdateClientRows();
         UpdateFollowControls();
         UpdateAutoPartyControls();
+        if (_pairingSettled) await ContinueOneClickFollowAsync();
     }
 
     private void ShowCurrentPairingStep()
@@ -3111,6 +3191,7 @@ public sealed class MainWindow : Window
 
     private async Task StopBridgeAsync()
     {
+        _oneClickFollowRequested = false;
         var wasHybrid = _bridge?.IsHybridMode == true;
         _gameHotkeys?.SetHybridHandler(null);
         var publisher = _hybridPublisher;
@@ -3498,6 +3579,56 @@ public sealed class MainWindow : Window
             _followStopping = false;
             UpdateFollowControls();
         }
+    }
+
+    private async Task RunOneClickStartAsync()
+    {
+        var topology = _selectedTopology;
+        if (topology is null)
+        {
+            _status.Text = "先选择人数。";
+            return;
+        }
+        var missing = Enumerable.Range(0, topology.ClientCount)
+            .FirstOrDefault(index => string.IsNullOrWhiteSpace(_paths[index].Text), -1);
+        if (missing >= 0)
+        {
+            _status.Text = $"先为客户端 {missing + 1} 选择游戏目录。";
+            return;
+        }
+        var priorClients = _launchedClients;
+        await RunLauncherAsync(ClientAction.Start);
+        if (ReferenceEquals(_launchedClients, priorClients) ||
+            _launchedClients.Count != topology.ClientCount || !ReferenceEquals(_selectedTopology, topology))
+        {
+            _oneClickFollowRequested = false;
+            return;
+        }
+        if (_bridge is null && topology.PlayerCount > 1)
+            await PrepareBridgeAsync();
+        if (_bridge is null && topology.PlayerCount > 1)
+        {
+            _status.Text = $"游戏已打开，输入连接尚未就绪：{_pairingStatus.Text}";
+            return;
+        }
+        _oneClickFollowRequested = topology.PlayerCount > 1;
+        _status.Text = _follow is not null ? "游戏已打开，跟随已启动。" :
+            topology.PlayerCount == 1 ? "游戏已打开。" :
+            "游戏已打开。按画面提示确认角色，完成后自动尝试跟随。";
+        if (_pairingSettled) await ContinueOneClickFollowAsync();
+    }
+
+    private async Task ContinueOneClickFollowAsync()
+    {
+        if (!_oneClickFollowRequested || !_pairingSettled) return;
+        _oneClickFollowRequested = false;
+        UpdateFollowControls();
+        if (!_startFollow.IsEnabled)
+        {
+            _followStatus.Text = "角色已确认；位置数据或跟随设置尚未就绪。";
+            return;
+        }
+        await StartFollowAsync();
     }
 
     private async Task RunLauncherAsync(ClientAction action)

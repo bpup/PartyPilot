@@ -18,3 +18,17 @@
 - **实现目标：行为复刻。** 对照可观察结果独立实现，并保留静态证据与实测差异；不把反编译文本直接当作开源产品的可构建源码，也不处理付费授权或有效期。
 
 下一步的可执行验收顺序：先做 0.6.17 界面逐页取证，再用相同的 2/4/6 角色场景在 Windows 上对比目标版与 PartyPilot；每项记录输入方式、客户端/角色映射、实际画面、结果和失败日志。没有目标版运行记录的项持续标为待确认。
+
+## ExileCore2 依赖核对
+
+- **事实：** [FollowLad](https://github.com/AlphaCaster/FollowLad) 明确自称 ExileApi2/Core PoE2 插件。[ExileCore2 仓库](https://github.com/exCore2/ExileCore2)说明它是插件框架。
+- **事实：** 当前 PartyPilot 的 `BETA_TEST.md` 要求用户手动把 `PartyPilot.Sensor` 放入 ExileCore2 的 `Plugins/Compiled`。这是目前的产品依赖和使用门槛。
+- **事实：** MultiPilot 0.6.17 已读依赖包含 `NoddPilot.Memory`、`NoddPilot.Offsets`、`NoddPilot.Runtime`，并有独立的 `memory-probe/MultiPilotMemoryProbe.dll`。在本次读取的依赖清单和相关方法中未见 ExileCore2 引用。
+- **待确认：** [ExiledBot 2](https://exiled-bot.net/)、[ExileBot Autofollower](https://exilebot.com/autofollower)、[ExilePal](https://exilepal.com/)的公开页面没有说明是否使用 ExileCore2；不能将“没有写依赖”当作“肯定没有依赖”。MultiPilot 是否曾借鉴该框架也无法从现有静态证据排除。
+- **实现影响：** 若要达到目标版的开箱体验，PartyPilot 需要让位置和地图数据链路无需用户手动安装 ExileCore2 插件。现有插件链可作为联调路径，但不能据此宣称与目标版安装和启动体验一致。
+
+## 位置探针的具体工作原理（静态可见部分）
+
+`ProbeSession.CaptureMotion` 首先确认目标进程和当前区域实例可读；随后通过 `AreaEntityListReader.ReadEntities` 取得实体候选，再由 `PlayerSlotVectorResolver.Resolve` 在区域实例附近寻找本地角色向量。解析器只接受 1–2 项、指针结构和容量合理的向量，并核对每项是否指向角色实体；若出现多个相互冲突的有效顺序，返回不可靠。探针在区域变化或约五秒后重新解析；正常帧读取按顺序排列的角色位置，任意角色位置失败便发出 `playerOrderReliable=false`。桌面端 `MemoryReaderService.ApplyMotion` 只有在进程附着、顺序可靠且角色数量足够时才发布运动帧。
+
+这说明目标版的核心位置来源是**随软件运行的独立内存探针**，不是让用户先安装 ExileCore2 插件。它解释了 PartyPilot 当前“一键启动”仍不能做到目标版开箱即用的关键原因。偏移量在游戏更新后的有效性、区域实例与画面角色的对应，还须在 Windows/PoE2 中验证。
