@@ -59,3 +59,15 @@
 **事实：** 本仓库新增 `probe/`，它独立于 ExileCore2，用只读进程权限查找上述已知哈希的游戏进程，并验证 `GameState` 定位候选是否唯一。未知构建、零候选或多候选均不输出可供跟随使用的位置。此程序目前只输出诊断 JSON；它不发布运动帧、不读取角色位置，也不接入桌面的一键启动。
 
 **待确认：** 当前 PoE2 EXE 哈希、签名是否仍匹配、`GameState → IngameState → AreaInstance` 的有效偏移、同窗口角色向量与位置坐标、雷达地形来源和 Windows 下读取权限。本机没有 Windows/PoE2，扫描器自测只能证明字节匹配、跨块读取和无效指针拒收，不能证明游戏内可用。
+
+## 本机文件再核对（2026-10-28）
+
+使用新安装的 `reverse-engineering` skill 的只读 triage 脚本检查本机安装目录中的三个文件，供后续分析确认是否针对同一组字节：
+
+| 文件 | SHA-256 | 静态识别 |
+| --- | --- | --- |
+| `NoddPilot.Licensing.dll` | `c69fd58faf6cf706f483e77e6f82502a7a7afd2836690cfbbbbf01a5a5a2e554` | .NET 托管程序集，76,800 字节 |
+| `MultiPilot.Core.dll` | `26dd6d9ac32c97087661e1d74aac27c16a932a01f3243696a32d1661ea006a7e` | .NET 托管程序集，41,319,936 字节；`.text` 熵较高，单凭熵不能证明采用某种壳 |
+| `memory-probe/MultiPilotMemoryProbe.dll` | `2fcc449e258315c13b6a0788ca8acb9de234c8cdf7007fabc5873985d2ab41f6` | .NET 托管可执行文件，1,344,000 字节 |
+
+**授权与偏移的证据边界：** `LicenseSession` 静态代码显示激活响应验签、解包加密偏移密钥及会话心跳；`OffsetCatalog` 同时有 `CreateDefault()`，使用内嵌签名和默认偏移，另有 `ActivateSealed(key)` 切换到解封后的配置。因而“存在服务端密钥”是事实，“所有功能在任何情况下都必须取得该密钥”仍是待确认。未执行或修改授权流程，不能称为已破解。
