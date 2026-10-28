@@ -1,5 +1,5 @@
+using System.ComponentModel;
 using System.Diagnostics;
-using System.Security.Cryptography;
 using System.Text.Json;
 using PartyPilot.Probe;
 
@@ -10,6 +10,12 @@ if (args is ["--self-test"])
     return;
 }
 
+if (args is not ([] or ["--watch"]))
+{
+    Console.Error.WriteLine("Usage: PartyPilot.Probe [--watch|--self-test]");
+    Environment.ExitCode = 2;
+    return;
+}
 if (!OperatingSystem.IsWindows())
 {
     Console.Error.WriteLine("独立探针只能在 Windows 上连接游戏；此电脑仅能运行扫描器自测。");
@@ -22,72 +28,79 @@ var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     "PathOfExile", "PathOfExile_x64", "PathOfExileSteam", "PathOfExile_x64Steam",
     "PathOfExileEGS", "PathOfExile_x64EGS"
 };
-var processes = Process.GetProcesses().Where(process => names.Contains(process.ProcessName))
-    .OrderBy(process => process.Id).ToArray();
-if (processes.Length == 0)
+var processes = new List<Process>();
+foreach (var process in Process.GetProcesses())
+{
+    try
+    {
+        if (names.Contains(process.ProcessName)) processes.Add(process);
+        else process.Dispose();
+    }
+    catch (InvalidOperationException)
+    {
+        process.Dispose(); // Process exited during enumeration.
+    }
+}
+processes.Sort((left, right) => left.Id.CompareTo(right.Id));
+if (processes.Count == 0)
 {
     Console.WriteLine(JsonSerializer.Serialize(new { status = "game_not_running" }));
     return;
 }
 
-foreach (var process in processes)
+var sessions = new List<DiagnosticSession>();
+try
 {
-    try
+    foreach (var process in processes)
     {
-        using (process)
+        try
         {
-            var module = process.MainModule ?? throw new InvalidOperationException("main module unavailable");
-            var path = module.FileName;
-            using var file = File.OpenRead(path);
-            var hash = Convert.ToHexString(SHA256.HashData(file));
-            var recognizedBuild = KnownGameLayout.ForSha256(hash) is not null;
-            using var memory = Win32Memory.Open(process.Id);
-            var candidates = AnchorCandidateScanner.Find(module.BaseAddress.ToInt64(),
-                module.ModuleMemorySize, memory.TryRead);
-            var selection = candidates.Count == 1
-                ? LayoutCandidateResolver.Resolve(candidates[0].GameStateAddress, hash,
-                    memory.TryRead)
-                : new LayoutCandidateSelection(null, null, 0);
-            var layout = selection.Layout;
-            var state = selection.State;
-            var validated = layout is not null && state is not null;
-            var roles = validated
-                ? RoleCandidateDiagnostic.Capture(candidates[0].GameStateAddress, layout!,
-                    memory.TryRead) : null;
+            sessions.Add(DiagnosticSession.Open(process));
+        }
+        catch (Exception error) when (error is InvalidOperationException or Win32Exception or
+                                      IOException or UnauthorizedAccessException)
+        {
             Console.WriteLine(JsonSerializer.Serialize(new
             {
-                pid = process.Id,
-                status = roles?.Status == "role_position_candidates_unverified"
-                    ? (recognizedBuild ? "role_position_candidates_unverified" :
-                        "role_position_candidates_unverified_unknown_build") :
-                    validated ? (recognizedBuild ? "area_candidate_only" :
-                        "area_candidate_unknown_build") :
-                    candidates.Count == 0 ? "anchor_missing" :
-                    candidates.Count > 1 ? "anchor_ambiguous" :
-                    selection.ValidLayoutCount > 1 ? "layout_ambiguous" :
-                    recognizedBuild ? "state_unverified" : "unknown_build_unverified",
-                exeSha256 = hash,
-                recognizedBuild,
-                layout = layout?.Name,
-                validLayoutCount = selection.ValidLayoutCount,
-                candidateCount = candidates.Count,
-                // Addresses are diagnostic only. No movement or radar frames are emitted.
-                gameStateAddress = validated ? $"0x{candidates[0].GameStateAddress:X}" : null,
-                areaInstanceAddress = validated ? $"0x{state!.AreaInstanceAddress:X}" : null,
-                baseAreaLevel = validated ? state!.BaseAreaLevel : (int?)null,
-                monsterLevel = validated ? state!.MonsterLevel : (int?)null,
-                roleCandidateStatus = roles?.Status,
-                roleCandidateHeaders = roles?.MatchingHeaders,
-                roleCandidates = roles?.Positions
+                pid = process.Id, status = "attach_failed", error = error.Message
             }));
+            process.Dispose();
         }
     }
-    catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception or
-                                  System.IO.IOException or UnauthorizedAccessException)
+
+    var watch = args is ["--watch"];
+    using var cancellation = new CancellationTokenSource();
+    if (watch) Console.CancelKeyPress += (_, eventArgs) =>
     {
-        Console.WriteLine(JsonSerializer.Serialize(new
+        eventArgs.Cancel = true;
+        cancellation.Cancel();
+    };
+    var exited = new HashSet<int>();
+    do
+    {
+        foreach (var session in sessions)
         {
-            pid = process.Id, status = "attach_failed", error = error.Message
-        }));
-    }
+            if (exited.Contains(session.ProcessId)) continue;
+            try
+            {
+                Console.WriteLine(JsonSerializer.Serialize(session.Capture()));
+                if (session.HasExited) exited.Add(session.ProcessId);
+            }
+            catch (Exception error) when (error is InvalidOperationException or Win32Exception or
+                                          IOException or UnauthorizedAccessException)
+            {
+                Console.WriteLine(JsonSerializer.Serialize(new
+                {
+                    pid = session.ProcessId, status = "capture_failed", error = error.Message
+                }));
+            }
+        }
+        if (!watch || cancellation.IsCancellationRequested || exited.Count == sessions.Count) break;
+        try { await Task.Delay(100, cancellation.Token); }
+        catch (OperationCanceledException) { break; }
+    } while (!cancellation.IsCancellationRequested);
+}
+finally
+{
+    foreach (var session in sessions) session.Dispose();
 }
