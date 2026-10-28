@@ -7,7 +7,11 @@ public sealed record RolePositionCandidate(int Slot, string EntityAddress, float
     float WorldY, float WorldZ, float GridX, float GridY);
 
 public sealed record RoleCandidateResult(string Status, int MatchingHeaders,
-    RolePositionCandidate[] Positions);
+    RolePositionCandidate[] Positions)
+{
+    public string? VectorHeaderAddress { get; init; }
+    public string[] OrderedAddresses { get; init; } = [];
+}
 
 public static class RoleCandidateDiagnostic
 {
@@ -58,6 +62,10 @@ public static class RoleCandidateDiagnostic
             return new RoleCandidateResult("area_changed", candidate.MatchingHeaders, []);
 
         return new RoleCandidateResult("role_position_candidates_unverified",
-            candidate.MatchingHeaders, positions.ToArray());
+            candidate.MatchingHeaders, positions.ToArray())
+        {
+            VectorHeaderAddress = candidate.VectorHeaderAddress,
+            OrderedAddresses = candidate.OrderedAddresses
+        };
     }
 }

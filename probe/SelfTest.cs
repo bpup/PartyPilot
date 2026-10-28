@@ -169,6 +169,8 @@ internal static class SelfTest
         var roleResult = RoleCandidateDiagnostic.Capture(0x300000, layout!, ReadState, Position);
         Require(roleResult.Status == "role_position_candidates_unverified" &&
                 roleResult.Positions.Length == 2 &&
+                roleResult.VectorHeaderAddress == $"0x{vectorAddress:X}" &&
+                roleResult.OrderedAddresses.SequenceEqual(["0x900000", "0x910000"]) &&
                 roleResult.Positions[0].EntityAddress == "0x900000" &&
                 roleResult.Positions[1].EntityAddress == "0x910000", "ordered role candidates");
         Require(RoleCandidateDiagnostic.Capture(0x300000, layout!, ReadState,

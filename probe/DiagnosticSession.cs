@@ -105,6 +105,8 @@ public sealed class DiagnosticSession : IDisposable
             monsterLevel = validated ? state!.MonsterLevel : (int?)null,
             roleCandidateStatus = roles?.Status,
             roleCandidateHeaders = roles?.MatchingHeaders,
+            vectorHeaderAddress = roles?.VectorHeaderAddress,
+            orderedAddresses = roles?.OrderedAddresses,
             roleCandidates = roles?.Positions
         };
     }
