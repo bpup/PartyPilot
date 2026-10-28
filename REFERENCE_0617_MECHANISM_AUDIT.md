@@ -51,3 +51,11 @@
 **研究结论：** 本轮目标功能的主要静态调用链均已找到，可以明确独立实现应替代哪些来源与流程；不能把“主要链路找到”表述为“全部代码已恢复”。完整 1:1 仍缺目标版与 PartyPilot 在同一 Windows/PoE2 环境下的逐项画面、输入和结果对照。尤其是目标版的独立位置/地图探针、PartyPilot 的手动插件依赖，是最先需要解决的结构性差距。
 
 **用户确认的例外：游戏目录选择。** `ShellViewModel.ChooseConfiguredClientExecutableAsync` 的 0.6.17 静态代码实际调用 Avalonia 的 `OpenFilePickerAsync`，让用户选择 `PathOfExile*.exe`；Epic 客户端则先尝试从安装清单自动发现。用户明确要求 PartyPilot 用“打开目录选择”而非填写完整路径，因此独立版采用文件夹选择后列出发现的游戏程序。此处按用户要求改善交互，不声称与目标版选择器完全一样。
+
+## 独立探针的定位入口（本轮新增核对）
+
+**事实：** `AnchorScanRunner.Run` 从 `NoddPilot.Offsets.dll` 内嵌的 `signatures.json` 读取 `GameStatePattern` 与 `FileRootPattern`，扫描游戏进程模块，把匹配点转换为指针存储地址，再读取 `GameState` 指针。找到它后，优先检查指定的 `IngameState` 子状态，失败时做形状校验搜索；找不到会明确返回未解析。`GameBuildOffsetOverrides.Apply` 先计算游戏 EXE 的 SHA-256；静态代码内明确列有一个原始构建哈希和两个 2026-09-05 PoE2 0.5.5 客户端哈希。未知哈希在目标版会尝试最近的布局并继续做实时校验，不能因此认定当前游戏版本兼容。
+
+**事实：** 本仓库新增 `probe/`，它独立于 ExileCore2，用只读进程权限查找上述已知哈希的游戏进程，并验证 `GameState` 定位候选是否唯一。未知构建、零候选或多候选均不输出可供跟随使用的位置。此程序目前只输出诊断 JSON；它不发布运动帧、不读取角色位置，也不接入桌面的一键启动。
+
+**待确认：** 当前 PoE2 EXE 哈希、签名是否仍匹配、`GameState → IngameState → AreaInstance` 的有效偏移、同窗口角色向量与位置坐标、雷达地形来源和 Windows 下读取权限。本机没有 Windows/PoE2，扫描器自测只能证明字节匹配、跨块读取和无效指针拒收，不能证明游戏内可用。
