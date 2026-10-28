@@ -113,6 +113,8 @@ public sealed class DiagnosticSession : IDisposable
             // Addresses and positions are diagnostics only. No control frame is emitted.
             gameStateAddress = validated ? $"0x{gameStateAddress:X}" : null,
             areaInstanceAddress = validated ? $"0x{state!.AreaInstanceAddress:X}" : null,
+            areaHashCandidate = validated ? AreaHashCandidate.Read(state!.AreaInstanceAddress,
+                _memory.TryRead) : null,
             baseAreaLevel = validated ? state!.BaseAreaLevel : (int?)null,
             monsterLevel = validated ? state!.MonsterLevel : (int?)null,
             roleCandidateStatus = roles?.Status,

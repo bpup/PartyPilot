@@ -55,6 +55,7 @@ bool initialize() {
     put(ingame_state, 656, reinterpret_cast<std::uintptr_t>(area_instance));
     put(area_instance, 192, std::int32_t{12});
     put(area_instance, 196, std::int32_t{14});
+    put(area_instance, 244, std::uint32_t{0x12345678});
     local_players[0] = reinterpret_cast<std::uintptr_t>(entity[0]);
     local_players[1] = reinterpret_cast<std::uintptr_t>(entity[1]);
     vector_header(area_instance, 1408 + 72,

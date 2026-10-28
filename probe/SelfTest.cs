@@ -104,6 +104,10 @@ internal static class SelfTest
         Write(0x400000 + 656, BitConverter.GetBytes(0x500000L));
         Write(0x500000 + 192, BitConverter.GetBytes(12));
         Write(0x500000 + 196, BitConverter.GetBytes(14));
+        Write(0x500000 + 244, BitConverter.GetBytes(0x12345678u));
+        Require(AreaHashCandidate.Read(0x500000, ReadState) == 0x12345678u &&
+                AreaHashCandidate.Read(0x600000, ReadState) is null,
+            "current-area hash remains a read-only candidate");
         Require(StateCandidateValidator.TryRead(0x300000, layout!, ReadState, out var state) &&
                 state is { IngameStateAddress: 0x400000, AreaInstanceAddress: 0x500000,
                     BaseAreaLevel: 12, MonsterLevel: 14 }, "validated area candidate");

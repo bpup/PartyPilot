@@ -116,6 +116,7 @@ jobs:
               $_.status -eq "role_position_candidates_unverified_unknown_build" -and
               $_.roleCandidates.Count -eq 2 -and
               $_.orderedAddresses.Count -eq 2 -and
+              $_.areaHashCandidate -eq 0x12345678 -and
               $_.vectorHeaderAddress
             })) {
               throw "Probe did not read both fixture roles for process $($target.Id)"
