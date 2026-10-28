@@ -181,6 +181,21 @@ internal static class SelfTest
                 (entity, reader) => entity == 0x900000 ? Position(entity, reader) : null)
             is { Status: "position_unavailable", Positions.Length: 0 },
             "partial positions rejected");
+        var reordered = false;
+        var changedRoleResult = RoleCandidateDiagnostic.Capture(0x300000, layout!, ReadState,
+            (entity, reader) =>
+            {
+                if (entity == 0x910000)
+                {
+                    Write(0x800000, BitConverter.GetBytes(0x910000L));
+                    Write(0x800008, BitConverter.GetBytes(0x900000L));
+                    reordered = true;
+                }
+                return Position(entity, reader);
+            });
+        Require(reordered && changedRoleResult is
+            { Status: "role_vector_changed", Positions.Length: 0 },
+            "vector changed during position read rejected");
     }
 
     private static void Require(bool condition, string name)

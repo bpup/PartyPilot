@@ -56,6 +56,11 @@ public static class RoleCandidateDiagnostic
                 position.WorldY, position.WorldZ, position.GridX, position.GridY));
         }
 
+        if (!LocalSlotCandidateScanner.Revalidate(candidate, 0,
+                new Dictionary<long, string>(), Read,
+                entity => RawCharacterPathReader.Read(entity, Read), state.IngameStateAddress))
+            return new RoleCandidateResult("role_vector_changed", candidate.MatchingHeaders, []);
+
         if (!StateCandidateValidator.TryRead(gameStateAddress, layout, read, out var after) ||
             after is null || after.AreaInstanceAddress != state.AreaInstanceAddress ||
             after.IngameStateAddress != state.IngameStateAddress)
