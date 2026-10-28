@@ -1206,9 +1206,10 @@ if (prepare.IsEnabled) throw new Exception("Bridge preparation ignored the missi
 pathFields[0].Text = "C:/GameA.exe";
 Dispatcher.UIThread.RunJobs();
 if (!prepare.IsEnabled) throw new Exception("Supported two-player topology did not enable the physical bridge.");
-if (!pathFields[0].IsEffectivelyVisible || pathFields[1].IsEffectivelyVisible)
+if (!folderButtons[0].IsEffectivelyVisible || folderButtons[1].IsEffectivelyVisible ||
+    folderButtons[2].IsEffectivelyVisible)
 {
-    throw new Exception("The default couch 2P option did not request one game window.");
+    throw new Exception("The default couch 2P option did not show one game directory selector.");
 }
 var guide = new PairingGuide(PartyTopologies.DefaultFor(2));
 if (guide.ObserveARelease(1) || guide.Arm(2) || !guide.Arm(1) ||
