@@ -46,7 +46,26 @@ internal static class SelfTest
             destination.Length <= 4096 + 128 && Read(address, destination);
         Require(AnchorCandidateScanner.Find(moduleBase, image.Length, ReadSmallOnly).Count == 1,
             "unreadable large chunk fallback");
+        // The following page cannot be read. The complete signature and RIP
+        // storage still fit inside the preceding readable page.
+        Array.Clear(image, matchOffset, signature.Length);
+        const int beforeUnreadablePage = 4 * 4096;
+        const int pageLocalMatch = beforeUnreadablePage - 64;
+        const int pageLocalStorage = beforeUnreadablePage - 16;
+        BitConverter.GetBytes(pageLocalStorage - pageLocalMatch - 15).CopyTo(signature, 11);
+        signature.CopyTo(image, pageLocalMatch);
+        BitConverter.GetBytes(0x300000L).CopyTo(image, pageLocalStorage);
+        bool ReadBeforeHole(long address, byte[] destination)
+        {
+            var offset = address - moduleBase;
+            if (offset < 0 || offset + destination.Length > beforeUnreadablePage) return false;
+            return Read(address, destination);
+        }
+        Require(AnchorCandidateScanner.Find(moduleBase, image.Length, ReadBeforeHole)
+                is [{ MatchAddress: moduleBase + pageLocalMatch }],
+            "readable page before unreadable neighbor");
         Array.Clear(image, storageOffset, 8);
+        Array.Clear(image, pageLocalStorage, 8);
         Require(AnchorCandidateScanner.Find(moduleBase, image.Length, Read).Count == 0,
             "invalid pointer rejected");
 

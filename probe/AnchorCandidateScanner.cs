@@ -55,6 +55,14 @@ public static class AnchorCandidateScanner
                 var pageBuffer = new byte[pageLength];
                 if (read(moduleBase + offset + page, pageBuffer))
                     ScanWindow(offset + page, pageOwned, pageBuffer);
+                else if (pageLength > pageOwned)
+                {
+                    // A readable page followed by an unreadable one still
+                    // contains valid matches that fit entirely in this page.
+                    var ownedBuffer = new byte[pageOwned];
+                    if (read(moduleBase + offset + page, ownedBuffer))
+                        ScanWindow(offset + page, pageOwned, ownedBuffer);
+                }
             }
         }
         return found.Values.OrderBy(value => value.MatchAddress).ToArray();
