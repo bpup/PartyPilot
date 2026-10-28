@@ -234,6 +234,7 @@ public sealed class MainWindow : Window
     private int _hybridFocusTransition;
     private int _hybridFocusGeneration;
     private readonly HashSet<int> _hybridFocusKeysDown = [];
+    private readonly StackPanel _pairingPanel = new() { Spacing = 10 };
     private bool HybridSelected => _inputMode.SelectedIndex == 1;
 
     public MainWindow() : this(new FollowTargetPreferenceStore()) { }
@@ -272,17 +273,18 @@ public sealed class MainWindow : Window
         _hideNames.Click += (_, _) => NamePrivacy.Enabled = !NamePrivacy.Enabled;
         heading.Children.Add(_hideNames);
         content.Children.Add(heading);
-        content.Children.Add(Label("独立版工作区 · 游戏窗口启动与有限布局的手柄配对引导", 13, MutedBrush));
+        content.Children.Add(Label("选择输入和人数，指定游戏程序，启动后完成角色配对，再开始跟随。", 13, MutedBrush));
         content.Children.Add(BuildInputStep());
         content.Children.Add(BuildClientStep());
-        content.Children.Add(BuildAccountStep());
+        content.Children.Add(OptionalSection("账号自动填入 · 可选", BuildAccountStep()));
         content.Children.Add(BuildLaunchStep());
-        content.Children.Add(BuildAutoPartyStep());
+        content.Children.Add(BuildPairingStep());
+        content.Children.Add(OptionalSection("组队邀请 · 可选", BuildAutoPartyStep()));
         content.Children.Add(BuildFollowStep());
         content.Children.Add(BuildRadarStep());
-        content.Children.Add(BuildPrivacyStep());
-        content.Children.Add(BuildFpsStep());
-        content.Children.Add(BuildResourceStep());
+        content.Children.Add(OptionalSection("隐私遮挡 · 可选", BuildPrivacyStep()));
+        content.Children.Add(OptionalSection("帧率设置 · 可选", BuildFpsStep()));
+        content.Children.Add(OptionalSection("后台资源设置 · 可选", BuildResourceStep()));
         content.Children.Add(BuildStatusCard());
 
         shell.Children.Add(new ScrollViewer { Content = content });
@@ -439,6 +441,9 @@ public sealed class MainWindow : Window
         panel.Children.Add(new Expander { Header = title, IsExpanded = false, Content = content });
     }
 
+    private static Expander OptionalSection(string title, Control content) =>
+        new() { Header = title, IsExpanded = false, Content = content };
+
     private static Border BuildSidebar()
     {
         var navigation = new StackPanel { Width = 194, Spacing = 18, Margin = new Thickness(20, 26) };
@@ -477,12 +482,13 @@ public sealed class MainWindow : Window
             UpdateBridgeControls();
         };
         panel.Children.Add(_inputMode);
+        panel.Children.Add(Label("手柄用 L3/R3 切换角色；键鼠用 F1–F6。详细按键可在高级设置中查看。", 12, MutedBrush));
+        var advancedStart = panel.Children.Count;
         _focusGuide.Name = "focus-help";
         _focusGuide.Text = "手柄操作：按下左摇杆 L3 控制 P1，按下右摇杆 R3 控制 P2；LT+L3/R3 切换 P3/P4，LT+方向键上/下切换 P5/P6。单独控制后松开并再按同一聚焦键，即可返回共同控制，让跟随者继续追近；快速连按也生效。切换到其他角色仍需间隔 350 毫秒，P3–P6 组合键除外。";
         _focusGuide.Foreground = MutedBrush;
         _focusGuide.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(_focusGuide);
-        var advancedStart = panel.Children.Count;
         _hybridBindingsButton.Content = "设置键鼠按键映射";
         _hybridBindingsButton.HorizontalAlignment = HorizontalAlignment.Left;
         _hybridBindingsButton.Click += async (_, _) => await EditHybridBindingsAsync();
@@ -633,17 +639,24 @@ public sealed class MainWindow : Window
         actions.Children.Add(_stopBridge);
         actions.Children.Add(_endSession);
         actions.Children.Add(_confirmRole);
-        panel.Children.Add(actions);
+        _pairingPanel.Children.Add(actions);
         _pairingStatus.Text = "选择输入方式、人数与布局后检查桥接支持情况。";
         _pairingStatus.Foreground = MutedBrush;
         _pairingStatus.TextWrapping = TextWrapping.Wrap;
-        panel.Children.Add(_pairingStatus);
+        _pairingPanel.Children.Add(_pairingStatus);
+        return Card(panel);
+    }
+
+    private Border BuildPairingStep()
+    {
+        var panel = Step("3A", "确认游戏角色", "游戏窗口已启动或绑定后，逐个完成角色配对。游戏内确认每个角色加入后，再开始跟随。");
+        panel.Children.Add(_pairingPanel);
         return Card(panel);
     }
 
     private Border BuildClientStep()
     {
-        var panel = Step("2", "选择人数与客户端", "按目标版本的布局列出 1–6 人及其所需客户端；仅部分布局支持上方的手柄配对引导。");
+        var panel = Step("2", "选择人数与客户端", "选择总人数，再确认每个客户端的角色分布。");
         _playerCount.PlaceholderText = "选择 1–6 人";
         _playerCount.ItemsSource = Enumerable.Range(1, 6).Select(count => $"{count} 人").ToArray();
         _playerCount.Width = 190;
@@ -666,14 +679,17 @@ public sealed class MainWindow : Window
             var path = new TextBox { Watermark = "PathOfExile_x64.exe 完整路径" };
             path.TextChanged += (_, _) => ClearLaunchedClients();
             row.Children.Add(path);
-            row.Children.Add(Label("Steam/Epic 启动 URI（可选；须与上方程序对应）", 12, MutedBrush));
+            var advanced = new StackPanel { Spacing = 7 };
+            advanced.Children.Add(Label("Steam/Epic 启动 URI（可选；须与上方程序对应）", 12, MutedBrush));
             var uri = new TextBox { Watermark = "steam://rungameid/2694490 或 Epic 清单 URI" };
             uri.TextChanged += (_, _) => ClearLaunchedClients();
-            row.Children.Add(uri);
-            row.Children.Add(Label("绑定已运行窗口的进程号（同目录多客户端时必填）", 12, MutedBrush));
+            advanced.Children.Add(uri);
+            advanced.Children.Add(Label("绑定已运行窗口的进程号（同目录多客户端时必填）", 12, MutedBrush));
             var attachPid = new TextBox { Watermark = "进程号，仅用于绑定已运行窗口" };
             attachPid.TextChanged += (_, _) => ClearLaunchedClients();
-            row.Children.Add(attachPid);
+            advanced.Children.Add(attachPid);
+            row.Children.Add(new Expander { Header = "启动与绑定的高级选项", IsExpanded = false,
+                Content = advanced });
             _paths[index] = path;
             _uris[index] = uri;
             _attachPids[index] = attachPid;
@@ -808,16 +824,17 @@ public sealed class MainWindow : Window
 
     private Border BuildLaunchStep()
     {
-        var panel = Step("3", "准备并开始", "检查配置后可启动或绑定游戏窗口；已启用的独立客户端会尝试填入账号。此步骤不提交登录或执行角色配对。");
+        var panel = Step("3", "准备并开始", "选择每个客户端的游戏程序路径，然后启动游戏或绑定已运行的窗口。");
         _applyLayout.Content = "对游戏窗口应用布局";
-        panel.Children.Add(_applyLayout);
+        var advanced = new StackPanel { Spacing = 8 };
+        advanced.Children.Add(_applyLayout);
         _layoutMode.ItemsSource = new[] { "stacked", "tiled", "multiple" };
         _layoutMode.SelectedIndex = 0;
         _layoutMode.Width = 190;
         _layoutMode.HorizontalAlignment = HorizontalAlignment.Left;
-        panel.Children.Add(_layoutMode);
+        advanced.Children.Add(_layoutMode);
         _monitors.Watermark = "显示器编号，例如 1,2";
-        panel.Children.Add(_monitors);
+        advanced.Children.Add(_monitors);
 
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12, LineSpacing = 8, Margin = new Thickness(0, 10, 0, 0) };
         _check.Content = "检查配置";
@@ -829,18 +846,20 @@ public sealed class MainWindow : Window
         _cancelAutoLogin.Content = "取消账号准备";
         _cancelAutoLogin.IsEnabled = false;
         _cancelAutoLogin.Click += (_, _) => _autoLoginFillCancellation?.Cancel();
-        actions.Children.Add(_check);
         actions.Children.Add(_launch);
         actions.Children.Add(_attach);
         actions.Children.Add(_cancelAutoLogin);
         panel.Children.Add(actions);
+        advanced.Children.Add(_check);
         _probeRoster.Content = "检查 Current Party 人数";
         _probeRoster.Click += async (_, _) => await ProbeRosterAsync();
-        panel.Children.Add(_probeRoster);
+        advanced.Children.Add(_probeRoster);
         _rosterStatus.Text = "绑定窗口后，可在游戏内打开 Current Party 面板再检查；结果仅是画面候选行数。";
         _rosterStatus.Foreground = MutedBrush;
         _rosterStatus.TextWrapping = TextWrapping.Wrap;
-        panel.Children.Add(_rosterStatus);
+        advanced.Children.Add(_rosterStatus);
+        panel.Children.Add(new Expander { Header = "窗口布局与队伍检查 · 可选", IsExpanded = false,
+            Content = advanced });
         return Card(panel);
     }
 
@@ -857,7 +876,7 @@ public sealed class MainWindow : Window
 
     private Border BuildAutoPartyStep()
     {
-        var panel = Step("3A", "组队邀请", "按角色填写游戏中的准确名称。已绑定游戏窗口前台时按所选快捷键可运行或取消自动组队。自动恢复向其他客户端发出全新邀请，按目标版菜单顺序接受，并检查游戏内队伍画面候选人数。Windows 游戏内效果待验证。");
+        var panel = Step("3B", "组队邀请", "按角色填写游戏中的准确名称。已绑定游戏窗口前台时按所选快捷键可运行或取消自动组队。自动恢复向其他客户端发出全新邀请，按目标版菜单顺序接受，并检查游戏内队伍画面候选人数。Windows 游戏内效果待验证。");
         panel.Children.Add(Label("自动组队快捷键（目标版默认 F8；None 关闭）", 12, MutedBrush));
         _autoPartyKey.ItemsSource = AutoPartyKeyBinding.Options;
         _autoPartyKey.Width = 190;
@@ -911,7 +930,7 @@ public sealed class MainWindow : Window
 
     private Border BuildFollowStep()
     {
-        var panel = Step("4", "自动跟随与追赶", "先完成配对，并在每个客户端启用只读位置传感器。4 人和 6 人布局可启动双角色跟随链路；当前传感器的本地双角色顺序仍是候选数据，未核验前引擎会等待并停止自动方向。距离与时效需要按实际游戏校准。");
+        var panel = Step("4", "自动跟随与追赶", "角色配对完成、各客户端位置传感器已启用后，点击开始跟随。4–6 人布局仍需在游戏中核对角色身份和方向。");
         panel.Children.Add(Label("配对完成后点击“开始跟随”。默认距离与时效可在高级设置中调整。", 12, MutedBrush));
         var advancedStart = panel.Children.Count;
         _followStop.Name = "follow-stop-global";

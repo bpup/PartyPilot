@@ -226,6 +226,13 @@ var followAdvanced = window.GetLogicalDescendants().OfType<Expander>()
     .Single(item => item.Header?.ToString() == "高级设置 · 距离、追赶与时效");
 if (inputAdvanced.IsExpanded || followAdvanced.IsExpanded)
     throw new Exception("Technical setup controls were expanded in the normal first-use flow.");
+var optionalSections = window.GetLogicalDescendants().OfType<Expander>()
+    .Where(item => item.Header?.ToString()?.EndsWith("· 可选") == true).ToArray();
+if (optionalSections.Length < 5 || optionalSections.Any(item => item.IsExpanded))
+    throw new Exception("Optional account and tuning panels were visible during first use.");
+if (window.GetLogicalDescendants().OfType<Expander>()
+    .Any(item => item.Header?.ToString() == "启动与绑定的高级选项" && item.IsExpanded))
+    throw new Exception("Client process IDs were visible during first use.");
 (window.CaptureRenderedFrame() ?? throw new Exception("First-use setup did not render."))
     .Save(Path.GetFullPath("../PartyPilot-ui-first-run.png"));
 inputAdvanced.IsExpanded = true;
