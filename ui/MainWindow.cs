@@ -81,9 +81,6 @@ public sealed class MainWindow : Window
     private readonly TextBlock _hybridBindingsStatus = new();
     private readonly HybridBindingPreferenceStore _hybridBindingPreferences = new();
     private HybridBindingConfig _hybridBindings = HybridBindingConfig.Default;
-    private readonly ComboBox _physicalIndex = new();
-    private readonly TextBox _physicalDevice = new();
-    private readonly CheckBox _isolationConfirmed = new();
     private readonly CheckBox _rightStickFollowerOverride = new();
     private readonly CheckBox _engageDodge = new();
     private readonly ComboBox _engageDodgeBinding = new();
@@ -352,9 +349,6 @@ public sealed class MainWindow : Window
         _playerCount.SelectionChanged += (_, _) => UpdateTopologyOptions();
         _topologyVariant.SelectionChanged += (_, _) => UpdateClientRows();
         _applyLayout.IsCheckedChanged += (_, _) => UpdateLayoutControls();
-        _isolationConfirmed.IsCheckedChanged += (_, _) => UpdateBridgeControls();
-        _physicalIndex.SelectionChanged += (_, _) => UpdateBridgeControls();
-        _physicalDevice.TextChanged += (_, _) => UpdateBridgeControls();
         Opened += (_, _) =>
         {
             if (!OperatingSystem.IsWindows()) return;
@@ -433,6 +427,18 @@ public sealed class MainWindow : Window
         return panel;
     }
 
+    private static void CollapseAdvanced(StackPanel panel, int start, string title)
+    {
+        var content = new StackPanel { Spacing = 10 };
+        while (panel.Children.Count > start)
+        {
+            var child = panel.Children[start];
+            panel.Children.RemoveAt(start);
+            content.Children.Add(child);
+        }
+        panel.Children.Add(new Expander { Header = title, IsExpanded = false, Content = content });
+    }
+
     private static Border BuildSidebar()
     {
         var navigation = new StackPanel { Width = 194, Spacing = 18, Margin = new Thickness(20, 26) };
@@ -467,7 +473,7 @@ public sealed class MainWindow : Window
                 : "手柄操作：按下左摇杆 L3 控制 P1，按下右摇杆 R3 控制 P2；LT+L3/R3 切换 P3/P4，LT+方向键上/下切换 P5/P6。单独控制后松开并再按同一聚焦键，即可返回共同控制，让跟随者继续追近；快速连按也生效。切换到其他角色仍需间隔 350 毫秒，P3–P6 组合键除外。";
             _pairingStatus.Text = HybridSelected
                 ? "键鼠模式要求客户端 1 仅有 P1。启动游戏前会先建立虚拟手柄；绑定现有窗口后也可手动准备。"
-                : "实体手柄模式需要确认 HidHide 隔离与输入设备。";
+                : "实体手柄将在启动时自动检测；请先连接手柄。";
             UpdateBridgeControls();
         };
         panel.Children.Add(_inputMode);
@@ -476,6 +482,7 @@ public sealed class MainWindow : Window
         _focusGuide.Foreground = MutedBrush;
         _focusGuide.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(_focusGuide);
+        var advancedStart = panel.Children.Count;
         _hybridBindingsButton.Content = "设置键鼠按键映射";
         _hybridBindingsButton.HorizontalAlignment = HorizontalAlignment.Left;
         _hybridBindingsButton.Click += async (_, _) => await EditHybridBindingsAsync();
@@ -483,16 +490,7 @@ public sealed class MainWindow : Window
         _hybridBindingsStatus.Foreground = MutedBrush;
         _hybridBindingsStatus.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(_hybridBindingsStatus);
-        _physicalIndex.PlaceholderText = "实体手柄 XInput 编号";
-        _physicalIndex.ItemsSource = Enumerable.Range(0, 4).Select(index => $"XInput {index}").ToArray();
-        _physicalIndex.Width = 190;
-        _physicalIndex.HorizontalAlignment = HorizontalAlignment.Left;
-        panel.Children.Add(_physicalIndex);
-        _physicalDevice.Watermark = "HidHide 中已隐藏的实体手柄设备 ID";
-        panel.Children.Add(_physicalDevice);
-        panel.Children.Add(Label("从 HidHide 设备列表复制当前实体手柄的设备 ID；程序会读取隔离配置，但设备与 XInput 编号的对应仍需实机核对。", 12, MutedBrush));
-        _isolationConfirmed.Content = "我已确认实体手柄对游戏隐藏，仅由桥接读取";
-        panel.Children.Add(_isolationConfirmed);
+        panel.Children.Add(Label("连接手柄后，程序会自动寻找并检查输入隔离；无需填写设备编号。", 12, MutedBrush));
         _rightStickFollowerOverride.Content = "右摇杆暂时控制可活动的跟随角色（主角色不再使用右摇杆瞄准）";
         _rightStickFollowerOverride.IsCheckedChanged += (_, _) => UpdateBridgeControls();
         panel.Children.Add(_rightStickFollowerOverride);
@@ -618,6 +616,7 @@ public sealed class MainWindow : Window
         panel.Children.Add(_lastFocusedLeads);
         panel.Children.Add(Label("默认由 P1 带路，P2–P6 跟随；开启上方选项后，最近手动聚焦的角色会成为主控。", 12, MutedBrush));
         panel.Children.Add(_leadershipPreferenceStatus);
+        CollapseAdvanced(panel, advancedStart, "高级设置 · 按键、右摇杆与镜像");
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12, LineSpacing = 8 };
         _prepareBridge.Content = "准备虚拟手柄";
         _prepareBridge.Click += async (_, _) => await PrepareBridgeAsync();
@@ -913,10 +912,15 @@ public sealed class MainWindow : Window
     private Border BuildFollowStep()
     {
         var panel = Step("4", "自动跟随与追赶", "先完成配对，并在每个客户端启用只读位置传感器。4 人和 6 人布局可启动双角色跟随链路；当前传感器的本地双角色顺序仍是候选数据，未核验前引擎会等待并停止自动方向。距离与时效需要按实际游戏校准。");
+        panel.Children.Add(Label("配对完成后点击“开始跟随”。默认距离与时效可在高级设置中调整。", 12, MutedBrush));
+        var advancedStart = panel.Children.Count;
         _followStop.Name = "follow-stop-global";
         _followStop.Text = "9";
         _followCatchup.Name = "follow-catchup-global";
         _followCatchup.Text = "39.13940256045524";
+        _followMaxAge.Text = "600ms";
+        _followLogAge.Text = "1m";
+        panel.Children.Add(Label("时效采用独立版测试预设 600ms / 1m，仍需游戏内校准。", 12, MutedBrush));
         var fields = new (TextBox Box, string Label)[]
         {
             (_followStop, "停止距离（0.6.17 首次启动配置 9）"),
@@ -926,7 +930,7 @@ public sealed class MainWindow : Window
         foreach (var (box, label) in fields)
         {
             panel.Children.Add(Label(label, 12, MutedBrush));
-            box.Watermark = "明确填写";
+            box.Watermark = "按需调整";
             box.Width = 190;
             box.HorizontalAlignment = HorizontalAlignment.Left;
             box.TextChanged += (_, _) => UpdateFollowControls();
@@ -1052,6 +1056,7 @@ public sealed class MainWindow : Window
         _experimentalWarpClick.Content = "实验：跨区追赶（P1 带路时可靠近同入口；队伍传送；入口交互待验证）";
         _experimentalWarpClick.IsChecked = false;
         panel.Children.Add(_experimentalWarpClick);
+        CollapseAdvanced(panel, advancedStart, "高级设置 · 距离、追赶与时效");
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
         _startFollow.Content = "开始跟随";
         _startFollow.Click += async (_, _) => await StartFollowAsync();
@@ -1970,9 +1975,7 @@ public sealed class MainWindow : Window
             _menuGuardPreferenceReady && _menuGuard.IsChecked is bool &&
             _followerMirrorPreferenceReady &&
             (HybridSelected ? hybridSupported && _gameHotkeys?.IsStarted == true :
-                supported && _leadershipPreferenceReady && _lastFocusedLeads.IsChecked is bool &&
-                (useWgi || _physicalIndex.SelectedIndex is >= 0 and <= 3) &&
-                _isolationConfirmed.IsChecked == true && !string.IsNullOrWhiteSpace(_physicalDevice.Text));
+                supported && _leadershipPreferenceReady && _lastFocusedLeads.IsChecked is bool);
         _stopBridge.IsEnabled = _bridge is not null;
         _endSession.IsEnabled = OperatingSystem.IsWindows() && !_busy &&
             (_bridge is not null || _launchedClients.Count > 0);
@@ -2004,10 +2007,7 @@ public sealed class MainWindow : Window
         _playerCount.IsEnabled = _bridge is null && !_busy;
         _topologyVariant.IsEnabled = _bridge is null && !_busy;
         _inputMode.IsEnabled = _bridge is null && !_busy;
-        _physicalIndex.IsEnabled = !HybridSelected && _bridge is null && !_busy && !useWgi;
         _hybridBindingsButton.IsEnabled = _bridge is null && !_busy;
-        _physicalDevice.IsEnabled = !HybridSelected && _bridge is null && !_busy;
-        _isolationConfirmed.IsEnabled = !HybridSelected && _bridge is null && !_busy;
         _rightStickFollowerOverride.IsEnabled = !HybridSelected && _bridge is null && !_busy;
         _engageDodge.IsEnabled = !HybridSelected && _bridge is null && !_busy &&
             _rightStickFollowerOverride.IsChecked == true;
@@ -2522,7 +2522,8 @@ public sealed class MainWindow : Window
                 "5-main-solo" or "6-balanced");
     }
 
-    private async Task PrepareBridgeAsync(Client3PreResumeSession? pendingPrivate = null)
+    private async Task PrepareBridgeAsync(Client3PreResumeSession? pendingPrivate = null,
+        ControllerAutoSelection? prelaunchController = null)
     {
         if ((_busy && pendingPrivate is null) || _bridge is not null ||
             _selectedTopology is null || !OperatingSystem.IsWindows())
@@ -2554,10 +2555,7 @@ public sealed class MainWindow : Window
             return;
         }
         if (slots.Length is < 1 or > 4 || slots.Any(slot => slot is < 1 or > 4) ||
-            (slots.Length == 4 && !useWgi) ||
-            (!useWgi && _physicalIndex.SelectedIndex is < 0 or > 3) ||
-            _isolationConfirmed.IsChecked != true ||
-            string.IsNullOrWhiteSpace(_physicalDevice.Text))
+            (slots.Length == 4 && !useWgi))
         {
             _pairingStatus.Text = "当前布局或实体手柄隔离条件不满足桥接要求。";
             return;
@@ -2576,8 +2574,13 @@ public sealed class MainWindow : Window
         {
             var gameExecutables = Enumerable.Range(0, _selectedTopology.ClientCount)
                 .Select(index => _paths[index].Text?.Trim() ?? "").ToArray();
-            var session = await BridgeSession.StartAsync(executable, _selectedTopology.Slots, _physicalIndex.SelectedIndex,
-                _physicalDevice.Text.Trim(), gameExecutables, _rightStickFollowerOverride.IsChecked == true,
+            var selected = prelaunchController ?? await ControllerLaunchPreflight.DiscoverAsync(
+                executable, gameExecutables, useWgi);
+            if (!selected.Ready || selected.Device is null)
+                throw new InvalidOperationException(selected.Message);
+            var session = await BridgeSession.StartAsync(executable, _selectedTopology.Slots,
+                selected.PhysicalIndex ?? 0, selected.Device, gameExecutables,
+                _rightStickFollowerOverride.IsChecked == true,
                 _selectedTopology.Id is "2-split" or "3-three-singles" && _autoFlask.IsChecked == true,
                 useWgi, privatePlan, lastFocusedLeads: _lastFocusedLeads.IsChecked == true,
                 menuGuardEnabled: _menuGuard.IsChecked == true, followerMirror: _followerMirror,
@@ -3579,6 +3582,7 @@ public sealed class MainWindow : Window
         };
         BridgeSession? prelaunchBridge = null;
         Client3PreResumeSession? pendingPrivate = null;
+        ControllerAutoSelection? selectedController = null;
         var startRadarAfterBinding = false;
         try
         {
@@ -3620,11 +3624,6 @@ public sealed class MainWindow : Window
                     _status.Text = "先确认并保存菜单保护、跟随按键及右摇杆闪避设置；游戏尚未启动。";
                     return;
                 }
-                if (_isolationConfirmed.IsChecked != true || string.IsNullOrWhiteSpace(_physicalDevice.Text))
-                {
-                    _status.Text = "启动前请确认实体手柄隔离并填写所选设备 ID；游戏尚未启动。";
-                    return;
-                }
                 var bridgeExecutable = BridgeSession.FindExecutable();
                 if (bridgeExecutable is null)
                 {
@@ -3634,14 +3633,14 @@ public sealed class MainWindow : Window
                 var useWgi = _selectedTopology.Slots.Count(slot => slot.Client != 3) == 4;
                 var gameExecutables = Enumerable.Range(0, _selectedTopology.ClientCount)
                     .Select(index => _paths[index].Text?.Trim() ?? string.Empty).ToArray();
-                var preflight = await ControllerLaunchPreflight.CheckAsync(bridgeExecutable,
-                    _physicalDevice.Text.Trim(), gameExecutables,
-                    useWgi ? null : _physicalIndex.SelectedIndex, useWgi);
-                if (!preflight.Ready)
+                var selected = await ControllerLaunchPreflight.DiscoverAsync(bridgeExecutable,
+                    gameExecutables, useWgi);
+                if (!selected.Ready || selected.Device is null)
                 {
-                    _status.Text = preflight.Message;
+                    _status.Text = selected.Message;
                     return;
                 }
+                selectedController = selected;
                 if (_selectedTopology.ClientCount <= 2)
                 {
                     if (!_leadershipPreferenceReady || _lastFocusedLeads.IsChecked is not bool)
@@ -3656,8 +3655,8 @@ public sealed class MainWindow : Window
                         if (_bridge is not null) await StopBridgeAsync();
                         _status.Text = "正在连接虚拟手柄并核对槽位，游戏尚未启动…";
                         var session = await BridgeSession.StartAsync(bridgeExecutable,
-                            _selectedTopology.Slots, _physicalIndex.SelectedIndex,
-                            _physicalDevice.Text.Trim(), gameExecutables,
+                            _selectedTopology.Slots, selected.PhysicalIndex ?? 0,
+                            selected.Device, gameExecutables,
                             _rightStickFollowerOverride.IsChecked == true,
                             _selectedTopology.Id is "2-split" or "3-three-singles" && _autoFlask.IsChecked == true,
                             useWgi, lastFocusedLeads: _lastFocusedLeads.IsChecked == true,
@@ -3792,7 +3791,7 @@ public sealed class MainWindow : Window
                 }
                 else if (pendingPrivate is not null)
                 {
-                    await PrepareBridgeAsync(pendingPrivate);
+                    await PrepareBridgeAsync(pendingPrivate, selectedController);
                     if (_bridge is null)
                         throw new InvalidOperationException("第三客户端私有手柄未能接入主桥接：" +
                             _pairingStatus.Text);

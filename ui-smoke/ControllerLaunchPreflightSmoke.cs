@@ -24,6 +24,22 @@ internal static class ControllerLaunchPreflightSmoke
                     "--game-exe", "/game/PathOfExile.exe", "--game-exe", "/second/PathOfExile.exe"
                 }))
                 throw new Exception("Desktop did not bind the selected physical input to every game executable before launch.");
+            await File.WriteAllTextAsync(executable,
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" + arguments + "'\n" +
+                "printf '%s\\n' '{\"controller_ready\":true,\"device_instance\":\"HID\\\\VID_1234&PID_ABCD\\\\PAD\",\"physical_index\":2,\"message\":\"已自动找到手柄。\"}'\n");
+            File.SetUnixFileMode(executable, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            var automatic = await ControllerLaunchPreflight.DiscoverAsync(executable,
+                ["/game/PathOfExile.exe", "/second/PathOfExile.exe"], false);
+            actual = await File.ReadAllLinesAsync(arguments);
+            if (!automatic.Ready || automatic.Device != @"HID\VID_1234&PID_ABCD\PAD" ||
+                automatic.PhysicalIndex != 2 || !actual.SequenceEqual(new[]
+                {
+                    "--discover-controller", "--game-exe", "/game/PathOfExile.exe",
+                    "--game-exe", "/second/PathOfExile.exe"
+                }) || ControllerLaunchPreflight.ParseDiscovery(0,
+                    "{\"controller_ready\":true,\"device_instance\":\"HID\",\"physical_index\":null,\"message\":\"ok\"}",
+                    "", false).Ready)
+                throw new Exception($"Desktop controller discovery failed: {automatic}; args={string.Join(',', actual)}");
         }
         finally
         {

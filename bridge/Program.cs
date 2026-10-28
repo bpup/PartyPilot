@@ -169,6 +169,44 @@ if (args.Length > 0 && args[0] == "--check-startup")
     }
 }
 
+if (args.Length > 0 && args[0] == "--discover-controller")
+{
+    var useWgi = args.Contains("--physical-wgi");
+    var expected = 1 + (useWgi ? 1 : 0);
+    var discoveryGamePaths = new List<string>();
+    for (var index = expected; index < args.Length; index += 2)
+    {
+        if (index + 1 >= args.Length || args[index] != "--game-exe")
+        {
+            Console.Error.WriteLine("Invalid controller discovery arguments.");
+            return 2;
+        }
+        discoveryGamePaths.Add(args[index + 1]);
+    }
+    if (discoveryGamePaths.Count is < 1 or > 3 ||
+        args.Length != expected + discoveryGamePaths.Count * 2)
+    {
+        Console.Error.WriteLine("Controller discovery needs 1–3 game executables.");
+        return 2;
+    }
+    try
+    {
+        var found = ControllerAutoDiscovery.Discover(discoveryGamePaths, useWgi);
+        Console.WriteLine(JsonSerializer.Serialize(new { controller_ready = found.Ready,
+            device_instance = found.Device, physical_index = found.XInputIndex,
+            message = found.Message }));
+        return found.Ready ? 0 : 1;
+    }
+    catch (Exception error) when (error is IOException or System.ComponentModel.Win32Exception or
+        InvalidDataException or InvalidOperationException or UnauthorizedAccessException or
+        DllNotFoundException)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(new { controller_ready = false,
+            message = "无法读取手柄或 HidHide 设置：" + error.Message }));
+        return 1;
+    }
+}
+
 if (args.Length == 4 && args[0] == "--probe-xinput" && args[2] == "--samples" &&
     uint.TryParse(args[1], out var probeIndex) && probeIndex <= 3 &&
     int.TryParse(args[3], out var sampleCount) && sampleCount is >= 1 and <= 200)

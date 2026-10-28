@@ -29,6 +29,30 @@ if (!ControllerDeviceId.TryReadVidPid(@"HID\VID_1234&PID_ABCD\DEVICE", out var v
     ControllerDeviceId.TryReadVidPid(@"HID\VID_123&PID_ABCD\DEVICE", out _, out _) ||
     ControllerDeviceId.TryReadVidPid("XInput 0", out _, out _))
     throw new Exception("WGI physical source accepted an unbound or invalid VID/PID.");
+var hiddenController = @"HID\VID_1234&PID_ABCD\DEVICE";
+var controllerSnapshot = new HidHideSnapshot(true, false, [hiddenController],
+    [@"C:\Tools\PartyPilot.Bridge.exe"]);
+var autoController = ControllerAutoDiscovery.Select(controllerSnapshot,
+    @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+    false, [2], _ => true);
+if (!autoController.Ready || autoController.Device != hiddenController ||
+    autoController.XInputIndex != 2 ||
+    ControllerAutoDiscovery.Select(controllerSnapshot, @"C:\Tools\PartyPilot.Bridge.exe",
+        [@"C:\Game\PathOfExile.exe"], false, [1, 2], _ => true).Ready ||
+    ControllerAutoDiscovery.Select(controllerSnapshot with { HiddenDevices =
+        [hiddenController, @"HID\VID_5678&PID_EF01\SECOND"] },
+        @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+        false, [2], _ => true).Ready ||
+    ControllerAutoDiscovery.Select(controllerSnapshot with { Active = false },
+        @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+        false, [2], _ => true).Ready ||
+    !ControllerAutoDiscovery.Select(controllerSnapshot,
+        @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+        true, [], _ => true).Ready ||
+    ControllerAutoDiscovery.Select(controllerSnapshot,
+        @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+        true, [], _ => false).Ready)
+    throw new Exception("Automatic controller selection accepted ambiguous or unisolated input.");
 if (WgiIdentitySelection.SelectClaimedIndex(["physical", "virtual-1", "virtual-2"], "physical") != 0 ||
     WgiIdentitySelection.SelectClaimedIndex(["virtual-1", "physical", "virtual-2"], "physical") != 1 ||
     WgiIdentitySelection.SelectClaimedIndex(["virtual-1", "virtual-2"], "physical") != -1 ||

@@ -220,6 +220,17 @@ var focusHelp = window.GetLogicalDescendants().OfType<TextBlock>()
 if (focusHelp.Text?.Contains("L3") != true || focusHelp.Text.Contains("R3") != true ||
     focusHelp.Text.Contains("350 毫秒") != true)
     throw new Exception("Controller focus and return guidance was not shown.");
+var inputAdvanced = window.GetLogicalDescendants().OfType<Expander>()
+    .Single(item => item.Header?.ToString() == "高级设置 · 按键、右摇杆与镜像");
+var followAdvanced = window.GetLogicalDescendants().OfType<Expander>()
+    .Single(item => item.Header?.ToString() == "高级设置 · 距离、追赶与时效");
+if (inputAdvanced.IsExpanded || followAdvanced.IsExpanded)
+    throw new Exception("Technical setup controls were expanded in the normal first-use flow.");
+(window.CaptureRenderedFrame() ?? throw new Exception("First-use setup did not render."))
+    .Save(Path.GetFullPath("../PartyPilot-ui-first-run.png"));
+inputAdvanced.IsExpanded = true;
+followAdvanced.IsExpanded = true;
+Dispatcher.UIThread.RunJobs();
 inputMode.SelectedIndex = 1;
 if (focusHelp.Text?.Contains("F1") != true || focusHelp.Text.Contains("F2–F6") != true)
     throw new Exception("Keyboard focus guidance did not follow the selected input mode.");
@@ -946,12 +957,11 @@ var radarPanelOutput = Path.Combine(Path.GetDirectoryName(output)!, "PartyPilot-
 Console.WriteLine($"Headless preview saved to {output}.");
 var clientCount = window.GetLogicalDescendants().OfType<ComboBox>()
     .Single(item => item.PlaceholderText == "选择 1–6 人");
-var physicalIndex = window.GetLogicalDescendants().OfType<ComboBox>()
-    .Single(item => item.PlaceholderText == "实体手柄 XInput 编号");
-var isolation = window.GetLogicalDescendants().OfType<CheckBox>()
-    .Single(item => item.Content?.ToString()?.Contains("实体手柄对游戏隐藏") == true);
-var deviceInstance = window.GetLogicalDescendants().OfType<TextBox>()
-    .Single(item => item.Watermark?.ToString()?.Contains("实体手柄设备 ID") == true);
+if (window.GetLogicalDescendants().OfType<ComboBox>()
+        .Any(item => item.PlaceholderText == "实体手柄 XInput 编号") ||
+    window.GetLogicalDescendants().OfType<TextBox>()
+        .Any(item => item.Watermark?.ToString()?.Contains("实体手柄设备 ID") == true))
+    throw new Exception("Normal setup still asked the player to enter a controller ID.");
 var prepare = window.GetLogicalDescendants().OfType<Button>()
     .Single(item => item.Content?.ToString() == "准备虚拟手柄");
 var attach = window.GetLogicalDescendants().OfType<Button>()
@@ -1009,10 +1019,8 @@ if (fiveStop.Text != "42.71758436944938")
     throw new Exception("Five-player main-client solo layout used the wrong runtime stop slot.");
 clientCount.SelectedIndex = 3;
 Dispatcher.UIThread.RunJobs();
-physicalIndex.SelectedIndex = 0;
-isolation.IsChecked = true;
 Dispatcher.UIThread.RunJobs();
-if (prepare.IsEnabled) throw new Exception("Four virtual pads ignored missing device and game paths.");
+if (prepare.IsEnabled) throw new Exception("Four virtual pads ignored missing game paths.");
 var pathFields = window.GetLogicalDescendants().OfType<TextBox>()
     .Where(item => item.Watermark?.ToString()?.Contains("PathOfExile_x64.exe") == true)
     .ToArray();
@@ -1020,16 +1028,12 @@ if (pathFields.Length != 3 || !pathFields[0].IsEffectivelyVisible || !pathFields
 {
     throw new Exception($"Client selection did not show exactly two game path fields: {pathFields.Length} fields, effective visibility {string.Join(',', pathFields.Select(field => field.IsEffectivelyVisible))}.");
 }
-physicalIndex.SelectedIndex = -1;
-deviceInstance.Text = @"HID\VID_1234&PID_5678\DEVICE";
 pathFields[0].Text = "C:/GameA.exe";
 pathFields[1].Text = "D:/GameB.exe";
 Dispatcher.UIThread.RunJobs();
-if (!prepare.IsEnabled || physicalIndex.IsEnabled)
-    throw new Exception("Four-player WGI layout still required a public XInput physical index.");
+if (!prepare.IsEnabled)
+    throw new Exception("Four-player layout was blocked before automatic controller discovery.");
 pathFields[0].Text = pathFields[1].Text = "";
-deviceInstance.Text = "";
-physicalIndex.SelectedIndex = 0;
 Dispatcher.UIThread.RunJobs();
 if (args.Contains("--four-pad-ui-only"))
 {
@@ -1168,8 +1172,7 @@ if (p2Target.IsEffectivelyVisible)
     throw new Exception("Couch layout exposed unsupported live follow targets.");
 if (terrainPaths.Any(box => box.IsEffectivelyVisible) || terrainDodge.IsEnabled || classicSprint.IsEnabled)
     throw new Exception("Couch layout exposed unsupported live terrain controls.");
-if (prepare.IsEnabled) throw new Exception("Bridge preparation ignored missing device and game paths.");
-deviceInstance.Text = @"HID\VID_1234&PID_5678\DEVICE";
+if (prepare.IsEnabled) throw new Exception("Bridge preparation ignored the missing game path.");
 pathFields[0].Text = "C:/GameA.exe";
 Dispatcher.UIThread.RunJobs();
 if (!prepare.IsEnabled) throw new Exception("Supported two-player topology did not enable the physical bridge.");
@@ -1254,25 +1257,6 @@ if (args.Length > 2)
     await ResourcePolicyTool.PreviewAsync(args[2], resourcePlan).ConfigureAwait(false);
     Console.WriteLine("Desktop resource policy preview checked against the native tool.");
 }
-if (!OperatingSystem.IsWindows())
-{
-    var fakeResource = Path.Combine(Path.GetTempPath(), $"partypilot-resource-control-{Guid.NewGuid():N}.sh");
-    try
-    {
-        File.WriteAllText(fakeResource,
-            "#!/bin/sh\nIFS= read -r command\n[ \"$command\" = stop ] || exit 5\nexit 0\n");
-        File.SetUnixFileMode(fakeResource, UnixFileMode.UserRead | UnixFileMode.UserWrite |
-            UnixFileMode.UserExecute);
-        await using var session = await ResourcePolicySession.StartAsync(fakeResource, resourcePlan)
-            .ConfigureAwait(false);
-        if (session.HasExited) throw new Exception("Resource manager control test exited before stop.");
-        Console.WriteLine("Desktop resource manager stop channel checked with a local fake process.");
-    }
-    finally
-    {
-        File.Delete(fakeResource);
-    }
-}
 var shippingStopDirectory = Path.Combine(Path.GetTempPath(),
     "partypilot-shipping-stop-" + Guid.NewGuid().ToString("N"));
 try
@@ -1307,6 +1291,25 @@ try
 finally
 {
     if (Directory.Exists(shippingStopDirectory)) Directory.Delete(shippingStopDirectory, true);
+}
+if (!OperatingSystem.IsWindows())
+{
+    var fakeResource = Path.Combine(Path.GetTempPath(), $"partypilot-resource-control-{Guid.NewGuid():N}.sh");
+    try
+    {
+        File.WriteAllText(fakeResource,
+            "#!/bin/sh\nIFS= read -r command\n[ \"$command\" = stop ] || exit 5\nexit 0\n");
+        File.SetUnixFileMode(fakeResource, UnixFileMode.UserRead | UnixFileMode.UserWrite |
+            UnixFileMode.UserExecute);
+        await using var session = await ResourcePolicySession.StartAsync(fakeResource, resourcePlan)
+            .ConfigureAwait(false);
+        if (session.HasExited) throw new Exception("Resource manager control test exited before stop.");
+        Console.WriteLine("Desktop resource manager stop channel checked with a local fake process.");
+    }
+    finally
+    {
+        File.Delete(fakeResource);
+    }
 }
 await Task.Run(ProcessPipelineSmoke.RunAsync).ConfigureAwait(false);
 
