@@ -9,17 +9,23 @@ public sealed class DiagnosticSession : IDisposable
     private readonly Win32Memory _memory;
     private readonly string _hash;
     private readonly bool _recognizedBuild;
-    private readonly IReadOnlyList<AnchorCandidate> _anchors;
+    private readonly long _moduleBase;
+    private readonly int _moduleSize;
+    private IReadOnlyList<AnchorCandidate> _anchors;
+    private DateTime _nextAnchorScanUtc;
     private long _sequence;
 
     private DiagnosticSession(Process process, Win32Memory memory, string hash,
-        IReadOnlyList<AnchorCandidate> anchors)
+        long moduleBase, int moduleSize, IReadOnlyList<AnchorCandidate> anchors)
     {
         _process = process;
         _memory = memory;
         _hash = hash;
         _recognizedBuild = KnownGameLayout.ForSha256(hash) is not null;
+        _moduleBase = moduleBase;
+        _moduleSize = moduleSize;
         _anchors = anchors;
+        _nextAnchorScanUtc = DateTime.UtcNow.AddSeconds(5);
     }
 
     public int ProcessId => _process.Id;
@@ -35,7 +41,8 @@ public sealed class DiagnosticSession : IDisposable
         {
             var anchors = AnchorCandidateScanner.Find(module.BaseAddress.ToInt64(),
                 module.ModuleMemorySize, memory.TryRead);
-            return new DiagnosticSession(process, memory, hash, anchors);
+            return new DiagnosticSession(process, memory, hash,
+                module.BaseAddress.ToInt64(), module.ModuleMemorySize, anchors);
         }
         catch
         {
@@ -50,6 +57,13 @@ public sealed class DiagnosticSession : IDisposable
         var seenUtc = DateTime.UtcNow;
         if (_process.HasExited)
             return new { pid = _process.Id, sequence, seenUtc, status = "game_exited" };
+
+        if (_anchors.Count == 0 && seenUtc >= _nextAnchorScanUtc)
+        {
+            _anchors = AnchorCandidateScanner.Find(_moduleBase, _moduleSize,
+                _memory.TryRead);
+            _nextAnchorScanUtc = seenUtc.AddSeconds(5);
+        }
 
         long gameStateAddress = 0;
         var currentStateReadable = _anchors.Count == 1 &&
