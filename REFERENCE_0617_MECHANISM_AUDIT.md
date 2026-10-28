@@ -32,3 +32,20 @@
 `ProbeSession.CaptureMotion` 首先确认目标进程和当前区域实例可读；随后通过 `AreaEntityListReader.ReadEntities` 取得实体候选，再由 `PlayerSlotVectorResolver.Resolve` 在区域实例附近寻找本地角色向量。解析器只接受 1–2 项、指针结构和容量合理的向量，并核对每项是否指向角色实体；若出现多个相互冲突的有效顺序，返回不可靠。探针在区域变化或约五秒后重新解析；正常帧读取按顺序排列的角色位置，任意角色位置失败便发出 `playerOrderReliable=false`。桌面端 `MemoryReaderService.ApplyMotion` 只有在进程附着、顺序可靠且角色数量足够时才发布运动帧。
 
 这说明目标版的核心位置来源是**随软件运行的独立内存探针**，不是让用户先安装 ExileCore2 插件。它解释了 PartyPilot 当前“一键启动”仍不能做到目标版开箱即用的关键原因。偏移量在游戏更新后的有效性、区域实例与画面角色的对应，还须在 Windows/PoE2 中验证。
+
+## 本轮范围的静态覆盖表
+
+下表的“已读入口”均来自本机标记为 0.6.17 的程序集反编译文本，表示方法和控制流可读，**不表示游戏内已经复现**。
+
+| 用户流程 | 已读入口与确认的原理 | PartyPilot 当前差距 | 状态 |
+| --- | --- | --- | --- |
+| 客户端发现与启动 | `GameClientTypes` 列出 Steam、Epic、Standalone 与六种已知进程名；`EpicGameClientDiscoveryService` 读 Epic 安装清单。`MultiInstanceLaunchService` 对额外独立客户端检查 `FindigoMultiInstance.dll` 完整性，创建暂停进程、加载运行时后恢复；`ShellViewModel.HomeCanStart` 汇总输入、人数、账号和会话状态。 | 本轮已加入目录选择与“一键启动”入口；Steam/Epic 自动发现、所有启动拓扑与目标版的处理顺序仍未对齐。 | 静态原理已读；启动实测待确认 |
+| 账号与登录 | `GameAccountCredentialStore` 用 Windows 当前用户保护保存每客户端邮箱和密码；`GameClientAutoLoginService` 核对窗口、识别登录表单或使用确认标记，填入后离开文本输入状态，配对首个 A 键才继续登录。 | 当前独立版有按客户端加密保存与手动字段标记；目标版的自动识别体验和准确率尚未复现。 | 静态原理已读；输入效果待确认 |
+| 手柄配对和切换 | `SetupViewModel` 展示逐客户端 P1–P6 配对顺序；`FocusModeService` 对聚焦按键做按下沿检测、组合键优先、350ms 防抖，同一角色再次触发则返回共同控制。`ControllerSlotBridgeService` 把两个输入样本写入共享映射，并有释放为中性输入的分支。 | PartyPilot 有配对引导和快捷键逻辑，但真实手柄识别、后台隔离和 P5/P6 桥接仍未实测。 | 静态原理已读；游戏输入待确认 |
+| 位置和角色顺序 | `ProbeSession.CaptureMotion` + `PlayerSlotVectorResolver` + `MemoryReaderService.ApplyMotion` 形成独立进程读取、顺序校验、失效拒收和运动帧发布链。 | PartyPilot 仍依赖 ExileCore2 插件；双角色位置入口为显式实验功能。 | 静态原理已读；独立探针未实现 |
+| 同区跟随和追赶 | `SmartFollowEngine.Compute/ComputeFresh` 按区域与领队重置，结合停止距离、领队轨迹、地形路径和冲刺条件输出停靠、跟随、追赶或手动接管状态。 | 独立版有跟随决策和追赶路径，但目标版阈值、每角色方向和游戏手感未逐场景对照。 | 静态原理已读；行为一致性待确认 |
+| 换区与传送 | `SmartFollowTransitionCoordinator` 持有入口/传送门目标、队长与跟随客户端区域证据、接近与交互状态；未确认进入时有失败和释放路径。 | 独立版相关路径仍是实验功能，入口对应与成功换区未实测。 | 静态原理已读；行为一致性待确认 |
+| Tab 地图 | `RadarOverlayService.Start` 启动独立雷达进程并传递游戏进程、热键和运动映射；`RadarFeedPump` 有地形缓存、访问区域网格、地图标记分类和渲染，包含任务点、传送点及出口。 | 独立版依赖 ExileCore2 标记与候选地形文件；地图完整性、方向和去迷雾未实测。 | 静态原理已读；数据与画面待确认 |
+| 主界面 | `MainWindow` 与 `SetupView`/`PlayView` 是 Avalonia 视图；`ShellViewModel` 有人数、客户端、输入、账号、启动条件和状态绑定。 | PartyPilot 也是 Avalonia，但布局与文案只做了简化，尚无 0.6.17 逐页实机截图对比。 | 静态结构已读；视觉/交互 1:1 待确认 |
+
+**研究结论：** 本轮目标功能的主要静态调用链均已找到，可以明确独立实现应替代哪些来源与流程；不能把“主要链路找到”表述为“全部代码已恢复”。完整 1:1 仍缺目标版与 PartyPilot 在同一 Windows/PoE2 环境下的逐项画面、输入和结果对照。尤其是目标版的独立位置/地图探针、PartyPilot 的手动插件依赖，是最先需要解决的结构性差距。
