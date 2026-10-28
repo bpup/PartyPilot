@@ -10,6 +10,19 @@ public static class AnchorCandidateScanner
         "83 00 00 00 8B 00 33 00 00 39 00 00 00 00 00 0F 85 00 00 00 00 00 00 00 00 00 E8",
         "x???x?x??x?????xx?????????x");
 
+    public static bool TryReadCurrentGameState(AnchorCandidate anchor,
+        Func<long, byte[], bool> read, out long gameStateAddress)
+    {
+        gameStateAddress = 0;
+        var pointerBytes = new byte[8];
+        if (!Win32Memory.Plausible(anchor.PointerStorage) ||
+            !read(anchor.PointerStorage, pointerBytes)) return false;
+        var pointer = BitConverter.ToInt64(pointerBytes);
+        if (!Win32Memory.Plausible(pointer)) return false;
+        gameStateAddress = pointer;
+        return true;
+    }
+
     public static IReadOnlyList<AnchorCandidate> Find(long moduleBase, int moduleSize,
         Func<long, byte[], bool> read)
     {
@@ -28,11 +41,9 @@ public static class AnchorCandidateScanner
                 var windowLength = Math.Min(64, buffer.Length - index);
                 if (!MemoryPattern.TryResolveRipPointer(matchAddress,
                         buffer.AsSpan(index, windowLength), 11, out var storage)) continue;
-                var pointerBytes = new byte[8];
-                if (!Win32Memory.Plausible(storage) || !read(storage, pointerBytes)) continue;
-                var pointer = BitConverter.ToInt64(pointerBytes);
-                if (!Win32Memory.Plausible(pointer)) continue;
-                found.Add(matchAddress, new AnchorCandidate(matchAddress, storage, pointer));
+                var anchor = new AnchorCandidate(matchAddress, storage, 0);
+                if (!TryReadCurrentGameState(anchor, read, out var pointer)) continue;
+                found.Add(matchAddress, anchor with { GameStateAddress = pointer });
             }
         }
         for (long offset = 0; offset < moduleSize; offset += chunkSize)

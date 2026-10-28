@@ -42,6 +42,14 @@ internal static class SelfTest
         Require(candidates.Count == 1 && candidates[0].MatchAddress == moduleBase + matchOffset &&
                 candidates[0].PointerStorage == moduleBase + storageOffset &&
                 candidates[0].GameStateAddress == 0x300000, "cross-chunk anchor");
+        BitConverter.GetBytes(0x310000L).CopyTo(image, storageOffset);
+        Require(AnchorCandidateScanner.TryReadCurrentGameState(candidates[0], Read,
+                out var updatedState) && updatedState == 0x310000,
+            "current GameState pointer replaces scanned snapshot");
+        Array.Clear(image, storageOffset, 8);
+        Require(!AnchorCandidateScanner.TryReadCurrentGameState(candidates[0], Read,
+                out _), "invalid current GameState pointer rejected");
+        BitConverter.GetBytes(0x300000L).CopyTo(image, storageOffset);
         bool ReadSmallOnly(long address, byte[] destination) =>
             destination.Length <= 4096 + 128 && Read(address, destination);
         Require(AnchorCandidateScanner.Find(moduleBase, image.Length, ReadSmallOnly).Count == 1,

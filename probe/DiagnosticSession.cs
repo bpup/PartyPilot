@@ -51,15 +51,18 @@ public sealed class DiagnosticSession : IDisposable
         if (_process.HasExited)
             return new { pid = _process.Id, sequence, seenUtc, status = "game_exited" };
 
-        var selection = _anchors.Count == 1
-            ? LayoutCandidateResolver.Resolve(_anchors[0].GameStateAddress, _hash,
-                _memory.TryRead)
+        long gameStateAddress = 0;
+        var currentStateReadable = _anchors.Count == 1 &&
+            AnchorCandidateScanner.TryReadCurrentGameState(_anchors[0], _memory.TryRead,
+                out gameStateAddress);
+        var selection = currentStateReadable
+            ? LayoutCandidateResolver.Resolve(gameStateAddress, _hash, _memory.TryRead)
             : new LayoutCandidateSelection(null, null, 0);
         var layout = selection.Layout;
         var state = selection.State;
         var validated = layout is not null && state is not null;
         var roles = validated
-            ? RoleCandidateDiagnostic.Capture(_anchors[0].GameStateAddress, layout!,
+            ? RoleCandidateDiagnostic.Capture(gameStateAddress, layout!,
                 _memory.TryRead) : null;
         var status = roles?.Status == "role_position_candidates_unverified"
             ? (_recognizedBuild ? "role_position_candidates_unverified" :
@@ -82,7 +85,7 @@ public sealed class DiagnosticSession : IDisposable
             validLayoutCount = selection.ValidLayoutCount,
             candidateCount = _anchors.Count,
             // Addresses and positions are diagnostics only. No control frame is emitted.
-            gameStateAddress = validated ? $"0x{_anchors[0].GameStateAddress:X}" : null,
+            gameStateAddress = validated ? $"0x{gameStateAddress:X}" : null,
             areaInstanceAddress = validated ? $"0x{state!.AreaInstanceAddress:X}" : null,
             baseAreaLevel = validated ? state!.BaseAreaLevel : (int?)null,
             monsterLevel = validated ? state!.MonsterLevel : (int?)null,
