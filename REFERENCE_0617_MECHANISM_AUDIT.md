@@ -71,3 +71,7 @@
 | `memory-probe/MultiPilotMemoryProbe.dll` | `2fcc449e258315c13b6a0788ca8acb9de234c8cdf7007fabc5873985d2ab41f6` | .NET 托管可执行文件，1,344,000 字节 |
 
 **授权与偏移的证据边界：** `LicenseSession` 静态代码显示激活响应验签、解包加密偏移密钥及会话心跳；`OffsetCatalog` 同时有 `CreateDefault()`，使用内嵌签名和默认偏移，另有 `ActivateSealed(key)` 切换到解封后的配置。因而“存在服务端密钥”是事实，“所有功能在任何情况下都必须取得该密钥”仍是待确认。未执行或修改授权流程，不能称为已破解。
+
+## 独立探针诊断的未知构建边界
+
+目标版 `GameBuildOffsetOverrides` 对未知 EXE 哈希会尝试最近布局并做实时校验。独立探针现在也允许**只读诊断**未知哈希：扫描签名后分别尝试安装包内可见的原始布局与 0.5.5 布局；只有恰好一个布局通过状态指针和区域等级校验，才继续寻找角色向量并输出带 `unverified_unknown_build` 状态的候选坐标。两个布局都通过则报 `layout_ambiguous`，两个都失败则报 `unknown_build_unverified`。这些结果绝不作为跟随控制输入。已用合成内存验证唯一布局与冲突拒收，并将 Windows 探针加入预览包构建与 CI 离线自测；当前游戏构建是否匹配仍待 Windows/PoE2 运行核对。

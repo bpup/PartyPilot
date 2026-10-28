@@ -3,22 +3,58 @@ namespace PartyPilot.Probe;
 public sealed record KnownGameLayout(string Name, int IngameStateSlot,
     int AreaInstanceSlot, int BaseAreaLevelOffset, int MonsterLevelOffset)
 {
+    private static readonly KnownGameLayout Original =
+        new("supplied original build", 136, 656, 192, 196);
+    private static readonly KnownGameLayout Profile055 =
+        new("supplied 0.5.5 profile", 144, 656, 192, 188);
+
     public static KnownGameLayout? ForSha256(string hash) => hash.ToUpperInvariant() switch
     {
         // Hashes and offsets are observed in the supplied 0.6.17 files. A
         // matching hash identifies a static profile, not a live game result.
         "D6BAC03A460177DCB1E9C621B6D3D0F432C94E32BE1CB9BB58DC1F23EC0934C3"
-            => new("supplied original build", 136, 656, 192, 196),
+            => Original,
         "BB8627EB41FEBE3F2BE0AA19ED28E5891D5EBD002EEE4F819DB569EA91203DC2"
-            => new("supplied 0.5.5 profile", 144, 656, 192, 188),
+            => Profile055,
         "457B5B09A4F1CBBEB2AAC0958138350BF96947B39A1E639F6ADCC195576636EF"
-            => new("supplied 0.5.5 profile", 144, 656, 192, 188),
+            => Profile055,
         _ => null
     };
+
+    public static IReadOnlyList<KnownGameLayout> DiagnosticCandidates(string hash)
+    {
+        var known = ForSha256(hash);
+        return known is null ? [Original, Profile055] : [known];
+    }
 }
 
 public sealed record StateCandidate(long IngameStateAddress, long AreaInstanceAddress,
     int BaseAreaLevel, int MonsterLevel);
+
+public sealed record LayoutCandidateSelection(KnownGameLayout? Layout,
+    StateCandidate? State, int ValidLayoutCount);
+
+public static class LayoutCandidateResolver
+{
+    public static LayoutCandidateSelection Resolve(long gameStateAddress, string executableHash,
+        Func<long, byte[], bool> read)
+    {
+        KnownGameLayout? selectedLayout = null;
+        StateCandidate? selectedState = null;
+        var count = 0;
+        foreach (var layout in KnownGameLayout.DiagnosticCandidates(executableHash))
+        {
+            if (!StateCandidateValidator.TryRead(gameStateAddress, layout, read, out var state))
+                continue;
+            count++;
+            selectedLayout = layout;
+            selectedState = state;
+        }
+        return count == 1
+            ? new LayoutCandidateSelection(selectedLayout, selectedState, count)
+            : new LayoutCandidateSelection(null, null, count);
+    }
+}
 
 public static class StateCandidateValidator
 {

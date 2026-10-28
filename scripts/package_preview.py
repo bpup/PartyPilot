@@ -13,6 +13,7 @@ OUTPUT = ROOT.parent / "PartyPilot-preview.zip"
 TEMP = OUTPUT.with_suffix(".zip.tmp")
 REQUIRED = {
     "release/desktop/PartyPilot.Desktop.exe",
+    "release/probe/PartyPilot.Probe.exe",
     "release/bridge/PartyPilot.Bridge.exe",
     "release/PartyPilot-LiveFollow.exe",
     "release/PartyPilot-BridgeFeed.exe",
@@ -55,6 +56,10 @@ def refresh_binaries() -> None:
          "-r", "win-x64", "--self-contained", "true",
          "-p:PublishSingleFile=true", "-p:IncludeNativeLibrariesForSelfExtract=true",
          "-o", "release/bridge"], cwd=ROOT, check=True)
+    run(["dotnet", "publish", "probe/PartyPilot.Probe.csproj", "-c", "Release",
+         "-r", "win-x64", "--self-contained", "true",
+         "-p:PublishSingleFile=true", "-p:IncludeNativeLibrariesForSelfExtract=true",
+         "-o", "release/probe"], cwd=ROOT, check=True)
     run(["dotnet", "build", "sensor/PartyPilot.Sensor.csproj", "-c", "Release"],
         cwd=ROOT, env={**os.environ, "EXILECORE2_DIR": exilecore}, check=True)
     built = ROOT / "sensor/bin/Release/net8.0-windows"
@@ -83,6 +88,11 @@ def check_binaries_current() -> None:
         ROOT / "release/bridge/PartyPilot.Bridge.exe":
             [*source_files("bridge"), *ROOT.glob("common/*.cs"),
              ROOT / "bridge/PartyPilot.Bridge.csproj"],
+        ROOT / "release/probe/PartyPilot.Probe.exe":
+            [*source_files("probe"), ROOT / "probe/PartyPilot.Probe.csproj",
+             ROOT / "sensor/LocalSlotCandidateScanner.cs",
+             ROOT / "sensor/RawCharacterPathReader.cs",
+             ROOT / "sensor/RawRenderPositionReader.cs"],
         ROOT / "release/PartyPilot.Sensor.dll":
             [*source_files("sensor"), *shared,
              ROOT / "sensor/PartyPilot.Sensor.csproj"],

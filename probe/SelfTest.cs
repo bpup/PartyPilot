@@ -80,6 +80,19 @@ internal static class SelfTest
         Require(StateCandidateValidator.TryRead(0x300000, layout!, ReadState, out var state) &&
                 state is { IngameStateAddress: 0x400000, AreaInstanceAddress: 0x500000,
                     BaseAreaLevel: 12, MonsterLevel: 14 }, "validated area candidate");
+        Require(LayoutCandidateResolver.Resolve(0x300000, "unknown", ReadState)
+            is { Layout.IngameStateSlot: 136, ValidLayoutCount: 1 },
+            "unknown build unique diagnostic layout");
+        Write(0x300000 + 144, BitConverter.GetBytes(0x400000L));
+        Write(0x500000 + 188, BitConverter.GetBytes(13));
+        Require(LayoutCandidateResolver.Resolve(0x300000, "unknown", ReadState)
+            is { Layout: null, State: null, ValidLayoutCount: 2 },
+            "unknown build ambiguous layout rejected");
+        Require(LayoutCandidateResolver.Resolve(0x300000, originalHash, ReadState)
+            is { Layout.IngameStateSlot: 136, ValidLayoutCount: 1 },
+            "known build profile stays pinned");
+        for (var index = 0; index < 8; index++) bytesByAddress.Remove(0x300000 + 144 + index);
+        for (var index = 0; index < 4; index++) bytesByAddress.Remove(0x500000 + 188 + index);
         Write(0x500000 + 196, BitConverter.GetBytes(101));
         Require(!StateCandidateValidator.TryRead(0x300000, layout!, ReadState, out _),
             "invalid area level rejected");

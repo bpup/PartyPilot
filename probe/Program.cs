@@ -40,35 +40,36 @@ foreach (var process in processes)
             var path = module.FileName;
             using var file = File.OpenRead(path);
             var hash = Convert.ToHexString(SHA256.HashData(file));
-            var layout = KnownGameLayout.ForSha256(hash);
-            if (layout is null)
-            {
-                Console.WriteLine(JsonSerializer.Serialize(new
-                {
-                    pid = process.Id, status = "unknown_game_build", exeSha256 = hash
-                }));
-                continue;
-            }
+            var recognizedBuild = KnownGameLayout.ForSha256(hash) is not null;
             using var memory = Win32Memory.Open(process.Id);
             var candidates = AnchorCandidateScanner.Find(module.BaseAddress.ToInt64(),
                 module.ModuleMemorySize, memory.TryRead);
-            StateCandidate? state = null;
-            var validated = candidates.Count == 1 &&
-                StateCandidateValidator.TryRead(candidates[0].GameStateAddress, layout,
-                    memory.TryRead, out state);
+            var selection = candidates.Count == 1
+                ? LayoutCandidateResolver.Resolve(candidates[0].GameStateAddress, hash,
+                    memory.TryRead)
+                : new LayoutCandidateSelection(null, null, 0);
+            var layout = selection.Layout;
+            var state = selection.State;
+            var validated = layout is not null && state is not null;
             var roles = validated
-                ? RoleCandidateDiagnostic.Capture(candidates[0].GameStateAddress, layout,
+                ? RoleCandidateDiagnostic.Capture(candidates[0].GameStateAddress, layout!,
                     memory.TryRead) : null;
             Console.WriteLine(JsonSerializer.Serialize(new
             {
                 pid = process.Id,
                 status = roles?.Status == "role_position_candidates_unverified"
-                    ? "role_position_candidates_unverified" :
-                    validated ? "area_candidate_only" :
+                    ? (recognizedBuild ? "role_position_candidates_unverified" :
+                        "role_position_candidates_unverified_unknown_build") :
+                    validated ? (recognizedBuild ? "area_candidate_only" :
+                        "area_candidate_unknown_build") :
                     candidates.Count == 0 ? "anchor_missing" :
-                    candidates.Count > 1 ? "anchor_ambiguous" : "state_unverified",
+                    candidates.Count > 1 ? "anchor_ambiguous" :
+                    selection.ValidLayoutCount > 1 ? "layout_ambiguous" :
+                    recognizedBuild ? "state_unverified" : "unknown_build_unverified",
                 exeSha256 = hash,
-                layout = layout.Name,
+                recognizedBuild,
+                layout = layout?.Name,
+                validLayoutCount = selection.ValidLayoutCount,
                 candidateCount = candidates.Count,
                 // Addresses are diagnostic only. No movement or radar frames are emitted.
                 gameStateAddress = validated ? $"0x{candidates[0].GameStateAddress:X}" : null,

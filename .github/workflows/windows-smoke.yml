@@ -24,6 +24,8 @@ jobs:
         run: dotnet run --project sensor-tests/PartyPilot.Sensor.Tests.csproj -c Release
         env:
           DOTNET_ROLL_FORWARD: Major
+      - name: Standalone probe offline checks
+        run: dotnet run --project probe/PartyPilot.Probe.csproj -c Release -- --self-test
       - name: Build ExileCore2 sensor plugin
         shell: pwsh
         run: |
