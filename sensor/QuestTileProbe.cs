@@ -123,7 +123,7 @@ internal static class QuestTileProbe
             var originY = y * 23 + shiftY;
             var gridX = originX + 11.5;
             var gridY = originY + 11.5;
-            if (originX <= 0 || originY <= 0 ||
+            if (originX < 0 || originY < 0 ||
                 originX >= layout.TilesX * 23 || originY >= layout.TilesY * 23)
                 continue;
             anchors.Add(new(path, marker.Category, marker.Label,

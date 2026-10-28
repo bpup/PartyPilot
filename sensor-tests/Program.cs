@@ -916,6 +916,13 @@ void TestQuestTileProbe()
         "Repeated generic tiles were not grouped to the representative site.");
     Array.Clear(records);
     BitConverter.GetBytes(asset).CopyTo(records, 8);
+    var edge = QuestTileProbe.Scan(new(area, 232, 4, 4), 92, 92, "MapHeadland", Read);
+    Require(edge is { Status: "candidate_tiles_observed",
+        Anchors: [{ Category: "boss", TileX: 0, TileY: 0,
+            GridX: 11.5, GridY: 11.5 }] },
+        "A generic landmark at the top-left map edge was dropped.");
+    Array.Clear(records);
+    BitConverter.GetBytes(asset).CopyTo(records, 8);
     records[52] = 1;
     records[53] = 2;
     records[54] = 1;
