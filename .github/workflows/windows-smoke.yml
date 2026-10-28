@@ -83,6 +83,47 @@ jobs:
               throw "Probe did not release test process $($target.Id)"
             }
           }
+      - name: Exercise three dual-role probe fixtures
+        shell: pwsh
+        run: |
+          cmake -S native/probe-fixture -B "$env:RUNNER_TEMP/probe-fixture" -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build "$env:RUNNER_TEMP/probe-fixture" --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $log = Join-Path $env:RUNNER_TEMP "probe-dual-roles.jsonl"
+          $probe = Start-Process "probe/bin/Release/net9.0/PartyPilot.Probe.exe" -ArgumentList "--watch" -RedirectStandardOutput $log -PassThru
+          $targets = @()
+          try {
+            $targetPath = Join-Path $env:RUNNER_TEMP "probe-fixture/Release/PathOfExile_x64.exe"
+            for ($client = 1; $client -le 3; $client++) {
+              Start-Sleep -Seconds 1
+              $targets += Start-Process $targetPath -PassThru
+            }
+            Start-Sleep -Seconds 11
+            foreach ($target in $targets) { Stop-Process -Id $target.Id -Force }
+            Start-Sleep -Seconds 1
+          } finally {
+            foreach ($target in $targets) { Stop-Process -Id $target.Id -Force -ErrorAction SilentlyContinue }
+            Stop-Process -Id $probe.Id -Force -ErrorAction SilentlyContinue
+          }
+          $frames = @(Get-Content $log | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+          foreach ($target in $targets) {
+            if (-not ($frames | Where-Object { $_.pid -eq $target.Id -and $_.status -eq "anchor_missing" })) {
+              throw "Probe did not wait for fixture $($target.Id) to publish its state"
+            }
+            if (-not ($frames | Where-Object {
+              $_.pid -eq $target.Id -and
+              $_.status -eq "role_position_candidates_unverified_unknown_build" -and
+              $_.roleCandidates.Count -eq 2 -and
+              $_.orderedAddresses.Count -eq 2 -and
+              $_.vectorHeaderAddress
+            })) {
+              throw "Probe did not read both fixture roles for process $($target.Id)"
+            }
+            if (-not ($frames | Where-Object { $_.pid -eq $target.Id -and $_.status -eq "game_exited" })) {
+              throw "Probe did not release fixture $($target.Id)"
+            }
+          }
       - name: Build and exercise multi-instance runtime
         shell: pwsh
         run: |
