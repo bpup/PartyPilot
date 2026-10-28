@@ -697,7 +697,7 @@ public sealed class MainWindow : Window
                 if (choice.SelectedItem is string executable)
                 {
                     _paths[clientIndex].Text = executable;
-                    location.Text = $"已选择：{Path.GetFileName(executable)} · {Path.GetDirectoryName(executable)}";
+                    location.Text = $"已选择：{Path.GetFileName(executable)}";
                 }
             };
             row.Children.Add(choice);
@@ -707,7 +707,7 @@ public sealed class MainWindow : Window
                 ClearLaunchedClients();
                 location.Text = string.IsNullOrWhiteSpace(path.Text)
                     ? "尚未选择游戏目录"
-                    : $"已选择：{Path.GetFileName(path.Text.Trim())} · {Path.GetDirectoryName(path.Text.Trim())}";
+                    : $"已选择：{Path.GetFileName(path.Text.Trim())}";
             };
             var advanced = new StackPanel { Spacing = 7 };
             advanced.Children.Add(Label("游戏程序路径（仅在目录选择无法使用时修改）", 12, MutedBrush));
@@ -765,7 +765,7 @@ public sealed class MainWindow : Window
             _gameLocations[index].Text = executables.Count switch
             {
                 0 => "所选目录没有找到流放之路 2 游戏程序，请选择安装目录。",
-                1 => $"已选择：{Path.GetFileName(executables[0])} · {directory}",
+                1 => $"已选择：{Path.GetFileName(executables[0])}",
                 _ => "发现多个游戏程序，请选择要启动的版本。"
             };
         }
