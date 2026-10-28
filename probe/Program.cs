@@ -30,14 +30,6 @@ if (processes.Length == 0)
     return;
 }
 
-var knownHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-{
-    // Executable SHA-256 values explicitly recognized by the supplied probe.
-    "D6BAC03A460177DCB1E9C621B6D3D0F432C94E32BE1CB9BB58DC1F23EC0934C3",
-    "BB8627EB41FEBE3F2BE0AA19ED28E5891D5EBD002EEE4F819DB569EA91203DC2",
-    "457B5B09A4F1CBBEB2AAC0958138350BF96947B39A1E639F6ADCC195576636EF"
-};
-
 foreach (var process in processes)
 {
     try
@@ -48,7 +40,8 @@ foreach (var process in processes)
             var path = module.FileName;
             using var file = File.OpenRead(path);
             var hash = Convert.ToHexString(SHA256.HashData(file));
-            if (!knownHashes.Contains(hash))
+            var layout = KnownGameLayout.ForSha256(hash);
+            if (layout is null)
             {
                 Console.WriteLine(JsonSerializer.Serialize(new
                 {
@@ -59,15 +52,24 @@ foreach (var process in processes)
             using var memory = Win32Memory.Open(process.Id);
             var candidates = AnchorCandidateScanner.Find(module.BaseAddress.ToInt64(),
                 module.ModuleMemorySize, memory.TryRead);
+            StateCandidate? state = null;
+            var validated = candidates.Count == 1 &&
+                StateCandidateValidator.TryRead(candidates[0].GameStateAddress, layout,
+                    memory.TryRead, out state);
             Console.WriteLine(JsonSerializer.Serialize(new
             {
                 pid = process.Id,
-                status = candidates.Count == 1 ? "anchor_candidate_only" :
-                    candidates.Count == 0 ? "anchor_missing" : "anchor_ambiguous",
+                status = validated ? "area_candidate_only" :
+                    candidates.Count == 0 ? "anchor_missing" :
+                    candidates.Count > 1 ? "anchor_ambiguous" : "state_unverified",
                 exeSha256 = hash,
+                layout = layout.Name,
                 candidateCount = candidates.Count,
                 // Addresses are diagnostic only. No movement or radar frames are emitted.
-                gameStateAddress = candidates.Count == 1 ? $"0x{candidates[0].GameStateAddress:X}" : null
+                gameStateAddress = validated ? $"0x{candidates[0].GameStateAddress:X}" : null,
+                areaInstanceAddress = validated ? $"0x{state!.AreaInstanceAddress:X}" : null,
+                baseAreaLevel = validated ? state!.BaseAreaLevel : (int?)null,
+                monsterLevel = validated ? state!.MonsterLevel : (int?)null
             }));
         }
     }
