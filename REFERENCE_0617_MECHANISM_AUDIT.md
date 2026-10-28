@@ -8,7 +8,7 @@
 | 跟随和追赶 | `SmartFollowEngine.Compute` 接受运动帧、地形、停靠距离、领队和追赶参数；区域或领队变化时重置路径；`ComputeFresh` 使用领队轨迹、停靠区、路径/视线与冲刺条件产生状态和方向。`PartyFollowSession` 负责临时领队/目标选择，不等于驱动角色的全部链路。 | 帧如何在所有拓扑中分发、控制输出是否被游戏消费、距离阈值的游戏内手感以及跨区域追赶表现。 |
 | 多客户端输入 | `AssignedRuntime.LocalClient` 根据 `ClientAssignment.Slots` 建立每客户端运行时；核心与手动输入进入双槽输出仲裁，最终调用 `ControllerSlotBridgeService.Submit`。桥接服务可见 P5/P6 的共享内存样本和停止时的中性输入。 | 桥接模块在目标 Windows/游戏进程中是否成功加载；手柄和键鼠两套实际路由；前后台窗口切换时输入是否正确隔离。 |
 | Tab 地图 | `RadarOverlayService.Start` 按游戏进程、热键、运动映射和角色掩码启动雷达进程；`RadarFeedPump.ToggleOverlay` 切换显示，数据处理里有地形缓存、访问区域网格、传送点/出口/任务标记分类和雷达绘制。 | 0.6.17 实际运行时的标记准确率、迷雾边界、任务点来源、分辨率/窗口模式覆盖与 Tab 热键冲突。 |
-| 中文 UI/启动 | 安装目录 `Assets/getting-started/quick-start.html` 描述自动发现 Client 1、添加游戏、账号保存、输入选择、READY 逐人配对；官方网页有操作截图与雷达设置说明。 | 精确的 0.6.17 窗口布局、完整中文文案、键位默认值和全部交互状态；部分随包指南混有其他构建版本内容。 |
+| 中文 UI/启动 | 安装目录 `Assets/getting-started/quick-start.html` 描述自动发现 Client 1、添加游戏、账号保存、输入选择、READY 逐人配对；反编译工程中可见 `SetupView`、`PlayView`、`PairingOverlayViewModel`、`ShellViewModel` 等视图与状态类。 | 精确的 0.6.17 窗口布局、完整中文文案、样式资源、键位默认值和全部交互状态；部分随包指南混有其他构建版本内容。 |
 
 ## 对“1:1”的判定
 
