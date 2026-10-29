@@ -134,7 +134,8 @@ internal sealed class RadarSession : IAsyncDisposable
 
     private async Task ReceiveLoopAsync()
     {
-        var lastQueued = new Dictionary<int, DateTime>();
+        var lastQueuedFull = new Dictionary<int, DateTime>();
+        var lastQueuedMotion = new Dictionary<int, DateTime>();
         try
         {
             while (!_cancellation.IsCancellationRequested)
@@ -146,9 +147,9 @@ internal sealed class RadarSession : IAsyncDisposable
                     if (RadarFrames.TryParse(packet.Buffer, pid, DateTime.UtcNow, out var frame) &&
                         frame != null)
                     {
-                        if (lastQueued.TryGetValue(pid, out var previous) && frame.SeenUtc <= previous)
+                        if (lastQueuedFull.TryGetValue(pid, out var previous) && frame.SeenUtc <= previous)
                             break;
-                        lastQueued[pid] = frame.SeenUtc;
+                        lastQueuedFull[pid] = frame.SeenUtc;
                         RadarTerrainCapture? terrain = null;
                         if (_manualTerrains is not null && _manualTerrains.TryGetValue(pid, out var manual) &&
                             manual.Matches(frame))
@@ -177,9 +178,9 @@ internal sealed class RadarSession : IAsyncDisposable
                     }
                     if (!RadarMotionFrame.TryParse(packet.Buffer, pid, DateTime.UtcNow,
                             out var motion) || motion is null) continue;
-                    if (lastQueued.TryGetValue(pid, out var last) && motion.SeenUtc <= last)
+                    if (lastQueuedMotion.TryGetValue(pid, out var last) && motion.SeenUtc <= last)
                         break;
-                    lastQueued[pid] = motion.SeenUtc;
+                    lastQueuedMotion[pid] = motion.SeenUtc;
                     var mailbox = _motionMailboxes[pid];
                     if (!mailbox.Offer(motion)) break;
                     Dispatcher.UIThread.Post(() =>
