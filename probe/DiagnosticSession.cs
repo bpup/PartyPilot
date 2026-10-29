@@ -169,7 +169,11 @@ public sealed class DiagnosticSession : IDisposable
             baseline.State, baseline.Roles, _memory.TryRead);
         if (roles is null ||
             AreaHashCandidate.ReadStable(baseline.State.AreaInstanceAddress, _memory.TryRead)
-                != baseline.AreaHash)
+                != baseline.AreaHash ||
+            !AnchorCandidateScanner.TryReadCurrentGameState(_anchors[0], _memory.TryRead,
+                out var stateAfterAddress) || stateAfterAddress != baseline.GameStateAddress ||
+            Stopwatch.GetElapsedTime(baseline.ValidatedAtTimestamp) >
+                TimeSpan.FromMilliseconds(250))
             return RejectMotion();
         return ProbeOrderedFrame.TryEncode(_process.Id, DateTime.UtcNow,
             baseline.AreaHash, baseline.State.AreaInstanceAddress, roles) ?? RejectMotion();
