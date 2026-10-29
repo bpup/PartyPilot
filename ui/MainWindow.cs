@@ -3499,7 +3499,7 @@ public sealed class MainWindow : Window
             ("holding", "Close-range mirror") => "近距离镜像方向已输出；游戏内移动效果待验证。",
             ("holding", "Mirrored dodge / sprint") => "镜像闪避／冲刺方向已输出；游戏内效果待验证。",
             ("holding", _) => "跟随者已停靠，自动方向已停止。",
-            ("waiting", "missing position") => "缺少角色位置样本；请检查两端传感器与进程绑定。自动方向已停止。",
+            ("waiting", "missing position") => "缺少角色位置样本；请检查独立探针或传感器与进程绑定。自动方向已停止。",
             ("waiting", "different or unknown instance") => "两端尚无可用的同一区域实例证据；自动方向已停止。",
             ("waiting", "stale position") => "角色位置样本已过期；自动方向已停止。",
             ("waiting", "dead follower") => "传感器报告跟随角色生命值为零；自动与右摇杆方向已停止。",

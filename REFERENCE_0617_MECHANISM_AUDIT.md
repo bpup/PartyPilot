@@ -42,7 +42,7 @@
 | 客户端发现与启动 | `GameClientTypes` 列出 Steam、Epic、Standalone 与六种已知进程名；`EpicGameClientDiscoveryService` 读 Epic 安装清单。`MultiInstanceLaunchService` 对额外独立客户端检查 `FindigoMultiInstance.dll` 完整性，创建暂停进程、加载运行时后恢复；`ShellViewModel.HomeCanStart` 汇总输入、人数、账号和会话状态。 | 本轮已加入目录选择与“一键启动”入口；Steam/Epic 自动发现、所有启动拓扑与目标版的处理顺序仍未对齐。 | 静态原理已读；启动实测待确认 |
 | 账号与登录 | `GameAccountCredentialStore` 用 Windows 当前用户保护保存每客户端邮箱和密码；`GameClientAutoLoginService` 核对窗口、识别登录表单或使用确认标记，填入后离开文本输入状态，配对首个 A 键才继续登录。 | 当前独立版有按客户端加密保存与手动字段标记；目标版的自动识别体验和准确率尚未复现。 | 静态原理已读；输入效果待确认 |
 | 手柄配对和切换 | `SetupViewModel` 展示逐客户端 P1–P6 配对顺序；`FocusModeService` 对聚焦按键做按下沿检测、组合键优先、350ms 防抖，同一角色再次触发则返回共同控制。`ControllerSlotBridgeService` 把两个输入样本写入共享映射，并有释放为中性输入的分支。 | PartyPilot 有配对引导和快捷键逻辑，但真实手柄识别、后台隔离和 P5/P6 桥接仍未实测。 | 静态原理已读；游戏输入待确认 |
-| 位置和角色顺序 | `ProbeSession.CaptureMotion` + `PlayerSlotVectorResolver` + `MemoryReaderService.ApplyMotion` 形成独立进程读取、顺序校验、失效拒收和运动帧发布链。 | PartyPilot 的独立只读探针已有角色位置候选诊断；针对已识别构建新增显式实验性 UDP 有序帧出口，但桌面一键启动尚未接入，游戏内角色顺序和坐标未验证。默认控制仍依赖 ExileCore2 插件。 | 静态原理已读；独立控制链仅有实验性入口 |
+| 位置和角色顺序 | `ProbeSession.CaptureMotion` + `PlayerSlotVectorResolver` + `MemoryReaderService.ApplyMotion` 形成独立进程读取、顺序校验、失效拒收和运动帧发布链。 | PartyPilot 的独立只读探针已有角色位置候选诊断；针对已识别构建新增显式实验性 UDP 有序帧出口，4–6 人跟随会话已自动启动发布包内探针，游戏内角色顺序和坐标未验证。其他布局仍依赖传感器输入。 | 静态原理已读；独立控制链仅有实验性入口 |
 | 同区跟随和追赶 | `SmartFollowEngine.Compute/ComputeFresh` 按区域与领队重置，结合停止距离、领队轨迹、地形路径和冲刺条件输出停靠、跟随、追赶或手动接管状态。 | 独立版有跟随决策和追赶路径，但目标版阈值、每角色方向和游戏手感未逐场景对照。 | 静态原理已读；行为一致性待确认 |
 | 换区与传送 | `SmartFollowTransitionCoordinator` 持有入口/传送门目标、队长与跟随客户端区域证据、接近与交互状态；未确认进入时有失败和释放路径。 | 独立版相关路径仍是实验功能，入口对应与成功换区未实测。 | 静态原理已读；行为一致性待确认 |
 | Tab 地图 | `RadarOverlayService.Start` 启动独立雷达进程并传递游戏进程、热键和运动映射；`RadarFeedPump` 有地形缓存、访问区域网格、地图标记分类和渲染，包含任务点、传送点及出口。 | 独立版依赖 ExileCore2 标记与候选地形文件；地图完整性、方向和去迷雾未实测。 | 静态原理已读；数据与画面待确认 |
@@ -56,7 +56,7 @@
 
 **事实：** `AnchorScanRunner.Run` 从 `NoddPilot.Offsets.dll` 内嵌的 `signatures.json` 读取 `GameStatePattern` 与 `FileRootPattern`，扫描游戏进程模块，把匹配点转换为指针存储地址，再读取 `GameState` 指针。找到它后，优先检查指定的 `IngameState` 子状态，失败时做形状校验搜索；找不到会明确返回未解析。`GameBuildOffsetOverrides.Apply` 先计算游戏 EXE 的 SHA-256；静态代码内明确列有一个原始构建哈希和两个 2026-09-05 PoE2 0.5.5 客户端哈希。未知哈希在目标版会尝试最近的布局并继续做实时校验，不能因此认定当前游戏版本兼容。
 
-**事实：** 本仓库新增 `probe/`，它独立于 ExileCore2，用只读进程权限查找游戏进程，并验证 `GameState` 定位候选是否唯一。已知哈希使用对应静态布局；未知哈希仅在恰好一个候选布局通过状态校验时继续只读诊断。探针读取 `IngameState → AreaInstance`，核对区域等级范围并重读两个指针，发生变化即拒绝。对通过区域校验的进程，它复用仓库内已有的角色向量、角色路径与 Render 坐标解析器，只有同帧全部候选位置可读、读取前后向量顺序及区域均未变化时才输出 `role_position_candidates_unverified`。零候选、多候选、区域校验失败或部分坐标缺失均不输出有序帧。显式使用 `--watch --experimental-ordered-udp` 时，已识别构建的完整候选可向本机实时跟随端口发布实验性 `ordered_client` 帧；该标志表示静态结构通过校验，不代表游戏内顺序已验证。默认仍只输出诊断 JSON，桌面一键启动未接入此模式。
+**事实：** 本仓库新增 `probe/`，它独立于 ExileCore2，用只读进程权限查找游戏进程，并验证 `GameState` 定位候选是否唯一。已知哈希使用对应静态布局；未知哈希仅在恰好一个候选布局通过状态校验时继续只读诊断。探针读取 `IngameState → AreaInstance`，核对区域等级范围并重读两个指针，发生变化即拒绝。对通过区域校验的进程，它复用仓库内已有的角色向量、角色路径与 Render 坐标解析器，只有同帧全部候选位置可读、读取前后向量顺序及区域均未变化时才输出 `role_position_candidates_unverified`。零候选、多候选、区域校验失败或部分坐标缺失均不输出有序帧。显式使用 `--watch --experimental-ordered-udp` 时，已识别构建的完整候选可向本机实时跟随端口发布实验性 `ordered_client` 帧；该标志表示静态结构通过校验，不代表游戏内顺序已验证。探针默认仍只输出诊断 JSON；桌面 4–6 人跟随会话自动开启此实验模式，停止跟随时关闭探针。
 
 **待确认：** 当前 PoE2 EXE 哈希、签名是否仍匹配、`GameState → IngameState → AreaInstance` 的有效偏移、同窗口角色向量与位置坐标、雷达地形来源和 Windows 下读取权限。本机没有 Windows/PoE2，合成自测只能证明字节匹配、跨块读取、指针/等级校验、候选顺序及缺帧拒收的实现行为，不能证明游戏内可用。
 

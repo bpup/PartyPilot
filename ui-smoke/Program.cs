@@ -24,6 +24,7 @@ finally
 }
 
 PartyRosterCounterSmoke.Run();
+await IndependentProbeSessionSmoke.RunAsync();
 await PairingInGameWitnessSmoke.RunAsync();
 SessionGameClientShutdownSmoke.Run();
 FollowTargetChoicesSmoke.Run();

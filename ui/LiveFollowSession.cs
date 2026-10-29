@@ -11,6 +11,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
 {
     private readonly Process _process;
     private readonly BridgeSession _bridge;
+    private IndependentProbeSession? _independentProbe;
     private HashSet<int> _followerPads;
     private readonly PartyTopology _topology;
     private readonly Dictionary<int, int> _padToPlayer;
@@ -50,6 +51,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
 
     public FollowBridgeFrame Current { get; private set; }
     public bool Paused { get; private set; }
+    public bool IndependentProbeStarted => _independentProbe is not null;
     public bool ManualWarpActive => Volatile.Read(ref _manualWarpDesired) != 0;
     public event Action<FollowBridgeFrame>? StatusChanged;
     public event Action<string>? WarpStatusChanged;
@@ -479,12 +481,17 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 await bridge.SetWarpToMainSubscriptionAsync(true);
                 Volatile.Write(ref session._warpShortcutSubscribed, 1);
             }
+            if (orderedTopology && OperatingSystem.IsWindows() &&
+                IndependentProbeSession.FindExecutable() is { } probeExecutable)
+                session._independentProbe = await IndependentProbeSession.StartAsync(probeExecutable);
             return session;
         }
         catch (Exception error)
         {
             if (session is not null)
             {
+                if (session._independentProbe is { } probe)
+                    await probe.DisposeAsync();
                 bridge.MainInputChanged -= session.OnMainInputChanged;
                 bridge.WarpToMainPressed -= session.OnWarpToMainPressed;
                 if (session._wantsWarpShortcut && bridge.IsRunning)
@@ -841,6 +848,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         await _entryTask;
         await _writeControls;
         await _readError;
+        if (_independentProbe is { } probe) await probe.DisposeAsync();
         try
         {
             foreach (var pad in _followerPads)
