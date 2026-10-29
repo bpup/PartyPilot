@@ -483,7 +483,7 @@ public sealed class MainWindow : Window
                 ? "键鼠默认操作：F1 返回 P1，F2–F6 切换其他角色；返回 P1 后，其他角色恢复自动跟随。聚焦键可在上方按键映射中修改。"
                 : "手柄操作：按下左摇杆 L3 控制 P1，按下右摇杆 R3 控制 P2；LT+L3/R3 切换 P3/P4，LT+方向键上/下切换 P5/P6。单独控制后松开并再按同一聚焦键，即可返回共同控制，让跟随者继续追近；快速连按也生效。切换到其他角色仍需间隔 350 毫秒，P3–P6 组合键除外。";
             _pairingStatus.Text = HybridSelected
-                ? "键鼠模式要求客户端 1 仅有 P1。启动游戏前会先建立虚拟手柄；绑定现有窗口后也可手动准备。"
+                ? "键鼠模式会在启动游戏前准备虚拟手柄；三客户端各两人布局为独立版实验功能。"
                 : "实体手柄将在启动时自动检测；请先连接手柄。";
             UpdateBridgeControls();
         };
@@ -1424,8 +1424,8 @@ public sealed class MainWindow : Window
             _pairingStatus.Text = selection.PlayerCount == 1
                 ? "单人模式由 P1 原生键鼠操作；无需准备虚拟手柄。"
                 : HybridTopologySupport.CanBridge(selection)
-                    ? "客户端 1 仅有 P1；启动游戏前先建立键鼠虚拟手柄，绑定现有窗口后也可手动准备。"
-                    : "目标版键鼠模式要求客户端 1 仅有 P1；此布局的键鼠桥接尚未接入。";
+                    ? "启动游戏前先建立键鼠虚拟手柄；三客户端各两人布局仍需游戏内验证。"
+                    : "此布局的键鼠桥接尚未接入。";
         if (_bridge is null && topologyChanged) _autoFlask.IsChecked = selection?.Id is "2-split" or "3-three-singles";
         var count = _selectedTopology?.ClientCount ?? 0;
         if (_pairingCard is not null) _pairingCard.IsVisible = _launchedClients.Count > 0;
@@ -2906,7 +2906,7 @@ public sealed class MainWindow : Window
             HybridPairingPhase.AwaitNativeMain =>
                 "P1 使用鼠标登录和选角；进入游戏后点击“P1 已进入游戏”。此步由用户确认，尚无游戏内身份验证。",
             HybridPairingPhase.AwaitFollowerFocus =>
-                $"在游戏窗口按 {HybridKeyLabel(guide.CurrentPlayer - 1)}，切换到 P{guide.CurrentPlayer} 的客户端。",
+                $"在游戏窗口按 {HybridKeyLabel(guide.CurrentPlayer - 1)}，切换到 P{guide.CurrentPlayer}。",
             HybridPairingPhase.AwaitConfirmRelease =>
                 $"P{guide.CurrentPlayer} 窗口已前台；使用 {HybridKeyLabel(6)}/{HybridKeyLabel(7)}/{HybridKeyLabel(8)}/{HybridKeyLabel(9)} 选角，按 {HybridKeyLabel(11)} 发送虚拟手柄 A。",
             HybridPairingPhase.AwaitUserConfirmation =>
@@ -3637,7 +3637,7 @@ public sealed class MainWindow : Window
             !HybridTopologySupport.CanBridge(_selectedTopology) &&
             !(_selectedTopology.PlayerCount == 1 && HybridTopologySupport.HasNativeP1(_selectedTopology)))
         {
-            _status.Text = "目标版键鼠模式要求客户端 1 只有 P1；当前独立版暂不支持此布局的键鼠桥接。";
+            _status.Text = "当前布局的键鼠桥接尚未接入。";
             return;
         }
         var reusePreparedBridge = action == ClientAction.Start && _bridge is not null &&

@@ -35,5 +35,17 @@ internal static class HybridPairingGuideSmoke
         }
         if (five.Phase != HybridPairingPhase.Complete)
             throw new Exception("Client 3 followers did not complete keyboard pairing.");
+        var six = new HybridPairingGuide(PartyTopologies.ForPlayerCount(6)
+            .Single(item => item.Id == "6-balanced"));
+        if (!six.ConfirmNativeMain())
+            throw new Exception("Six-player native P1 pairing did not start.");
+        for (var player = 2; player <= 6; player++)
+        {
+            if (six.CurrentPlayer != player || !six.ObserveFocus(player) ||
+                !six.ObserveConfirmRelease(player) || !six.ConfirmFollowerJoined())
+                throw new Exception($"Six-player keyboard pairing stopped before P{player}.");
+        }
+        if (six.Phase != HybridPairingPhase.Complete)
+            throw new Exception("Six-player keyboard pairing did not complete.");
     }
 }

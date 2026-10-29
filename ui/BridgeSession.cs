@@ -225,7 +225,8 @@ internal sealed class BridgeSession : IAsyncDisposable
         var runtimePads = partySlots.Select(slot => slot.RuntimePad).ToArray();
         if (!(runtimePads.SequenceEqual([1, 3]) || runtimePads.SequenceEqual([1, 3, 4]) ||
               runtimePads.SequenceEqual([1, 3, 5]) ||
-              runtimePads.SequenceEqual([1, 3, 4, 5, 6])) ||
+              runtimePads.SequenceEqual([1, 3, 4, 5, 6]) ||
+              runtimePads.SequenceEqual([1, 2, 3, 4, 5, 6])) ||
             gameExecutables.Count != (runtimePads.Max() >= 5 ? 3 : 2) ||
             gameExecutables.Any(path => !Path.IsPathFullyQualified(path) || !File.Exists(path)))
             throw new ArgumentException("Keyboard prelaunch needs the selected topology and existing game executables.");
@@ -347,7 +348,8 @@ internal sealed class BridgeSession : IAsyncDisposable
         var supportedLayout = runtimePads.SequenceEqual([1, 3]) ||
             runtimePads.SequenceEqual([1, 3, 4]) ||
             runtimePads.SequenceEqual([1, 3, 5]) ||
-            runtimePads.SequenceEqual([1, 3, 4, 5, 6]);
+            runtimePads.SequenceEqual([1, 3, 4, 5, 6]) ||
+            runtimePads.SequenceEqual([1, 2, 3, 4, 5, 6]);
         if (!supportedLayout || clients.Count != (runtimePads.Max() >= 5 ? 3 : 2) ||
             !partySlots.Select(slot => slot.PartyPlayer).SequenceEqual(Enumerable.Range(1, partySlots.Count)) ||
             partySlots.Any(slot => slot.Client != (slot.RuntimePad - 1) / 2 + 1 ||

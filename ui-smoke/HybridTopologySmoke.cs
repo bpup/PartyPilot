@@ -4,7 +4,7 @@ internal static class HybridTopologySmoke
 {
     internal static void Run()
     {
-        var allowed = new[] { "2-split", "3-main-solo", "3-three-singles", "5-main-solo" };
+        var allowed = new[] { "2-split", "3-main-solo", "3-three-singles", "5-main-solo", "6-balanced" };
         foreach (var topology in Enumerable.Range(1, 6).SelectMany(PartyTopologies.ForPlayerCount))
         {
             if (HybridTopologySupport.CanBridge(topology) != allowed.Contains(topology.Id))

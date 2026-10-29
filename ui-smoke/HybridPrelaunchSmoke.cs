@@ -65,5 +65,40 @@ internal static class HybridPrelaunchSmoke
         {
             try { Directory.Delete(directory, recursive: true); } catch (IOException) { }
         }
+        await VerifySixPrelaunchAsync();
+    }
+
+    private static async Task VerifySixPrelaunchAsync()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var directory = Path.Combine(Path.GetTempPath(),
+            "partypilot-six-prelaunch-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var bridgePath = Path.Combine(directory, "fake-bridge");
+            var games = Enumerable.Range(1, 3)
+                .Select(index => Path.Combine(directory, $"Game{index}.exe")).ToArray();
+            foreach (var game in games) File.WriteAllText(game, "fake");
+            File.WriteAllText(bridgePath, "#!/usr/bin/env python3\nimport sys,json\n" +
+                "def value(name): return sys.argv[sys.argv.index(name)+1] if name in sys.argv else None\n" +
+                "games=[sys.argv[i+1] for i,arg in enumerate(sys.argv[:-1]) if arg=='--game-exe']\n" +
+                $"if games != {JsonSerializer.Serialize(games)} or value('--slots') != '1,2,3,4' or value('--hybrid-player-pads') != '2:2,3:3,4:4,5:5,6:6' or '--hybrid-window-map' in sys.argv: sys.exit(2)\n" +
+                "print(json.dumps({'event':'prelaunch_ready','slots':[1,2,3,4],'hybrid_mode':True,'physical_mode':False,'hybrid_player_pads':value('--hybrid-player-pads'),'hybrid_binding_keys':value('--hybrid-binding-keys'),'menu_guard_enabled':True,'follower_mirror':value('--follower-mirror')}),flush=True)\n" +
+                "for line in sys.stdin: pass\n");
+            File.SetUnixFileMode(bridgePath,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            var topology = PartyTopologies.ForPlayerCount(6)
+                .Single(item => item.Id == "6-balanced");
+            await using var bridge = await BridgeSession.StartHybridPrelaunchAsync(bridgePath,
+                topology.Slots, games, HybridBindingConfig.Default, true,
+                FollowerMirrorConfig.Default);
+            if (!bridge.IsHybridMode || !bridge.IsRunning)
+                throw new Exception("Six-player keyboard prelaunch did not keep its virtual pads ready.");
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch (IOException) { }
+        }
     }
 }
