@@ -5,6 +5,10 @@ namespace PartyPilot.Probe;
 
 public sealed class DiagnosticSession : IDisposable
 {
+    private sealed record MotionCandidate(long ValidatedAtTimestamp, long GameStateAddress,
+        KnownGameLayout Layout, StateCandidate State, uint AreaHash,
+        RoleCandidateResult Roles);
+
     private readonly Process _process;
     private readonly Win32Memory _memory;
     private readonly string _hash;
@@ -14,6 +18,7 @@ public sealed class DiagnosticSession : IDisposable
     private IReadOnlyList<AnchorCandidate> _anchors;
     private DateTime _nextAnchorScanUtc;
     private long _sequence;
+    private MotionCandidate? _motionCandidate;
 
     private DiagnosticSession(Process process, Win32Memory memory, string hash,
         long moduleBase, int moduleSize, IReadOnlyList<AnchorCandidate> anchors)
@@ -55,6 +60,7 @@ public sealed class DiagnosticSession : IDisposable
     public object Capture()
     {
         LastOrderedFrame = null;
+        _motionCandidate = null;
         var sequence = ++_sequence;
         var seenUtc = DateTime.UtcNow;
         if (_process.HasExited)
@@ -117,8 +123,14 @@ public sealed class DiagnosticSession : IDisposable
             selection.ValidLayoutCount > 1 ? "layout_ambiguous" :
             _recognizedBuild ? "state_unverified" : "unknown_build_unverified";
         if (validated && _recognizedBuild)
+        {
             LastOrderedFrame = ProbeOrderedFrame.TryEncode(_process.Id, seenUtc,
                 areaHashCandidate, state!.AreaInstanceAddress, roles);
+            if (LastOrderedFrame is not null && areaHashCandidate is { } hash &&
+                roles?.ValidatedVector is not null)
+                _motionCandidate = new MotionCandidate(Stopwatch.GetTimestamp(), gameStateAddress,
+                    layout!, state!, hash, roles);
+        }
         return new
         {
             pid = _process.Id,
@@ -142,6 +154,31 @@ public sealed class DiagnosticSession : IDisposable
             orderedAddresses = roles?.OrderedAddresses,
             roleCandidates = roles?.Positions
         };
+    }
+
+    internal byte[]? CaptureMotion()
+    {
+        var baseline = _motionCandidate;
+        if (baseline is null || !_recognizedBuild || _process.HasExited ||
+            _anchors.Count != 1 || Stopwatch.GetElapsedTime(baseline.ValidatedAtTimestamp) >
+                TimeSpan.FromMilliseconds(250) ||
+            !AnchorCandidateScanner.TryReadCurrentGameState(_anchors[0], _memory.TryRead,
+                out var gameStateAddress) || gameStateAddress != baseline.GameStateAddress)
+            return RejectMotion();
+        var roles = RoleCandidateDiagnostic.CaptureFast(gameStateAddress, baseline.Layout,
+            baseline.State, baseline.Roles, _memory.TryRead);
+        if (roles is null ||
+            AreaHashCandidate.ReadStable(baseline.State.AreaInstanceAddress, _memory.TryRead)
+                != baseline.AreaHash)
+            return RejectMotion();
+        return ProbeOrderedFrame.TryEncode(_process.Id, DateTime.UtcNow,
+            baseline.AreaHash, baseline.State.AreaInstanceAddress, roles) ?? RejectMotion();
+    }
+
+    private byte[]? RejectMotion()
+    {
+        _motionCandidate = null;
+        return null;
     }
 
     public void Dispose()

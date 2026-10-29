@@ -210,6 +210,29 @@ internal static class SelfTest
                 ProbeOrderedFrame.TryEncode(101, seenUtc, 0x12345678u, 0x500000,
                     roleResult with { OrderedAddresses = ["0x910000", "0x900000"] }) is null,
             "unverified area, stale vector, and changed role order cannot emit control frames");
+        var baseline = new StateCandidate(0x400000, 0x500000, 12, 14);
+        var fast = RoleCandidateDiagnostic.CaptureFast(0x300000, layout!, baseline,
+            roleResult, ReadState, (entity, reader) => entity == 0x910000
+                ? new RawRenderPositionReader.Position(125, 225, 0, 11.5f, 20.7f,
+                    "0xC10000") : Position(entity, reader));
+        Require(fast is { Positions.Length: 2 } && fast.Positions[1].WorldX == 125 &&
+                ProbeOrderedFrame.TryEncode(101, seenUtc, 0x12345678u, 0x500000, fast)
+                    is not null, "fast motion reads a fresh ordered position");
+        Write(0x800000, BitConverter.GetBytes(0x910000L));
+        Require(RoleCandidateDiagnostic.CaptureFast(0x300000, layout!, baseline,
+                roleResult, ReadState, Position) is null,
+            "fast motion refuses a changed role vector");
+        Write(0x800000, BitConverter.GetBytes(0x900000L));
+        Write(0xB10000, Encoding.Unicode.GetBytes("Metadata/Monstersxx/PlayerTwo"));
+        Require(RoleCandidateDiagnostic.CaptureFast(0x300000, layout!, baseline,
+                roleResult, ReadState, Position) is null,
+            "fast motion refuses an entity that is no longer a character");
+        Write(0xB10000, Encoding.Unicode.GetBytes("Metadata/Characters/PlayerTwo"));
+        Write(0x400000 + 656, BitConverter.GetBytes(0x600000L));
+        Require(RoleCandidateDiagnostic.CaptureFast(0x300000, layout!, baseline,
+                roleResult, ReadState, Position) is null,
+            "fast motion refuses a changed area pointer");
+        Write(0x400000 + 656, BitConverter.GetBytes(0x500000L));
         Require(RoleCandidateDiagnostic.Capture(0x300000, layout!, ReadState,
                 (entity, reader) => entity == 0x900000 ? Position(entity, reader) : null)
             is { Status: "position_unavailable", Positions.Length: 0 },

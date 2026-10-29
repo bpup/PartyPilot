@@ -86,15 +86,23 @@ try
         cancellation.Cancel();
     };
     var lastDiscovery = DateTime.UtcNow;
+    var diagnosticClock = Stopwatch.StartNew();
+    var nextDiagnosticAt = TimeSpan.Zero;
     do
     {
+        var captureFull = !emitOrdered || diagnosticClock.Elapsed >= nextDiagnosticAt;
         foreach (var (pid, session) in sessions.OrderBy(entry => entry.Key).ToArray())
         {
             try
             {
-                Console.WriteLine(JsonSerializer.Serialize(session.Capture()));
-                if (orderedUdp is not null && session.LastOrderedFrame is { } packet)
-                    await orderedUdp.SendAsync(packet, orderedEndpoint);
+                if (captureFull)
+                {
+                    Console.WriteLine(JsonSerializer.Serialize(session.Capture()));
+                    if (orderedUdp is not null && session.LastOrderedFrame is { } packet)
+                        await orderedUdp.SendAsync(packet, orderedEndpoint);
+                }
+                else if (orderedUdp is not null && session.CaptureMotion() is { } motion)
+                    await orderedUdp.SendAsync(motion, orderedEndpoint);
                 if (session.HasExited)
                 {
                     sessions.Remove(pid);
@@ -112,13 +120,14 @@ try
                 }));
             }
         }
+        if (captureFull) nextDiagnosticAt = diagnosticClock.Elapsed.Add(TimeSpan.FromMilliseconds(100));
         if (!watch || cancellation.IsCancellationRequested) break;
         if (DateTime.UtcNow - lastDiscovery >= TimeSpan.FromSeconds(2))
         {
             Discover();
             lastDiscovery = DateTime.UtcNow;
         }
-        try { await Task.Delay(100, cancellation.Token); }
+        try { await Task.Delay(emitOrdered ? 20 : 100, cancellation.Token); }
         catch (OperationCanceledException) { break; }
     } while (!cancellation.IsCancellationRequested);
 }
