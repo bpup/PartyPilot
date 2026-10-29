@@ -12,6 +12,7 @@ internal sealed class RadarSession : IAsyncDisposable
     private readonly Dictionary<int, RadarOverlayWindow> _windows;
     private readonly Dictionary<int, RadarLandmarkCache> _landmarks = new();
     private readonly Dictionary<int, RadarFrame> _lastFullFrames = new();
+    private readonly Dictionary<int, RadarMotionFrame> _renderedMotion = new();
     private readonly Dictionary<int, RadarMotionMailbox> _motionMailboxes = new();
     private readonly Dictionary<int, RadarTerrainCapture?> _lastTerrains = new();
     private readonly Dictionary<int, nint> _gameHandles;
@@ -170,9 +171,11 @@ internal sealed class RadarSession : IAsyncDisposable
                                 return;
                             _lastFullFrames[pid] = enriched;
                             _lastTerrains[pid] = terrain;
-                            window.Apply(enriched, terrain);
-                            FrameObserved?.Invoke(enriched);
-                            FrameReceived?.Invoke(pid, enriched.Markers.Count, window.TerrainVisible);
+                            _renderedMotion.TryGetValue(pid, out var lastMotion);
+                            var display = OverlayLatestMotion(enriched, lastMotion);
+                            window.Apply(display, terrain);
+                            FrameObserved?.Invoke(display);
+                            FrameReceived?.Invoke(pid, display.Markers.Count, window.TerrainVisible);
                         });
                         break;
                     }
@@ -190,6 +193,7 @@ internal sealed class RadarSession : IAsyncDisposable
                         if (_disposed || !_lastFullFrames.TryGetValue(pid, out var full) ||
                             !latest.TryApply(full, out var moved) || moved is null)
                             return;
+                        _renderedMotion[pid] = latest;
                         _lastTerrains.TryGetValue(pid, out var terrain);
                         if (terrain != null && !terrain.MetadataUnchanged()) terrain = null;
                         window.ApplyMotion(moved, terrain);
@@ -207,6 +211,10 @@ internal sealed class RadarSession : IAsyncDisposable
             Dispatcher.UIThread.Post(() => Ended?.Invoke(exception.Message));
         }
     }
+
+    internal static RadarFrame OverlayLatestMotion(RadarFrame full, RadarMotionFrame? motion) =>
+        motion is not null && motion.TryApply(full, out var moved) && moved is not null
+            ? moved : full;
 
     private void OnTargetLost() => Ended?.Invoke("绑定的游戏窗口已消失或进程身份发生变化。");
 

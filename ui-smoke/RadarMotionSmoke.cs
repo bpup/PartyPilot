@@ -44,6 +44,12 @@ internal static class RadarMotionSmoke
             motion.TryApply(full with { SeenUtc = now.AddSeconds(-3) }, out _))
             throw new Exception("Radar motion accepted stale or mismatched game identity.");
 
+        if (RadarSession.OverlayLatestMotion(full, motion).PlayerX != motion.PlayerX ||
+            RadarSession.OverlayLatestMotion(full, wrongHash).PlayerX != full.PlayerX ||
+            RadarSession.OverlayLatestMotion(full with { SeenUtc = now.AddMilliseconds(1) }, motion)
+                .PlayerX != full.PlayerX)
+            throw new Exception("A late full radar scan lost newer valid motion or reused another area.");
+
         var mailbox = new RadarMotionMailbox();
         var later = motion with { SeenUtc = now.AddMilliseconds(25), PlayerX = 12 };
         if (!mailbox.Offer(motion) || mailbox.Offer(later) ||
