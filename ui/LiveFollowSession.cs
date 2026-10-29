@@ -52,10 +52,18 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     public FollowBridgeFrame Current { get; private set; }
     public bool Paused { get; private set; }
     public bool IndependentProbeStarted => _independentProbe is not null;
+    public bool IndependentProbeRunning => _independentProbe?.IsRunning == true;
+    public bool HasUnknownProbeBuild => _independentProbe is { } probe &&
+        _clients.Any(client => probe.HasUnknownBuild(client.Pid));
     public bool ManualWarpActive => Volatile.Read(ref _manualWarpDesired) != 0;
     public event Action<FollowBridgeFrame>? StatusChanged;
     public event Action<string>? WarpStatusChanged;
     public event Action<string>? Ended;
+
+    private void OnProbeDiagnosticsChanged() => Dispatcher.UIThread.Post(() =>
+    {
+        if (!_stopping) StatusChanged?.Invoke(Current);
+    });
 
     internal void ObserveRadarFrame(RadarFrame frame)
     {
@@ -483,7 +491,10 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             }
             if (orderedTopology && OperatingSystem.IsWindows() &&
                 IndependentProbeSession.FindExecutable() is { } probeExecutable)
+            {
                 session._independentProbe = await IndependentProbeSession.StartAsync(probeExecutable);
+                session._independentProbe.DiagnosticsChanged += session.OnProbeDiagnosticsChanged;
+            }
             return session;
         }
         catch (Exception error)
@@ -491,7 +502,10 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             if (session is not null)
             {
                 if (session._independentProbe is { } probe)
+                {
+                    probe.DiagnosticsChanged -= session.OnProbeDiagnosticsChanged;
                     await probe.DisposeAsync();
+                }
                 bridge.MainInputChanged -= session.OnMainInputChanged;
                 bridge.WarpToMainPressed -= session.OnWarpToMainPressed;
                 if (session._wantsWarpShortcut && bridge.IsRunning)
@@ -848,7 +862,11 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         await _entryTask;
         await _writeControls;
         await _readError;
-        if (_independentProbe is { } probe) await probe.DisposeAsync();
+        if (_independentProbe is { } probe)
+        {
+            probe.DiagnosticsChanged -= OnProbeDiagnosticsChanged;
+            await probe.DisposeAsync();
+        }
         try
         {
             foreach (var pad in _followerPads)

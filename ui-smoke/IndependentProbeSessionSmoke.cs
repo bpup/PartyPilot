@@ -15,16 +15,31 @@ internal static class IndependentProbeSessionSmoke
             File.WriteAllText(executable, "#!/usr/bin/env python3\n" +
                 "import sys,time\n" +
                 $"open({System.Text.Json.JsonSerializer.Serialize(arguments)},'w').write(' '.join(sys.argv[1:]))\n" +
+                "print('{\"pid\":123,\"status\":\"unknown_build_unverified\",\"recognizedBuild\":false}',flush=True)\n" +
+                "time.sleep(.5)\n" +
+                "print('{\"pid\":\"bad\",\"recognizedBuild\":true}',flush=True)\n" +
+                "print('{\"pid\":123,\"recognizedBuild\":true}',flush=True)\n" +
                 "while True:\n print('capture',flush=True); time.sleep(.01)\n");
             File.SetUnixFileMode(executable, UnixFileMode.UserRead | UnixFileMode.UserWrite |
                 UnixFileMode.UserExecute);
             await using (var session = await IndependentProbeSession.StartAsync(executable))
             {
+                var changes = 0;
+                session.DiagnosticsChanged += () => Interlocked.Increment(ref changes);
                 for (var attempt = 0; attempt < 20 && !File.Exists(arguments); attempt++)
                     await Task.Delay(100);
                 if (!File.Exists(arguments) ||
                     File.ReadAllText(arguments) != "--watch --experimental-ordered-udp")
                     throw new Exception("The desktop did not start the independent probe in ordered mode.");
+                for (var attempt = 0; attempt < 20 && !session.HasUnknownBuild(123); attempt++)
+                    await Task.Delay(100);
+                if (!session.IsRunning || !session.HasUnknownBuild(123) ||
+                    session.HasUnknownBuild(124))
+                    throw new Exception("Unknown game build was not distinguished from a running probe.");
+                for (var attempt = 0; attempt < 20 && session.HasUnknownBuild(123); attempt++)
+                    await Task.Delay(100);
+                if (session.HasUnknownBuild(123) || changes == 0)
+                    throw new Exception("Probe build changes did not refresh diagnostics.");
             }
             File.WriteAllText(executable, "#!/usr/bin/env python3\n" +
                 "import sys\nprint('probe rejected startup',file=sys.stderr,flush=True)\nsys.exit(3)\n");

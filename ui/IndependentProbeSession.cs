@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text.Json;
 
 namespace PartyPilot.Desktop;
 
@@ -8,6 +10,9 @@ internal sealed class IndependentProbeSession : IAsyncDisposable
     private readonly Process _process;
     private readonly Task _output;
     private readonly Task<string> _error;
+    private readonly ConcurrentDictionary<int, bool> _recognizedBuilds = new();
+
+    internal event Action? DiagnosticsChanged;
 
     private IndependentProbeSession(Process process)
     {
@@ -15,6 +20,11 @@ internal sealed class IndependentProbeSession : IAsyncDisposable
         _output = DrainAsync(process.StandardOutput);
         _error = ReadErrorAsync(process.StandardError);
     }
+
+    internal bool IsRunning => !_process.HasExited;
+
+    internal bool HasUnknownBuild(int processId) =>
+        _recognizedBuilds.TryGetValue(processId, out var recognized) && !recognized;
 
     internal static string? FindExecutable()
     {
@@ -55,9 +65,32 @@ internal sealed class IndependentProbeSession : IAsyncDisposable
         return session;
     }
 
-    private static async Task DrainAsync(StreamReader reader)
+    private async Task DrainAsync(StreamReader reader)
     {
-        while (await reader.ReadLineAsync() is not null) { }
+        while (await reader.ReadLineAsync() is { } line)
+        {
+            if (line.Length > 4096) continue;
+            try
+            {
+                using var document = JsonDocument.Parse(line);
+                var root = document.RootElement;
+                if (root.ValueKind == JsonValueKind.Object &&
+                    root.TryGetProperty("pid", out var pid) &&
+                    pid.ValueKind == JsonValueKind.Number &&
+                    pid.TryGetInt32(out var processId) && processId > 0 &&
+                    root.TryGetProperty("recognizedBuild", out var build) &&
+                    build.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                {
+                    var recognized = build.GetBoolean();
+                    var changed = !_recognizedBuilds.TryGetValue(processId, out var prior) ||
+                        prior != recognized;
+                    _recognizedBuilds[processId] = recognized;
+                    if (changed) DiagnosticsChanged?.Invoke();
+                }
+            }
+            catch (JsonException) { }
+        }
+        DiagnosticsChanged?.Invoke();
     }
 
     private static async Task<string> ReadErrorAsync(StreamReader reader)

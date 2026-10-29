@@ -3472,6 +3472,22 @@ public sealed class MainWindow : Window
             _followStatus.Text = $"{blocked} 入口追赶无进展，自动方向已停止；请手动处理。";
             return;
         }
+        if (_follow?.IndependentProbeStarted == true &&
+            frame.PadCommands.Count > 0 &&
+            frame.PadCommands.All(command => command.Status == "waiting") &&
+            frame.PadCommands.Any(command => command.Reason == "missing position") &&
+            !_follow.IndependentProbeRunning)
+        {
+            _followStatus.Text = "独立探针已退出；跟随者仍在等待位置，自动方向已停止。";
+            return;
+        }
+        if (_follow?.HasUnknownProbeBuild == true && frame.PadCommands.Count > 0 &&
+            frame.PadCommands.All(command => command.Status == "waiting") &&
+            frame.PadCommands.Any(command => command.Reason == "missing position"))
+        {
+            _followStatus.Text = "独立探针未识别至少一个客户端的游戏版本；跟随者仍在等待位置，自动方向已停止。";
+            return;
+        }
         if (_selectedTopology?.Id is "3-three-singles" or "4-balanced" or
             "5-third-solo" or "5-main-solo" or "6-balanced" &&
             frame.Reason is not ("party disbanded" or "local client left party" or "followed member left party"))
@@ -3629,6 +3645,9 @@ public sealed class MainWindow : Window
             return;
         }
         await StartFollowAsync();
+        _status.Text = _follow is null
+            ? "游戏已打开；跟随未启动，原因见下方。"
+            : "游戏已打开；跟随会话已启动，状态见下方。";
     }
 
     private async Task RunLauncherAsync(ClientAction action)
