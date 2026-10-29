@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using PartyPilot.Sensor;
 
 namespace PartyPilot.Probe;
@@ -189,6 +190,26 @@ internal static class SelfTest
                 roleResult.OrderedAddresses.SequenceEqual(["0x900000", "0x910000"]) &&
                 roleResult.Positions[0].EntityAddress == "0x900000" &&
                 roleResult.Positions[1].EntityAddress == "0x910000", "ordered role candidates");
+        var seenUtc = DateTime.UtcNow;
+        var packet = ProbeOrderedFrame.TryEncode(101, seenUtc, 0x12345678u,
+            0x500000, roleResult);
+        Require(packet is not null, "complete probe frame can use the opt-in ordered transport");
+        using (var frame = JsonDocument.Parse(packet!))
+        {
+            var wire = frame.RootElement;
+            Require(wire.GetProperty("Kind").GetString() == "ordered_client" &&
+                    wire.GetProperty("PlayerOrderSource").GetString() ==
+                        "experimental_static_vector_0.6.17" &&
+                    wire.GetProperty("Players").GetArrayLength() == 2 &&
+                    wire.GetProperty("Players")[1].GetProperty("X").GetSingle() == 120,
+                "probe transport retained ordered world positions");
+        }
+        Require(ProbeOrderedFrame.TryEncode(101, seenUtc, null, 0x500000, roleResult) is null &&
+                ProbeOrderedFrame.TryEncode(101, seenUtc, 0x12345678u, 0x500000,
+                    roleResult with { Status = "role_vector_changed" }) is null &&
+                ProbeOrderedFrame.TryEncode(101, seenUtc, 0x12345678u, 0x500000,
+                    roleResult with { OrderedAddresses = ["0x910000", "0x900000"] }) is null,
+            "unverified area, stale vector, and changed role order cannot emit control frames");
         Require(RoleCandidateDiagnostic.Capture(0x300000, layout!, ReadState,
                 (entity, reader) => entity == 0x900000 ? Position(entity, reader) : null)
             is { Status: "position_unavailable", Positions.Length: 0 },

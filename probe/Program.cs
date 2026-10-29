@@ -1,5 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
 using System.Text.Json;
 using PartyPilot.Probe;
 
@@ -10,9 +12,9 @@ if (args is ["--self-test"])
     return;
 }
 
-if (args is not ([] or ["--watch"]))
+if (args is not ([] or ["--watch"] or ["--watch", "--experimental-ordered-udp"]))
 {
-    Console.Error.WriteLine("Usage: PartyPilot.Probe [--watch|--self-test]");
+    Console.Error.WriteLine("Usage: PartyPilot.Probe [--watch [--experimental-ordered-udp]|--self-test]");
     Environment.ExitCode = 2;
     return;
 }
@@ -29,6 +31,10 @@ var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     "PathOfExileEGS", "PathOfExile_x64EGS"
 };
 var watch = args is ["--watch"];
+var emitOrdered = args is ["--watch", "--experimental-ordered-udp"];
+watch |= emitOrdered;
+using var orderedUdp = emitOrdered ? new UdpClient() : null;
+var orderedEndpoint = new IPEndPoint(IPAddress.Loopback, 47617);
 var sessions = new Dictionary<int, DiagnosticSession>();
 var reportedEmpty = false;
 void Discover()
@@ -87,6 +93,8 @@ try
             try
             {
                 Console.WriteLine(JsonSerializer.Serialize(session.Capture()));
+                if (orderedUdp is not null && session.LastOrderedFrame is { } packet)
+                    await orderedUdp.SendAsync(packet, orderedEndpoint);
                 if (session.HasExited)
                 {
                     sessions.Remove(pid);

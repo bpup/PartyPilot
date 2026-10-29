@@ -30,6 +30,7 @@ public sealed class DiagnosticSession : IDisposable
 
     public int ProcessId => _process.Id;
     public bool HasExited => _process.HasExited;
+    internal byte[]? LastOrderedFrame { get; private set; }
 
     public static DiagnosticSession Open(Process process)
     {
@@ -53,6 +54,7 @@ public sealed class DiagnosticSession : IDisposable
 
     public object Capture()
     {
+        LastOrderedFrame = null;
         var sequence = ++_sequence;
         var seenUtc = DateTime.UtcNow;
         if (_process.HasExited)
@@ -114,6 +116,9 @@ public sealed class DiagnosticSession : IDisposable
             _anchors.Count > 1 ? "anchor_ambiguous" :
             selection.ValidLayoutCount > 1 ? "layout_ambiguous" :
             _recognizedBuild ? "state_unverified" : "unknown_build_unverified";
+        if (validated && _recognizedBuild)
+            LastOrderedFrame = ProbeOrderedFrame.TryEncode(_process.Id, seenUtc,
+                areaHashCandidate, state!.AreaInstanceAddress, roles);
         return new
         {
             pid = _process.Id,
