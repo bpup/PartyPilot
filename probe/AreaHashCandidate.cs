@@ -15,4 +15,11 @@ public static class AreaHashCandidate
         var hash = BitConverter.ToUInt32(bytes);
         return hash == 0 ? null : hash;
     }
+
+    public static uint? ReadStable(long areaInstanceAddress, Func<long, byte[], bool> read)
+    {
+        var before = Read(areaInstanceAddress, read);
+        return before is not null && before == Read(areaInstanceAddress, read)
+            ? before : null;
+    }
 }

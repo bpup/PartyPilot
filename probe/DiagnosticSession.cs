@@ -90,6 +90,21 @@ public sealed class DiagnosticSession : IDisposable
             validated = false;
             roles = null;
         }
+        var areaHashCandidate = validated
+            ? AreaHashCandidate.ReadStable(state!.AreaInstanceAddress, _memory.TryRead) : null;
+        if (validated && areaHashCandidate is not null &&
+            (!AnchorCandidateScanner.TryReadCurrentGameState(_anchors[0],
+                _memory.TryRead, out var stateAfterHashAddress) ||
+             stateAfterHashAddress != gameStateAddress ||
+             !StateCandidateValidator.TryRead(gameStateAddress, layout!,
+                 _memory.TryRead, out var stateAfterHash) ||
+             stateAfterHash?.AreaInstanceAddress != state!.AreaInstanceAddress ||
+             stateAfterHash.IngameStateAddress != state.IngameStateAddress))
+        {
+            validated = false;
+            roles = null;
+            areaHashCandidate = null;
+        }
         var status = roles?.Status == "role_position_candidates_unverified"
             ? (_recognizedBuild ? "role_position_candidates_unverified" :
                 "role_position_candidates_unverified_unknown_build") :
@@ -113,8 +128,7 @@ public sealed class DiagnosticSession : IDisposable
             // Addresses and positions are diagnostics only. No control frame is emitted.
             gameStateAddress = validated ? $"0x{gameStateAddress:X}" : null,
             areaInstanceAddress = validated ? $"0x{state!.AreaInstanceAddress:X}" : null,
-            areaHashCandidate = validated ? AreaHashCandidate.Read(state!.AreaInstanceAddress,
-                _memory.TryRead) : null,
+            areaHashCandidate,
             baseAreaLevel = validated ? state!.BaseAreaLevel : (int?)null,
             monsterLevel = validated ? state!.MonsterLevel : (int?)null,
             roleCandidateStatus = roles?.Status,

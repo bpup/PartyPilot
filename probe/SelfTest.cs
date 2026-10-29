@@ -108,6 +108,18 @@ internal static class SelfTest
         Require(AreaHashCandidate.Read(0x500000, ReadState) == 0x12345678u &&
                 AreaHashCandidate.Read(0x600000, ReadState) is null,
             "current-area hash remains a read-only candidate");
+        Require(AreaHashCandidate.ReadStable(0x500000, ReadState) == 0x12345678u,
+            "stable current-area hash candidate");
+        var hashReads = 0;
+        bool ChangingHash(long address, byte[] destination)
+        {
+            if (!ReadState(address, destination)) return false;
+            if (address == 0x500000 + 244 && ++hashReads == 2)
+                BitConverter.GetBytes(0x87654321u).CopyTo(destination, 0);
+            return true;
+        }
+        Require(AreaHashCandidate.ReadStable(0x500000, ChangingHash) is null,
+            "changing current-area hash candidate rejected");
         Require(StateCandidateValidator.TryRead(0x300000, layout!, ReadState, out var state) &&
                 state is { IngameStateAddress: 0x400000, AreaInstanceAddress: 0x500000,
                     BaseAreaLevel: 12, MonsterLevel: 14 }, "validated area candidate");
