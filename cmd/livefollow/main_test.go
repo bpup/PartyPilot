@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,10 +10,83 @@ import (
 	"time"
 
 	"partypilot/internal/arealog"
+	"partypilot/internal/clientprocess"
 	"partypilot/internal/follow"
 	"partypilot/internal/live"
 	"partypilot/internal/telemetry"
 )
+
+func TestOrderedLoopEmitsWaitingFramesBeforeSourceTimeout(t *testing.T) {
+	if clientprocess.Supported {
+		t.Skip("the fixture uses synthetic process IDs")
+	}
+	directory := t.TempDir()
+	paths := map[int]string{1: filepath.Join(directory, "first.log"),
+		2: filepath.Join(directory, "second.log")}
+	for _, path := range paths {
+		if err := os.WriteFile(path, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	roster := map[int]int{1: 101, 2: 202}
+	engine, err := live.New(roster, 1, follow.Config{StopDistance: 2,
+		ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		writer.Close()
+		reader.Close()
+	}()
+	frames := make(chan frame, 16)
+	go func() {
+		scanner := bufio.NewScanner(reader)
+		for scanner.Scan() {
+			var current frame
+			if json.Unmarshal(scanner.Bytes(), &current) == nil {
+				frames <- current
+			}
+		}
+	}()
+	controls := make(chan menuInput)
+	controlsClosed := false
+	defer func() {
+		if !controlsClosed {
+			close(controls)
+		}
+	}()
+	done := make(chan error, 1)
+	go func() {
+		done <- run("127.0.0.1:0", roster, paths, nil, 1, engine,
+			nil, controls, true, false, writer)
+	}()
+	timer := time.NewTimer(600 * time.Millisecond)
+	defer timer.Stop()
+	for count := 0; count < 8; count++ {
+		select {
+		case current := <-frames:
+			if current.Commands[2].State != follow.Waiting {
+				t.Fatalf("missing sensor position produced movement: %+v", current.Commands[2])
+			}
+		case err := <-done:
+			t.Fatalf("ordered loop stopped before a sensor arrived: %v", err)
+		case <-timer.C:
+			t.Fatal("ordered loop did not emit eight waiting frames within 600 ms")
+		}
+	}
+	close(controls)
+	controlsClosed = true
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("ordered loop did not stop after control input closed")
+	}
+}
 
 func TestOrderedModeAcceptsOnlyOrdinarySingleClientSamples(t *testing.T) {
 	now := time.Now().UTC()

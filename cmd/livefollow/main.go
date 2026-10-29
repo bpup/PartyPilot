@@ -510,7 +510,8 @@ func decodeStandaloneSample(data []byte) (telemetry.Sample, error) {
 
 func run(address string, roster map[int]int, paths map[int]string, offsets logStartOffsets,
 	leader int, engine *live.Engine,
-	flasks *live.FlaskSession, menuInput <-chan menuInput, ordered, allowFollowPause bool) error {
+	flasks *live.FlaskSession, menuInput <-chan menuInput, ordered, allowFollowPause bool,
+	output io.Writer) error {
 	endpoint, err := net.ResolveUDPAddr("udp", address)
 	if err != nil || endpoint.IP == nil || !endpoint.IP.IsLoopback() {
 		return errors.New("listen address must be loopback")
@@ -553,7 +554,14 @@ func run(address string, roster map[int]int, paths map[int]string, offsets logSt
 		}
 	}()
 	data := make([]byte, 64*1024)
-	encoder := json.NewEncoder(os.Stdout)
+	encoder := json.NewEncoder(output)
+	readWait := 100 * time.Millisecond
+	if ordered {
+		// Re-evaluate ordered positions and publish neutral commands promptly
+		// when a source frame expires; the probe's own cadence is independent.
+		readWait = 20 * time.Millisecond
+	}
+	var nextSourceCheck time.Time
 	fail := func(reason string, err error) error {
 		engine.Stop(reason)
 		_ = encoder.Encode(frame{Focused: engine.Leader(), Commands: engine.Step(time.Now().UTC())})
@@ -564,7 +572,7 @@ func run(address string, roster map[int]int, paths map[int]string, offsets logSt
 			return fail("menu guard input failed", err)
 		}
 		var activations []flask.Activation
-		_ = conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		_ = conn.SetReadDeadline(time.Now().Add(readWait))
 		count, _, err := conn.ReadFromUDP(data)
 		if err == nil {
 			if ordered {
@@ -599,32 +607,35 @@ func run(address string, roster map[int]int, paths map[int]string, offsets logSt
 		} else if timeout, ok := err.(net.Error); !ok || !timeout.Timeout() {
 			return fail("sensor read failed", err)
 		}
-		var pathErr error
-		if ordered {
-			pathErr = arealog.ValidateClientPaths(paths)
-		} else {
-			pathErr = arealog.ValidatePaths(paths)
-		}
-		if err := pathErr; err != nil {
-			return fail("log source changed", err)
-		}
-		if err := verifyProcessBindings(roster, paths); err != nil {
-			return fail("process/log binding changed", err)
-		}
 		now := time.Now().UTC()
-		for _, slot := range slots {
-			previousRotations := tails[slot].Rotations()
-			lines, err := tails[slot].Poll()
-			if err != nil {
-				return fail("log read failed", fmt.Errorf("slot %d log: %w", slot, err))
+		if !ordered || !now.Before(nextSourceCheck) {
+			var pathErr error
+			if ordered {
+				pathErr = arealog.ValidateClientPaths(paths)
+			} else {
+				pathErr = arealog.ValidatePaths(paths)
 			}
-			if tails[slot].Rotations() != previousRotations {
-				engine.InvalidateClientArea(roster[slot])
-				activations = nil
+			if err := pathErr; err != nil {
+				return fail("log source changed", err)
 			}
-			for _, line := range lines {
-				engine.ObserveClientLogLine(roster[slot], line, now)
+			if err := verifyProcessBindings(roster, paths); err != nil {
+				return fail("process/log binding changed", err)
 			}
+			for _, slot := range slots {
+				previousRotations := tails[slot].Rotations()
+				lines, err := tails[slot].Poll()
+				if err != nil {
+					return fail("log read failed", fmt.Errorf("slot %d log: %w", slot, err))
+				}
+				if tails[slot].Rotations() != previousRotations {
+					engine.InvalidateClientArea(roster[slot])
+					activations = nil
+				}
+				for _, line := range lines {
+					engine.ObserveClientLogLine(roster[slot], line, now)
+				}
+			}
+			nextSourceCheck = now.Add(100 * time.Millisecond)
 		}
 		commands := engine.Step(now)
 		handoffs := engine.CrossAreaRequests(now)
@@ -867,7 +878,7 @@ func main() {
 	}
 	fmt.Fprintln(os.Stderr, "Live follow decision stream; Windows controller and PoE2 behavior remain unverified.")
 	if err := run(*address, roster, paths, offsets, *leader, engine, flaskSession, menuCommands,
-		*orderedInput, *allowFollowPause); err != nil {
+		*orderedInput, *allowFollowPause, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
