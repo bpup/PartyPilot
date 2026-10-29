@@ -58,7 +58,7 @@ public sealed class DiagnosticSession : IDisposable
         if (_process.HasExited)
             return new { pid = _process.Id, sequence, seenUtc, status = "game_exited" };
 
-        if (_anchors.Count == 0 && seenUtc >= _nextAnchorScanUtc)
+        if (_anchors.Count != 1 && seenUtc >= _nextAnchorScanUtc)
         {
             _anchors = AnchorCandidateScanner.Find(_moduleBase, _moduleSize,
                 _memory.TryRead);

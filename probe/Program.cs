@@ -96,9 +96,11 @@ try
             catch (Exception error) when (error is InvalidOperationException or Win32Exception or
                                           IOException or UnauthorizedAccessException)
             {
+                sessions.Remove(pid);
+                session.Dispose();
                 Console.WriteLine(JsonSerializer.Serialize(new
                 {
-                    pid = session.ProcessId, status = "capture_failed", error = error.Message
+                    pid, status = "capture_failed", error = error.Message
                 }));
             }
         }
