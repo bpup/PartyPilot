@@ -1177,7 +1177,7 @@ public sealed class MainWindow : Window
 
     private Border BuildRadarStep()
     {
-        var panel = Step("5", "Tab 地图覆盖层", "按 Tab 在已绑定游戏窗口上显示可见标记和可选候选地形；请在对应 ExileCore2 实例中启用雷达诊断，绘制地形还需开启地形诊断。无迷雾效果、坐标方向与比例仍需游戏内验证。");
+        var panel = Step("5", "Tab 地图覆盖层", "首次安装传感器后默认采集地图标记与候选地形；按 Tab 显示。若以前保存过关闭设置，请在对应 ExileCore2 实例中重新开启。地图方向与比例仍需游戏内核对。");
         panel.Children.Add(Label("雷达显隐快捷键（如 Tab、Ctrl+R、Shift+F9）", 12, MutedBrush));
         var hotkeyRow = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
         _radarHotkeyText.Width = 190;
