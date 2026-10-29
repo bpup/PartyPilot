@@ -420,6 +420,42 @@ internal static class HybridKeyboardInputTests
         if (privateP5.Report.Buttons != 0x1000 || privateP6.Report.Buttons != 0x1000)
             throw new Exception("Normal MAIN input did not reach both Client 3 followers.");
 
+        var sixPads = Enumerable.Range(1, 6).ToDictionary(slot => slot, _ => new FakePad());
+        var sixRouter = new BridgeRouter(sixPads.ToDictionary(entry => entry.Key,
+            entry => (IPadOutput)entry.Value));
+        if (!sixRouter.ConfigureHybridKeyboard(Enumerable.Range(2, 5)
+                .ToDictionary(player => player, player => player)) ||
+            !sixRouter.EnableHybridMainFollowMirror())
+            throw new Exception("Six-role keyboard layout rejected the five follower routes.");
+        sixRouter.SetHybridForeground(true);
+        foreach (var slot in Enumerable.Range(2, 5))
+        {
+            if (!sixRouter.ApplyLine($"{{\"slot\":{slot},\"state\":\"following\",\"x\":1,\"y\":0}}", now) ||
+                sixPads[slot].X != 32767)
+                throw new Exception($"P{slot} follow command did not reach its own output.");
+        }
+        if (sixPads[1].Report != default)
+            throw new Exception("Native P1 placeholder received follower movement.");
+        sixRouter.ApplyHybridKey(0x71, true, true);
+        sixRouter.ApplyHybridKey(0x57, true, true);
+        if (sixRouter.HybridFocusedPlayer != 2 || sixPads[2].Y != 32767 ||
+            sixPads.Where(entry => entry.Key != 2).Any(entry => entry.Value.Report != default))
+            throw new Exception("P2 manual keyboard focus did not isolate all other clients.");
+        sixRouter.ApplyHybridKey(0x57, false, true);
+        sixRouter.ApplyHybridKey(0x75, true, true);
+        sixRouter.ApplyHybridKey(0x57, true, true);
+        if (sixRouter.HybridFocusedPlayer != 6 || sixPads[6].Y != 32767 ||
+            sixPads.Where(entry => entry.Key != 6).Any(entry => entry.Value.Report != default))
+            throw new Exception("P6 manual keyboard focus leaked to another client.");
+        sixRouter.SetHybridForeground(false);
+        if (sixPads.Values.Any(pad => pad.Report != default))
+            throw new Exception("Six-role keyboard outputs survived game focus loss.");
+        sixRouter.ApplyHybridKey(0x57, false, true);
+        sixRouter.ApplyHybridKey(0x70, true, true);
+        if (sixRouter.HybridFocusedPlayer != 1 ||
+            sixPads.Values.Any(pad => pad.Report != default))
+            throw new Exception("Returning to P1 resumed stale six-role automation.");
+
         var menuState = new HybridKeyboardState([2]);
         menuState.Handle(0x71, true, true);
         menuState.Handle(0x71, false, true);
