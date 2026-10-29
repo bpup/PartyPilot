@@ -171,6 +171,25 @@ internal static class TransitionAnchorEvidenceSmoke
             throw new Exception("A position jump was reused as a walkable breadcrumb.");
         if (evidence.Match(handoff, topology, now.AddSeconds(13)) is not null)
             throw new Exception("Expired transition remained eligible.");
+        var duplicateDestination = new TransitionAnchorEvidence();
+        duplicateDestination.Observe(1, Frame(101, now.AddMilliseconds(-400), 41,
+            100, 100, entrance));
+        duplicateDestination.Observe(2, Frame(202, now.AddMilliseconds(-300), 42,
+            200, 200, entrance with { Id = 20, X = 205, Y = 201 },
+            entrance with { Id = 21, X = 450, Y = 201 }));
+        duplicateDestination.Observe(1, Frame(101, now.AddMilliseconds(-100), 43,
+            300, 300));
+        if (duplicateDestination.Match(handoff, topology, now) is not null)
+            throw new Exception("A repeated destination entrance was chosen only by proximity.");
+        var duplicateSource = new TransitionAnchorEvidence();
+        duplicateSource.Observe(1, Frame(101, now.AddMilliseconds(-400), 41,
+            100, 100, entrance, entrance with { Id = 11, X = 115, Y = 105 }));
+        duplicateSource.Observe(2, Frame(202, now.AddMilliseconds(-300), 42,
+            200, 200, entrance with { Id = 20, X = 205, Y = 201 }));
+        duplicateSource.Observe(1, Frame(101, now.AddMilliseconds(-100), 43,
+            300, 300));
+        if (duplicateSource.Match(handoff, topology, now) is not null)
+            throw new Exception("A repeated source entrance was treated as an identified transition.");
         evidence.Observe(2, Frame(202, now, 42, 200, 200,
             entrance with { Id = 21, Label = "Another Door", X = 205, Y = 201 }));
         if (evidence.Match(handoff, topology, now) is not null)

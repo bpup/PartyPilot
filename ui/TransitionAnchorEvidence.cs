@@ -176,7 +176,10 @@ internal sealed class TransitionAnchorEvidence
                     StringComparison.OrdinalIgnoreCase)).OrderBy(marker =>
                 DistanceSquared(marker.X, marker.Y, destination.PlayerX, destination.PlayerY))
                 .ToArray();
-            if (matches.Length == 0) return null;
+            // A path and label may identify several entrances in one area. Their
+            // IDs are local to each client, so proximity cannot prove which one
+            // corresponds to the entrance the leader used.
+            if (matches.Length != 1) return null;
             var nearest = matches[0];
             var approach = used.Approach.Select(point => new TransitionPoint(
                 nearest.X + point.X - used.SourceAnchor.X,
@@ -255,13 +258,19 @@ internal sealed class TransitionAnchorEvidence
         return reverse.Count >= 3 ? reverse.ToArray() : [];
     }
 
-    private static RadarMarker? NearestVisibleAnchor(RadarFrame frame) =>
-        frame.Markers.Where(IsAnchor).Select(marker => new
+    private static RadarMarker? NearestVisibleAnchor(RadarFrame frame)
+    {
+        var candidates = frame.Markers.Where(IsAnchor).Select(marker => new
         {
             Marker = marker,
             Distance = DistanceSquared(marker.X, marker.Y, frame.PlayerX, frame.PlayerY)
         }).Where(item => item.Distance <= Math.Pow(28 * WorldPerGridUnit, 2))
-        .OrderBy(item => item.Distance).Select(item => item.Marker).FirstOrDefault();
+        .OrderBy(item => item.Distance).Select(item => item.Marker).ToArray();
+        return candidates.Length > 0 &&
+            candidates.Count(marker => string.Equals(Identity(marker),
+                Identity(candidates[0]), StringComparison.OrdinalIgnoreCase)) == 1
+            ? candidates[0] : null;
+    }
 
     private static bool IsAnchor(RadarMarker marker) =>
         marker.Category is "transition" or "waypoint" or "checkpoint" &&
