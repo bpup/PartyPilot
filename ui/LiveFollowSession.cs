@@ -55,6 +55,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     public bool IndependentProbeRunning => _independentProbe?.IsRunning == true;
     public bool HasUnknownProbeBuild => _independentProbe is { } probe &&
         _clients.Any(client => probe.HasUnknownBuild(client.Pid));
+    public bool HasProbeReadFailure => _independentProbe is { } probe &&
+        _clients.Any(client => probe.HasReadFailure(client.Pid));
     public bool ManualWarpActive => Volatile.Read(ref _manualWarpDesired) != 0;
     public event Action<FollowBridgeFrame>? StatusChanged;
     public event Action<string>? WarpStatusChanged;

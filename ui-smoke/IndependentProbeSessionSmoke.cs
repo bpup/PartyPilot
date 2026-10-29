@@ -16,9 +16,11 @@ internal static class IndependentProbeSessionSmoke
                 "import sys,time\n" +
                 $"open({System.Text.Json.JsonSerializer.Serialize(arguments)},'w').write(' '.join(sys.argv[1:]))\n" +
                 "print('{\"pid\":123,\"status\":\"unknown_build_unverified\",\"recognizedBuild\":false}',flush=True)\n" +
+                "print('{\"pid\":124,\"status\":\"attach_failed\"}',flush=True)\n" +
                 "time.sleep(.5)\n" +
                 "print('{\"pid\":\"bad\",\"recognizedBuild\":true}',flush=True)\n" +
                 "print('{\"pid\":123,\"recognizedBuild\":true}',flush=True)\n" +
+                "print('{\"pid\":124,\"recognizedBuild\":true}',flush=True)\n" +
                 "while True:\n print('capture',flush=True); time.sleep(.01)\n");
             File.SetUnixFileMode(executable, UnixFileMode.UserRead | UnixFileMode.UserWrite |
                 UnixFileMode.UserExecute);
@@ -34,11 +36,11 @@ internal static class IndependentProbeSessionSmoke
                 for (var attempt = 0; attempt < 20 && !session.HasUnknownBuild(123); attempt++)
                     await Task.Delay(100);
                 if (!session.IsRunning || !session.HasUnknownBuild(123) ||
-                    session.HasUnknownBuild(124))
+                    session.HasUnknownBuild(124) || !session.HasReadFailure(124))
                     throw new Exception("Unknown game build was not distinguished from a running probe.");
                 for (var attempt = 0; attempt < 20 && session.HasUnknownBuild(123); attempt++)
                     await Task.Delay(100);
-                if (session.HasUnknownBuild(123) || changes == 0)
+                if (session.HasUnknownBuild(123) || session.HasReadFailure(124) || changes == 0)
                     throw new Exception("Probe build changes did not refresh diagnostics.");
             }
             File.WriteAllText(executable, "#!/usr/bin/env python3\n" +

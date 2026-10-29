@@ -3481,6 +3481,13 @@ public sealed class MainWindow : Window
             _followStatus.Text = "独立探针已退出；跟随者仍在等待位置，自动方向已停止。";
             return;
         }
+        if (_follow?.HasProbeReadFailure == true && frame.PadCommands.Count > 0 &&
+            frame.PadCommands.All(command => command.Status == "waiting") &&
+            frame.PadCommands.Any(command => command.Reason == "missing position"))
+        {
+            _followStatus.Text = "独立探针无法读取至少一个客户端；跟随者仍在等待位置，自动方向已停止。";
+            return;
+        }
         if (_follow?.HasUnknownProbeBuild == true && frame.PadCommands.Count > 0 &&
             frame.PadCommands.All(command => command.Status == "waiting") &&
             frame.PadCommands.Any(command => command.Reason == "missing position"))

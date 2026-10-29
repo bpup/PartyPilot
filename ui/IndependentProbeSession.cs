@@ -11,6 +11,7 @@ internal sealed class IndependentProbeSession : IAsyncDisposable
     private readonly Task _output;
     private readonly Task<string> _error;
     private readonly ConcurrentDictionary<int, bool> _recognizedBuilds = new();
+    private readonly ConcurrentDictionary<int, byte> _readFailures = new();
 
     internal event Action? DiagnosticsChanged;
 
@@ -25,6 +26,8 @@ internal sealed class IndependentProbeSession : IAsyncDisposable
 
     internal bool HasUnknownBuild(int processId) =>
         _recognizedBuilds.TryGetValue(processId, out var recognized) && !recognized;
+
+    internal bool HasReadFailure(int processId) => _readFailures.ContainsKey(processId);
 
     internal static string? FindExecutable()
     {
@@ -74,17 +77,26 @@ internal sealed class IndependentProbeSession : IAsyncDisposable
             {
                 using var document = JsonDocument.Parse(line);
                 var root = document.RootElement;
-                if (root.ValueKind == JsonValueKind.Object &&
-                    root.TryGetProperty("pid", out var pid) &&
-                    pid.ValueKind == JsonValueKind.Number &&
-                    pid.TryGetInt32(out var processId) && processId > 0 &&
-                    root.TryGetProperty("recognizedBuild", out var build) &&
-                    build.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                if (root.ValueKind != JsonValueKind.Object ||
+                    !root.TryGetProperty("pid", out var pid) ||
+                    pid.ValueKind != JsonValueKind.Number ||
+                    !pid.TryGetInt32(out var processId) || processId <= 0)
+                    continue;
+                if (root.TryGetProperty("status", out var status) &&
+                    status.ValueKind == JsonValueKind.String &&
+                    status.GetString() is "attach_failed" or "capture_failed")
+                {
+                    _recognizedBuilds.TryRemove(processId, out _);
+                    if (_readFailures.TryAdd(processId, 0)) DiagnosticsChanged?.Invoke();
+                }
+                else if (root.TryGetProperty("recognizedBuild", out var build) &&
+                         build.ValueKind is JsonValueKind.True or JsonValueKind.False)
                 {
                     var recognized = build.GetBoolean();
                     var changed = !_recognizedBuilds.TryGetValue(processId, out var prior) ||
                         prior != recognized;
                     _recognizedBuilds[processId] = recognized;
+                    if (_readFailures.TryRemove(processId, out _)) changed = true;
                     if (changed) DiagnosticsChanged?.Invoke();
                 }
             }
