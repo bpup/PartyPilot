@@ -6,6 +6,27 @@ namespace PartyPilot.Bridge;
 // Ambiguous devices are rejected: a HidHide instance ID is not a WGI identity.
 internal sealed class WgiPhysicalSource
 {
+    // This is only a presence check. WGI can expose virtual gamepads too, so
+    // selection and isolation must still bind one exact physical device.
+    internal static bool HasReadableGamepad()
+    {
+        foreach (var raw in RawGameController.RawGameControllers)
+        {
+            try
+            {
+                var gamepad = Gamepad.FromGameController(raw);
+                if (gamepad is null) continue;
+                _ = gamepad.GetCurrentReading();
+                return true;
+            }
+            catch
+            {
+                // A single unsupported controller must not hide another input.
+            }
+        }
+        return false;
+    }
+
     private readonly ushort _vendor;
     private readonly ushort _product;
     private readonly string _nonRoamableId;

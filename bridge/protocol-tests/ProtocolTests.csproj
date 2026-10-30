@@ -11,6 +11,10 @@
     <Compile Include="../BridgeProtocol.cs" Link="BridgeProtocol.cs" />
     <Compile Include="../BridgeSlots.cs" Link="BridgeSlots.cs" />
     <Compile Include="../ControllerDeviceId.cs" Link="ControllerDeviceId.cs" />
+    <Compile Include="../ControllerCandidateSelection.cs" Link="ControllerCandidateSelection.cs" />
+    <Compile Include="../HidHideGamingInventory.cs" Link="HidHideGamingInventory.cs" />
+    <Compile Include="../HidHideIsolationPlan.cs" Link="HidHideIsolationPlan.cs" />
+    <Compile Include="../HidHideControllerLease.cs" Link="HidHideControllerLease.cs" />
     <Compile Include="../ControllerAutoDiscovery.cs" Link="ControllerAutoDiscovery.cs" />
     <Compile Include="../PublicSlotGuard.cs" Link="PublicSlotGuard.cs" />
     <Compile Include="../WgiIdentitySelection.cs" Link="WgiIdentitySelection.cs" />

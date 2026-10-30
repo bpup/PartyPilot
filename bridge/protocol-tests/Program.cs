@@ -29,30 +29,211 @@ if (!ControllerDeviceId.TryReadVidPid(@"HID\VID_1234&PID_ABCD\DEVICE", out var v
     ControllerDeviceId.TryReadVidPid(@"HID\VID_123&PID_ABCD\DEVICE", out _, out _) ||
     ControllerDeviceId.TryReadVidPid("XInput 0", out _, out _))
     throw new Exception("WGI physical source accepted an unbound or invalid VID/PID.");
+var gamingInventoryJson = System.Text.Json.JsonSerializer.Serialize(new[]
+{
+    new { friendlyName = "Bluetooth controller", devices = new[]
+    {
+        new { present = true, gamingDevice = true,
+            deviceInstancePath = @"HID\VID_045E&PID_0B13&IG_00\FIRST",
+            xusbDeviceInstancePath = "", baseContainerDeviceInstancePath = @"BTHLE\DEV_A" },
+        new { present = true, gamingDevice = true,
+            deviceInstancePath = @"HID\VID_045E&PID_0B13&IG_01\SECOND",
+            xusbDeviceInstancePath = "", baseContainerDeviceInstancePath = @"BTHLE\DEV_A" },
+        new { present = false, gamingDevice = true,
+            deviceInstancePath = @"HID\VID_1234&PID_5678\DISCONNECTED",
+            xusbDeviceInstancePath = "", baseContainerDeviceInstancePath = @"BTHLE\DEV_B" },
+        new { present = true, gamingDevice = true,
+            deviceInstancePath = @"HID\VID_045E&PID_028E\VIRTUAL",
+            xusbDeviceInstancePath = "", baseContainerDeviceInstancePath = @"ROOT\VIGEMBUS\0000" },
+        new { present = true, gamingDevice = true,
+            deviceInstancePath = @"HID\VID_045E&PID_028E&IG_00\VIRTUAL_2",
+            xusbDeviceInstancePath = "", baseContainerDeviceInstancePath =
+                @"USB\VID_045E&PID_028E\01" }
+    } }
+});
+var gamingGroups = HidHideGamingInventory.Parse(gamingInventoryJson);
+if (gamingGroups.Count != 1 || gamingGroups[0].Interfaces.Count != 2 ||
+    gamingGroups[0].Key != @"BTHLE\DEV_A" ||
+    gamingGroups[0].Interfaces.Any(item => item.Vendor != 0x045e || item.Product != 0x0b13))
+    throw new Exception("Present Bluetooth HID interfaces were not grouped without a model whitelist.");
+var noVidJson = System.Text.Json.JsonSerializer.Serialize(new[]
+{
+    new { friendlyName = "Unknown controller", devices = new[]
+    {
+        new { present = true, gamingDevice = true,
+            deviceInstancePath = @"BTHLE\NO_VID_PID\DEVICE", xusbDeviceInstancePath = "",
+            baseContainerDeviceInstancePath = @"BTHLE\DEV_C" }
+    } }
+});
+if (HidHideGamingInventory.Parse(noVidJson) is not [{ Interfaces.Count: 1 } unknown] ||
+    unknown.Interfaces[0].Vendor is not null)
+    throw new Exception("A connected controller without a VID/PID was silently discarded.");
+try
+{
+    HidHideGamingInventory.Parse("{}");
+    throw new Exception("A malformed HidHide inventory was accepted.");
+}
+catch (InvalidDataException) { }
 var hiddenController = @"HID\VID_1234&PID_ABCD\DEVICE";
+var mappedBridge = HidHidePreflight.NormalizeImagePath(
+    @"C:\Tools\PartyPilot.Bridge.exe",
+    drive => drive == "C:" ? @"\Device\HarddiskVolume3" : null);
+var mappedPrefixed = HidHidePreflight.NormalizeImagePath(
+    @"\??\C:\Tools\PartyPilot.Bridge.exe",
+    drive => drive == "C:" ? @"\Device\HarddiskVolume3" : null);
+if (mappedBridge != @"\Device\HarddiskVolume3\Tools\PartyPilot.Bridge.exe" ||
+    mappedBridge != mappedPrefixed)
+    throw new Exception("HidHide device-form allow-list paths did not match drive paths.");
+if (OperatingSystem.IsWindows() && Environment.ProcessPath is { Length: > 3 } processPath &&
+    processPath[1] == ':' && HidHidePreflight.NormalizeImagePath(processPath) == processPath)
+    throw new Exception("Windows drive path did not resolve to a HidHide device path.");
+var singleController = new GamingControllerGroup(@"USB\ONE", "Controller",
+    [new GamingControllerInterface(hiddenController, @"USB\ONE", "", "Controller",
+        0x1234, 0xabcd)]);
 var controllerSnapshot = new HidHideSnapshot(true, false, [hiddenController],
     [@"C:\Tools\PartyPilot.Bridge.exe"]);
-var autoController = ControllerAutoDiscovery.Select(controllerSnapshot,
+var autoController = ControllerAutoDiscovery.Select(controllerSnapshot, [singleController],
     @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
-    false, [2], _ => true);
+    false, [2], _ => true, windowsInputVisible: true);
 if (!autoController.Ready || autoController.Device != hiddenController ||
     autoController.XInputIndex != 2 ||
-    ControllerAutoDiscovery.Select(controllerSnapshot, @"C:\Tools\PartyPilot.Bridge.exe",
-        [@"C:\Game\PathOfExile.exe"], false, [1, 2], _ => true).Ready ||
-    ControllerAutoDiscovery.Select(controllerSnapshot with { HiddenDevices =
-        [hiddenController, @"HID\VID_5678&PID_EF01\SECOND"] },
+    ControllerAutoDiscovery.Select(controllerSnapshot, [singleController],
         @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
-        false, [2], _ => true).Ready ||
+        false, [1, 2], _ => true, windowsInputVisible: true).Ready ||
     ControllerAutoDiscovery.Select(controllerSnapshot with { Active = false },
+        [singleController],
         @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
-        false, [2], _ => true).Ready ||
-    !ControllerAutoDiscovery.Select(controllerSnapshot,
+        false, [2], _ => true, windowsInputVisible: true).Ready ||
+    !ControllerAutoDiscovery.Select(controllerSnapshot, [singleController],
         @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
-        true, [], _ => true).Ready ||
-    ControllerAutoDiscovery.Select(controllerSnapshot,
+        true, [], _ => true, windowsInputVisible: true).Ready ||
+    ControllerAutoDiscovery.Select(controllerSnapshot, [singleController],
         @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
-        true, [], _ => false).Ready)
+        true, [], _ => false, windowsInputVisible: true).Ready)
     throw new Exception("Automatic controller selection accepted ambiguous or unisolated input.");
+var connectedButUnhidden = ControllerAutoDiscovery.Select(
+    controllerSnapshot with { HiddenDevices = [] }, [singleController],
+    @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+    true, [], _ => true, windowsInputVisible: true);
+if (connectedButUnhidden.Ready ||
+    !connectedButUnhidden.Message.Contains("已发现手柄", StringComparison.Ordinal) ||
+    !connectedButUnhidden.Message.Contains("尚未完成游戏隔离", StringComparison.Ordinal))
+    throw new Exception("A connected but unhidden controller was reported as missing.");
+var noWindowsInput = ControllerAutoDiscovery.Select(controllerSnapshot, [singleController],
+    @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+    true, [], _ => true, windowsInputVisible: false);
+if (noWindowsInput.Ready ||
+    !noWindowsInput.Message.Contains("PartyPilot 当前读不到", StringComparison.Ordinal))
+    throw new Exception("Controller discovery treated HidHide entries as live input.");
+var bluetoothSnapshot = controllerSnapshot with
+{
+    HiddenDevices = gamingGroups[0].Interfaces.Select(item => item.InstancePath).ToArray()
+};
+var groupedController = ControllerAutoDiscovery.Select(bluetoothSnapshot, gamingGroups,
+    @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+    false, [2], _ => true, windowsInputVisible: true);
+if (!groupedController.Ready || groupedController.XInputIndex != 2 ||
+    groupedController.Device != gamingGroups[0].Interfaces[0].InstancePath)
+    throw new Exception("Two interfaces of one Bluetooth controller were treated as separate pads.");
+var unhiddenInterface = ControllerAutoDiscovery.Select(bluetoothSnapshot with
+    {
+        HiddenDevices = [gamingGroups[0].Interfaces[0].InstancePath]
+    }, gamingGroups, @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+    false, [2], _ => true, windowsInputVisible: true);
+if (unhiddenInterface.Ready || !unhiddenInterface.Message.Contains("尚未完成游戏隔离"))
+    throw new Exception("A partially hidden Bluetooth controller was accepted.");
+var secondController = new GamingControllerGroup(@"USB\SECOND", "Another controller",
+    [new GamingControllerInterface(@"HID\VID_1234&PID_5678\SECOND",
+        @"USB\SECOND", "", "Another controller", 0x1234, 0x5678)]);
+if (ControllerCandidateSelection.Select([gamingGroups[0], secondController],
+        false, [2], _ => true).Ready ||
+    ControllerCandidateSelection.Select([gamingGroups[0]],
+        false, [-1], _ => true).Ready ||
+    ControllerCandidateSelection.Select([gamingGroups[0], secondController],
+        true, [], _ => true).Ready)
+    throw new Exception("Ambiguous physical controller paths were automatically selected.");
+var uniqueWgi = ControllerCandidateSelection.Select([gamingGroups[0], secondController],
+    true, [], path => path == secondController.Interfaces[0].InstancePath);
+if (!uniqueWgi.Ready || uniqueWgi.Device != secondController.Interfaces[0].InstancePath ||
+    uniqueWgi.XInputIndex is not null)
+    throw new Exception("A uniquely readable WGI controller was not selected.");
+var bluetoothCandidate = ControllerCandidateSelection.Select(gamingGroups,
+    false, [2], _ => true);
+if (!HidHideIsolationPlanner.TryCreate(bluetoothSnapshot with
+    {
+        HiddenDevices = [gamingGroups[0].Interfaces[0].InstancePath]
+    }, bluetoothCandidate, @"C:\Tools\PartyPilot.Bridge.exe",
+    [@"C:\Game\PathOfExile.exe"], out var isolationPlan, out _) ||
+    isolationPlan is null || isolationPlan.PathsToHide.Length != 1 ||
+    isolationPlan.PathsToHide[0] != gamingGroups[0].Interfaces[1].InstancePath ||
+    isolationPlan.RegisterBridge || isolationPlan.EnableCloak || isolationPlan.DisableInverse)
+    throw new Exception("Isolation plan did not limit changes to the selected controller.");
+if (HidHideIsolationPlanner.TryCreate(bluetoothSnapshot with
+    {
+        Active = false,
+        HiddenDevices = [@"HID\VID_5678&PID_EF01\OTHER"]
+    }, bluetoothCandidate, @"C:\Tools\PartyPilot.Bridge.exe",
+    [@"C:\Game\PathOfExile.exe"], out _, out _) ||
+    HidHideIsolationPlanner.TryCreate(bluetoothSnapshot with
+    {
+        AllowedApps = [@"C:\Tools\PartyPilot.Bridge.exe",
+            @"\??\C:\Game\PathOfExile.exe"]
+    }, bluetoothCandidate, @"C:\Tools\PartyPilot.Bridge.exe",
+    [@"C:\Game\PathOfExile.exe"], out _, out _))
+    throw new Exception("Isolation plan would change other devices or expose the game.");
+var leaseRoot = Path.Combine(Path.GetTempPath(), "partypilot-lease-test-" + Guid.NewGuid());
+try
+{
+    var leasePath = Path.Combine(leaseRoot, "lease.json");
+    var settings = new FakeHidHideControllerSettings(new HidHideSnapshot(false, false,
+        [], []));
+    var lease = new HidHideControllerLeaseManager(settings, leasePath,
+        (_, _) => true);
+    var acquired = await lease.PrepareAsync(bluetoothCandidate,
+        @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+        int.MaxValue, 1, startWatcher: () => Task.CompletedTask);
+    if (!acquired.Ready || acquired.LeaseId is null ||
+        !settings.State.Active || settings.State.HiddenDevices.Length != 2 ||
+        !HidHidePreflight.IsApplicationAllowed(settings.State,
+            @"C:\Tools\PartyPilot.Bridge.exe") || !File.Exists(leasePath))
+        throw new Exception("New controller isolation was not journaled and verified.");
+    if (await lease.ReleaseAsync(int.MaxValue - 1, 1) || !File.Exists(leasePath))
+        throw new Exception("Another owner released the active controller lease.");
+    settings.Inject(settings.State with
+    {
+        HiddenDevices = [..settings.State.HiddenDevices,
+            @"HID\VID_5678&PID_EF01\OTHER"]
+    });
+    if (await lease.ReleaseAsync(int.MaxValue, 1) || !File.Exists(leasePath) ||
+        !settings.State.Active || settings.State.HiddenDevices.Length != 1)
+        throw new Exception("Lease cleanup changed a separately added hidden device.");
+    settings.Inject(settings.State with { HiddenDevices = [] });
+    var recovering = new HidHideControllerLeaseManager(settings, leasePath,
+        (_, _) => false);
+    if (!await recovering.RecoverStaleAsync() || File.Exists(leasePath) ||
+        settings.State.Active || settings.State.HiddenDevices.Length != 0 ||
+        settings.State.AllowedApps.Length != 0)
+        throw new Exception("A stale controller isolation lease did not restore prior settings.");
+
+    settings.FailOnSecondHide = true;
+    var failed = await lease.PrepareAsync(bluetoothCandidate,
+        @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+        int.MaxValue, 1, startWatcher: () => Task.CompletedTask);
+    if (failed.Ready || File.Exists(leasePath) || settings.State.Active ||
+        settings.State.HiddenDevices.Length != 0 || settings.State.AllowedApps.Length != 0)
+        throw new Exception("A partial HidHide configuration was not rolled back.");
+    var watcherFailed = await lease.PrepareAsync(bluetoothCandidate,
+        @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+        int.MaxValue, 1, startWatcher: () =>
+            throw new IOException("simulated watcher startup failure"));
+    if (watcherFailed.Ready || File.Exists(leasePath) || settings.State.Active ||
+        settings.State.HiddenDevices.Length != 0 || settings.State.AllowedApps.Length != 0)
+        throw new Exception("Isolation changed state without a recovery watcher.");
+}
+finally
+{
+    if (Directory.Exists(leaseRoot)) Directory.Delete(leaseRoot, true);
+}
 if (WgiIdentitySelection.SelectClaimedIndex(["physical", "virtual-1", "virtual-2"], "physical") != 0 ||
     WgiIdentitySelection.SelectClaimedIndex(["virtual-1", "physical", "virtual-2"], "physical") != 1 ||
     WgiIdentitySelection.SelectClaimedIndex(["virtual-1", "virtual-2"], "physical") != -1 ||
@@ -1109,4 +1290,44 @@ internal sealed class FakePad : IPadOutput
     public short X => Report.LeftX;
     public short Y => Report.LeftY;
     public void SetReport(PadReport report) => Report = report;
+}
+
+internal sealed class FakeHidHideControllerSettings(HidHideSnapshot initial)
+    : IHidHideControllerSettings
+{
+    internal HidHideSnapshot State { get; private set; } = initial;
+    private bool _failOnSecondHide;
+    internal bool FailOnSecondHide
+    {
+        get => _failOnSecondHide;
+        set { _failOnSecondHide = value; _hideCount = 0; }
+    }
+    private int _hideCount;
+
+    public HidHideSnapshot Read() => State;
+
+    internal void Inject(HidHideSnapshot state) => State = state;
+
+    public Task ApplyAsync(string command, string? argument,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (command == "--dev-hide" && FailOnSecondHide && ++_hideCount == 2)
+            throw new IOException("simulated second interface failure");
+        State = command switch
+        {
+            "--app-reg" => State with { AllowedApps = [..State.AllowedApps, argument!] },
+            "--app-unreg" => State with { AllowedApps = State.AllowedApps.Where(path =>
+                !string.Equals(path, argument, StringComparison.OrdinalIgnoreCase)).ToArray() },
+            "--dev-hide" => State with { HiddenDevices = [..State.HiddenDevices, argument!] },
+            "--dev-unhide" => State with { HiddenDevices = State.HiddenDevices.Where(path =>
+                !string.Equals(path, argument, StringComparison.OrdinalIgnoreCase)).ToArray() },
+            "--cloak-on" => State with { Active = true },
+            "--cloak-off" => State with { Active = false },
+            "--inv-off" => State with { Inverse = false },
+            "--inv-on" => State with { Inverse = true },
+            _ => throw new InvalidOperationException("Unexpected HidHide operation: " + command)
+        };
+        return Task.CompletedTask;
+    }
 }

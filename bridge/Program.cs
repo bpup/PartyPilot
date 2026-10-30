@@ -169,10 +169,18 @@ if (args.Length > 0 && args[0] == "--check-startup")
     }
 }
 
-if (args.Length > 0 && args[0] == "--discover-controller")
+if (args.Length > 0 && args[0] is "--prepare-controller" or "--discover-controller")
 {
-    var useWgi = args.Contains("--physical-wgi");
-    var expected = 1 + (useWgi ? 1 : 0);
+    if (args.Length < 7 || args[1] != "--owner-pid" ||
+        !int.TryParse(args[2], out var ownerPid) || ownerPid <= 0 ||
+        args[3] != "--owner-start" ||
+        !long.TryParse(args[4], out var ownerStartTicks) || ownerStartTicks <= 0)
+    {
+        Console.Error.WriteLine("Controller preparation needs a live owner process.");
+        return 2;
+    }
+    var useWgi = args[5] == "--physical-wgi";
+    var expected = 5 + (useWgi ? 1 : 0);
     var discoveryGamePaths = new List<string>();
     for (var index = expected; index < args.Length; index += 2)
     {
@@ -191,7 +199,9 @@ if (args.Length > 0 && args[0] == "--discover-controller")
     }
     try
     {
-        var found = ControllerAutoDiscovery.Discover(discoveryGamePaths, useWgi);
+        var found = await ControllerAutoDiscovery.DiscoverAsync(discoveryGamePaths,
+            useWgi, ownerPid, ownerStartTicks,
+            prepareIsolation: args[0] == "--prepare-controller");
         Console.WriteLine(JsonSerializer.Serialize(new { controller_ready = found.Ready,
             device_instance = found.Device, physical_index = found.XInputIndex,
             message = found.Message }));
@@ -203,6 +213,40 @@ if (args.Length > 0 && args[0] == "--discover-controller")
     {
         Console.WriteLine(JsonSerializer.Serialize(new { controller_ready = false,
             message = "无法读取手柄或 HidHide 设置：" + error.Message }));
+        return 1;
+    }
+}
+
+if (args.Length == 5 && args[0] is "--watch-controller-lease" or "--release-controller" &&
+    args[1] == "--owner-pid" && int.TryParse(args[2], out var leaseOwnerPid) &&
+    leaseOwnerPid > 0 && args[3] == "--owner-start" &&
+    long.TryParse(args[4], out var leaseOwnerStart) && leaseOwnerStart > 0)
+{
+    try
+    {
+        var manager = new HidHideControllerLeaseManager(new HidHideCliControllerSettings(),
+            HidHideControllerLeaseManager.DefaultJournalPath);
+        if (args[0] == "--watch-controller-lease")
+        {
+            Console.WriteLine("controller-lease-watching");
+            Console.Out.Flush();
+            while (HidHideControllerLeaseManager.OwnerAlive(leaseOwnerPid, leaseOwnerStart))
+                await Task.Delay(1000);
+            for (var attempt = 0; attempt < 12; attempt++)
+            {
+                if (await manager.ReleaseAsync(leaseOwnerPid, leaseOwnerStart)) return 0;
+                await Task.Delay(TimeSpan.FromSeconds(5));
+            }
+            return 1;
+        }
+        return await manager.ReleaseAsync(leaseOwnerPid, leaseOwnerStart) ? 0 : 1;
+    }
+    catch (Exception error) when (error is IOException or UnauthorizedAccessException or
+        InvalidDataException or InvalidOperationException or
+        System.ComponentModel.Win32Exception or
+        OperationCanceledException)
+    {
+        Console.Error.WriteLine("Controller isolation could not be restored: " + error.Message);
         return 1;
     }
 }

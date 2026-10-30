@@ -2672,7 +2672,7 @@ public sealed class MainWindow : Window
             var gameExecutables = Enumerable.Range(0, _selectedTopology.ClientCount)
                 .Select(index => _paths[index].Text?.Trim() ?? "").ToArray();
             var selected = prelaunchController ?? await ControllerLaunchPreflight.DiscoverAsync(
-                executable, gameExecutables, useWgi);
+                executable, gameExecutables, useWgi, prepareIsolation: false);
             if (!selected.Ready || selected.Device is null)
                 throw new InvalidOperationException(selected.Message);
             var session = await BridgeSession.StartAsync(executable, _selectedTopology.Slots,
@@ -2693,6 +2693,8 @@ public sealed class MainWindow : Window
         }
         finally
         {
+            if (_bridge is null)
+                await ReleaseControllerIsolationAsync();
             _busy = wasBusy;
             UpdateBridgeControls();
         }
@@ -3227,7 +3229,12 @@ public sealed class MainWindow : Window
         _loginStatus = "waiting";
         UpdateFollowControls();
         UpdateClientRows();
-        if (session is null) return;
+        if (session is null)
+        {
+            if (!await ReleaseControllerIsolationAsync())
+                _pairingStatus.Text = "手柄隔离恢复未完成，请检查 HidHide 设置。";
+            return;
+        }
         session.AReleased -= BridgeAReleased;
         session.PairingArmed -= BridgePairingArmed;
         session.PairingCompleted -= BridgePairingCompleted;
@@ -3235,10 +3242,28 @@ public sealed class MainWindow : Window
         session.HybridFocusChanged -= HybridFocusChanged;
         session.HybridConfirmReleased -= HybridConfirmReleased;
         session.Ended -= BridgeEnded;
-        await session.DisposeAsync();
-        _pairingStatus.Text = wasHybrid
-            ? "键鼠桥接已停止，虚拟手柄已释放。"
-            : "手柄桥接已停止，虚拟手柄已释放。";
+        try { await session.DisposeAsync(); }
+        finally
+        {
+            var restored = await ReleaseControllerIsolationAsync();
+            _pairingStatus.Text = restored
+                ? wasHybrid ? "键鼠桥接已停止，虚拟手柄已释放。" :
+                    "手柄桥接已停止，虚拟手柄已释放。"
+                : "手柄桥接已停止，但手柄隔离恢复未完成；请检查 HidHide 设置。";
+        }
+    }
+
+    private static async Task<bool> ReleaseControllerIsolationAsync()
+    {
+        try
+        {
+            return await ControllerLaunchPreflight.ReleaseAsync(BridgeSession.FindExecutable());
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or
+            System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     private async Task EndSessionAsync()
@@ -3809,8 +3834,10 @@ public sealed class MainWindow : Window
                 var useWgi = _selectedTopology.Slots.Count(slot => slot.Client != 3) == 4;
                 var gameExecutables = Enumerable.Range(0, _selectedTopology.ClientCount)
                     .Select(index => _paths[index].Text?.Trim() ?? string.Empty).ToArray();
+                if (_bridge is not null && (!reusePreparedBridge || !_bridge.IsRunning))
+                    await StopBridgeAsync();
                 var selected = await ControllerLaunchPreflight.DiscoverAsync(bridgeExecutable,
-                    gameExecutables, useWgi);
+                    gameExecutables, useWgi, prepareIsolation: true);
                 if (!selected.Ready || selected.Device is null)
                 {
                     _status.Text = selected.Message;
@@ -4001,6 +4028,8 @@ public sealed class MainWindow : Window
             try
             {
                 if (pendingPrivate is not null) await pendingPrivate.DisposeAsync();
+                if (action == ClientAction.Start && _bridge is null)
+                    await ReleaseControllerIsolationAsync();
             }
             finally
             {

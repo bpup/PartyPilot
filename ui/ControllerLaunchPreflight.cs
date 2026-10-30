@@ -10,7 +10,7 @@ internal sealed record ControllerAutoSelection(bool Ready, string? Device,
 internal static class ControllerLaunchPreflight
 {
     internal static async Task<ControllerAutoSelection> DiscoverAsync(string bridgeExecutable,
-        IReadOnlyList<string> gameExecutables, bool useWgi)
+        IReadOnlyList<string> gameExecutables, bool useWgi, bool prepareIsolation)
     {
         if (gameExecutables.Count is < 1 or > 3 ||
             gameExecutables.Any(string.IsNullOrWhiteSpace))
@@ -23,7 +23,13 @@ internal static class ControllerLaunchPreflight
             RedirectStandardError = true,
             CreateNoWindow = true
         };
-        start.ArgumentList.Add("--discover-controller");
+        start.ArgumentList.Add(prepareIsolation
+            ? "--prepare-controller" : "--discover-controller");
+        start.ArgumentList.Add("--owner-pid");
+        start.ArgumentList.Add(Environment.ProcessId.ToString());
+        start.ArgumentList.Add("--owner-start");
+        using (var owner = Process.GetCurrentProcess())
+            start.ArgumentList.Add(owner.StartTime.ToUniversalTime().Ticks.ToString());
         if (useWgi) start.ArgumentList.Add("--physical-wgi");
         foreach (var path in gameExecutables)
         {
@@ -34,15 +40,56 @@ internal static class ControllerLaunchPreflight
             throw new InvalidOperationException("手柄检测程序未能启动。");
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
-        try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(12)); }
+        try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(45)); }
         catch (TimeoutException)
         {
             if (!process.HasExited) process.Kill(entireProcessTree: true);
             await process.WaitForExitAsync();
-            return new(false, null, null, "手柄检测超时，请重试。");
+            var restored = !prepareIsolation || await ReleaseAsync(bridgeExecutable);
+            return new(false, null, null, !prepareIsolation
+                ? "手柄检测超时，请重试。"
+                : restored ? "手柄准备超时，已撤销本次隔离；请重试。"
+                    : "手柄准备超时，隔离恢复未完成；请检查 HidHide 设置。");
         }
         await Task.WhenAll(output, error);
         return ParseDiscovery(process.ExitCode, output.Result, error.Result, useWgi);
+    }
+
+    internal static async Task<bool> ReleaseAsync(string? bridgeExecutable)
+    {
+        var journal = Path.Combine(Environment.GetFolderPath(
+            Environment.SpecialFolder.LocalApplicationData), "PartyPilot",
+            "controller-isolation-lease.json");
+        if (!OperatingSystem.IsWindows() || !File.Exists(journal)) return true;
+        if (string.IsNullOrWhiteSpace(bridgeExecutable) || !File.Exists(bridgeExecutable))
+            return false;
+        var start = new ProcessStartInfo(bridgeExecutable)
+        {
+            WorkingDirectory = Path.GetDirectoryName(bridgeExecutable)!,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        start.ArgumentList.Add("--release-controller");
+        start.ArgumentList.Add("--owner-pid");
+        start.ArgumentList.Add(Environment.ProcessId.ToString());
+        start.ArgumentList.Add("--owner-start");
+        using (var owner = Process.GetCurrentProcess())
+            start.ArgumentList.Add(owner.StartTime.ToUniversalTime().Ticks.ToString());
+        using var process = Process.Start(start);
+        if (process is null) return false;
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20)); }
+        catch (TimeoutException)
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync();
+            return false;
+        }
+        await Task.WhenAll(output, error);
+        return process.ExitCode == 0;
     }
 
     internal static ControllerAutoSelection ParseDiscovery(int exitCode, string output,
