@@ -3,6 +3,11 @@ name: Installer smoke
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_version:
+        description: Installer version (for a release build)
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -21,8 +26,10 @@ jobs:
           dotnet-version: 9.0.x
       - name: Build one Windows installer
         shell: pwsh
+        env:
+          BUILD_VERSION: ${{ inputs.release_version || format('0.0.0-ci.{0}', github.run_number) }}
         run: |
-          python scripts/build_installer.py --version "0.0.0-ci.${{ github.run_number }}"
+          python scripts/build_installer.py --version "$env:BUILD_VERSION"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install and uninstall silently
         shell: pwsh
