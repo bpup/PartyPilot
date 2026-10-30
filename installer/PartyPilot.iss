@@ -1,4 +1,6 @@
 ; Build with scripts/build_installer.py. StageDir and BuildVersion are required.
+; ChineseSimplified.isl is from jrsoftware/issrc commit 2527da77ff7983514f535d19391a748c5d898336.
+; Its redistribution terms are retained in InnoSetup-LICENSE.txt.
 #ifndef StageDir
   #error StageDir must point to a freshly built payload
 #endif
@@ -25,7 +27,7 @@ CloseApplications=yes
 RestartApplications=no
 
 [Languages]
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "chinesesimplified"; MessagesFile: "{#AddBackslash(SourcePath)}ChineseSimplified.isl"
 
 [Files]
 Source: "{#StageDir}\desktop\PartyPilot.Desktop.exe"; DestDir: "{app}\desktop"; Flags: ignoreversion
