@@ -8,6 +8,11 @@ on:
         description: Installer version (for a release build)
         required: false
         type: string
+      publish_release:
+        description: Publish the checked installer as a prerelease
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -77,3 +82,33 @@ jobs:
           name: PartyPilot-Setup-preview
           path: installer/out/PartyPilot-Setup-*.exe
           if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_release == true
+    needs: installer
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: PartyPilot-Setup-preview
+          path: release-asset
+      - name: Publish checked prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.release_version }}
+          TARGET_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_VERSION" == 0.1.0-beta.87 ]]
+          expected="release-asset/PartyPilot-Setup-$RELEASE_VERSION.exe"
+          test -f "$expected"
+          test "$(find release-asset -type f | wc -l)" -eq 1
+          test "$(head -c 2 "$expected")" = MZ
+          gh release create "v$RELEASE_VERSION" "$expected" \
+            --target "$TARGET_SHA" --title "PartyPilot beta.87" \
+            --notes-file .github/release-notes/beta.87.md --prerelease
