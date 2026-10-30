@@ -54,8 +54,18 @@ jobs:
           )) {
             if (-not (Test-Path (Join-Path $target $file))) { throw "Installed file missing: $file" }
           }
-          $shortcut = Join-Path $env:APPDATA "Microsoft/Windows/Start Menu/Programs/PartyPilot/PartyPilot.lnk"
-          if (-not (Test-Path $shortcut)) { throw "Start menu shortcut missing" }
+          $shortcuts = @(
+            (Join-Path $env:APPDATA "Microsoft/Windows/Start Menu/Programs/PartyPilot/PartyPilot.lnk"),
+            (Join-Path ([Environment]::GetFolderPath("Desktop")) "PartyPilot.lnk")
+          )
+          $shell = New-Object -ComObject WScript.Shell
+          foreach ($shortcut in $shortcuts) {
+            if (-not (Test-Path $shortcut)) { throw "Shortcut missing: $shortcut" }
+            $link = $shell.CreateShortcut($shortcut)
+            if ($link.TargetPath -ne (Join-Path $target "desktop/PartyPilot.Desktop.exe")) {
+              throw "Shortcut points to a different program: $shortcut"
+            }
+          }
           $uninstall = Join-Path $target "unins000.exe"
           if (-not (Test-Path $uninstall)) { throw "Uninstaller missing" }
           $removed = Start-Process -FilePath $uninstall -ArgumentList @(
