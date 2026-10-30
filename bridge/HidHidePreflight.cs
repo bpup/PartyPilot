@@ -27,22 +27,42 @@ internal static class HidHidePreflight
     public static HidHidePreflightResult Evaluate(HidHideSnapshot snapshot, string selectedDevice,
         string bridgeExecutable, string gameExecutable)
     {
-        var allowed = snapshot.AllowedApps.Select(NormalizeImagePath)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         return new HidHidePreflightResult(snapshot.Active, !snapshot.Inverse,
             snapshot.HiddenDevices.Contains(selectedDevice, StringComparer.OrdinalIgnoreCase),
-            allowed.Contains(NormalizeImagePath(bridgeExecutable)),
-            !allowed.Contains(NormalizeImagePath(gameExecutable)));
+            IsApplicationAllowed(snapshot, bridgeExecutable),
+            !IsApplicationAllowed(snapshot, gameExecutable));
     }
 
-    private static string NormalizeImagePath(string path)
+    internal static bool IsApplicationAllowed(HidHideSnapshot snapshot, string executable) =>
+        snapshot.AllowedApps.Any(path => string.Equals(NormalizeImagePath(path),
+            NormalizeImagePath(executable), StringComparison.OrdinalIgnoreCase));
+
+    internal static string NormalizeImagePath(string path,
+        Func<string, string?>? resolveDrive = null)
     {
         var normalized = path.Replace('/', '\\');
         if (normalized.StartsWith(@"\??\", StringComparison.OrdinalIgnoreCase))
             normalized = normalized[4..];
         else if (normalized.StartsWith(@"\\?\", StringComparison.OrdinalIgnoreCase))
             normalized = normalized[4..];
+        if (normalized.Length >= 3 && char.IsLetter(normalized[0]) &&
+            normalized[1] == ':' && normalized[2] == '\\')
+        {
+            var device = (resolveDrive ?? ResolveDrive)(normalized[..2]);
+            if (!string.IsNullOrWhiteSpace(device))
+                return device.TrimEnd('\\') + normalized[2..];
+        }
         return normalized;
+    }
+
+    private static string? ResolveDrive(string drive)
+    {
+        if (!OperatingSystem.IsWindows()) return null;
+        var target = new StringBuilder(1024);
+        if (QueryDosDevice(drive, target, (uint)target.Capacity) == 0)
+            return null;
+        var end = target.ToString().IndexOf('\0');
+        return end < 0 ? target.ToString() : target.ToString()[..end];
     }
 
     public static HidHideSnapshot Read()
@@ -100,4 +120,9 @@ internal static class HidHidePreflight
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool DeviceIoControl(SafeFileHandle device, uint code, IntPtr input,
         uint inputSize, [Out] byte[] output, uint outputSize, out uint returned, IntPtr overlapped);
+
+    [DllImport("kernel32.dll", EntryPoint = "QueryDosDeviceW", CharSet = CharSet.Unicode,
+        SetLastError = true)]
+    private static extern uint QueryDosDevice(string deviceName, StringBuilder targetPath,
+        uint maxChars);
 }

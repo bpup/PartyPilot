@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace PartyPilot.Desktop;
 
 internal readonly record struct MainInputSample(int Pad, short LeftX, short LeftY,
-    bool BDown, bool Blocked, DateTime ReceivedAtUtc)
+    bool BDown, bool AttackActive, bool Blocked, DateTime ReceivedAtUtc)
 {
     internal static bool TryParse(JsonElement root, IReadOnlySet<int> assignedPads,
         DateTime receivedAtUtc, out MainInputSample sample)
@@ -18,9 +18,11 @@ internal readonly record struct MainInputSample(int Pad, short LeftX, short Left
             !yValue.TryGetInt16(out var y) ||
             !root.TryGetProperty("b_down", out var bValue) ||
             bValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
+            !root.TryGetProperty("attack_active", out var attackValue) ||
+            attackValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
             !root.TryGetProperty("blocked", out var blockedValue) ||
             blockedValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return false;
-        sample = new MainInputSample(pad, x, y, bValue.GetBoolean(),
+        sample = new MainInputSample(pad, x, y, bValue.GetBoolean(), attackValue.GetBoolean(),
             blockedValue.GetBoolean(), receivedAtUtc);
         return true;
     }

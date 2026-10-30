@@ -7,14 +7,21 @@ internal static class LiveTerrainSelection
     {
         bindings = new Dictionary<int, string>();
         error = "";
-        if (topology.Id is not ("2-split" or "3-three-singles") ||
-            topology.ClientCount != topology.Slots.Count ||
+        var orderedTopology = topology.Id is "4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced";
+        if (topology.Id is not ("2-split" or "3-three-singles" or "4-balanced" or
+                "5-third-solo" or "5-main-solo" or "6-balanced") ||
+            (!orderedTopology && topology.ClientCount != topology.Slots.Count) ||
             paths.Count < topology.ClientCount)
         {
             error = "当前布局没有可核对的逐客户端地形绑定。";
             return false;
         }
         var selected = paths.Take(topology.ClientCount).Select(path => path?.Trim() ?? "").ToArray();
+        if (orderedTopology && classicCollisionDodge)
+        {
+            error = "当前双角色客户端布局不支持经典碰撞闪避。";
+            return false;
+        }
         if (selected.All(string.IsNullOrEmpty))
         {
             if (!classicCollisionDodge) return true;

@@ -176,3 +176,34 @@ func TestTerrainBindingFileResolvesCaptureBesideBinding(t *testing.T) {
 		t.Fatalf("relative capture path not resolved: %+v, %v", binding, err)
 	}
 }
+
+func TestTwoPlayerClientSharesOneValidatedTerrain(t *testing.T) {
+	path := testTerrainCapture(t, time.Now().UTC(), 202)
+	e, err := NewWithBindings([]RoleBinding{
+		{Slot: 1, Client: 1, LocalPlayer: 1, ProcessID: 101},
+		{Slot: 2, Client: 2, LocalPlayer: 1, ProcessID: 202},
+		{Slot: 3, Client: 2, LocalPlayer: 2, ProcessID: 202},
+	}, 1, follow.Config{StopDistance: 2, ResumeDistance: 5,
+		CatchUpDistance: 30, MaxAge: time.Second, TargetTrail: true}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	binding := TerrainBinding{CaptureMetadataFile: path, ProcessID: 202,
+		AreaID: "G2_4", Seed: 123, AreaHash: 77, CellSize: 1}
+	if err := e.SetTerrainBinding(2, binding); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.SetTerrainBinding(3, binding); err != nil {
+		t.Fatal(err)
+	}
+	if e.terrains[2].grid != e.terrains[3].grid ||
+		e.terrains[2].capture != e.terrains[3].capture {
+		t.Fatal("same client did not share validated terrain")
+	}
+	changed := binding
+	changed.Seed++
+	if err := e.SetTerrainBinding(3, changed); err == nil {
+		t.Fatal("same client accepted conflicting terrain identity")
+	}
+}

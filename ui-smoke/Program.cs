@@ -7,7 +7,24 @@ using Avalonia.Themes.Fluent;
 using Avalonia.Threading;
 using PartyPilot.Desktop;
 
+var installFixture = Path.Combine(Path.GetTempPath(), "partypilot-install-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(installFixture);
+try
+{
+    File.WriteAllText(Path.Combine(installFixture, "PathOfExile_x64.exe"), "");
+    File.WriteAllText(Path.Combine(installFixture, "PathOfExile_x64Steam.exe"), "");
+    File.WriteAllText(Path.Combine(installFixture, "unrelated.exe"), "");
+    var found = GameInstallDiscovery.FindExecutables(installFixture);
+    if (found.Count != 2 || found.Any(path => Path.GetFileName(path) == "unrelated.exe"))
+        throw new Exception("Folder selection did not limit choices to known PoE2 executables.");
+}
+finally
+{
+    Directory.Delete(installFixture, recursive: true);
+}
+
 PartyRosterCounterSmoke.Run();
+await IndependentProbeSessionSmoke.RunAsync();
 await PairingInGameWitnessSmoke.RunAsync();
 SessionGameClientShutdownSmoke.Run();
 FollowTargetChoicesSmoke.Run();
@@ -21,9 +38,13 @@ await AutoLoginFillSmoke.RunAsync();
 AutoLoginPreferenceSmoke.Run();
 AutoLoginStartupPlanSmoke.Run();
 LeadershipPreferenceSmoke.Run();
+FollowInputPreferenceSmoke.Run();
 MenuGuardPreferenceSmoke.Run();
 RightStickDodgePreferenceSmoke.Run();
 FollowerMirrorPreferenceSmoke.Run();
+FlaskSupportPreferenceSmoke.Run();
+FlaskRulePreferenceSmoke.Run();
+FlaskCustomPreferenceSmoke.Run();
 AutoPartyCoordinatorSmoke.Run();
 AutoPartyHotkeySmoke.Run();
 AutoPartyKeyPreferenceSmoke.Run();
@@ -33,10 +54,12 @@ HybridTopologySmoke.Run();
 HybridPairingGuideSmoke.Run();
 RadarHotkeySmoke.Run();
 AutoPartyInviteSmoke.Run();
+LiveMemberNameSelectionSmoke.Run();
 AutoPartyRecoverySmoke.Run();
 await AutoPartyRecoverySchedulerSmoke.RunAsync();
 await PartyLeaveLogSmoke.RunAsync();
 await ControllerLaunchPreflightSmoke.RunAsync();
+await ProcessLocalBridgePipelineSmoke.RunAsync();
 if (!ControllerLaunchPreflight.Parse(0,
         "{\"startup_preflight_ready\":true,\"isolation_matches\":true,\"physical_source_readable\":true}", "").Ready ||
     ControllerLaunchPreflight.Parse(0,
@@ -76,9 +99,43 @@ var followPreferencePath = Path.Combine(Path.GetTempPath(),
 var followPreferenceStore = new FollowTargetPreferenceStore(followPreferencePath);
 var stopPreferenceStore = new FollowStopPreferenceStore(Path.Combine(
     Path.GetDirectoryName(followPreferencePath)!, "follow-stops.json"));
-var window = new MainWindow(followPreferenceStore, stopPreferenceStore);
+var followInputPreferenceStore = new FollowInputPreferenceStore(Path.Combine(
+    Path.GetDirectoryName(followPreferencePath)!, "follow-input.json"));
+var window = new MainWindow(followPreferenceStore, stopPreferenceStore,
+    followInputPreferenceStore);
 window.Show();
 window.UpdateLayout();
+if (window.GetLogicalDescendants().OfType<TextBox>()
+        .Single(box => box.Name == "follow-stop-global").Text != "9" ||
+    window.GetLogicalDescendants().OfType<TextBox>()
+        .Single(box => box.Name == "follow-catchup-global").Text != "39.13940256045524")
+    throw new Exception("The observed 0.6.17 distance values were not prefilled.");
+var priorityChoice = window.GetLogicalDescendants().OfType<CheckBox>()
+    .Single(box => box.Content?.ToString()?.StartsWith("追赶优先", StringComparison.Ordinal) == true);
+var attackChoice = window.GetLogicalDescendants().OfType<CheckBox>()
+    .Single(box => box.Content?.ToString()?.StartsWith("攻击时同步主控移动方向", StringComparison.Ordinal) == true);
+if (priorityChoice.IsChecked != true || attackChoice.IsChecked != true ||
+    window.GetLogicalDescendants().OfType<CheckBox>()
+        .Single(box => box.Content?.ToString()?.StartsWith("启用经典冲刺追赶", StringComparison.Ordinal) == true)
+        .IsChecked != true)
+    throw new Exception("Desktop did not load the observed follow input defaults.");
+priorityChoice.IsChecked = true;
+attackChoice.IsChecked = false;
+var retryField = window.GetLogicalDescendants().OfType<TextBox>()
+    .Single(box => box.Name == "aggressive-sprint-retry-delay");
+retryField.Text = "900";
+var closeChoice = window.GetLogicalDescendants().OfType<CheckBox>()
+    .Single(box => box.Content?.ToString()?.StartsWith("近距离镜像跟随", StringComparison.Ordinal) == true);
+closeChoice.IsChecked = true;
+var closeDurationField = window.GetLogicalDescendants().OfType<TextBox>()
+    .Single(box => box.Name == "close-mirror-duration");
+closeDurationField.Text = "650";
+Dispatcher.UIThread.RunJobs();
+var savedFollowInput = followInputPreferenceStore.Load();
+if (savedFollowInput is not
+    { Success: true, Options: { SprintCatchUpPriority: true, MirrorAttackDirection: false,
+        AggressiveSprintRetryDelayMs: 900, CloseRangeMirror: true, CloseRangeMirrorDurationMs: 650 } })
+    throw new Exception($"Desktop did not save changed follow input options: {savedFollowInput}.");
 var mirrorDialog = new FollowerMirrorDialog(PartyPilot.Common.FollowerMirrorConfig.Default, 3);
 var mirrorResult = mirrorDialog.ShowDialog<PartyPilot.Common.FollowerMirrorConfig?>(window);
 var mirrorPlayer = mirrorDialog.GetLogicalDescendants().OfType<ComboBox>()
@@ -103,12 +160,105 @@ if (chosenMirror is null || chosenMirror.ForPlayer(1) != (PartyPilot.Common.Foll
     chosenMirror.ForPlayer(2) != (PartyPilot.Common.FollowerMirrorConfig.All & ~4) ||
     chosenMirror.ForPlayer(3) != PartyPilot.Common.FollowerMirrorConfig.All)
     throw new Exception("Follower profile editor changed another player or lost the selected setting.");
+var drinkerDialog = new FlaskSupportDialog(3, []);
+var drinkerResult = drinkerDialog.ShowDialog<FlaskSupportBinding[]?>(window);
+var drinkerPicker = drinkerDialog.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(box => box.ItemsSource?.OfType<int>().SequenceEqual([1, 2, 3]) == true);
+drinkerPicker.SelectedItem = 2;
+drinkerDialog.GetLogicalDescendants().OfType<CheckBox>()
+    .Single(box => box.Content?.ToString()?.StartsWith("此角色使用 Flask Support", StringComparison.Ordinal) == true)
+    .IsChecked = true;
+drinkerDialog.GetLogicalDescendants().OfType<CheckBox>()
+    .Single(box => box.Content?.ToString() == "监测 P1").IsChecked = true;
+drinkerDialog.GetLogicalDescendants().OfType<ComboBox>()
+    .First(box => box.ItemsSource?.OfType<string>().Contains("Life AND Mana") == true)
+    .SelectedItem = "Life AND Mana";
+drinkerDialog.GetLogicalDescendants().OfType<TextBox>().First().Text = "45";
+drinkerDialog.GetLogicalDescendants().OfType<ComboBox>()
+    .First(box => box.ItemsSource?.OfType<string>().Contains("Both") == true)
+    .SelectedItem = "Both";
+drinkerDialog.GetLogicalDescendants().OfType<Button>()
+    .Single(button => button.Content?.ToString() == "保存")
+    .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+var chosenDrinker = await drinkerResult;
+var watched = chosenDrinker?.SingleOrDefault(item => item.DrinkerPlayer == 2 &&
+    item.Monitor.TargetPlayer == 1);
+if (watched is not { SupportBuild: true,
+        Monitor: { Enabled: true, MonitorResource: "Life AND Mana", TriggerPercent: 45,
+            FlaskResource: "Both" } })
+    throw new Exception("Drinker editor did not retain selected player monitoring rules.");
+var flaskRuleDialog = new FlaskRuleDialog(2,
+    [FlaskRulePreferenceStore.DefaultFor(1), FlaskRulePreferenceStore.DefaultFor(2)]);
+var flaskRuleResult = flaskRuleDialog.ShowDialog<FlaskPlayerRule[]?>(window);
+var rulePlayer = flaskRuleDialog.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(box => box.ItemsSource?.OfType<int>().SequenceEqual([1, 2]) == true);
+rulePlayer.SelectedItem = 2;
+flaskRuleDialog.GetLogicalDescendants().OfType<TextBox>()
+    .Single(box => box.Name == "life-trigger").Text = "60";
+flaskRuleDialog.GetLogicalDescendants().OfType<CheckBox>()
+    .Single(box => box.Content?.ToString()?.StartsWith("合并生命与能量护盾", StringComparison.Ordinal) == true)
+    .IsChecked = true;
+rulePlayer.SelectedItem = 1;
+rulePlayer.SelectedItem = 2;
+if (flaskRuleDialog.GetLogicalDescendants().OfType<TextBox>()
+        .Single(box => box.Name == "life-trigger").Text != "60")
+    throw new Exception("Flask rule editor lost the selected player's input.");
+flaskRuleDialog.GetLogicalDescendants().OfType<Button>()
+    .Single(button => button.Content?.ToString() == "保存")
+    .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+var chosenRules = await flaskRuleResult;
+if (chosenRules is null || chosenRules[0].LifeTrigger != 70 || chosenRules[1].LifeTrigger != 60 ||
+    !chosenRules[1].CombinedDefence || chosenRules[0].CombinedDefence)
+    throw new Exception("Flask rule editor changed another player or lost its setting.");
+var customDialog = new FlaskCustomDialog(2, [FlaskCustomPreferenceStore.DefaultRule()]);
+var customResult = customDialog.ShowDialog<FlaskCustomRule[]?>(window);
+customDialog.GetLogicalDescendants().OfType<Button>()
+    .Single(button => button.Content?.ToString() == "新增规则")
+    .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+customDialog.GetLogicalDescendants().OfType<TextBox>()
+    .Single(box => box.Name == "custom-threshold").Text = "55";
+customDialog.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(box => box.ItemsSource?.OfType<string>().Contains("Energy Shield") == true)
+    .SelectedItem = "Energy Shield";
+customDialog.GetLogicalDescendants().OfType<Button>()
+    .Single(button => button.Content?.ToString() == "保存")
+    .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+var chosenCustom = await customResult;
+if (chosenCustom is not { Length: 2 } || chosenCustom[0].Threshold != 45 ||
+    chosenCustom[1].Threshold != 55 || chosenCustom[1].Resource != "Energy Shield" ||
+    chosenCustom[0].Id == chosenCustom[1].Id)
+    throw new Exception("Custom recovery editor did not keep independent ordered rules.");
 var inputMode = window.GetLogicalDescendants().OfType<ComboBox>()
     .SingleOrDefault(box => box.ItemsSource?.OfType<string>()
-        .Contains("Keyboard and mouse · 键鼠") == true);
+        .Contains("键盘与鼠标") == true);
 if (inputMode is null || inputMode.SelectedIndex != 0)
     throw new Exception("The desktop did not offer the observed keyboard and mouse input mode.");
+var focusHelp = window.GetLogicalDescendants().OfType<TextBlock>()
+    .Single(label => label.Name == "focus-help");
+if (focusHelp.Text?.Contains("L3") != true || focusHelp.Text.Contains("R3") != true ||
+    focusHelp.Text.Contains("350 毫秒") != true)
+    throw new Exception("Controller focus and return guidance was not shown.");
+var inputAdvanced = window.GetLogicalDescendants().OfType<Expander>()
+    .Single(item => item.Header?.ToString() == "高级设置 · 按键、右摇杆与镜像");
+var followAdvanced = window.GetLogicalDescendants().OfType<Expander>()
+    .Single(item => item.Header?.ToString() == "高级设置 · 距离、追赶与时效");
+if (inputAdvanced.IsExpanded || followAdvanced.IsExpanded)
+    throw new Exception("Technical setup controls were expanded in the normal first-use flow.");
+var optionalSections = window.GetLogicalDescendants().OfType<Expander>()
+    .Where(item => item.Header?.ToString()?.EndsWith("· 可选") == true).ToArray();
+if (optionalSections.Length < 5 || optionalSections.Any(item => item.IsExpanded))
+    throw new Exception("Optional account and tuning panels were visible during first use.");
+if (window.GetLogicalDescendants().OfType<Expander>()
+    .Any(item => item.Header?.ToString() == "启动与绑定的高级选项" && item.IsExpanded))
+    throw new Exception("Client process IDs were visible during first use.");
+(window.CaptureRenderedFrame() ?? throw new Exception("First-use setup did not render."))
+    .Save(Path.GetFullPath("../PartyPilot-ui-first-run.png"));
+inputAdvanced.IsExpanded = true;
+followAdvanced.IsExpanded = true;
+Dispatcher.UIThread.RunJobs();
 inputMode.SelectedIndex = 1;
+if (focusHelp.Text?.Contains("F1") != true || focusHelp.Text.Contains("F2–F6") != true)
+    throw new Exception("Keyboard focus guidance did not follow the selected input mode.");
 if (window.GetLogicalDescendants().OfType<Button>()
         .Single(button => button.Content?.ToString() == "准备键鼠虚拟手柄").IsEnabled)
     throw new Exception("Keyboard virtual pads became available without bound game windows.");
@@ -116,7 +266,7 @@ var playerCountChoice = window.GetLogicalDescendants().OfType<ComboBox>()
     .Single(box => box.ItemsSource?.OfType<string>().Contains("2 人") == true);
 playerCountChoice.SelectedIndex = 1;
 var launchButton = window.GetLogicalDescendants().OfType<Button>()
-    .Single(button => button.Content?.ToString() == "启动游戏窗口");
+    .Single(button => button.Content?.ToString() == "一键启动");
 if (launchButton.IsEnabled)
     throw new Exception("Keyboard mode exposed a couch layout with P2 on native Client 1.");
 var topologyChoice = window.GetLogicalDescendants().OfType<ComboBox>()
@@ -133,9 +283,8 @@ var classicSprint = window.GetLogicalDescendants().OfType<CheckBox>()
     .Single(box => box.Content?.ToString()?.StartsWith("启用经典冲刺追赶", StringComparison.Ordinal) == true);
 if (terrainPaths.Length != 3 || !terrainPaths[0].IsEffectivelyVisible ||
     !terrainPaths[1].IsEffectivelyVisible || terrainPaths[2].IsEffectivelyVisible ||
-    terrainDodge.IsChecked != false || terrainDodge.IsEnabled || classicSprint.IsChecked != false)
-    throw new Exception("Two-client terrain and classic sprint controls did not default off.");
-classicSprint.IsChecked = true;
+    terrainDodge.IsChecked != false || !terrainDodge.IsEnabled || classicSprint.IsChecked != true)
+    throw new Exception("Two-client terrain or classic sprint first-run controls were incorrect.");
 if (!terrainDodge.IsEnabled)
     throw new Exception("Classic sprint did not expose its optional terrain collision setting.");
 terrainDodge.IsChecked = true;
@@ -218,22 +367,144 @@ if (args.Contains("--ui-controls-only"))
     window.Close();
     return;
 }
+RadarTerrainCaptureSmoke.Run();
+RadarMotionSmoke.Run();
+await TransitionAnchorEvidenceSmoke.RunAsync();
 var radarPayload = System.Text.Encoding.UTF8.GetBytes(
-    "{\"ProcessId\":123,\"RadarStatus\":\"ok\",\"RadarSeenUtc\":\"" + DateTime.UtcNow.ToString("O") +
+    "{\"ProcessId\":123,\"AreaHash\":42,\"RadarAreaAddress\":\"0xABCDEF\",\"RadarStatus\":\"ok\",\"RadarSeenUtc\":\"" + DateTime.UtcNow.ToString("O") +
     "\",\"X\":100,\"Y\":200,\"RadarEntities\":[" +
     "{\"EntityId\":7,\"Category\":\"monster\",\"Path\":\"Metadata/Monsters/Beast\",\"X\":103,\"Y\":198}," +
-    "{\"EntityId\":8,\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\",\"X\":95,\"Y\":205}," +
+    "{\"EntityId\":8,\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\",\"NavigationIsValid\":true,\"NavigationIsTargetable\":true,\"X\":95,\"Y\":205}," +
     "{\"EntityId\":9,\"Category\":\"player\",\"Path\":\"Metadata/Characters/Player\",\"Label\":\"Teammate\",\"X\":110,\"Y\":200}," +
     "{\"EntityId\":10,\"Category\":\"league\",\"Path\":\"Metadata/MiscellaneousObjects/Expedition2/Expedition2Encounter\",\"X\":105,\"Y\":210}," +
     "{\"EntityId\":11,\"Category\":\"loot\",\"Path\":\"Metadata/MiscellaneousObjects/WorldItem@123\",\"ItemPath\":\"Metadata/Items/Currency/CurrencyIdentification\",\"Label\":\"Scroll of Wisdom\",\"Stack\":47,\"Rarity\":\"normal\",\"X\":92,\"Y\":194}]}"
 );
 if (!RadarFrames.TryParse(radarPayload, 123, DateTime.UtcNow, out var radarFrame) || radarFrame?.Markers.Count != 5 ||
+    radarFrame.Markers[1].NavigationIsValid != true ||
+    radarFrame.Markers[1].NavigationIsTargetable != true ||
     radarFrame.Markers.Last().Stack != 47 || radarFrame.Markers.Last().Rarity != "normal" ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        System.Text.Encoding.UTF8.GetString(radarPayload).Replace("\"NavigationIsTargetable\":true", "\"NavigationIsTargetable\":\"true\"")),
+        123, DateTime.UtcNow, out _) ||
     RadarFrames.TryParse(radarPayload, 124, DateTime.UtcNow, out _) ||
     RadarFrames.TryParse(radarPayload, 123, DateTime.UtcNow.AddSeconds(3), out _) ||
     RadarProjection.TryScale("0", out _) || !RadarProjection.TryScale("2", out var radarScale))
     throw new Exception("Radar frame identity, freshness, or explicit scale validation failed.");
 var radarText = System.Text.Encoding.UTF8.GetString(radarPayload);
+var terrainOnlyText = "{\"ProcessId\":123,\"AreaHash\":42," +
+    "\"RadarAreaAddress\":null,\"RadarStateAreaAddress\":\"0x123456\"," +
+    "\"RadarStatus\":\"ok\",\"RadarSeenUtc\":\"" + DateTime.UtcNow.ToString("O") +
+    "\",\"X\":100,\"Y\":200,\"RadarGridX\":3,\"RadarGridY\":4," +
+    "\"RadarEntities\":[],\"DormantAreaMap\":null}";
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(terrainOnlyText), 123,
+        DateTime.UtcNow, out var terrainOnlyFrame) || terrainOnlyFrame is null ||
+    terrainOnlyFrame.Markers.Count != 0 || terrainOnlyFrame.StateAreaAddress != "0x123456" ||
+    terrainOnlyFrame.GridX != 3 || terrainOnlyFrame.GridY != 4)
+    throw new Exception("A terrain-only frame did not reach the overlay with its area and grid identity.");
+var gridRadarText = radarText.Replace("\"AreaHash\":42,",
+    "\"AreaHash\":42,\"RadarStateAreaAddress\":\"0x123456\",\"RadarGridX\":3,\"RadarGridY\":4,");
+using var dormantRadarSource = System.Text.Json.JsonDocument.Parse(gridRadarText);
+var dormantSeenText = dormantRadarSource.RootElement.GetProperty("RadarSeenUtc").GetString();
+var dormantRadarText = gridRadarText[..^1] +
+    ",\"DormantAreaMap\":{\"SeenUtc\":\"" + dormantSeenText +
+    "\",\"Status\":\"candidate_unverified_build\",\"AreaAddress\":\"0x123456\",\"EntityListOffset\":1776,\"AwakeCount\":1,\"SleepingCount\":1,\"LocalPosition\":{\"WorldX\":100,\"WorldY\":200},\"NavigationCandidates\":[{\"EntityId\":40,\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\",\"Label\":null,\"X\":110,\"Y\":205}]}}";
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(dormantRadarText), 123, DateTime.UtcNow,
+        out var dormantRadarFrame) || dormantRadarFrame?.Markers.Count != 5 ||
+    dormantRadarFrame.DormantCandidates.Count != 1 ||
+    !RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        dormantRadarText.Replace("\"EntityListOffset\":1776", "\"EntityListOffset\":2048")),
+        123, DateTime.UtcNow, out var scannedOffsetFrame) ||
+    scannedOffsetFrame?.DormantCandidates.Count != 1 ||
+    RadarOverlayWindow.DisplayLabel(dormantRadarFrame.DormantCandidates[0], true) != "候选 · 传送点" ||
+    !RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        dormantRadarText.Replace("\"AreaAddress\":\"0x123456\"", "\"AreaAddress\":\"0x123458\"")),
+        123, DateTime.UtcNow, out var wrongAreaDormant) ||
+    wrongAreaDormant?.Markers.Count != 5 || wrongAreaDormant.DormantCandidates.Count != 0 ||
+    !RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        dormantRadarText.Replace("\"WorldX\":100", "\"WorldX\":110")),
+        123, DateTime.UtcNow, out var wrongPositionDormant) ||
+    wrongPositionDormant?.Markers.Count != 5 || wrongPositionDormant.DormantCandidates.Count != 0 ||
+    !RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        dormantRadarText.Replace("\"EntityId\":40", "\"EntityId\":8")),
+        123, DateTime.UtcNow, out var duplicateDormant) ||
+    duplicateDormant?.Markers.Count != 5 || duplicateDormant.DormantCandidates.Count != 0 ||
+    !RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        dormantRadarText.Replace("\"SeenUtc\":\"" + dormantSeenText + "\"",
+            "\"SeenUtc\":\"" + dormantRadarSource.RootElement.GetProperty("RadarSeenUtc")
+                .GetDateTime().AddSeconds(-4).ToString("O") + "\"")),
+        123, DateTime.UtcNow, out var staleDormant) ||
+    staleDormant?.Markers.Count != 5 || staleDormant.DormantCandidates.Count != 0)
+    throw new Exception("Dormant candidate identity, coordinate, duplicate, or label guard failed.");
+var dormantCache = new RadarLandmarkCache();
+dormantCache.Apply(dormantRadarFrame with
+{
+    SeenUtc = dormantRadarFrame.SeenUtc.AddMilliseconds(-1),
+    DormantCandidates = [],
+    Markers = [new RadarMarker(40, "waypoint", "Metadata/MiscellaneousObjects/Waypoint",
+        null, null, null, null, 110, 205)]
+});
+if (dormantCache.Apply(dormantRadarFrame).Markers.Count != 5)
+    throw new Exception("A retained visible waypoint duplicated its current dormant candidate.");
+var dormantEssenceText = dormantRadarText.Replace(
+    "\"EntityId\":40,\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\"",
+    "\"EntityId\":40,\"Category\":\"essence\",\"Path\":\"Metadata/MiscellaneousObjects/Monolith\"");
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(dormantEssenceText), 123,
+        DateTime.UtcNow, out var dormantEssence) ||
+    dormantEssence?.DormantCandidates.Count != 1 ||
+    RadarOverlayWindow.DisplayLabel(dormantEssence.DormantCandidates[0], true) != "候选 · 精华")
+    throw new Exception("A dormant essence anchor did not appear as a Chinese candidate marker.");
+var dormantQuestText = dormantRadarText.Replace(
+    "\"EntityId\":40,\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\",\"Label\":null",
+    "\"EntityId\":40,\"Category\":\"quest\",\"Path\":\"Metadata/Terrain/Gallows/Act1/Objects/QuestChestBase\",\"Label\":\"任务目标\"");
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(dormantQuestText), 123,
+        DateTime.UtcNow, out var dormantQuest) ||
+    dormantQuest?.DormantCandidates.Count != 1 ||
+    RadarOverlayWindow.DisplayLabel(dormantQuest.DormantCandidates[0], true) != "候选 · 任务目标")
+    throw new Exception("A dormant generic quest object did not appear as a candidate marker.");
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(gridRadarText), 123, DateTime.UtcNow, out var gridRadarFrame) ||
+    gridRadarFrame?.GridX != 3 || gridRadarFrame.GridY != 4 ||
+    gridRadarFrame.StateAreaAddress != "0x123456" ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        gridRadarText.Replace("\"RadarGridY\":4,", "\"RadarGridY\":null,")), 123, DateTime.UtcNow, out _))
+    throw new Exception("Radar terrain grid observation was malformed or accepted a partial pair.");
+var landmarkCache = new RadarLandmarkCache();
+var retained = landmarkCache.Apply(radarFrame);
+retained = landmarkCache.Apply(retained with { SeenUtc = retained.SeenUtc.AddMilliseconds(1), Markers = [] });
+if (retained.Markers.Count != 1 || retained.Markers[0].Category != "waypoint" ||
+    landmarkCache.Apply(retained with { AreaHash = 43, SeenUtc = retained.SeenUtc.AddMilliseconds(1), Markers = [] }).Markers.Count != 0)
+    throw new Exception("Radar retained transient markers or landmarks after an area change.");
+var standaloneCache = new RadarLandmarkCache();
+var standaloneFrame = radarFrame with { AreaAddress = null, StateAreaAddress = "0x200000" };
+standaloneCache.Apply(standaloneFrame);
+if (standaloneCache.Apply(standaloneFrame with
+        { SeenUtc = standaloneFrame.SeenUtc.AddMilliseconds(1), Markers = [] }).Markers.Count != 1 ||
+    standaloneCache.Apply(standaloneFrame with
+        { SeenUtc = standaloneFrame.SeenUtc.AddMilliseconds(2),
+          StateAreaAddress = "0x300000", Markers = [] }).Markers.Count != 0)
+    throw new Exception("Standalone area pointer did not scope or retire landmarks.");
+var sameHashNewAddress = new RadarLandmarkCache();
+sameHashNewAddress.Apply(radarFrame);
+if (sameHashNewAddress.TryApply(radarFrame with
+    { SeenUtc = radarFrame.SeenUtc.AddMilliseconds(-1), AreaHash = 99, Markers = [] }, out _) ||
+    sameHashNewAddress.TryApply(radarFrame with
+    { AreaHash = 99, Markers = [] }, out _) ||
+    !sameHashNewAddress.TryApply(radarFrame with
+    { SeenUtc = radarFrame.SeenUtc.AddMilliseconds(1), Markers = [] }, out var orderedRadar) ||
+    orderedRadar?.Markers.Count != 1)
+    throw new Exception("An older radar packet replaced a newer overlay frame.");
+if (sameHashNewAddress.Apply(radarFrame with
+    { AreaAddress = "0xABCD00", SeenUtc = radarFrame.SeenUtc.AddMilliseconds(1), Markers = [] }).Markers.Count != 0 ||
+    sameHashNewAddress.Apply(radarFrame with
+    { SeenUtc = radarFrame.SeenUtc, Markers = [] }).Markers.Count != 0)
+    throw new Exception("Radar reused landmarks across an area address change or older frame.");
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        radarText.Replace("\"AreaHash\":42", "\"AreaHash\":0")), 123, DateTime.UtcNow, out var unknownArea) ||
+    unknownArea is null || landmarkCache.Apply(unknownArea with
+        { SeenUtc = retained.SeenUtc.AddMilliseconds(2) }).Markers.Count != 5 ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        radarText.Replace("\"RadarAreaAddress\":\"0xABCDEF\"", "\"RadarAreaAddress\":\"bad\"")),
+        123, DateTime.UtcNow, out _))
+    throw new Exception("Radar area identity gate lost visible markers or accepted an invalid address.");
 if (RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
         radarText.Replace("\"EntityId\":8", "\"EntityId\":7")), 123, DateTime.UtcNow, out _) ||
     RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
@@ -258,21 +529,135 @@ if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
     oldLootFrame is not { } parsedOldLoot ||
     parsedOldLoot.Markers.Last().Stack != null || parsedOldLoot.Markers.Last().Rarity != null)
     throw new Exception("Radar rejected loot without optional metadata.");
+var questRadarText = radarText.Replace(
+    "\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\",\"NavigationIsValid\":true,\"NavigationIsTargetable\":true",
+    "\"Category\":\"quest\",\"Path\":\"Metadata/Effects/QuestMarker\",\"Label\":\"Quest marker\"");
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(questRadarText), 123, DateTime.UtcNow, out var questRadarFrame) ||
+    questRadarFrame?.Markers[1].Category != "quest" ||
+    RadarOverlayWindow.DisplayLabel(questRadarFrame.Markers[1]) != "任务线索 · 任务标记" ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        questRadarText.Replace("\"Label\":\"Quest marker\"", "\"Label\":null")), 123, DateTime.UtcNow, out _))
+    throw new Exception("Radar quest marker parsing or display failed.");
+var stateQuestText = questRadarText.Replace("Metadata/Effects/QuestMarker",
+    "Metadata/Quest/MainCampaignObjective").Replace("\"Label\":\"Quest marker\"",
+    "\"Label\":\"Main Campaign Objective\",\"QuestStateCandidate\":true");
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(stateQuestText), 123,
+        DateTime.UtcNow, out var stateQuestFrame) ||
+    stateQuestFrame?.Markers[1].QuestStateCandidate != true ||
+    RadarOverlayWindow.DisplayLabel(stateQuestFrame.Markers[1]) !=
+        "候选 · 任务线索 · Main Campaign Objective" ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        stateQuestText.Replace("\"QuestStateCandidate\":true", "\"QuestStateCandidate\":\"true\"")),
+        123, DateTime.UtcNow, out _))
+    throw new Exception("Candidate quest-state marker lost its provenance or accepted an invalid flag.");
+var questItemRadarText = radarText.Replace(
+    "\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\",\"NavigationIsValid\":true,\"NavigationIsTargetable\":true",
+    "\"Category\":\"quest\",\"Path\":\"Metadata/MiscellaneousObjects/WorldItem@123\",\"ItemPath\":\"Metadata/Items/QuestItems/Gallows/Act2/SuicideNote\",\"Label\":\"Final Letter (Skill Points)\"");
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(questItemRadarText), 123,
+        DateTime.UtcNow, out var questItemFrame) ||
+    questItemFrame?.Markers[1].Category != "quest" ||
+    RadarOverlayWindow.DisplayLabel(questItemFrame.Markers[1]) != "任务线索 · Final Letter (Skill Points)" ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        questItemRadarText.Replace("Metadata/Items/QuestItems/Gallows/Act2/SuicideNote",
+            "Metadata/Items/Weapons/Sword")), 123, DateTime.UtcNow, out _) ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        questItemRadarText.Replace("Metadata/MiscellaneousObjects/WorldItem@123",
+            "Metadata/MiscellaneousObjects/Waypoint")), 123, DateTime.UtcNow, out _))
+    throw new Exception("Radar quest item was lost or accepted without a matching wrapper and item path.");
+var destinationRadarText = radarText.Replace(
+    "\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\"",
+    "\"Category\":\"transition\",\"Path\":\"Metadata/MiscellaneousObjects/AreaTransition_Animate\",\"Label\":\"Mausoleum of the Praetor\"");
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(destinationRadarText), 123,
+        DateTime.UtcNow, out var destinationFrame) ||
+    destinationFrame is null ||
+    RadarOverlayWindow.DisplayLabel(destinationFrame.Markers[1]) != "区域入口 · Mausoleum of the Praetor" ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        destinationRadarText.Replace("Mausoleum of the Praetor", "AreaTransition_Animate")),
+        123, DateTime.UtcNow, out _))
+    throw new Exception("Radar transition destination label was lost or accepted as metadata.");
+var portalRadarText = destinationRadarText.Replace(
+    "\"Category\":\"transition\",\"Path\":\"Metadata/MiscellaneousObjects/AreaTransition_Animate\"",
+    "\"Category\":\"portal\",\"Path\":\"Metadata/MiscellaneousObjects/Portal\"");
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(portalRadarText), 123,
+        DateTime.UtcNow, out var portalFrame) ||
+    portalFrame is null ||
+    RadarOverlayWindow.DisplayLabel(portalFrame.Markers[1]) != "传送门 · Mausoleum of the Praetor")
+    throw new Exception("Radar portal destination label was lost.");
+var bossRadarText = radarText.Replace(
+    "\"Category\":\"waypoint\",\"Path\":\"Metadata/MiscellaneousObjects/Waypoint\",\"NavigationIsValid\":true,\"NavigationIsTargetable\":true",
+    "\"Category\":\"boss\",\"Path\":\"Metadata/Monsters/HyenaMonster/Objects/BossRoomMinimapIcon\",\"Label\":\"Rathbreaker\"");
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(bossRadarText), 123, DateTime.UtcNow, out var bossRadarFrame) ||
+    bossRadarFrame?.Markers[1].Category != "boss" ||
+    RadarOverlayWindow.DisplayLabel(bossRadarFrame.Markers[1]) != "首领地点 · Rathbreaker" ||
+    RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        bossRadarText.Replace("\"Label\":\"Rathbreaker\"", "\"Label\":\"Unknown\"")),
+        123, DateTime.UtcNow, out _))
+    throw new Exception("Radar boss arena icon parsing or display failed.");
+var bossWindow = new RadarOverlayWindow(new LaunchedClient(123, 1, "C:/Game.exe"),
+    2, new RadarVisibility(), renderOnly: true);
+bossWindow.Show();
+bossWindow.Apply(bossRadarFrame);
+bossWindow.UpdateLayout();
+if (!bossWindow.GetLogicalDescendants().OfType<TextBlock>().Any(label => label.Text == "首领地点 · Rathbreaker"))
+    throw new Exception("Radar did not draw the named boss room marker.");
+bossWindow.Close();
+var dormantWindow = new RadarOverlayWindow(new LaunchedClient(123, 1, "C:/Game.exe"),
+    2, new RadarVisibility(), renderOnly: true);
+dormantWindow.Show();
+dormantWindow.Apply(dormantRadarFrame);
+dormantWindow.UpdateLayout();
+if (!dormantWindow.GetLogicalDescendants().OfType<TextBlock>()
+        .Any(label => label.Text == "候选 · 传送点"))
+    throw new Exception("Radar did not draw the guarded dormant waypoint candidate.");
+dormantWindow.Close();
+var questCache = new RadarLandmarkCache();
+questCache.Apply(questRadarFrame);
+if (questCache.Apply(questRadarFrame with
+    { SeenUtc = questRadarFrame.SeenUtc.AddMilliseconds(1), Markers = [] }).Markers.Count != 0)
+    throw new Exception("Radar retained a quest marker without current quest-state evidence.");
 var projected = RadarProjection.Project(radarFrame.PlayerX, radarFrame.PlayerY,
     radarFrame.Markers[0], 400, 300, radarScale);
-if (projected != (406d, 296d)) throw new Exception("Radar marker projection changed unexpectedly.");
+var targetGridScale = 0.66;
+var targetWorldScale = targetGridScale / RadarProjection.WorldUnitsPerGridUnit;
+var targetWorldProjection = RadarProjection.Project(radarFrame.PlayerX, radarFrame.PlayerY,
+    radarFrame.Markers[0], 400, 300, targetWorldScale);
+var targetGridProjection = RadarProjection.ProjectGrid(
+    radarFrame.PlayerX / RadarProjection.WorldUnitsPerGridUnit,
+    radarFrame.PlayerY / RadarProjection.WorldUnitsPerGridUnit,
+    radarFrame.Markers[0].X / RadarProjection.WorldUnitsPerGridUnit,
+    radarFrame.Markers[0].Y / RadarProjection.WorldUnitsPerGridUnit,
+    400, 300, targetGridScale);
+if (Math.Abs(targetWorldProjection.X - targetGridProjection.X) > 0.000001 ||
+    Math.Abs(targetWorldProjection.Y - targetGridProjection.Y) > 0.000001)
+    throw new Exception("Target radar grid scale was not converted to the world scale.");
+var sameGrid = RadarProjection.ProjectGrid(radarFrame.PlayerX / RadarProjection.WorldUnitsPerGridUnit,
+    radarFrame.PlayerY / RadarProjection.WorldUnitsPerGridUnit,
+    radarFrame.Markers[0].X / RadarProjection.WorldUnitsPerGridUnit,
+    radarFrame.Markers[0].Y / RadarProjection.WorldUnitsPerGridUnit,
+    400, 300, radarScale * RadarProjection.WorldUnitsPerGridUnit);
+var roundTrip = RadarProjection.UnprojectGrid(
+    radarFrame.PlayerX / RadarProjection.WorldUnitsPerGridUnit,
+    radarFrame.PlayerY / RadarProjection.WorldUnitsPerGridUnit,
+    sameGrid.X, sameGrid.Y, 400, 300, radarScale * RadarProjection.WorldUnitsPerGridUnit);
+if (Math.Abs(projected.X - sameGrid.X) > 0.000001 ||
+    Math.Abs(projected.Y - sameGrid.Y) > 0.000001 ||
+    projected.X < 405 || projected.Y > 300 ||
+    Math.Abs(roundTrip.X - radarFrame.Markers[0].X / RadarProjection.WorldUnitsPerGridUnit) > 0.000001 ||
+    Math.Abs(roundTrip.Y - radarFrame.Markers[0].Y / RadarProjection.WorldUnitsPerGridUnit) > 0.000001)
+    throw new Exception("Radar markers and grid terrain use different projections.");
 var radarVisibility = new RadarVisibility();
+if (radarVisibility.Enabled) throw new Exception("Radar was visible before Tab was pressed.");
 radarVisibility.Observe(true, true);
 radarVisibility.Observe(true, true);
-if (radarVisibility.Enabled) throw new Exception("A held Tab key toggled radar more than once.");
+if (!radarVisibility.Enabled) throw new Exception("Tab did not open radar or repeated while held.");
 radarVisibility.Observe(true, false);
 radarVisibility.Observe(true, true);
-if (!radarVisibility.Enabled) throw new Exception("A second Tab press did not restore radar.");
+if (radarVisibility.Enabled) throw new Exception("A second Tab press did not hide radar.");
 radarVisibility.Observe(false, false);
 radarVisibility.Observe(false, true);
-if (!radarVisibility.Enabled) throw new Exception("Tab outside the game changed radar visibility.");
+if (radarVisibility.Enabled) throw new Exception("Tab outside the game changed radar visibility.");
 var radarWindow = new RadarOverlayWindow(new LaunchedClient(123, 1, "C:/Game.exe"), radarScale,
-    radarVisibility);
+    radarVisibility, renderOnly: true);
 radarWindow.Show();
 radarWindow.Apply(radarFrame);
 radarWindow.UpdateLayout();
@@ -281,7 +666,7 @@ var lootMarker = radarFrame.Markers.Single(marker => marker.Category == "loot");
 var leaderField = window.GetLogicalDescendants().OfType<TextBox>()
     .Single(field => field.Watermark?.ToString() == "角色名");
 var hideNamesButton = window.GetLogicalDescendants().OfType<Button>()
-    .Single(button => button.Content?.ToString() == "Hide names");
+    .Single(button => button.Content?.ToString() == "隐藏姓名");
 leaderField.Text = "Leader";
 NamePrivacy.Enabled = true;
 Dispatcher.UIThread.RunJobs();
@@ -291,7 +676,7 @@ if (NamePrivacy.Mask("Teammate") != "hidden" || NamePrivacy.Mask("  ") != "" ||
     RadarOverlayWindow.DisplayLabel(playerMarker) != "hidden" ||
     RadarOverlayWindow.DisplayLabel(lootMarker) != "Scroll of Wisdom" ||
     leaderField.PasswordChar != '•' || leaderField.Text != "Leader" ||
-    hideNamesButton.Content?.ToString() != "Names hidden" ||
+    hideNamesButton.Content?.ToString() != "姓名已隐藏" ||
     !radarWindow.GetLogicalDescendants().OfType<TextBlock>().Any(label => label.Text == "hidden"))
     throw new Exception("Name privacy changed identity data or failed to mask a displayed character name.");
 var hiddenRadarOutput = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(args.FirstOrDefault() ?? "../PartyPilot-ui-preview.png"))!,
@@ -301,12 +686,33 @@ NamePrivacy.Enabled = false;
 Dispatcher.UIThread.RunJobs();
 if (RadarOverlayWindow.DisplayLabel(playerMarker) != "Teammate" ||
     leaderField.PasswordChar != '\0' || leaderField.Text != "Leader" ||
-    hideNamesButton.Content?.ToString() != "Hide names")
+    hideNamesButton.Content?.ToString() != "隐藏姓名")
     throw new Exception("Showing names did not restore the visible label without changing the real input.");
 var radarScreenshot = radarWindow.CaptureRenderedFrame() ?? throw new Exception("Radar overlay did not render.");
 var radarOutput = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(args.FirstOrDefault() ?? "../PartyPilot-ui-preview.png"))!,
     "PartyPilot-radar-preview.png");
 radarScreenshot.Save(radarOutput);
+var edgeGrid = RadarProjection.UnprojectGrid(
+    radarFrame.PlayerX / RadarProjection.WorldUnitsPerGridUnit,
+    radarFrame.PlayerY / RadarProjection.WorldUnitsPerGridUnit,
+    radarWindow.Bounds.Width - 10, radarWindow.Bounds.Height - 10,
+    radarWindow.Bounds.Width / 2, radarWindow.Bounds.Height / 2,
+    radarScale * RadarProjection.WorldUnitsPerGridUnit);
+radarWindow.Apply(radarFrame with
+{
+    SeenUtc = DateTime.UtcNow,
+    Markers = [new RadarMarker(777, "transition", "Metadata/MiscellaneousObjects/AreaTransition",
+        "Example Destination Near Window Edge", null, null, null,
+        edgeGrid.X * RadarProjection.WorldUnitsPerGridUnit,
+        edgeGrid.Y * RadarProjection.WorldUnitsPerGridUnit)]
+});
+radarWindow.UpdateLayout();
+var edgeLabel = radarWindow.GetLogicalDescendants().OfType<TextBlock>()
+    .Single(label => label.Text?.StartsWith("区域入口 · Example Destination", StringComparison.Ordinal) == true);
+if (Canvas.GetLeft(edgeLabel) < 0 || Canvas.GetTop(edgeLabel) < 0 ||
+    Canvas.GetLeft(edgeLabel) + edgeLabel.Bounds.Width > radarWindow.Bounds.Width ||
+    Canvas.GetTop(edgeLabel) + edgeLabel.Bounds.Height > radarWindow.Bounds.Height)
+    throw new Exception("A map marker near the game window edge clipped its destination label.");
 radarWindow.Close();
 if (!PrivacyMaskPlan.TryParse("1,10,5,20,6\n2,70,80,15,10", 2, out var privacyBoxes))
     throw new Exception("Valid privacy box plan did not parse.");
@@ -322,7 +728,7 @@ if (privacyBoxes.Count != 2 ||
     PrivacyMaskPlan.TryParse(string.Join('\n', Enumerable.Repeat("1,10,5,20,6", 17)), 1, out _))
     throw new Exception("Privacy box geometry or client binding validation failed.");
 var privacyWindow = new PrivacyMaskOverlayWindow(new LaunchedClient(123, 1, "C:/Game.exe"),
-    privacyBoxes.Where(box => box.Client == 1).ToArray());
+    privacyBoxes.Where(box => box.Client == 1).ToArray(), renderOnly: true);
 privacyWindow.Show();
 privacyWindow.UpdateLayout();
 var renderedMask = privacyWindow.GetLogicalDescendants().OfType<Border>().SingleOrDefault();
@@ -399,12 +805,16 @@ if (!PrivacyGameplayFrames.TryParse(privacyPulse, 123, DateTime.UtcNow, out var 
         123, DateTime.UtcNow, out _))
     throw new Exception("Privacy gameplay evidence accepted a stale or unrelated process sample.");
 var labels = window.GetLogicalDescendants().OfType<TextBlock>().Select(item => item.Text).ToArray();
-if (!labels.Contains("PLAY") || !labels.Any(item => item?.Contains("HOW MANY CHARACTERS") == true) ||
-    !labels.Any(item => item?.Contains("PREPARE & START") == true) ||
-    !labels.Any(item => item?.Contains("FOLLOW · 跟随") == true) ||
-    !labels.Any(item => item?.Contains("RADAR · 雷达") == true) ||
-    !labels.Any(item => item?.Contains("PERFORMANCE · FPS") == true) ||
-    !labels.Any(item => item?.Contains("PRIVACY · 游戏画面遮挡") == true) ||
+var radarGridScaleField = window.GetLogicalDescendants().OfType<TextBox>()
+    .SingleOrDefault(field => field.Watermark == "像素/地图格");
+if (radarGridScaleField?.Text != "0.66")
+    throw new Exception("Target radar grid scale was not prefilled in the desktop UI.");
+if (!labels.Contains("开始使用") || !labels.Any(item => item?.Contains("选择人数与客户端") == true) ||
+    !labels.Any(item => item == "开始") ||
+    !labels.Any(item => item?.Contains("自动跟随与追赶") == true) ||
+    !labels.Any(item => item?.Contains("Tab 地图覆盖层") == true) ||
+    !labels.Any(item => item?.Contains("帧率设置") == true) ||
+    !labels.Any(item => item?.Contains("游戏画面遮挡") == true) ||
     labels.Contains("恢复距离"))
 {
     throw new Exception("The launcher steps were not created in the window tree.");
@@ -488,6 +898,10 @@ var idleMirror = LiveFollowFrame.Parse(
     "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":0,\"y\":0,\"mirror_idle\":true}}}", 2, 3);
 var potion = LiveFollowFrame.Parse(
     "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}},\"flasks\":[{\"player\":2,\"resource\":\"life\",\"percent\":30,\"reason\":\"threshold\"}]}", 2, 3);
+var supportPotion = LiveFollowFrame.Parse(
+    "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}},\"flasks\":[{\"player\":2,\"resource\":\"life\",\"percent\":40,\"reason\":\"support\"}]}", 2, 3);
+const string customActionFrame = """{"focused":1,"commands":{"2":{"state":"waiting"}},"flasks":[{"player":2,"resource":"action","percent":30,"reason":"custom Energy Shield ≤50% · priority 50","direct_input":"X"}]}""";
+var customAction = LiveFollowFrame.Parse(customActionFrame, 2, 3, customRuleCount: 1);
 if (!movement.Command.Contains("\"slot\":3") || movement.Status != "following" ||
     !sprintMovement.Command.Contains("\"sprint_down\":true") ||
     !waiting.Command.Contains("\"slot\":3") || waiting.Status != "waiting" ||
@@ -496,8 +910,23 @@ if (!movement.Command.Contains("\"slot\":3") || movement.Status != "following" |
     !mirrored.Command.Contains("\"mirror_movement\":true") || !mirrored.Command.Contains("\"slot\":3") ||
     !suppressedB.Command.Contains("\"suppress_mirrored_b\":true") ||
     !idleMirror.Command.Contains("\"mirror_idle\":true") ||
-    potion.Flasks.Count != 1 || potion.Flasks[0] != new FlaskBridgeRequest(2, "life"))
+    potion.Flasks.Count != 1 || potion.Flasks[0] != new FlaskBridgeRequest(2, "life") ||
+    supportPotion.Flasks.Count != 1 || supportPotion.Flasks[0] != new FlaskBridgeRequest(2, "life") ||
+    customAction.Flasks.Count != 1 || customAction.Flasks[0] != new FlaskBridgeRequest(2, "action", "X"))
     throw new Exception("Live follow did not map P2 to the second client's system pad.");
+try
+{
+    LiveFollowFrame.Parse(customActionFrame, 2, 3);
+    throw new Exception("Custom recovery output passed without a configured rule.");
+}
+catch (InvalidDataException) { }
+try
+{
+    LiveFollowFrame.Parse(customActionFrame.Replace("\"X\"", "\"A\"", StringComparison.Ordinal),
+        2, 3, customRuleCount: 1);
+    throw new Exception("Unapproved custom recovery input reached the bridge boundary.");
+}
+catch (InvalidDataException) { }
 var splitTopology = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-split");
 var switchedMain = LiveFollowFrame.ParseDynamic(
     "{\"focused\":2,\"commands\":{\"1\":{\"state\":\"following\",\"x\":0,\"y\":1}}}", splitTopology);
@@ -576,12 +1005,11 @@ var radarPanelOutput = Path.Combine(Path.GetDirectoryName(output)!, "PartyPilot-
 Console.WriteLine($"Headless preview saved to {output}.");
 var clientCount = window.GetLogicalDescendants().OfType<ComboBox>()
     .Single(item => item.PlaceholderText == "选择 1–6 人");
-var physicalIndex = window.GetLogicalDescendants().OfType<ComboBox>()
-    .Single(item => item.PlaceholderText == "实体手柄 XInput 编号");
-var isolation = window.GetLogicalDescendants().OfType<CheckBox>()
-    .Single(item => item.Content?.ToString()?.Contains("实体手柄对游戏隐藏") == true);
-var deviceInstance = window.GetLogicalDescendants().OfType<TextBox>()
-    .Single(item => item.Watermark?.ToString()?.Contains("实体手柄设备 ID") == true);
+if (window.GetLogicalDescendants().OfType<ComboBox>()
+        .Any(item => item.PlaceholderText == "实体手柄 XInput 编号") ||
+    window.GetLogicalDescendants().OfType<TextBox>()
+        .Any(item => item.Watermark?.ToString()?.Contains("实体手柄设备 ID") == true))
+    throw new Exception("Normal setup still asked the player to enter a controller ID.");
 var prepare = window.GetLogicalDescendants().OfType<Button>()
     .Single(item => item.Content?.ToString() == "准备虚拟手柄");
 var attach = window.GetLogicalDescendants().OfType<Button>()
@@ -591,27 +1019,76 @@ if (attach.IsEnabled) throw new Exception("Existing-window attachment was enable
 clientCount.SelectedIndex = 3;
 Dispatcher.UIThread.RunJobs();
 if (!attach.IsEnabled) throw new Exception("Existing-window attachment was unavailable for a selected topology.");
-physicalIndex.SelectedIndex = 0;
-isolation.IsChecked = true;
+var fourTarget = window.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(item => item.Name == "follow-target-4");
+var fourStop = window.GetLogicalDescendants().OfType<TextBox>()
+    .Single(item => item.Name == "follow-stop-4");
+if (!fourTarget.IsEffectivelyVisible || !fourStop.IsEffectivelyVisible ||
+    !fourTarget.ItemsSource!.Cast<string>().SequenceEqual(["当前主控", "P1", "P2", "P3"]) ||
+    fourStop.Text != "42.71758436944938" || classicSprint.IsEnabled == false)
+    throw new Exception("Four-player follow choices, stop distance or sprint control were unavailable.");
+fourTarget.SelectedItem = "P1";
 Dispatcher.UIThread.RunJobs();
-if (prepare.IsEnabled) throw new Exception("Four virtual pads ignored missing device and game paths.");
+if (followPreferenceStore.Load() is not { Success: true, Targets: [0, 0, 0, 1, 0, 0] } ||
+    stopPreferenceStore.Load() is not { Success: true, FreshProfile: true })
+    throw new Exception("Four-player follow target did not persist or fresh stop profile was overwritten.");
+fourTarget.SelectedItem = "当前主控";
+Dispatcher.UIThread.RunJobs();
+clientCount.SelectedIndex = 5;
+Dispatcher.UIThread.RunJobs();
+var sixTarget = window.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(item => item.Name == "follow-target-6");
+var sixStop = window.GetLogicalDescendants().OfType<TextBox>()
+    .Single(item => item.Name == "follow-stop-6");
+if (!sixTarget.IsEffectivelyVisible || !sixStop.IsEffectivelyVisible ||
+    !sixTarget.ItemsSource!.Cast<string>().SequenceEqual(
+        ["当前主控", "P1", "P2", "P3", "P4", "P5"]) ||
+    sixStop.Text != "42.71758436944938")
+    throw new Exception("Six-player follower controls were unavailable.");
+sixTarget.SelectedItem = "P5";
+Dispatcher.UIThread.RunJobs();
+if (followPreferenceStore.Load() is not { Success: true, Targets: [0, 0, 0, 0, 0, 5] } ||
+    stopPreferenceStore.Load() is not { Success: true, FreshProfile: true })
+    throw new Exception("Six-player follow target did not persist or fresh stop profile was overwritten.");
+sixTarget.SelectedItem = "当前主控";
+Dispatcher.UIThread.RunJobs();
+clientCount.SelectedIndex = 4;
+Dispatcher.UIThread.RunJobs();
+var fiveStop = window.GetLogicalDescendants().OfType<TextBox>()
+    .Single(item => item.Name == "follow-stop-5");
+if (fiveStop.Text != "37.21136767317941")
+    throw new Exception("Five-player third-client solo layout used the wrong runtime stop slot.");
+var fiveVariant = window.GetLogicalDescendants().OfType<ComboBox>()
+    .Single(item => item.PlaceholderText == "选择角色分布");
+fiveVariant.SelectedItem = PartyTopologies.ForPlayerCount(5)
+    .Single(item => item.Id == "5-main-solo");
+Dispatcher.UIThread.RunJobs();
+if (fiveStop.Text != "42.71758436944938")
+    throw new Exception("Five-player main-client solo layout used the wrong runtime stop slot.");
+clientCount.SelectedIndex = 3;
+Dispatcher.UIThread.RunJobs();
+Dispatcher.UIThread.RunJobs();
+if (prepare.IsEnabled) throw new Exception("Four virtual pads ignored missing game paths.");
 var pathFields = window.GetLogicalDescendants().OfType<TextBox>()
-    .Where(item => item.Watermark?.ToString()?.Contains("PathOfExile_x64.exe") == true)
+    .Where(item => item.Watermark?.ToString()?.Contains("游戏程序完整路径") == true)
     .ToArray();
-if (pathFields.Length != 3 || !pathFields[0].IsEffectivelyVisible || !pathFields[1].IsEffectivelyVisible || pathFields[2].IsEffectivelyVisible)
+var folderButtons = window.GetLogicalDescendants().OfType<Button>()
+    .Where(item => item.Content?.ToString() == "选择游戏目录").ToArray();
+var oneClick = window.GetLogicalDescendants().OfType<Button>()
+    .SingleOrDefault(item => item.Content?.ToString() == "一键启动");
+if (pathFields.Length != 3 || folderButtons.Length != 3 ||
+    oneClick is null ||
+    !folderButtons[0].IsEffectivelyVisible || !folderButtons[1].IsEffectivelyVisible ||
+    folderButtons[2].IsEffectivelyVisible)
 {
-    throw new Exception($"Client selection did not show exactly two game path fields: {pathFields.Length} fields, effective visibility {string.Join(',', pathFields.Select(field => field.IsEffectivelyVisible))}.");
+    throw new Exception("Client selection did not show exactly two game directory buttons.");
 }
-physicalIndex.SelectedIndex = -1;
-deviceInstance.Text = @"HID\VID_1234&PID_5678\DEVICE";
 pathFields[0].Text = "C:/GameA.exe";
 pathFields[1].Text = "D:/GameB.exe";
 Dispatcher.UIThread.RunJobs();
-if (!prepare.IsEnabled || physicalIndex.IsEnabled)
-    throw new Exception("Four-player WGI layout still required a public XInput physical index.");
+if (!prepare.IsEnabled)
+    throw new Exception("Four-player layout was blocked before automatic controller discovery.");
 pathFields[0].Text = pathFields[1].Text = "";
-deviceInstance.Text = "";
-physicalIndex.SelectedIndex = 0;
 Dispatcher.UIThread.RunJobs();
 if (args.Contains("--four-pad-ui-only"))
 {
@@ -646,7 +1123,7 @@ Dispatcher.UIThread.RunJobs();
 var p2Target = window.GetLogicalDescendants().OfType<ComboBox>()
     .Single(item => item.Name == "follow-target-2");
 if (!p2Target.IsEffectivelyVisible ||
-    !p2Target.ItemsSource!.Cast<string>().SequenceEqual(["Current MAIN", "P1", "P3"]))
+    !p2Target.ItemsSource!.Cast<string>().SequenceEqual(["当前主控", "P1", "P3"]))
     throw new Exception("Three independent clients did not expose P2's active follow targets.");
 if (!terrainPaths.All(box => box.IsEffectivelyVisible))
     throw new Exception("Three independent clients did not expose three terrain bindings.");
@@ -685,8 +1162,23 @@ variant.SelectedIndex = 1;
 Dispatcher.UIThread.RunJobs();
 if (p2Stop.Text != "37.25" || !p2Stop.IsEffectivelyVisible)
     throw new Exception("System pad P3's stop distance was lost when switching to two-client split.");
-var restoredWindow = new MainWindow(followPreferenceStore, stopPreferenceStore);
+var restoredWindow = new MainWindow(followPreferenceStore, stopPreferenceStore,
+    followInputPreferenceStore);
 restoredWindow.Show();
+if (restoredWindow.GetLogicalDescendants().OfType<CheckBox>()
+        .Single(box => box.Content?.ToString()?.StartsWith("追赶优先", StringComparison.Ordinal) == true)
+        .IsChecked != true ||
+    restoredWindow.GetLogicalDescendants().OfType<CheckBox>()
+        .Single(box => box.Content?.ToString()?.StartsWith("攻击时同步主控移动方向", StringComparison.Ordinal) == true)
+        .IsChecked != false ||
+    restoredWindow.GetLogicalDescendants().OfType<CheckBox>()
+        .Single(box => box.Content?.ToString()?.StartsWith("近距离镜像跟随", StringComparison.Ordinal) == true)
+        .IsChecked != true ||
+    restoredWindow.GetLogicalDescendants().OfType<TextBox>()
+        .Single(box => box.Name == "aggressive-sprint-retry-delay").Text != "900" ||
+    restoredWindow.GetLogicalDescendants().OfType<TextBox>()
+        .Single(box => box.Name == "close-mirror-duration").Text != "650")
+    throw new Exception("Follow input choices were not restored in a new desktop window.");
 var restoredCount = restoredWindow.GetLogicalDescendants().OfType<ComboBox>()
     .Single(item => item.PlaceholderText == "选择 1–6 人");
 restoredCount.SelectedIndex = 2;
@@ -701,11 +1193,19 @@ if (restoredStop.Text != "37.25")
     throw new Exception("P2's stop distance did not reload in a new desktop window.");
 restoredWindow.Close();
 File.WriteAllText(Path.Combine(Path.GetDirectoryName(followPreferencePath)!, "follow-stops.json"), "{}");
-var repairWindow = new MainWindow(followPreferenceStore, stopPreferenceStore);
+File.WriteAllText(Path.Combine(Path.GetDirectoryName(followPreferencePath)!, "follow-input.json"), "{}");
+var repairWindow = new MainWindow(followPreferenceStore, stopPreferenceStore,
+    followInputPreferenceStore);
 repairWindow.Show();
 if (!repairWindow.GetLogicalDescendants().OfType<TextBlock>().Any(item =>
         item.Text?.StartsWith("每角色停止距离设置无效", StringComparison.Ordinal) == true))
     throw new Exception("A damaged stop setting was silently accepted in the desktop.");
+if (!repairWindow.GetLogicalDescendants().OfType<TextBlock>().Any(item =>
+        item.Text?.StartsWith("跟随输入设置文件无效", StringComparison.Ordinal) == true) ||
+    repairWindow.GetLogicalDescendants().OfType<CheckBox>()
+        .Single(box => box.Content?.ToString()?.StartsWith("追赶优先", StringComparison.Ordinal) == true)
+        .IsChecked is not null)
+    throw new Exception("Damaged follow input settings were silently accepted in the desktop.");
 var repairCount = repairWindow.GetLogicalDescendants().OfType<ComboBox>()
     .Single(item => item.PlaceholderText == "选择 1–6 人");
 repairCount.SelectedIndex = 2;
@@ -727,14 +1227,14 @@ if (p2Target.IsEffectivelyVisible)
     throw new Exception("Couch layout exposed unsupported live follow targets.");
 if (terrainPaths.Any(box => box.IsEffectivelyVisible) || terrainDodge.IsEnabled || classicSprint.IsEnabled)
     throw new Exception("Couch layout exposed unsupported live terrain controls.");
-if (prepare.IsEnabled) throw new Exception("Bridge preparation ignored missing device and game paths.");
-deviceInstance.Text = @"HID\VID_1234&PID_5678\DEVICE";
+if (prepare.IsEnabled) throw new Exception("Bridge preparation ignored the missing game path.");
 pathFields[0].Text = "C:/GameA.exe";
 Dispatcher.UIThread.RunJobs();
 if (!prepare.IsEnabled) throw new Exception("Supported two-player topology did not enable the physical bridge.");
-if (!pathFields[0].IsEffectivelyVisible || pathFields[1].IsEffectivelyVisible)
+if (!folderButtons[0].IsEffectivelyVisible || folderButtons[1].IsEffectivelyVisible ||
+    folderButtons[2].IsEffectivelyVisible)
 {
-    throw new Exception("The default couch 2P option did not request one game window.");
+    throw new Exception("The default couch 2P option did not show one game directory selector.");
 }
 var guide = new PairingGuide(PartyTopologies.DefaultFor(2));
 if (guide.ObserveARelease(1) || guide.Arm(2) || !guide.Arm(1) ||
@@ -812,6 +1312,41 @@ if (args.Length > 2)
 {
     await ResourcePolicyTool.PreviewAsync(args[2], resourcePlan).ConfigureAwait(false);
     Console.WriteLine("Desktop resource policy preview checked against the native tool.");
+}
+var shippingStopDirectory = Path.Combine(Path.GetTempPath(),
+    "partypilot-shipping-stop-" + Guid.NewGuid().ToString("N"));
+try
+{
+    var shippingStopPath = Path.Combine(shippingStopDirectory, "follow-stops.json");
+    var shippingStopStore = new FollowStopPreferenceStore(shippingStopPath);
+    var shippingWindow = new MainWindow(
+        new FollowTargetPreferenceStore(Path.Combine(shippingStopDirectory, "follow-targets.json")),
+        shippingStopStore,
+        new FollowInputPreferenceStore(Path.Combine(shippingStopDirectory, "follow-input.json")));
+    shippingWindow.Show();
+    var shippingCount = shippingWindow.GetLogicalDescendants().OfType<ComboBox>()
+        .Single(item => item.PlaceholderText == "选择 1–6 人");
+    shippingCount.SelectedIndex = 3;
+    Dispatcher.UIThread.RunJobs();
+    var shippingP4 = shippingWindow.GetLogicalDescendants().OfType<TextBox>()
+        .Single(item => item.Name == "follow-stop-4");
+    if (shippingP4.Text != "42.71758436944938" || File.Exists(shippingStopPath))
+        throw new Exception("Fresh 4P stop distances were not displayed without persisting unchosen settings.");
+    shippingP4.Text = "44";
+    Dispatcher.UIThread.RunJobs();
+    if (shippingStopStore.Load() is not { Success: true, FreshProfile: false,
+            Stops: [35.257548845470694, 36.32326820603909, 37.21136767317941,
+                44, 37.21136767317941, 42.71758436944938] })
+        throw new Exception("Editing a fresh 4P stop did not preserve other shipping distances.");
+    shippingP4.Text = string.Empty;
+    Dispatcher.UIThread.RunJobs();
+    if (shippingStopStore.Load() is not { Success: true, Stops: [_, _, _, null, _, _] })
+        throw new Exception("Clearing a selected stop did not preserve the explicit global fallback.");
+    shippingWindow.Close();
+}
+finally
+{
+    if (Directory.Exists(shippingStopDirectory)) Directory.Delete(shippingStopDirectory, true);
 }
 if (!OperatingSystem.IsWindows())
 {

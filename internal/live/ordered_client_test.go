@@ -112,13 +112,30 @@ func TestOrderedMotionDoesNotRequireSlowVitals(t *testing.T) {
 	}
 	motion := OrderedClientFrame{ProcessID: 101, SeenUTC: now.Add(time.Millisecond),
 		ReceivedAt: now.Add(time.Millisecond), TickMS: now.UnixMilli() + 1,
-		CoordinateSpace: "world", PlayerOrderReliable: true,
-		PlayerOrderSource: "verified fixture", Players: []OrderedLocalPlayer{
+		AreaHash: 55, AreaInstanceAddress: "0x100000", VectorHeaderAddress: "0x100100",
+		OrderedAddresses: []string{"0x200000", "0x300000"},
+		CoordinateSpace:  "world", PlayerOrderReliable: true,
+		PlayerOrderSource: "experimental_static_vector_0.6.17", Players: []OrderedLocalPlayer{
 			{LocalPlayer: 1, X: 30 * worldPerGridUnit},
 			{LocalPlayer: 2, X: 0},
 		}}
 	if !engine.ObserveOrderedClient(motion) {
 		t.Fatal("position-only ordered motion was rejected")
+	}
+	missingIdentity := motion
+	missingIdentity.SeenUTC = now.Add(1500 * time.Microsecond)
+	missingIdentity.ReceivedAt = missingIdentity.SeenUTC
+	missingIdentity.TickMS++
+	missingIdentity.OrderedAddresses = []string{"0x200000", "0x200000"}
+	if engine.ObserveOrderedClient(missingIdentity) ||
+		engine.Step(missingIdentity.SeenUTC)[2].State != follow.Waiting {
+		t.Fatal("duplicate static-vector role identities kept old movement active")
+	}
+	motion.SeenUTC = now.Add(1750 * time.Microsecond)
+	motion.ReceivedAt = motion.SeenUTC
+	motion.TickMS += 2
+	if !engine.ObserveOrderedClient(motion) {
+		t.Fatal("complete static-vector identity did not recover after a rejected frame")
 	}
 	command := engine.Step(motion.SeenUTC)[2]
 	if command.State != follow.CatchingUp || command.ManualOverrideEligible {
@@ -201,6 +218,154 @@ func TestOrderedMotionDoesNotRequireSlowVitals(t *testing.T) {
 	if !engine.ObserveOrderedClient(afterArea) ||
 		engine.Step(afterArea.SeenUTC)[2].ManualOverrideEligible {
 		t.Fatal("old vitality crossed into a new area")
+	}
+}
+
+func TestExperimentalOrderedRolesStopOnSameAreaReorder(t *testing.T) {
+	now := time.Now().UTC()
+	engine, err := NewWithBindings([]RoleBinding{{1, 1, 1, 101}, {2, 1, 2, 101}},
+		1, follow.Config{StopDistance: 2, ResumeDistance: 3,
+			CatchUpDistance: 10, MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	if !engine.ObserveClientArea(101, arealog.Signal{AreaID: "G2_4", Seed: 123,
+		ObservedAt: now, Origin: "live"}) {
+		t.Fatal("client area was not applied")
+	}
+	frame := OrderedClientFrame{ProcessID: 101, SeenUTC: now, ReceivedAt: now,
+		TickMS: now.UnixMilli(), AreaHash: 55, AreaInstanceAddress: "0x100000",
+		VectorHeaderAddress: "0x100100", OrderedAddresses: []string{"0x200000", "0x300000"},
+		CoordinateSpace: "world", PlayerOrderReliable: true,
+		PlayerOrderSource: experimentalStaticVectorSource,
+		Players: []OrderedLocalPlayer{{LocalPlayer: 1, X: 30 * worldPerGridUnit},
+			{LocalPlayer: 2, X: 0}}}
+	if !engine.ObserveOrderedClient(frame) || engine.Step(now)[2].State != follow.CatchingUp {
+		t.Fatal("initial ordered pair did not follow")
+	}
+	swapped := frame
+	swapped.SeenUTC = now.Add(time.Millisecond)
+	swapped.ReceivedAt = swapped.SeenUTC
+	swapped.TickMS++
+	swapped.OrderedAddresses = []string{"0x300000", "0x200000"}
+	swapped.Players = []OrderedLocalPlayer{{LocalPlayer: 1, X: 0},
+		{LocalPlayer: 2, X: 30 * worldPerGridUnit}}
+	if engine.ObserveOrderedClient(swapped) ||
+		engine.Step(swapped.SeenUTC)[2].State != follow.Waiting {
+		t.Fatal("same-area role reorder kept follower movement active")
+	}
+	swapped.SeenUTC = now.Add(2 * time.Millisecond)
+	swapped.ReceivedAt = swapped.SeenUTC
+	swapped.TickMS++
+	if engine.ObserveOrderedClient(swapped) {
+		t.Fatal("repeated reordered frame silently became the new role binding")
+	}
+	restored := frame
+	restored.SeenUTC = now.Add(3 * time.Millisecond)
+	restored.ReceivedAt = restored.SeenUTC
+	restored.TickMS += 3
+	if !engine.ObserveOrderedClient(restored) ||
+		engine.Step(restored.SeenUTC)[2].State != follow.CatchingUp {
+		t.Fatal("original role order did not recover")
+	}
+	if !engine.ObserveClientArea(101, arealog.Signal{AreaID: "G2_5", Seed: 456,
+		ObservedAt: now.Add(4 * time.Millisecond), Origin: "live"}) {
+		t.Fatal("new client area was not applied")
+	}
+	swapped.SeenUTC = now.Add(5 * time.Millisecond)
+	swapped.ReceivedAt = swapped.SeenUTC
+	swapped.TickMS += 3
+	swapped.AreaHash = 56
+	swapped.AreaInstanceAddress = "0x110000"
+	if !engine.ObserveOrderedClient(swapped) {
+		t.Fatal("new area instance could not establish its own ordered addresses")
+	}
+	if !engine.ObserveClientArea(101, arealog.Signal{AreaID: "G2_4", Seed: 789,
+		ObservedAt: now.Add(6 * time.Millisecond), Origin: "live"}) {
+		t.Fatal("new log generation with a recycled area address was rejected")
+	}
+	reusedArea := frame
+	reusedArea.SeenUTC = now.Add(7 * time.Millisecond)
+	reusedArea.ReceivedAt = reusedArea.SeenUTC
+	reusedArea.TickMS += 7
+	reusedArea.AreaHash = swapped.AreaHash
+	reusedArea.AreaInstanceAddress = swapped.AreaInstanceAddress
+	if !engine.ObserveOrderedClient(reusedArea) ||
+		engine.Step(reusedArea.SeenUTC)[2].State != follow.CatchingUp {
+		t.Fatal("new generation could not resume following at a reused area address")
+	}
+	reorderedAgain := swapped
+	reorderedAgain.SeenUTC = now.Add(8 * time.Millisecond)
+	reorderedAgain.ReceivedAt = reorderedAgain.SeenUTC
+	reorderedAgain.TickMS += 7
+	if engine.ObserveOrderedClient(reorderedAgain) ||
+		engine.Step(reorderedAgain.SeenUTC)[2].State != follow.Waiting {
+		t.Fatal("new generation allowed same-generation role reorder to drive movement")
+	}
+}
+
+func TestUnknownBuildVectorKeepsIdentityChecks(t *testing.T) {
+	now := time.Now().UTC()
+	engine, err := NewWithBindings([]RoleBinding{{1, 1, 1, 101}, {2, 1, 2, 101}},
+		1, follow.Config{StopDistance: 2, ResumeDistance: 3,
+			CatchUpDistance: 10, MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	if !engine.ObserveClientArea(101, arealog.Signal{AreaID: "G2_4", Seed: 123,
+		ObservedAt: now, Origin: "live"}) {
+		t.Fatal("client area was not applied")
+	}
+	frame := OrderedClientFrame{ProcessID: 101, SeenUTC: now, ReceivedAt: now,
+		TickMS: now.UnixMilli(), AreaHash: 55, AreaInstanceAddress: "0x100000",
+		VectorHeaderAddress: "0x100100", OrderedAddresses: []string{"0x200000", "0x300000"},
+		CoordinateSpace: "world", PlayerOrderReliable: true,
+		PlayerOrderSource: experimentalUnknownBuildVectorSource,
+		Players: []OrderedLocalPlayer{{LocalPlayer: 1, X: 30 * worldPerGridUnit},
+			{LocalPlayer: 2, X: 0}}}
+	if !engine.ObserveOrderedClient(frame) || engine.Step(now)[2].State != follow.CatchingUp {
+		t.Fatal("unique unknown-build vector was not admitted as a candidate")
+	}
+	frame.SeenUTC = now.Add(time.Millisecond)
+	frame.ReceivedAt = frame.SeenUTC
+	frame.TickMS++
+	frame.OrderedAddresses = []string{"0x300000", "0x200000"}
+	if engine.ObserveOrderedClient(frame) || engine.Step(frame.SeenUTC)[2].State != follow.Waiting {
+		t.Fatal("unknown-build role reorder did not stop following")
+	}
+}
+
+func TestUnverifiedSlotCandidateCannotBePromotedByReliableFlag(t *testing.T) {
+	now := time.Now().UTC()
+	engine, err := NewWithBindings([]RoleBinding{{1, 1, 1, 101}, {2, 1, 2, 101}},
+		1, follow.Config{StopDistance: 2, ResumeDistance: 3,
+			CatchUpDistance: 10, MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	if !engine.ObserveClientArea(101, arealog.Signal{AreaID: "G2_4", Seed: 123,
+		ObservedAt: now, Origin: "live"}) {
+		t.Fatal("client area was not applied")
+	}
+	frame := OrderedClientFrame{ProcessID: 101, SeenUTC: now.Add(time.Millisecond),
+		ReceivedAt: now.Add(time.Millisecond), TickMS: now.UnixMilli() + 1,
+		CoordinateSpace: "world", PlayerOrderReliable: true,
+		PlayerOrderSource: "verified fixture", Players: []OrderedLocalPlayer{
+			{LocalPlayer: 1, X: 30 * worldPerGridUnit},
+			{LocalPlayer: 2, X: 0},
+		}}
+	if !engine.ObserveOrderedClient(frame) || engine.Step(frame.SeenUTC)[2].State != follow.CatchingUp {
+		t.Fatal("verified fixture did not start following")
+	}
+	frame.SeenUTC = now.Add(2 * time.Millisecond)
+	frame.ReceivedAt = frame.SeenUTC
+	frame.TickMS++
+	frame.PlayerOrderSource = " UNVERIFIED_EXILECORE_LOCAL_SLOT_CANDIDATE "
+	if engine.ObserveOrderedClient(frame) || engine.Step(frame.SeenUTC)[2].State != follow.Waiting {
+		t.Fatal("unverified local-slot diagnostic drove or preserved follow movement")
 	}
 }
 
@@ -353,6 +518,121 @@ func TestSixRolesAcrossThreeDualLocalClients(t *testing.T) {
 		if commands[slot].State != follow.CatchingUp {
 			t.Fatalf("P%d was not represented in six-role follow: %+v", slot, commands[slot])
 		}
+	}
+}
+
+func TestFiveRolesMixDualAndStandaloneClientPositions(t *testing.T) {
+	for _, layout := range []struct {
+		name     string
+		bindings []RoleBinding
+	}{
+		{"third-solo", []RoleBinding{{1, 1, 1, 101}, {2, 1, 2, 101},
+			{3, 2, 1, 202}, {4, 2, 2, 202}, {5, 3, 1, 303}}},
+		{"main-solo", []RoleBinding{{1, 1, 1, 101}, {2, 2, 1, 202},
+			{3, 2, 2, 202}, {4, 3, 1, 303}, {5, 3, 2, 303}}},
+	} {
+		t.Run(layout.name, func(t *testing.T) {
+			now := time.Now().UTC()
+			engine, err := NewWithBindings(layout.bindings, 1, follow.Config{
+				StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10,
+				MaxAge: time.Second}, time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer engine.Close()
+			for _, pid := range []int{101, 202, 303} {
+				if !engine.ObserveClientArea(pid, arealog.Signal{AreaID: "G2_4", Seed: 123,
+					ObservedAt: now, Origin: "live"}) {
+					t.Fatalf("client %d area rejected", pid)
+				}
+			}
+			for _, pid := range []int{101, 202, 303} {
+				roles := engine.pidToRoles[pid]
+				if len(roles) == 1 {
+					role := roles[0]
+					sample := telemetry.Sample{ProcessID: pid, SeenUTC: now.Add(time.Millisecond),
+						ReceivedAt: now.Add(time.Millisecond), TickMS: now.UnixMilli() + 1,
+						CoordinateSpace: "world", X: float64(60-role.Slot*10) * worldPerGridUnit}
+					if !engine.ObserveSample(sample) {
+						t.Fatalf("solo client %d position rejected", pid)
+					}
+					continue
+				}
+				players := make([]OrderedLocalPlayer, 0, len(roles))
+				for _, role := range roles {
+					players = append(players, OrderedLocalPlayer{LocalPlayer: role.LocalPlayer,
+						X: float64(60-role.Slot*10) * worldPerGridUnit})
+				}
+				frame := OrderedClientFrame{ProcessID: pid, SeenUTC: now.Add(time.Millisecond),
+					ReceivedAt: now.Add(time.Millisecond), TickMS: now.UnixMilli() + 1,
+					AreaHash: 55, AreaInstanceAddress: "0x100000", VectorHeaderAddress: "0x100100",
+					OrderedAddresses: []string{"0x200000", "0x300000"},
+					CoordinateSpace:  "world", PlayerOrderReliable: true,
+					PlayerOrderSource: "experimental_static_vector_0.6.17", Players: players}
+				if !engine.ObserveOrderedClient(frame) || engine.ObserveSample(telemetry.Sample{
+					ProcessID: pid, SeenUTC: frame.SeenUTC, ReceivedAt: frame.ReceivedAt,
+					TickMS: frame.TickMS, CoordinateSpace: "world"}) {
+					t.Fatalf("dual client %d accepted ordinary position or rejected ordered frame", pid)
+				}
+			}
+			commands := engine.Step(now.Add(time.Millisecond))
+			for slot := 2; slot <= 5; slot++ {
+				if commands[slot].State != follow.CatchingUp {
+					t.Fatalf("P%d did not follow in mixed layout: %+v", slot, commands[slot])
+				}
+			}
+		})
+	}
+}
+
+func TestLogRotationRevokesBothLocalRolesUntilNewGeneration(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	engine, err := NewWithBindings([]RoleBinding{
+		{Slot: 1, Client: 1, LocalPlayer: 1, ProcessID: 101},
+		{Slot: 2, Client: 1, LocalPlayer: 2, ProcessID: 101},
+		{Slot: 3, Client: 2, LocalPlayer: 1, ProcessID: 303},
+	}, 1, follow.Config{StopDistance: 2, ResumeDistance: 3,
+		CatchUpDistance: 10, MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	for _, pid := range []int{101, 303} {
+		if !engine.ObserveClientArea(pid, arealog.Signal{AreaID: "G2_4", Seed: 123,
+			ObservedAt: now, Origin: "live"}) {
+			t.Fatal("initial client area was rejected")
+		}
+	}
+	frame := OrderedClientFrame{ProcessID: 101, SeenUTC: now.Add(time.Millisecond),
+		ReceivedAt: now.Add(time.Millisecond), TickMS: now.UnixMilli() + 1,
+		AreaHash: 55, AreaInstanceAddress: "0x100000", VectorHeaderAddress: "0x100100",
+		OrderedAddresses: []string{"0x200000", "0x300000"},
+		CoordinateSpace:  "world", PlayerOrderReliable: true,
+		PlayerOrderSource: "experimental_static_vector_0.6.17",
+		Players: []OrderedLocalPlayer{
+			{LocalPlayer: 1, X: 30 * worldPerGridUnit},
+			{LocalPlayer: 2, X: 0},
+		}}
+	if !engine.ObserveOrderedClient(frame) || !observeGridSample(engine, telemetry.Sample{
+		ProcessID: 303, SeenUTC: frame.SeenUTC, X: 0, AreaHash: 66}) ||
+		engine.Step(frame.SeenUTC)[2].State != follow.CatchingUp {
+		t.Fatal("initial two-local follow did not start")
+	}
+	if !engine.InvalidateClientArea(101) || engine.InvalidateClientArea(999) ||
+		engine.Step(now.Add(2 * time.Millisecond))[2].State != follow.Waiting ||
+		engine.Step(now.Add(2 * time.Millisecond))[3].State != follow.Waiting ||
+		len(engine.areas) != 1 || len(engine.samples) != 1 {
+		t.Fatal("rotation retained one local role or unrelated client was revoked")
+	}
+	if !engine.ObserveClientArea(101, arealog.Signal{AreaID: "G2_4", Seed: 123,
+		ObservedAt: now.Add(3 * time.Millisecond), Origin: "live"}) {
+		t.Fatal("new log generation was rejected")
+	}
+	frame.SeenUTC = now.Add(4 * time.Millisecond)
+	frame.ReceivedAt = frame.SeenUTC
+	frame.TickMS += 3
+	if !engine.ObserveOrderedClient(frame) || engine.Step(frame.SeenUTC)[2].State != follow.CatchingUp {
+		t.Fatal("fresh log and motion did not restore two-local follow")
 	}
 }
 

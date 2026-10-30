@@ -2,7 +2,7 @@ namespace PartyPilot.Desktop;
 
 internal static class FollowTargetChoices
 {
-    internal const string CurrentMain = "Current MAIN";
+    internal const string CurrentMain = "当前主控";
 
     internal static string[] For(PartyTopology topology, int player)
     {

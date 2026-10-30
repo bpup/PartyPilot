@@ -2,10 +2,17 @@ using System.Text.Json;
 
 namespace PartyPilot.Desktop;
 
-internal sealed record FollowStopPreferenceResult(bool Success, double?[] Stops, string Message);
+internal sealed record FollowStopPreferenceResult(bool Success, double?[] Stops, string Message,
+    bool FreshProfile = false);
 
 internal sealed class FollowStopPreferenceStore
 {
+    internal static double?[] CreateShippingDefaults() =>
+    [
+        35.257548845470694, 36.32326820603909, 37.21136767317941,
+        42.71758436944938, 37.21136767317941, 42.71758436944938
+    ];
+
     private readonly string _path;
 
     internal FollowStopPreferenceStore(string? path = null)
@@ -70,7 +77,8 @@ internal sealed class FollowStopPreferenceStore
     }
 
     private static FollowStopPreferenceResult Empty() =>
-        new(true, new double?[6], "尚无每角色停止距离；留空沿用明确填写的通用值。");
+        new(true, new double?[6], "首次打开：4–6 人布局使用已核对的逐角色出厂距离。",
+            FreshProfile: true);
 
     private static FollowStopPreferenceResult Invalid() =>
         new(false, new double?[6], "每角色停止距离设置无效；修改当前角色的距离可重新保存，旧记录会清空。");

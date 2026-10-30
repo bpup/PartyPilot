@@ -10,6 +10,7 @@ internal static class HybridClient3PipelineSmoke
         await RunLayoutAsync("3-three-singles", "2:3,3:5", "5", 5);
         await RunLayoutAsync("3-three-singles", "2:3,3:5", "5", 5, adopted: true);
         await RunLayoutAsync("5-main-solo", "2:3,3:4,4:5,5:6", "5,6", 6);
+        await RunLayoutAsync("6-balanced", "2:2,3:3,4:4,5:5,6:6", "5,6", 6);
     }
 
     private static async Task RunLayoutAsync(string id, string playerPads,
@@ -23,7 +24,8 @@ internal static class HybridClient3PipelineSmoke
         var inputLog = Path.Combine(directory, "input.jsonl");
         var games = Enumerable.Range(1, 3)
             .Select(index => Path.Combine(directory, $"Game{index}.exe")).ToArray();
-        var topology = PartyTopologies.ForPlayerCount(id == "3-three-singles" ? 3 : 5)
+        var playerCount = id == "3-three-singles" ? 3 : id == "6-balanced" ? 6 : 5;
+        var topology = PartyTopologies.ForPlayerCount(playerCount)
             .Single(item => item.Id == id);
         var clients = new[]
         {
@@ -59,6 +61,9 @@ internal static class HybridClient3PipelineSmoke
             await bridge.EnableHybridMainFollowMirrorAsync();
             await bridge.SendAutomationAsync(JsonSerializer.Serialize(new
                 { slot = lastPad, state = "following", x = 1, y = 0 }));
+            if (id == "6-balanced")
+                await bridge.SendAutomationAsync(JsonSerializer.Serialize(new
+                    { slot = 2, state = "following", x = 1, y = 0 }));
             await bridge.BeginAutoPartyAsync(CancellationToken.None);
             await bridge.PulseAutoPartyAsync(lastPad, 0x1000, 80, CancellationToken.None);
             await bridge.EndAutoPartyAsync(CancellationToken.None);
@@ -68,7 +73,10 @@ internal static class HybridClient3PipelineSmoke
                     state.GetString() == "following" && root.GetProperty("slot").GetInt32() == lastPad) ||
                 !lines.Any(root => root.TryGetProperty("type", out var type) &&
                     type.GetString() == "auto_party_pulse" &&
-                    root.GetProperty("slot").GetInt32() == lastPad))
+                    root.GetProperty("slot").GetInt32() == lastPad) ||
+                id == "6-balanced" && !lines.Any(root =>
+                    root.TryGetProperty("state", out var state) && state.GetString() == "following" &&
+                    root.GetProperty("slot").GetInt32() == 2))
                 throw new Exception($"Hybrid {id} did not route Client 3 follow and menu input.");
         }
         finally

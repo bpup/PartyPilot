@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace PartyPilot.Sensor;
 
@@ -11,19 +12,95 @@ internal static class PackedTerrainCapture
 
     internal sealed record Outcome(string Status, string? DataFile = null);
 
+    internal static string UpdateAnchors(string dataFile, int processId, string areaHash,
+        string areaAddress, string anchor, GeneratedRoomProbe.Result? generatedRooms,
+        TerrainPlacementProbe.Result? terrainPlacements, QuestTileProbe.Result? questTiles,
+        Func<bool> areaStillCurrent)
+    {
+        var roomsReady = generatedRooms is { Status: "candidate_rooms_observed",
+            AnchorsTruncated: false };
+        var placementsReady = terrainPlacements is { Status: "candidate_placements_observed",
+            Truncated: false };
+        var tilesReady = questTiles is { Status: "candidate_tiles_observed", Truncated: false };
+        if (!roomsReady && !placementsReady && !tilesReady) return "already_captured";
+        if (!areaStillCurrent()) return "area_changed_before_update";
+        string? temporary = null;
+        try
+        {
+            var metadataFile = Path.ChangeExtension(dataFile, ".json");
+            var info = new FileInfo(metadataFile);
+            if (!info.Exists || info.Length is < 1 or > 65536) return "metadata_unavailable";
+            if (JsonNode.Parse(File.ReadAllText(metadataFile)) is not JsonObject root ||
+                root["Status"]?.GetValue<string>() != "candidate_capture_only" ||
+                root["ProcessId"]?.GetValue<int>() != processId ||
+                root["AreaHash"]?.GetValue<string>() != areaHash ||
+                root["AreaAddress"]?.GetValue<string>() != areaAddress ||
+                root["Anchor"]?.GetValue<string>() != anchor ||
+                root["DataFile"]?.GetValue<string>() != Path.GetFileName(dataFile))
+                return "metadata_mismatch";
+            var changed = false;
+            if (roomsReady && root["GeneratedRooms"] is null)
+            {
+                root["GeneratedRoomStatus"] = generatedRooms!.Status;
+                root["GeneratedRoomAreaAddress"] = areaAddress;
+                root["GeneratedRoomAnchor"] = anchor;
+                root["GeneratedRooms"] = JsonSerializer.SerializeToNode(generatedRooms.Anchors);
+                changed = true;
+            }
+            if (placementsReady && root["TerrainPlacements"] is null)
+            {
+                root["TerrainPlacementStatus"] = terrainPlacements!.Status;
+                root["TerrainPlacementAreaAddress"] = areaAddress;
+                root["TerrainPlacementAnchor"] = anchor;
+                root["TerrainPlacements"] = JsonSerializer.SerializeToNode(terrainPlacements.Anchors);
+                changed = true;
+            }
+            if (tilesReady && root["QuestTiles"] is null)
+            {
+                root["QuestTileStatus"] = questTiles!.Status;
+                root["QuestTileAreaId"] = questTiles.AreaId;
+                root["QuestTileAreaAddress"] = areaAddress;
+                root["QuestTileAnchor"] = anchor;
+                root["QuestTiles"] = JsonSerializer.SerializeToNode(questTiles.Anchors);
+                changed = true;
+            }
+            if (!changed) return "already_captured";
+            temporary = metadataFile + ".tmp-" + Guid.NewGuid().ToString("N");
+            File.WriteAllText(temporary, root.ToJsonString());
+            if (new FileInfo(temporary).Length > 65536) return "metadata_too_large";
+            if (!areaStillCurrent()) return "area_changed_during_update";
+            File.Move(temporary, metadataFile, overwrite: true);
+            temporary = null;
+            return "markers_updated";
+        }
+        catch
+        {
+            return "marker_update_failed";
+        }
+        finally
+        {
+            if (temporary != null) TryDelete(temporary);
+        }
+    }
+
     internal static Outcome Save(PackedTerrainProbe.PackedSource source,
         PackedTerrainProbe.Observation observation,
-        RawRenderPositionReader.Position position, float observedWorldX, float observedWorldY,
+        RawRenderPositionReader.Position position, float? observedWorldX, float? observedWorldY,
         Func<long, int, byte[]?> read, Func<bool> areaStillCurrent,
         string directory, int processId,
-        string areaHash, string areaAddress, string anchor, DateTime seenUtc)
+        string areaHash, string areaAddress, string anchor, DateTime seenUtc,
+        GeneratedRoomProbe.Result? generatedRooms = null,
+        TerrainPlacementProbe.Result? terrainPlacements = null,
+        QuestTileProbe.Result? questTiles = null)
     {
         var length = (long)source.BytesPerRow * source.Rows;
         if (source.Start < 0x10000 || source.BytesPerRow <= 0 || source.Rows <= 0 ||
             length is < 4096 or > MaxBytes || processId <= 0 ||
             observation.Width != source.BytesPerRow * 2 || observation.Height != source.Rows ||
             !float.IsFinite(position.GridX) || !float.IsFinite(position.GridY) ||
-            !float.IsFinite(observedWorldX) || !float.IsFinite(observedWorldY) ||
+            observedWorldX.HasValue != observedWorldY.HasValue ||
+            observedWorldX is { } observedX && !float.IsFinite(observedX) ||
+            observedWorldY is { } observedY && !float.IsFinite(observedY) ||
             position.GridX < 0 || position.GridY < 0 ||
             position.GridX >= observation.Width || position.GridY >= observation.Height ||
             areaStillCurrent == null)
@@ -44,6 +121,9 @@ internal static class PackedTerrainCapture
             byte[]? last = null;
             long lastAddress = 0;
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            var sampleStride = PackedTerrainValueProfile.SampleStride(length);
+            var sampledBytes = 0;
+            var inRangeNibbles = 0;
             using (var output = new FileStream(temporary, FileMode.CreateNew,
                 FileAccess.Write, FileShare.None))
             {
@@ -58,9 +138,20 @@ internal static class PackedTerrainCapture
                     lastAddress = source.Start + offset;
                     output.Write(bytes);
                     hash.AppendData(bytes);
+                    var firstSample = ((offset + sampleStride - 1) / sampleStride) * sampleStride;
+                    for (var sampleOffset = firstSample; sampleOffset < offset + size;
+                        sampleOffset += sampleStride)
+                    {
+                        var value = bytes[(int)(sampleOffset - offset)];
+                        sampledBytes++;
+                        if ((value & 15) <= 5) inRangeNibbles++;
+                        if ((value >> 4) <= 5) inRangeNibbles++;
+                    }
                 }
                 output.Flush(flushToDisk: true);
             }
+            if (!PackedTerrainValueProfile.IsAccepted(sampledBytes, inRangeNibbles))
+                return new Outcome("out_of_range_nibbles");
             if (first == null || last == null ||
                 !Matches(read(source.Start, first.Length), first) ||
                 !Matches(read(lastAddress, last.Length), last))
@@ -96,7 +187,23 @@ internal static class PackedTerrainCapture
                 BytesPerRow = source.BytesPerRow,
                 PackedBytes = length,
                 Sha256 = digest,
-                DataFile = Path.GetFileName(dataFile)
+                DataFile = Path.GetFileName(dataFile),
+                GeneratedRoomStatus = generatedRooms?.Status,
+                GeneratedRoomAreaAddress = generatedRooms is null ? null : areaAddress,
+                GeneratedRoomAnchor = generatedRooms is null ? null : anchor,
+                GeneratedRooms = generatedRooms is { Status: "candidate_rooms_observed", AnchorsTruncated: false }
+                    ? generatedRooms.Anchors : null,
+                TerrainPlacementStatus = terrainPlacements?.Status,
+                TerrainPlacementAreaAddress = terrainPlacements is null ? null : areaAddress,
+                TerrainPlacementAnchor = terrainPlacements is null ? null : anchor,
+                TerrainPlacements = terrainPlacements is { Status: "candidate_placements_observed", Truncated: false }
+                    ? terrainPlacements.Anchors : null,
+                QuestTileStatus = questTiles?.Status,
+                QuestTileAreaId = questTiles?.AreaId,
+                QuestTileAreaAddress = questTiles is null ? null : areaAddress,
+                QuestTileAnchor = questTiles is null ? null : anchor,
+                QuestTiles = questTiles is { Status: "candidate_tiles_observed", Truncated: false }
+                    ? questTiles.Anchors : null
             }));
             if (!areaStillCurrent())
             {

@@ -6,6 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using PartyPilot.Common;
 
@@ -28,6 +29,9 @@ public sealed class MainWindow : Window
     private readonly CheckBox _applyLayout = new();
     private readonly TextBox _monitors = new();
     private readonly TextBox[] _paths = new TextBox[3];
+    private readonly Button[] _folderButtons = new Button[3];
+    private readonly ComboBox[] _gameChoices = new ComboBox[3];
+    private readonly TextBlock[] _gameLocations = new TextBlock[3];
     private readonly TextBox[] _uris = new TextBox[3];
     private readonly TextBox[] _attachPids = new TextBox[3];
     private readonly TextBlock[] _clientLabels = new TextBlock[3];
@@ -76,13 +80,11 @@ public sealed class MainWindow : Window
     private readonly TextBlock _autoPartyStatus = new();
     private readonly TextBlock _status = new();
     private readonly ComboBox _inputMode = new();
+    private readonly TextBlock _focusGuide = new();
     private readonly Button _hybridBindingsButton = new();
     private readonly TextBlock _hybridBindingsStatus = new();
     private readonly HybridBindingPreferenceStore _hybridBindingPreferences = new();
     private HybridBindingConfig _hybridBindings = HybridBindingConfig.Default;
-    private readonly ComboBox _physicalIndex = new();
-    private readonly TextBox _physicalDevice = new();
-    private readonly CheckBox _isolationConfirmed = new();
     private readonly CheckBox _rightStickFollowerOverride = new();
     private readonly CheckBox _engageDodge = new();
     private readonly ComboBox _engageDodgeBinding = new();
@@ -90,6 +92,15 @@ public sealed class MainWindow : Window
     private readonly RightStickDodgePreferenceStore _engageDodgePreferences = new();
     private bool _engageDodgePreferenceReady;
     private readonly CheckBox _autoFlask = new();
+    private readonly Button _flaskRulesButton = new();
+    private readonly TextBlock _flaskRulesStatus = new();
+    private readonly FlaskRulePreferenceStore _flaskRulePreferences;
+    private readonly Button _flaskCustomButton = new();
+    private readonly TextBlock _flaskCustomStatus = new();
+    private readonly FlaskCustomPreferenceStore _flaskCustomPreferences;
+    private readonly Button _flaskSupportButton = new();
+    private readonly TextBlock _flaskSupportStatus = new();
+    private readonly FlaskSupportPreferenceStore _flaskSupportPreferences;
     private readonly CheckBox _menuGuard = new();
     private readonly TextBlock _menuGuardStatus = new();
     private readonly MenuGuardPreferenceStore _menuGuardPreferences = new();
@@ -117,17 +128,25 @@ public sealed class MainWindow : Window
     private readonly StackPanel[] _terrainBindingRows = new StackPanel[3];
     private readonly CheckBox _classicSprintCatchUp = new();
     private readonly CheckBox _sprintCatchUp = new();
+    private readonly CheckBox _sprintCatchUpPriority = new();
+    private readonly CheckBox _mirrorAttackDirection = new();
+    private readonly FollowInputPreferenceStore _followInputPreferences;
+    private readonly TextBlock _followInputPreferenceStatus = new();
+    private bool _followInputPreferenceReady;
     private readonly CheckBox _aggressiveBlinkCatchUp = new();
     private readonly TextBox _aggressiveSprintRetryDelay = new();
     private readonly CheckBox _closeRangeMirror = new();
     private readonly TextBox _closeMirrorDuration = new();
     private readonly CheckBox _classicCollisionDodge = new();
+    private readonly CheckBox _experimentalWarpClick = new();
+    private readonly Button _manualWarpToMain = new();
     private readonly TextBlock _terrainBindingStatus = new();
     private readonly TextBox _followLeaderName = new();
     private readonly ComboBox[] _followTargets = new ComboBox[6];
     private readonly TextBox[] _followPlayerStops = new TextBox[6];
     private readonly FollowStopPreferenceStore _followStopPreferences;
     private double?[] _configuredFollowStops = new double?[6];
+    private bool _followStopFreshProfile;
     private bool _followStopPreferenceReady;
     private bool _updatingFollowStopFields;
     private readonly TextBlock _followStopPreferenceStatus = new();
@@ -143,6 +162,13 @@ public sealed class MainWindow : Window
     private readonly Button _stopFollow = new();
     private readonly TextBlock _followStatus = new();
     private readonly TextBox _radarScale = new();
+    private readonly TextBox _radarMapOpacity = new();
+    private readonly TextBox _radarBorderOpacity = new();
+    private readonly TextBox _radarBackgroundOpacity = new();
+    private readonly TextBlock _radarAppearanceStatus = new();
+    private readonly RadarAppearancePreferenceStore _radarAppearancePreferences = new();
+    private readonly TextBox[] _radarTerrainPaths = new TextBox[3];
+    private readonly CheckBox _radarAutoTerrain = new();
     private readonly TextBox _radarHotkeyText = new();
     private readonly TextBlock _radarHotkeyStatus = new();
     private readonly RadarHotkeyPreferenceStore _radarHotkeyPreferences = new();
@@ -179,6 +205,8 @@ public sealed class MainWindow : Window
     private BridgeSession? _bridge;
     private LiveFollowSession? _follow;
     private RadarSession? _radar;
+    private IndependentProbeSession? _radarProbe;
+    private bool _radarStarting;
     private PrivacyMaskSession? _privacy;
     private PairingGuide? _pairing;
     private PairingInGameWitness? _pairingWitness;
@@ -208,20 +236,31 @@ public sealed class MainWindow : Window
     private bool _closing;
     private string _loginStatus = "waiting";
     private bool _busy;
+    private bool _oneClickFollowRequested;
     private int _hybridFocusedPlayer = 1;
     private int _hybridFocusTransition;
     private int _hybridFocusGeneration;
     private readonly HashSet<int> _hybridFocusKeysDown = [];
+    private readonly StackPanel _pairingPanel = new() { Spacing = 10 };
+    private Border? _pairingCard;
     private bool HybridSelected => _inputMode.SelectedIndex == 1;
 
     public MainWindow() : this(new FollowTargetPreferenceStore()) { }
 
     internal MainWindow(FollowTargetPreferenceStore followTargetPreferences,
-        FollowStopPreferenceStore? followStopPreferences = null)
+        FollowStopPreferenceStore? followStopPreferences = null,
+        FollowInputPreferenceStore? followInputPreferences = null,
+        FlaskSupportPreferenceStore? flaskSupportPreferences = null,
+        FlaskRulePreferenceStore? flaskRulePreferences = null,
+        FlaskCustomPreferenceStore? flaskCustomPreferences = null)
     {
         _followTargetPreferences = followTargetPreferences;
         _followStopPreferences = followStopPreferences ?? new FollowStopPreferenceStore();
-        Title = "PartyPilot · Play";
+        _followInputPreferences = followInputPreferences ?? new FollowInputPreferenceStore();
+        _flaskSupportPreferences = flaskSupportPreferences ?? new FlaskSupportPreferenceStore();
+        _flaskRulePreferences = flaskRulePreferences ?? new FlaskRulePreferenceStore();
+        _flaskCustomPreferences = flaskCustomPreferences ?? new FlaskCustomPreferenceStore();
+        Title = "PartyPilot · 多角色跟随";
         Width = 1120;
         Height = 800;
         MinWidth = 760;
@@ -235,28 +274,49 @@ public sealed class MainWindow : Window
         shell.Children.Add(sidebar);
 
         var content = new StackPanel { Spacing = 18, Margin = new Thickness(34, 28, 34, 36) };
-        content.Children.Add(Label("PLAY", 12, AccentBrush, FontWeight.Bold));
+        content.Children.Add(Label("开始使用", 12, AccentBrush, FontWeight.Bold));
         var heading = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 16 };
-        heading.Children.Add(Label("Connect. Choose. Start playing.", 29, Brushes.White, FontWeight.Bold));
-        _hideNames.Content = "Hide names";
+        heading.Children.Add(Label("连接客户端，设置跟随与地图", 29, Brushes.White, FontWeight.Bold));
+        _hideNames.Content = "隐藏姓名";
         _hideNames.Click += (_, _) => NamePrivacy.Enabled = !NamePrivacy.Enabled;
         heading.Children.Add(_hideNames);
         content.Children.Add(heading);
-        content.Children.Add(Label("独立版工作区 · 游戏窗口启动与有限布局的手柄配对引导", 13, MutedBrush));
+        content.Children.Add(Label("选人数和游戏目录，启动游戏后配对角色。", 13, MutedBrush));
         content.Children.Add(BuildInputStep());
         content.Children.Add(BuildClientStep());
-        content.Children.Add(BuildAccountStep());
+        content.Children.Add(OptionalSection("账号自动填入 · 可选", BuildAccountStep()));
         content.Children.Add(BuildLaunchStep());
-        content.Children.Add(BuildAutoPartyStep());
+        content.Children.Add(BuildPairingStep());
+        content.Children.Add(OptionalSection("组队邀请 · 可选", BuildAutoPartyStep()));
         content.Children.Add(BuildFollowStep());
         content.Children.Add(BuildRadarStep());
-        content.Children.Add(BuildPrivacyStep());
-        content.Children.Add(BuildFpsStep());
-        content.Children.Add(BuildResourceStep());
+        content.Children.Add(OptionalSection("隐私遮挡 · 可选", BuildPrivacyStep()));
+        content.Children.Add(OptionalSection("帧率设置 · 可选", BuildFpsStep()));
+        content.Children.Add(OptionalSection("后台资源设置 · 可选", BuildResourceStep()));
         content.Children.Add(BuildStatusCard());
 
         shell.Children.Add(new ScrollViewer { Content = content });
         Content = shell;
+        var followInput = _followInputPreferences.Load();
+        var followOptions = followInput.Options;
+        _sprintCatchUp.IsChecked = followOptions.SprintCatchUp;
+        _sprintCatchUpPriority.IsChecked = followInput.Success ? followOptions.SprintCatchUpPriority : null;
+        _mirrorAttackDirection.IsChecked = followInput.Success ? followOptions.MirrorAttackDirection : null;
+        _classicSprintCatchUp.IsChecked = followOptions.ClassicSprintCatchUp;
+        _aggressiveBlinkCatchUp.IsChecked = followOptions.AggressiveBlinkCatchUp;
+        _aggressiveSprintRetryDelay.Text = followOptions.AggressiveSprintRetryDelayMs.ToString(CultureInfo.InvariantCulture);
+        _closeRangeMirror.IsChecked = followOptions.CloseRangeMirror;
+        _closeMirrorDuration.Text = followOptions.CloseRangeMirrorDurationMs.ToString(CultureInfo.InvariantCulture);
+        _followInputPreferenceReady = followInput.Success;
+        _followInputPreferenceStatus.Text = followInput.Message;
+        _sprintCatchUp.IsCheckedChanged += (_, _) => SaveFollowInputPreference();
+        _sprintCatchUpPriority.IsCheckedChanged += (_, _) => SaveFollowInputPreference();
+        _mirrorAttackDirection.IsCheckedChanged += (_, _) => SaveFollowInputPreference();
+        _classicSprintCatchUp.IsCheckedChanged += (_, _) => SaveFollowInputPreference();
+        _aggressiveBlinkCatchUp.IsCheckedChanged += (_, _) => SaveFollowInputPreference();
+        _aggressiveSprintRetryDelay.TextChanged += (_, _) => SaveFollowInputPreference();
+        _closeRangeMirror.IsCheckedChanged += (_, _) => SaveFollowInputPreference();
+        _closeMirrorDuration.TextChanged += (_, _) => SaveFollowInputPreference();
         var hybridPreference = _hybridBindingPreferences.Load();
         _hybridBindings = hybridPreference.Bindings;
         _hybridBindingsStatus.Text = hybridPreference.Success
@@ -289,12 +349,16 @@ public sealed class MainWindow : Window
             : RadarKeyConflicts(_radarHotkey)
                 ? "雷达快捷键与自动组队或暂停跟随冲突；请重新设置。"
                 : $"雷达显隐快捷键：{_radarHotkey.DisplayText}；仅在已绑定游戏窗口前台生效。";
+        var appearancePreference = _radarAppearancePreferences.Load();
+        _radarMapOpacity.Text = appearancePreference.Settings.MapOpacity.ToString(CultureInfo.InvariantCulture);
+        _radarBorderOpacity.Text = appearancePreference.Settings.BorderOpacity.ToString(CultureInfo.InvariantCulture);
+        _radarBackgroundOpacity.Text = appearancePreference.Settings.BackgroundOpacity.ToString(CultureInfo.InvariantCulture);
+        _radarAppearanceStatus.Text = appearancePreference.Success
+            ? "地图外观已加载；修改后保存，可立即更新已启动的覆盖层。"
+            : "地图外观设置文件无效；当前使用目标版首次启动值，请重新保存。";
         _playerCount.SelectionChanged += (_, _) => UpdateTopologyOptions();
         _topologyVariant.SelectionChanged += (_, _) => UpdateClientRows();
         _applyLayout.IsCheckedChanged += (_, _) => UpdateLayoutControls();
-        _isolationConfirmed.IsCheckedChanged += (_, _) => UpdateBridgeControls();
-        _physicalIndex.SelectionChanged += (_, _) => UpdateBridgeControls();
-        _physicalDevice.TextChanged += (_, _) => UpdateBridgeControls();
         Opened += (_, _) =>
         {
             if (!OperatingSystem.IsWindows()) return;
@@ -339,7 +403,7 @@ public sealed class MainWindow : Window
 
     private void UpdateNamePrivacy()
     {
-        _hideNames.Content = NamePrivacy.Enabled ? "Names hidden" : "Hide names";
+        _hideNames.Content = NamePrivacy.Enabled ? "姓名已隐藏" : "隐藏姓名";
         _followLeaderName.PasswordChar = NamePrivacy.Enabled ? '•' : '\0';
     }
 
@@ -373,13 +437,28 @@ public sealed class MainWindow : Window
         return panel;
     }
 
+    private static void CollapseAdvanced(StackPanel panel, int start, string title)
+    {
+        var content = new StackPanel { Spacing = 10 };
+        while (panel.Children.Count > start)
+        {
+            var child = panel.Children[start];
+            panel.Children.RemoveAt(start);
+            content.Children.Add(child);
+        }
+        panel.Children.Add(new Expander { Header = title, IsExpanded = false, Content = content });
+    }
+
+    private static Expander OptionalSection(string title, Control content) =>
+        new() { Header = title, IsExpanded = false, Content = content };
+
     private static Border BuildSidebar()
     {
         var navigation = new StackPanel { Width = 194, Spacing = 18, Margin = new Thickness(20, 26) };
-        navigation.Children.Add(Label("PARTYPILOT", 17, AccentBrush, FontWeight.Bold));
+        navigation.Children.Add(Label("PartyPilot", 17, AccentBrush, FontWeight.Bold));
         navigation.Children.Add(Label("独立 PoE2 组队工具", 11, MutedBrush));
         navigation.Children.Add(new Border { Height = 1, Background = EdgeBrush, Margin = new Thickness(0, 14) });
-        navigation.Children.Add(Label("PLAY  ·  游戏窗口", 13, Brushes.White, FontWeight.Bold));
+        navigation.Children.Add(Label("游戏窗口与角色", 13, Brushes.White, FontWeight.Bold));
         navigation.Children.Add(Label("自动跟随 · 集成待验证", 12, MutedBrush));
         navigation.Children.Add(Label("战斗与拾取 · 未接入", 12, MutedBrush));
         navigation.Children.Add(Label("设置与支持 · 未接入", 12, MutedBrush));
@@ -395,19 +474,28 @@ public sealed class MainWindow : Window
 
     private Border BuildInputStep()
     {
-        var panel = Step("1", "CHOOSE INPUT · 选择输入", "选择实体手柄，或让 P1 使用原生键鼠并为其他角色创建虚拟手柄。");
-        _inputMode.ItemsSource = new[] { "Controller · 实体手柄", "Keyboard and mouse · 键鼠" };
+        var panel = Step("1", "选择输入", "你用手柄，还是键盘鼠标？");
+        _inputMode.ItemsSource = new[] { "实体手柄", "键盘与鼠标" };
         _inputMode.SelectedIndex = 0;
         _inputMode.MinWidth = 260;
         _inputMode.HorizontalAlignment = HorizontalAlignment.Left;
         _inputMode.SelectionChanged += (_, _) =>
         {
+            _focusGuide.Text = HybridSelected
+                ? "键鼠默认操作：F1 返回 P1，F2–F6 切换其他角色；返回 P1 后，其他角色恢复自动跟随。聚焦键可在上方按键映射中修改。"
+                : "手柄操作：按下左摇杆 L3 控制 P1，按下右摇杆 R3 控制 P2；LT+L3/R3 切换 P3/P4，LT+方向键上/下切换 P5/P6。单独控制后松开并再按同一聚焦键，即可返回共同控制，让跟随者继续追近；快速连按也生效。切换到其他角色仍需间隔 350 毫秒，P3–P6 组合键除外。";
             _pairingStatus.Text = HybridSelected
-                ? "键鼠模式要求客户端 1 仅有 P1。启动游戏前会先建立虚拟手柄；绑定现有窗口后也可手动准备。"
-                : "实体手柄模式需要确认 HidHide 隔离与输入设备。";
+                ? "键鼠模式会在启动游戏前准备虚拟手柄；三客户端各两人布局为独立版实验功能。"
+                : "实体手柄将在启动时自动检测；请先连接手柄。";
             UpdateBridgeControls();
         };
         panel.Children.Add(_inputMode);
+        var advancedStart = panel.Children.Count;
+        _focusGuide.Name = "focus-help";
+        _focusGuide.Text = "手柄操作：按下左摇杆 L3 控制 P1，按下右摇杆 R3 控制 P2；LT+L3/R3 切换 P3/P4，LT+方向键上/下切换 P5/P6。单独控制后松开并再按同一聚焦键，即可返回共同控制，让跟随者继续追近；快速连按也生效。切换到其他角色仍需间隔 350 毫秒，P3–P6 组合键除外。";
+        _focusGuide.Foreground = MutedBrush;
+        _focusGuide.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_focusGuide);
         _hybridBindingsButton.Content = "设置键鼠按键映射";
         _hybridBindingsButton.HorizontalAlignment = HorizontalAlignment.Left;
         _hybridBindingsButton.Click += async (_, _) => await EditHybridBindingsAsync();
@@ -415,16 +503,7 @@ public sealed class MainWindow : Window
         _hybridBindingsStatus.Foreground = MutedBrush;
         _hybridBindingsStatus.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(_hybridBindingsStatus);
-        _physicalIndex.PlaceholderText = "实体手柄 XInput 编号";
-        _physicalIndex.ItemsSource = Enumerable.Range(0, 4).Select(index => $"XInput {index}").ToArray();
-        _physicalIndex.Width = 190;
-        _physicalIndex.HorizontalAlignment = HorizontalAlignment.Left;
-        panel.Children.Add(_physicalIndex);
-        _physicalDevice.Watermark = "HidHide 中已隐藏的实体手柄设备 ID";
-        panel.Children.Add(_physicalDevice);
-        panel.Children.Add(Label("从 HidHide 设备列表复制当前实体手柄的设备 ID；程序会读取隔离配置，但设备与 XInput 编号的对应仍需实机核对。", 12, MutedBrush));
-        _isolationConfirmed.Content = "我已确认实体手柄对游戏隐藏，仅由桥接读取";
-        panel.Children.Add(_isolationConfirmed);
+        panel.Children.Add(Label("连接手柄后，程序会自动寻找并检查输入隔离；无需填写设备编号。", 12, MutedBrush));
         _rightStickFollowerOverride.Content = "右摇杆暂时控制可活动的跟随角色（主角色不再使用右摇杆瞄准）";
         _rightStickFollowerOverride.IsCheckedChanged += (_, _) => UpdateBridgeControls();
         panel.Children.Add(_rightStickFollowerOverride);
@@ -464,6 +543,27 @@ public sealed class MainWindow : Window
         panel.Children.Add(_engageDodgeStatus);
         _autoFlask.Content = "随实时跟随启用自动药剂（双/三客户端各一名角色；生命/魔力须绑定手柄十字键左/右）";
         panel.Children.Add(_autoFlask);
+        _flaskRulesButton.Content = "设置逐角色生命/魔力药剂";
+        _flaskRulesButton.HorizontalAlignment = HorizontalAlignment.Left;
+        _flaskRulesButton.Click += async (_, _) => await EditFlaskRulesAsync();
+        panel.Children.Add(_flaskRulesButton);
+        _flaskRulesStatus.Foreground = MutedBrush;
+        _flaskRulesStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_flaskRulesStatus);
+        _flaskCustomButton.Content = "设置自定义恢复规则";
+        _flaskCustomButton.HorizontalAlignment = HorizontalAlignment.Left;
+        _flaskCustomButton.Click += async (_, _) => await EditFlaskCustomAsync();
+        panel.Children.Add(_flaskCustomButton);
+        _flaskCustomStatus.Foreground = MutedBrush;
+        _flaskCustomStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_flaskCustomStatus);
+        _flaskSupportButton.Content = "设置共享药剂 · Drinker";
+        _flaskSupportButton.HorizontalAlignment = HorizontalAlignment.Left;
+        _flaskSupportButton.Click += async (_, _) => await EditFlaskSupportAsync();
+        panel.Children.Add(_flaskSupportButton);
+        _flaskSupportStatus.Foreground = MutedBrush;
+        _flaskSupportStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_flaskSupportStatus);
         var menuPreference = _menuGuardPreferences.Load();
         _menuGuardPreferenceReady = menuPreference.Success;
         _menuGuard.Content = "启用菜单保护";
@@ -527,7 +627,9 @@ public sealed class MainWindow : Window
             UpdateBridgeControls();
         };
         panel.Children.Add(_lastFocusedLeads);
+        panel.Children.Add(Label("默认由 P1 带路，P2–P6 跟随；开启上方选项后，最近手动聚焦的角色会成为主控。", 12, MutedBrush));
         panel.Children.Add(_leadershipPreferenceStatus);
+        CollapseAdvanced(panel, advancedStart, "高级设置 · 按键、右摇杆与镜像");
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12, LineSpacing = 8 };
         _prepareBridge.Content = "准备虚拟手柄";
         _prepareBridge.Click += async (_, _) => await PrepareBridgeAsync();
@@ -544,17 +646,26 @@ public sealed class MainWindow : Window
         actions.Children.Add(_stopBridge);
         actions.Children.Add(_endSession);
         actions.Children.Add(_confirmRole);
-        panel.Children.Add(actions);
+        _pairingPanel.Children.Add(actions);
         _pairingStatus.Text = "选择输入方式、人数与布局后检查桥接支持情况。";
         _pairingStatus.Foreground = MutedBrush;
         _pairingStatus.TextWrapping = TextWrapping.Wrap;
-        panel.Children.Add(_pairingStatus);
+        _pairingPanel.Children.Add(_pairingStatus);
         return Card(panel);
+    }
+
+    private Border BuildPairingStep()
+    {
+        var panel = Step("4", "确认游戏角色", "按游戏画面提示逐个确认。");
+        panel.Children.Add(_pairingPanel);
+        _pairingCard = Card(panel);
+        _pairingCard.IsVisible = false;
+        return _pairingCard;
     }
 
     private Border BuildClientStep()
     {
-        var panel = Step("2", "HOW MANY CHARACTERS? · 选择人数", "按目标版本的布局列出 1–6 人及其所需客户端；仅部分布局支持上方的手柄配对引导。");
+        var panel = Step("2", "选择人数与客户端", "每个游戏客户端最多两名角色。");
         _playerCount.PlaceholderText = "选择 1–6 人";
         _playerCount.ItemsSource = Enumerable.Range(1, 6).Select(count => $"{count} 人").ToArray();
         _playerCount.Width = 190;
@@ -571,21 +682,52 @@ public sealed class MainWindow : Window
 
         for (var index = 0; index < 3; index++)
         {
+            var clientIndex = index;
             var row = new StackPanel { Spacing = 7, Margin = new Thickness(0, 8, 0, 0) };
             var clientLabel = Label($"客户端 {index + 1} · 游戏程序", 13, Brushes.White, FontWeight.SemiBold);
             row.Children.Add(clientLabel);
-            var path = new TextBox { Watermark = "PathOfExile_x64.exe 完整路径" };
-            path.TextChanged += (_, _) => ClearLaunchedClients();
-            row.Children.Add(path);
-            row.Children.Add(Label("Steam/Epic 启动 URI（可选；须与上方程序对应）", 12, MutedBrush));
+            var browse = new Button { Content = "选择游戏目录", HorizontalAlignment = HorizontalAlignment.Left };
+            browse.Click += async (_, _) => await ChooseGameFolderAsync(clientIndex);
+            row.Children.Add(browse);
+            var location = Label("尚未选择游戏目录", 12, MutedBrush);
+            location.TextWrapping = TextWrapping.Wrap;
+            row.Children.Add(location);
+            var choice = new ComboBox { IsVisible = false, HorizontalAlignment = HorizontalAlignment.Left,
+                MinWidth = 270 };
+            choice.SelectionChanged += (_, _) =>
+            {
+                if (choice.SelectedItem is string executable)
+                {
+                    _paths[clientIndex].Text = executable;
+                    location.Text = $"已选择：{Path.GetFileName(executable)}";
+                }
+            };
+            row.Children.Add(choice);
+            var path = new TextBox { Watermark = "游戏程序完整路径（高级选项）" };
+            path.TextChanged += (_, _) =>
+            {
+                ClearLaunchedClients();
+                location.Text = string.IsNullOrWhiteSpace(path.Text)
+                    ? "尚未选择游戏目录"
+                    : $"已选择：{Path.GetFileName(path.Text.Trim())}";
+            };
+            var advanced = new StackPanel { Spacing = 7 };
+            advanced.Children.Add(Label("游戏程序路径（仅在目录选择无法使用时修改）", 12, MutedBrush));
+            advanced.Children.Add(path);
+            advanced.Children.Add(Label("Steam/Epic 启动 URI（可选；须与上方程序对应）", 12, MutedBrush));
             var uri = new TextBox { Watermark = "steam://rungameid/2694490 或 Epic 清单 URI" };
             uri.TextChanged += (_, _) => ClearLaunchedClients();
-            row.Children.Add(uri);
-            row.Children.Add(Label("绑定已运行窗口的进程号（同目录多客户端时必填）", 12, MutedBrush));
+            advanced.Children.Add(uri);
+            advanced.Children.Add(Label("绑定已运行窗口的进程号（同目录多客户端时必填）", 12, MutedBrush));
             var attachPid = new TextBox { Watermark = "进程号，仅用于绑定已运行窗口" };
             attachPid.TextChanged += (_, _) => ClearLaunchedClients();
-            row.Children.Add(attachPid);
+            advanced.Children.Add(attachPid);
+            row.Children.Add(new Expander { Header = "启动与绑定的高级选项", IsExpanded = false,
+                Content = advanced });
             _paths[index] = path;
+            _folderButtons[index] = browse;
+            _gameChoices[index] = choice;
+            _gameLocations[index] = location;
             _uris[index] = uri;
             _attachPids[index] = attachPid;
             _clientLabels[index] = clientLabel;
@@ -595,10 +737,50 @@ public sealed class MainWindow : Window
         return Card(panel);
     }
 
+    private async Task ChooseGameFolderAsync(int index)
+    {
+        if (!StorageProvider.CanPickFolder)
+        {
+            _gameLocations[index].Text = "当前系统无法打开目录选择器。";
+            return;
+        }
+        try
+        {
+            var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = "选择流放之路 2 游戏目录",
+                AllowMultiple = false
+            });
+            if (folders.Count == 0) return;
+            using var folder = folders[0];
+            var directory = folder.TryGetLocalPath();
+            if (directory is null)
+            {
+                _gameLocations[index].Text = "此目录无法作为本机游戏目录，请重新选择。";
+                return;
+            }
+            var executables = GameInstallDiscovery.FindExecutables(directory);
+            _paths[index].Text = string.Empty;
+            _gameChoices[index].ItemsSource = executables;
+            _gameChoices[index].IsVisible = executables.Count > 1;
+            _gameChoices[index].SelectedIndex = executables.Count == 1 ? 0 : -1;
+            _gameLocations[index].Text = executables.Count switch
+            {
+                0 => "所选目录没有找到流放之路 2 游戏程序，请选择安装目录。",
+                1 => $"已选择：{Path.GetFileName(executables[0])}",
+                _ => "发现多个游戏程序，请选择要启动的版本。"
+            };
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            _gameLocations[index].Text = "无法读取所选目录，请检查权限后重试。";
+        }
+    }
+
     private Border BuildAccountStep()
     {
-        var panel = Step("2A", "ACCOUNTS · 账号资料",
-            "按客户端保存独立 PoE 账号；密码只写入当前 Windows 用户保护的本地资料。每端一名角色时可启用启动后自动填入；须先确认邮箱和密码字段。");
+        var panel = Step("2A", "账号资料",
+            "按客户端保存独立 PoE 账号；密码只写入当前 Windows 用户保护的本地资料。每端一名或两名角色均可在启动后自动填入一次；须先确认邮箱和密码字段。");
         for (var index = 0; index < 3; index++)
         {
             var client = index + 1;
@@ -719,39 +901,42 @@ public sealed class MainWindow : Window
 
     private Border BuildLaunchStep()
     {
-        var panel = Step("3", "PREPARE & START · 准备并开始", "检查配置后可启动或绑定游戏窗口；已启用的独立客户端会尝试填入账号。此步骤不提交登录或执行角色配对。");
+        var panel = Step("3", "开始", "启动后按画面提示确认角色。");
         _applyLayout.Content = "对游戏窗口应用布局";
-        panel.Children.Add(_applyLayout);
+        var advanced = new StackPanel { Spacing = 8 };
+        advanced.Children.Add(_applyLayout);
         _layoutMode.ItemsSource = new[] { "stacked", "tiled", "multiple" };
         _layoutMode.SelectedIndex = 0;
         _layoutMode.Width = 190;
         _layoutMode.HorizontalAlignment = HorizontalAlignment.Left;
-        panel.Children.Add(_layoutMode);
+        advanced.Children.Add(_layoutMode);
         _monitors.Watermark = "显示器编号，例如 1,2";
-        panel.Children.Add(_monitors);
+        advanced.Children.Add(_monitors);
 
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12, LineSpacing = 8, Margin = new Thickness(0, 10, 0, 0) };
         _check.Content = "检查配置";
         _check.Click += async (_, _) => await RunLauncherAsync(ClientAction.Check);
-        _launch.Content = "启动游戏窗口";
-        _launch.Click += async (_, _) => await RunLauncherAsync(ClientAction.Start);
+        _launch.Content = "一键启动";
+        _launch.Click += async (_, _) => await RunOneClickStartAsync();
         _attach.Content = "绑定已运行窗口";
         _attach.Click += async (_, _) => await RunLauncherAsync(ClientAction.Attach);
         _cancelAutoLogin.Content = "取消账号准备";
         _cancelAutoLogin.IsEnabled = false;
         _cancelAutoLogin.Click += (_, _) => _autoLoginFillCancellation?.Cancel();
-        actions.Children.Add(_check);
         actions.Children.Add(_launch);
-        actions.Children.Add(_attach);
-        actions.Children.Add(_cancelAutoLogin);
         panel.Children.Add(actions);
+        advanced.Children.Add(_attach);
+        advanced.Children.Add(_cancelAutoLogin);
+        advanced.Children.Add(_check);
         _probeRoster.Content = "检查 Current Party 人数";
         _probeRoster.Click += async (_, _) => await ProbeRosterAsync();
-        panel.Children.Add(_probeRoster);
+        advanced.Children.Add(_probeRoster);
         _rosterStatus.Text = "绑定窗口后，可在游戏内打开 Current Party 面板再检查；结果仅是画面候选行数。";
         _rosterStatus.Foreground = MutedBrush;
         _rosterStatus.TextWrapping = TextWrapping.Wrap;
-        panel.Children.Add(_rosterStatus);
+        advanced.Children.Add(_rosterStatus);
+        panel.Children.Add(new Expander { Header = "窗口布局与队伍检查 · 可选", IsExpanded = false,
+            Content = advanced });
         return Card(panel);
     }
 
@@ -768,7 +953,7 @@ public sealed class MainWindow : Window
 
     private Border BuildAutoPartyStep()
     {
-        var panel = Step("3A", "AUTO PARTY · 组队邀请", "按角色填写游戏中的准确名称。已绑定游戏窗口前台时按所选快捷键可运行或取消自动组队。自动恢复向其他客户端发出全新邀请，按目标版菜单顺序接受，并检查 Current Party 画面候选人数。Windows 游戏内效果待验证。");
+        var panel = Step("3B", "组队邀请", "按角色填写游戏中的准确名称。已绑定游戏窗口前台时按所选快捷键可运行或取消自动组队。自动恢复向其他客户端发出全新邀请，按目标版菜单顺序接受，并检查游戏内队伍画面候选人数。Windows 游戏内效果待验证。");
         panel.Children.Add(Label("自动组队快捷键（目标版默认 F8；None 关闭）", 12, MutedBrush));
         _autoPartyKey.ItemsSource = AutoPartyKeyBinding.Options;
         _autoPartyKey.Width = 190;
@@ -822,16 +1007,26 @@ public sealed class MainWindow : Window
 
     private Border BuildFollowStep()
     {
-        var panel = Step("4", "FOLLOW · 跟随", "实时输入支持双客户端 2P 或三个客户端 3P，均须每端一名角色；请先完成配对，并在每个客户端启用只读位置传感器。距离与时效需要按实际游戏校准。");
+        var panel = Step("4", "自动跟随与追赶", "配对角色后点击“开始跟随”。程序须收到每个角色的位置；游戏中的移动效果尚待验证。");
+        panel.Children.Add(Label("配对完成后点击“开始跟随”。默认距离与时效可在高级设置中调整。", 12, MutedBrush));
+        var advancedStart = panel.Children.Count;
+        _followStop.Name = "follow-stop-global";
+        _followStop.Text = "9";
+        _followCatchup.Name = "follow-catchup-global";
+        _followCatchup.Text = "39.13940256045524";
+        _followMaxAge.Text = "600ms";
+        _followLogAge.Text = "1m";
+        panel.Children.Add(Label("时效采用独立版测试预设 600ms / 1m，仍需游戏内校准。", 12, MutedBrush));
         var fields = new (TextBox Box, string Label)[]
         {
-            (_followStop, "停止距离"), (_followCatchup, "追赶距离"),
-            (_followMaxAge, "位置有效期（ms/s/m/h）"), (_followLogAge, "区域日志有效期（ms/s/m/h）")
+            (_followStop, "停止距离（0.6.17 首次启动配置 9）"),
+            (_followCatchup, "追赶距离（0.6.17 首次启动配置约 39.14）"),
+            (_followMaxAge, "位置有效期（ms/s/m/h）"), (_followLogAge, "区域首次核对时限（ms/s/m/h）")
         };
         foreach (var (box, label) in fields)
         {
             panel.Children.Add(Label(label, 12, MutedBrush));
-            box.Watermark = "明确填写";
+            box.Watermark = "按需调整";
             box.Width = 190;
             box.HorizontalAlignment = HorizontalAlignment.Left;
             box.TextChanged += (_, _) => UpdateFollowControls();
@@ -841,7 +1036,16 @@ public sealed class MainWindow : Window
         _sprintCatchUp.IsChecked = true;
         _sprintCatchUp.IsCheckedChanged += (_, _) => UpdateFollowControls();
         panel.Children.Add(_sprintCatchUp);
-        _classicSprintCatchUp.Content = "启用经典冲刺追赶（0.6.17 分布式客户端默认关闭）";
+        _sprintCatchUpPriority.Content = "追赶优先，暂停镜像施法按键（0.6.17 首次启动配置开启）";
+        _sprintCatchUpPriority.IsChecked = true;
+        panel.Children.Add(_sprintCatchUpPriority);
+        _mirrorAttackDirection.Content = "攻击时同步主控移动方向（目标版默认开启；实体手柄）";
+        _mirrorAttackDirection.IsChecked = true;
+        panel.Children.Add(_mirrorAttackDirection);
+        _followInputPreferenceStatus.Foreground = MutedBrush;
+        _followInputPreferenceStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_followInputPreferenceStatus);
+        _classicSprintCatchUp.Content = "启用经典冲刺追赶（0.6.17 首次启动配置开启）";
         _classicSprintCatchUp.IsCheckedChanged += (_, _) =>
         {
             if (_classicSprintCatchUp.IsChecked == true) _aggressiveBlinkCatchUp.IsChecked = false;
@@ -857,6 +1061,7 @@ public sealed class MainWindow : Window
         };
         panel.Children.Add(_aggressiveBlinkCatchUp);
         panel.Children.Add(Label("激进冲刺重试间隔（毫秒，500–1500；目标版默认 800）", 12, MutedBrush));
+        _aggressiveSprintRetryDelay.Name = "aggressive-sprint-retry-delay";
         _aggressiveSprintRetryDelay.Text = "800";
         _aggressiveSprintRetryDelay.Width = 190;
         _aggressiveSprintRetryDelay.HorizontalAlignment = HorizontalAlignment.Left;
@@ -866,6 +1071,7 @@ public sealed class MainWindow : Window
         _closeRangeMirror.IsCheckedChanged += (_, _) => UpdateFollowControls();
         panel.Children.Add(_closeRangeMirror);
         panel.Children.Add(Label("镜像时长（毫秒，50–5000；目标版默认 400）", 12, MutedBrush));
+        _closeMirrorDuration.Name = "close-mirror-duration";
         _closeMirrorDuration.Text = "400";
         _closeMirrorDuration.Width = 190;
         _closeMirrorDuration.HorizontalAlignment = HorizontalAlignment.Left;
@@ -926,6 +1132,7 @@ public sealed class MainWindow : Window
         panel.Children.Add(_followTargetPreferenceStatus);
         var loadedStops = _followStopPreferences.Load();
         _configuredFollowStops = loadedStops.Stops;
+        _followStopFreshProfile = loadedStops.FreshProfile;
         _followStopPreferenceReady = loadedStops.Success;
         _followStopPreferenceStatus.Text = loadedStops.Message;
         _followStopPreferenceStatus.Foreground = MutedBrush;
@@ -942,6 +1149,10 @@ public sealed class MainWindow : Window
         _followPauseKeyStatus.Foreground = MutedBrush;
         _followPauseKeyStatus.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(_followPauseKeyStatus);
+        _experimentalWarpClick.Content = "实验：跨区追赶（P1 带路时可靠近同入口；队伍传送；入口交互待验证）";
+        _experimentalWarpClick.IsChecked = false;
+        panel.Children.Add(_experimentalWarpClick);
+        CollapseAdvanced(panel, advancedStart, "高级设置 · 距离、追赶与时效");
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
         _startFollow.Content = "开始跟随";
         _startFollow.Click += async (_, _) => await StartFollowAsync();
@@ -951,8 +1162,14 @@ public sealed class MainWindow : Window
         _pauseFollow.Content = "暂停跟随";
         _pauseFollow.Click += (_, _) => ToggleFollowPause();
         actions.Children.Add(_pauseFollow);
+        _manualWarpToMain.Content = "实验：手动追到 MAIN / 再按取消";
+        _manualWarpToMain.Click += (_, _) => ToggleManualWarpToMain();
+        actions.Children.Add(_manualWarpToMain);
         actions.Children.Add(_stopFollow);
         panel.Children.Add(actions);
+        var manualWarpGuide = Label("实体手柄：LT + 十字键右，手动追到 MAIN；再按一次取消。仅在实时跟随运行且关闭自动跨区实验选项时生效。", 12, MutedBrush);
+        manualWarpGuide.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(manualWarpGuide);
         _followStatus.Text = "等待配对完成；真实游戏中的方向与角色绑定尚未验证。";
         _followStatus.Foreground = MutedBrush;
         _followStatus.TextWrapping = TextWrapping.Wrap;
@@ -962,7 +1179,7 @@ public sealed class MainWindow : Window
 
     private Border BuildRadarStep()
     {
-        var panel = Step("5", "RADAR · 雷达", "在已绑定游戏窗口上显示只读实体标记；请在对应 ExileCore2 实例中启用传感器的雷达诊断。坐标方向与比例仍需游戏内校准。");
+        var panel = Step("5", "Tab 地图覆盖层", "按 Tab 显示地图。自带读取仍需在游戏中核对；没有有效数据时不会显示地点和地形。");
         panel.Children.Add(Label("雷达显隐快捷键（如 Tab、Ctrl+R、Shift+F9）", 12, MutedBrush));
         var hotkeyRow = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
         _radarHotkeyText.Width = 190;
@@ -984,21 +1201,62 @@ public sealed class MainWindow : Window
         _radarHotkeyStatus.Foreground = MutedBrush;
         _radarHotkeyStatus.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(_radarHotkeyStatus);
-        panel.Children.Add(Label("每个游戏坐标单位对应的屏幕像素（需明确填写）", 12, MutedBrush));
-        _radarScale.Watermark = "像素/坐标单位";
+        panel.Children.Add(Label("每个地图格对应的屏幕像素（0.6.17 默认 0.66；可调整）", 12, MutedBrush));
+        _radarScale.Text = "0.66";
+        _radarScale.Watermark = "像素/地图格";
         _radarScale.Width = 190;
         _radarScale.HorizontalAlignment = HorizontalAlignment.Left;
         _radarScale.TextChanged += (_, _) => UpdateRadarControls();
         panel.Children.Add(_radarScale);
+        panel.Children.Add(Label("候选地形透明度（目标版首次启动：地图 58%、边线 26%、背景 6%；暂不改变标记）", 12, MutedBrush));
+        var appearanceRow = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
+        foreach (var (field, label, initial) in new[]
+                 {
+                     (_radarMapOpacity, "地图 %", "58"),
+                     (_radarBorderOpacity, "边线 %", "26"),
+                     (_radarBackgroundOpacity, "背景 %", "6")
+                 })
+        {
+            var group = new StackPanel { Spacing = 4 };
+            group.Children.Add(Label(label, 12, MutedBrush));
+            field.Text = initial;
+            field.Width = 100;
+            field.TextChanged += (_, _) =>
+            {
+                _radarAppearanceStatus.Text = "地图外观已修改，保存后应用到已启动的覆盖层。";
+                UpdateRadarControls();
+            };
+            group.Children.Add(field);
+            appearanceRow.Children.Add(group);
+        }
+        var saveAppearance = new Button { Content = "保存地图外观" };
+        saveAppearance.Click += (_, _) => SaveRadarAppearance();
+        appearanceRow.Children.Add(saveAppearance);
+        panel.Children.Add(appearanceRow);
+        _radarAppearanceStatus.Foreground = MutedBrush;
+        _radarAppearanceStatus.TextWrapping = TextWrapping.Wrap;
+        panel.Children.Add(_radarAppearanceStatus);
+        _radarAutoTerrain.Content = "自动查找当前进程与区域的候选地形（实验性）";
+        _radarAutoTerrain.IsChecked = true;
+        panel.Children.Add(_radarAutoTerrain);
+        panel.Children.Add(Label("候选地形采集文件（可选；需在游戏中核对区域与地图方向）", 12, MutedBrush));
+        for (var index = 0; index < _radarTerrainPaths.Length; index++)
+        {
+            panel.Children.Add(Label($"客户端 {index + 1} 的采集 JSON 绝对路径", 12, MutedBrush));
+            var path = new TextBox { Watermark = "留空则只显示标记", MinWidth = 310,
+                HorizontalAlignment = HorizontalAlignment.Left };
+            _radarTerrainPaths[index] = path;
+            panel.Children.Add(path);
+        }
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
-        _startRadar.Content = "显示雷达";
-        _startRadar.Click += (_, _) => StartRadar();
-        _stopRadar.Content = "关闭雷达";
+        _startRadar.Content = "启动地图覆盖层";
+        _startRadar.Click += async (_, _) => await StartRadarAsync();
+        _stopRadar.Content = "关闭地图覆盖层";
         _stopRadar.Click += async (_, _) => await StopRadarAsync();
         actions.Children.Add(_startRadar);
         actions.Children.Add(_stopRadar);
         panel.Children.Add(actions);
-        _radarStatus.Text = "等待已绑定的游戏窗口与明确的比例。";
+        _radarStatus.Text = "等待游戏窗口；没有地图数据时，覆盖层不会显示地点。";
         _radarStatus.Foreground = MutedBrush;
         _radarStatus.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(_radarStatus);
@@ -1007,7 +1265,7 @@ public sealed class MainWindow : Window
 
     private Border BuildPrivacyStep()
     {
-        var panel = Step("6", "PRIVACY · 游戏画面遮挡",
+        var panel = Step("6", "游戏画面遮挡",
             "在已绑定游戏窗口的指定区域显示模糊遮挡；窗口画面无法捕获时保留黑色遮挡。仅当前游戏窗口在前台时显示，暂不自动识别姓名牌。");
         panel.Children.Add(Label("每行：客户端编号, 左边距%, 上边距%, 宽%, 高%；最多 16 行，例如 1,10,5,20,6。", 12, MutedBrush));
         _privacyAutoNames.Content = "自动识别并遮挡游戏画面中的姓名牌（需启用各客户端传感器）";
@@ -1035,7 +1293,7 @@ public sealed class MainWindow : Window
 
     private Border BuildFpsStep()
     {
-        var panel = Step("6", "PERFORMANCE · FPS", "按客户端分别预览前台与后台帧率配置。仅修改明确指定的 PoE2 配置文件；应用前需关闭所有游戏窗口。");
+        var panel = Step("6", "帧率设置", "按客户端分别预览前台与后台帧率配置。仅修改明确指定的 PoE2 配置文件；应用前需关闭所有游戏窗口。");
         _fpsGamesClosed.Content = "应用前已关闭所有 PoE2 游戏客户端";
         _fpsGamesClosed.IsCheckedChanged += (_, _) => UpdateFpsControls();
         panel.Children.Add(_fpsGamesClosed);
@@ -1087,7 +1345,7 @@ public sealed class MainWindow : Window
 
     private Border BuildResourceStep()
     {
-        var panel = Step("7", "PERFORMANCE · RESOURCES",
+        var panel = Step("7", "资源设置",
             "按已绑定客户端预览并显式启用后台资源策略；切回前台时恢复。0 表示不设置该项。");
         for (var index = 0; index < 3; index++)
         {
@@ -1152,14 +1410,27 @@ public sealed class MainWindow : Window
             _ = StopAllResourcesAsync();
         }
         _selectedTopology = selection;
+        if (topologyChanged)
+            _flaskRulesStatus.Text = selection?.Id is "2-split" or "3-three-singles"
+                ? _flaskRulePreferences.Load(selection.PlayerCount).Message
+                : "当前布局尚不能发送实时逐角色药剂请求。";
+        if (topologyChanged)
+            _flaskCustomStatus.Text = selection?.Id is "2-split" or "3-three-singles"
+                ? _flaskCustomPreferences.Load(selection.PlayerCount).Message
+                : "当前布局尚不能发送实时自定义恢复请求。";
+        if (topologyChanged)
+            _flaskSupportStatus.Text = selection?.Id is "2-split" or "3-three-singles"
+                ? _flaskSupportPreferences.Load(selection.PlayerCount).Message
+                : "当前布局尚不能发送实时共享药剂请求。";
         if (topologyChanged && HybridSelected && _bridge is null && selection is not null)
             _pairingStatus.Text = selection.PlayerCount == 1
                 ? "单人模式由 P1 原生键鼠操作；无需准备虚拟手柄。"
                 : HybridTopologySupport.CanBridge(selection)
-                    ? "客户端 1 仅有 P1；启动游戏前先建立键鼠虚拟手柄，绑定现有窗口后也可手动准备。"
-                    : "目标版键鼠模式要求客户端 1 仅有 P1；此布局的键鼠桥接尚未接入。";
+                    ? "启动游戏前先建立键鼠虚拟手柄；多客户端双人布局仍需游戏内验证。"
+                    : "此布局的键鼠桥接尚未接入。";
         if (_bridge is null && topologyChanged) _autoFlask.IsChecked = selection?.Id is "2-split" or "3-three-singles";
         var count = _selectedTopology?.ClientCount ?? 0;
+        if (_pairingCard is not null) _pairingCard.IsVisible = _launchedClients.Count > 0;
         _assignment.Text = _selectedTopology is null
             ? "选择人数后显示角色与客户端分布。"
             : $"{_selectedTopology.PlayerCount} 人 · {count} 个客户端 · {_selectedTopology.Summary}";
@@ -1200,7 +1471,8 @@ public sealed class MainWindow : Window
 
     private void UpdateFollowTargetChoices()
     {
-        var supported = _selectedTopology?.Id is "2-split" or "3-three-singles";
+        var supported = _selectedTopology?.Id is "2-split" or "3-three-singles" or
+            "4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced";
         if (!_followTargetPreferenceReady) Array.Clear(_followTargetsRecovered);
         _updatingFollowTargetChoices = true;
         try
@@ -1234,11 +1506,16 @@ public sealed class MainWindow : Window
         _updatingFollowStopFields = true;
         try
         {
+            var shippingStops = _followStopFreshProfile &&
+                _selectedTopology?.Id is ("4-balanced" or "5-third-solo" or
+                    "5-main-solo" or "6-balanced")
+                    ? FollowStopPreferenceStore.CreateShippingDefaults() : null;
             for (var index = 0; index < _followPlayerStops.Length; index++)
             {
                 var slot = _selectedTopology?.Slots.FirstOrDefault(item => item.PartyPlayer == index + 1);
                 _followPlayerStops[index].Text = slot is null ? string.Empty :
-                    _configuredFollowStops[slot.RuntimePad - 1]?.ToString("R", CultureInfo.InvariantCulture) ?? string.Empty;
+                    (shippingStops?[slot.RuntimePad - 1] ?? _configuredFollowStops[slot.RuntimePad - 1])
+                        ?.ToString("R", CultureInfo.InvariantCulture) ?? string.Empty;
             }
         }
         finally
@@ -1251,18 +1528,28 @@ public sealed class MainWindow : Window
     {
         if (_updatingFollowStopFields || _selectedTopology is null) return;
         var slot = _selectedTopology.Slots.FirstOrDefault(item => item.PartyPlayer == player);
-        if (slot is null || _selectedTopology.Id is not ("2-split" or "3-three-singles")) return;
+        if (slot is null || _selectedTopology.Id is not ("2-split" or "3-three-singles" or
+            "4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced")) return;
         if (!FollowPlayerStop.TryRead(_followPlayerStops[player - 1].Text, out var value))
         {
             _followStopPreferenceStatus.Text = "停止距离必须为 0–200；当前输入未保存。";
             UpdateFollowControls();
             return;
         }
-        var next = (double?[])_configuredFollowStops.Clone();
+        var current = _followStopFreshProfile && _selectedTopology.Id is ("4-balanced" or
+            "5-third-solo" or "5-main-solo" or "6-balanced")
+            ? FollowStopPreferenceStore.CreateShippingDefaults()[slot.RuntimePad - 1]
+            : _configuredFollowStops[slot.RuntimePad - 1];
+        if (_followStopPreferenceReady && value == current) return;
+        var next = _followStopFreshProfile && _selectedTopology.Id is ("4-balanced" or
+            "5-third-solo" or "5-main-solo" or "6-balanced")
+            ? FollowStopPreferenceStore.CreateShippingDefaults()
+            : (double?[])_configuredFollowStops.Clone();
         next[slot.RuntimePad - 1] = value;
         _configuredFollowStops = next;
         var saved = _followStopPreferences.Save(next);
         _followStopPreferenceReady = saved.Success;
+        if (saved.Success) _followStopFreshProfile = false;
         _followStopPreferenceStatus.Text = saved.Message;
         UpdateFollowControls();
     }
@@ -1270,7 +1557,8 @@ public sealed class MainWindow : Window
     private void SaveFollowTargetChoice(int player)
     {
         if (_updatingFollowTargetChoices || _selectedTopology is null ||
-            _selectedTopology.Id is not ("2-split" or "3-three-singles")) return;
+            _selectedTopology.Id is not ("2-split" or "3-three-singles" or
+                "4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced")) return;
         if (!FollowTargetChoices.TryRead(_selectedTopology, player,
                 _followTargets[player - 1].SelectedItem as string, out var target)) return;
         var next = (int[])_configuredFollowTargets.Clone();
@@ -1336,7 +1624,7 @@ public sealed class MainWindow : Window
                 _autoLoginChoices[index].IsEnabled = OperatingSystem.IsWindows() &&
                     !_armRequested && !_pairingHasStarted && !_busy &&
                     _selectedTopology is { } topology && index < topology.ClientCount &&
-                    topology.Clients[index].Count == 1 && _accountPresent[index];
+                    _accountPresent[index];
             }
     }
 
@@ -1395,7 +1683,9 @@ public sealed class MainWindow : Window
     {
         var ready = _selectedTopology is not null &&
             _launchedClients.Count == _selectedTopology.ClientCount &&
-            RadarProjection.TryScale(_radarScale.Text, out _);
+            RadarProjection.TryScale(_radarScale.Text, out _) &&
+            RadarAppearanceSettings.TryParse(_radarMapOpacity.Text,
+                _radarBorderOpacity.Text, _radarBackgroundOpacity.Text, out _);
         _startRadar.IsEnabled = OperatingSystem.IsWindows() && !_busy && !_radarStopping &&
             _radar is null && ready;
         _stopRadar.IsEnabled = _radar is not null;
@@ -1657,29 +1947,63 @@ public sealed class MainWindow : Window
         }
     }
 
-    private void StartRadar()
+    private async Task StartRadarAsync()
     {
-        if (_radar is not null || _busy || _radarStopping || !OperatingSystem.IsWindows() ||
+        if (_radar is not null || _radarStarting || _busy || _radarStopping || !OperatingSystem.IsWindows() ||
             _selectedTopology is null || _launchedClients.Count != _selectedTopology.ClientCount ||
-            !RadarProjection.TryScale(_radarScale.Text, out var scale)) return;
+            !RadarProjection.TryScale(_radarScale.Text, out var gridScale) ||
+            !RadarAppearanceSettings.TryParse(_radarMapOpacity.Text,
+                _radarBorderOpacity.Text, _radarBackgroundOpacity.Text, out var appearance)) return;
         if (RadarKeyConflicts(_radarHotkey))
         {
             _radarHotkeyStatus.Text = "雷达快捷键与自动组队或暂停跟随冲突；请重新设置。";
             return;
         }
+        _radarStarting = true;
         try
         {
-            var session = RadarSession.Start(_launchedClients, scale, _radarHotkey);
-            session.Ended += RadarEnded;
-            session.FrameReceived += RadarFrameReceived;
-            _radar = session;
-            _radarStatus.Text = "雷达已打开；等待各游戏进程的只读标记。失焦或样本过期会隐藏标记。";
+            var captures = new Dictionary<int, RadarTerrainCapture>();
+            for (var index = 0; index < _launchedClients.Count; index++)
+            {
+                var path = _radarTerrainPaths[index].Text?.Trim();
+                if (string.IsNullOrEmpty(path)) continue;
+                if (!RadarTerrainCapture.TryLoad(path, out var capture) || capture is null ||
+                    capture.ProcessId != _launchedClients[index].Pid)
+                    throw new InvalidDataException($"客户端 {index + 1} 的候选地形文件或进程身份无效。");
+                captures.Add(capture.ProcessId, capture);
+            }
+            var catalog = _radarAutoTerrain.IsChecked == true
+                ? new RadarTerrainCatalog(RadarTerrainCatalog.SensorDirectory) : null;
+            var worldScale = gridScale / RadarProjection.WorldUnitsPerGridUnit;
+            var probeExecutable = IndependentProbeSession.FindExecutable() ??
+                throw new FileNotFoundException("找不到自带地图探针，请使用完整安装包。");
+            var probe = await IndependentProbeSession.StartAsync(probeExecutable);
+            try
+            {
+                var session = RadarSession.Start(_launchedClients, worldScale, _radarHotkey,
+                    captures, catalog, appearance);
+                session.Ended += RadarEnded;
+                session.FrameReceived += RadarFrameReceived;
+                session.FrameObserved += RadarFrameObserved;
+                _radarProbe = probe;
+                _radar = session;
+            }
+            catch
+            {
+                await probe.DisposeAsync();
+                throw;
+            }
+            _radarStatus.Text = $"覆盖层窗口已打开；按 {_radarHotkey.DisplayText} 显示。收到有效地图数据后才会显示地点和地形。";
         }
         catch (Exception exception)
         {
             _radarStatus.Text = $"雷达未能打开：{exception.Message}";
         }
-        UpdateRadarControls();
+        finally
+        {
+            _radarStarting = false;
+            UpdateRadarControls();
+        }
     }
 
     private async void RadarEnded(string reason)
@@ -1688,10 +2012,14 @@ public sealed class MainWindow : Window
         _radarStatus.Text = $"雷达已停止：{reason}";
     }
 
-    private void RadarFrameReceived(int pid, int count)
+    private void RadarFrameReceived(int pid, int count, bool terrainVisible)
     {
-        _radarStatus.Text = $"已收到游戏进程 {pid} 的 {count} 个可见实体标记；仅当前游戏窗口在前台时显示。";
+        _radarStatus.Text = $"已收到游戏进程 {pid} 的 {count} 个实体标记；" +
+            (terrainVisible ? "候选地形已绘制，游戏内地图方向待核对。" :
+                "候选地形尚未匹配；仅当前游戏窗口在前台时显示标记。");
     }
+
+    private void RadarFrameObserved(RadarFrame frame) => _follow?.ObserveRadarFrame(frame);
 
     private async Task StopRadarAsync()
     {
@@ -1704,6 +2032,7 @@ public sealed class MainWindow : Window
         {
             session.Ended -= RadarEnded;
             session.FrameReceived -= RadarFrameReceived;
+            session.FrameObserved -= RadarFrameObserved;
             await session.DisposeAsync();
             _radarStatus.Text = "雷达已关闭。";
         }
@@ -1713,8 +2042,19 @@ public sealed class MainWindow : Window
         }
         finally
         {
-            _radarStopping = false;
-            UpdateRadarControls();
+            try
+            {
+                if (_radarProbe is { } probe)
+                {
+                    _radarProbe = null;
+                    await probe.DisposeAsync();
+                }
+            }
+            finally
+            {
+                _radarStopping = false;
+                UpdateRadarControls();
+            }
         }
     }
 
@@ -1758,9 +2098,7 @@ public sealed class MainWindow : Window
             _menuGuardPreferenceReady && _menuGuard.IsChecked is bool &&
             _followerMirrorPreferenceReady &&
             (HybridSelected ? hybridSupported && _gameHotkeys?.IsStarted == true :
-                supported && _leadershipPreferenceReady && _lastFocusedLeads.IsChecked is bool &&
-                (useWgi || _physicalIndex.SelectedIndex is >= 0 and <= 3) &&
-                _isolationConfirmed.IsChecked == true && !string.IsNullOrWhiteSpace(_physicalDevice.Text));
+                supported && _leadershipPreferenceReady && _lastFocusedLeads.IsChecked is bool);
         _stopBridge.IsEnabled = _bridge is not null;
         _endSession.IsEnabled = OperatingSystem.IsWindows() && !_busy &&
             (_bridge is not null || _launchedClients.Count > 0);
@@ -1768,11 +2106,11 @@ public sealed class MainWindow : Window
         _armPairing.IsEnabled = !HybridSelected && _bridge is not null && _pairing?.Current is not null &&
             _launchedClients.Count == _selectedTopology?.ClientCount &&
             _pairing.Armed == false && _pairing.AReleased == false && !_armRequested && !_busy &&
-            (_selectedTopology?.Clients[_pairing.Current.Client - 1].Count != 1 ||
+            (_pairing.Current.LocalPlayer != 1 ||
              !_accountPresent[_pairing.Current.Client - 1] ||
              _autoLoginPreferenceReady[_pairing.Current.Client - 1]);
         _armPairing.Content = _pairing?.Current is { } next &&
-            _selectedTopology?.Clients[next.Client - 1].Count == 1 &&
+            next.LocalPlayer == 1 &&
             _accountPresent[next.Client - 1] &&
             _autoLoginChoices[next.Client - 1].IsChecked == true
                 ? _manualAutoLoginWindows[next.Client - 1] is { } manual &&
@@ -1792,10 +2130,7 @@ public sealed class MainWindow : Window
         _playerCount.IsEnabled = _bridge is null && !_busy;
         _topologyVariant.IsEnabled = _bridge is null && !_busy;
         _inputMode.IsEnabled = _bridge is null && !_busy;
-        _physicalIndex.IsEnabled = !HybridSelected && _bridge is null && !_busy && !useWgi;
         _hybridBindingsButton.IsEnabled = _bridge is null && !_busy;
-        _physicalDevice.IsEnabled = !HybridSelected && _bridge is null && !_busy;
-        _isolationConfirmed.IsEnabled = !HybridSelected && _bridge is null && !_busy;
         _rightStickFollowerOverride.IsEnabled = !HybridSelected && _bridge is null && !_busy;
         _engageDodge.IsEnabled = !HybridSelected && _bridge is null && !_busy &&
             _rightStickFollowerOverride.IsChecked == true;
@@ -1814,6 +2149,8 @@ public sealed class MainWindow : Window
         for (var index = 0; index < _paths.Length; index++)
         {
             if (_paths[index] is not null) _paths[index].IsEnabled = _bridge is null && !_pairingHasStarted && !_busy;
+            if (_folderButtons[index] is not null) _folderButtons[index].IsEnabled = _bridge is null && !_pairingHasStarted && !_busy;
+            if (_gameChoices[index] is not null) _gameChoices[index].IsEnabled = _bridge is null && !_pairingHasStarted && !_busy;
             if (_uris[index] is not null) _uris[index].IsEnabled = _bridge is null && !_pairingHasStarted && !_busy;
             if (_attachPids[index] is not null) _attachPids[index].IsEnabled = _bridge is null && !_pairingHasStarted && !_busy;
         }
@@ -1944,6 +2281,26 @@ public sealed class MainWindow : Window
     private bool RadarKeyConflicts(RadarHotkeyBinding binding) =>
         binding.VirtualKey == AutoPartyKeyBinding.VirtualKey(_autoPartyKeyValue) ||
         binding.VirtualKey == AutoPartyKeyBinding.VirtualKey(_followPauseKeyValue);
+
+    private void SaveRadarAppearance()
+    {
+        if (!RadarAppearanceSettings.TryParse(_radarMapOpacity.Text,
+                _radarBorderOpacity.Text, _radarBackgroundOpacity.Text, out var appearance))
+        {
+            _radarAppearanceStatus.Text = "请输入整数：地图 2–100%，边线与背景 0–100%。";
+            return;
+        }
+        if (!_radarAppearancePreferences.Save(appearance))
+        {
+            _radarAppearanceStatus.Text = "地图外观保存失败，当前覆盖层未更改。";
+            return;
+        }
+        _radar?.SetAppearance(appearance);
+        _radarAppearanceStatus.Text = _radar is null
+            ? "地图外观已保存；下次启动覆盖层时生效。"
+            : "地图外观已保存并应用到当前覆盖层；游戏内效果仍需核对。";
+        UpdateRadarControls();
+    }
 
     private void SaveRadarHotkey()
     {
@@ -2177,8 +2534,46 @@ public sealed class MainWindow : Window
         }
     }
 
+    private void SaveFollowInputPreference()
+    {
+        if (_sprintCatchUpPriority.IsChecked is not bool priority ||
+            _mirrorAttackDirection.IsChecked is not bool mirror)
+        {
+            _followInputPreferenceReady = false;
+            _followInputPreferenceStatus.Text = "请选择追赶优先和攻击方向同步两个选项以保存。";
+        }
+        else
+        {
+            if (!int.TryParse(_aggressiveSprintRetryDelay.Text, NumberStyles.None,
+                    CultureInfo.InvariantCulture, out var retry) ||
+                !int.TryParse(_closeMirrorDuration.Text, NumberStyles.None,
+                    CultureInfo.InvariantCulture, out var duration))
+            {
+                _followInputPreferenceReady = false;
+                _followInputPreferenceStatus.Text = "重试间隔和镜像时长须填写有效毫秒数。";
+            }
+            else
+            {
+                var options = new FollowInputOptions(_sprintCatchUp.IsChecked == true,
+                    priority, mirror, _classicSprintCatchUp.IsChecked == true,
+                    _aggressiveBlinkCatchUp.IsChecked == true, retry,
+                    _closeRangeMirror.IsChecked == true, duration);
+                var saved = _followInputPreferences.Save(options);
+                _followInputPreferenceReady = saved.Success;
+                _followInputPreferenceStatus.Text = saved.Message;
+            }
+        }
+        UpdateFollowControls();
+    }
+
     private void UpdateFollowControls()
     {
+        _flaskRulesButton.IsEnabled = _follow is null && !_busy &&
+            _selectedTopology?.Id is ("2-split" or "3-three-singles");
+        _flaskCustomButton.IsEnabled = _follow is null && !_busy &&
+            _selectedTopology?.Id is ("2-split" or "3-three-singles");
+        _flaskSupportButton.IsEnabled = _follow is null && !_busy &&
+            _selectedTopology?.Id is ("2-split" or "3-three-singles");
         foreach (var choice in _followTargets)
             if (choice is not null) choice.IsEnabled = _follow is null && !_busy;
         foreach (var stop in _followPlayerStops)
@@ -2186,8 +2581,13 @@ public sealed class MainWindow : Window
         foreach (var binding in _terrainBindingPaths)
             if (binding is not null) binding.IsEnabled = _follow is null && !_busy;
         _classicSprintCatchUp.IsEnabled = _follow is null && !_busy &&
-            _selectedTopology?.Id is ("2-split" or "3-three-singles");
+            _selectedTopology?.Id is ("2-split" or "3-three-singles" or
+                "4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced");
         _sprintCatchUp.IsEnabled = _classicSprintCatchUp.IsEnabled;
+        _sprintCatchUpPriority.IsEnabled = _sprintCatchUp.IsEnabled &&
+            _sprintCatchUp.IsChecked == true;
+        _mirrorAttackDirection.IsEnabled = _classicSprintCatchUp.IsEnabled &&
+            _bridge is { IsHybridMode: false };
         _aggressiveBlinkCatchUp.IsEnabled = _classicSprintCatchUp.IsEnabled;
         _aggressiveSprintRetryDelay.IsEnabled = _aggressiveBlinkCatchUp.IsEnabled &&
             _aggressiveBlinkCatchUp.IsChecked == true;
@@ -2198,6 +2598,9 @@ public sealed class MainWindow : Window
         _classicCollisionDodge.IsEnabled = _follow is null && !_busy &&
             _selectedTopology?.Id is ("2-split" or "3-three-singles") &&
             _classicSprintCatchUp.IsChecked == true;
+        _experimentalWarpClick.IsEnabled = _follow is null && !_busy &&
+            _selectedTopology?.Id is ("4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced") &&
+            OperatingSystem.IsWindows();
         var valid = LiveFollowPlan.TryCreate(_followStop.Text, _followCatchup.Text,
             _followMaxAge.Text, _followLogAge.Text, _followLeaderName.Text, out _);
         if (_aggressiveBlinkCatchUp.IsChecked == true)
@@ -2206,13 +2609,15 @@ public sealed class MainWindow : Window
         if (_closeRangeMirror.IsEnabled && _closeRangeMirror.IsChecked == true)
             valid &= int.TryParse(_closeMirrorDuration.Text, NumberStyles.None,
                 CultureInfo.InvariantCulture, out var duration) && duration is >= 50 and <= 5000;
-        if (_selectedTopology?.Id is "2-split" or "3-three-singles")
+        if (_selectedTopology?.Id is "2-split" or "3-three-singles" or "4-balanced" or
+            "5-third-solo" or "5-main-solo" or "6-balanced")
         {
             valid &= _selectedTopology.Slots.All(slot =>
                 FollowPlayerStop.TryRead(_followPlayerStops[slot.PartyPlayer - 1].Text, out _));
             var terrainValid = LiveTerrainSelection.TryCreate(_selectedTopology,
                 _terrainBindingPaths.Select(box => box?.Text).ToArray(),
-                _classicCollisionDodge.IsChecked == true && _sprintCatchUp.IsChecked == true,
+                _classicCollisionDodge.IsEnabled && _classicCollisionDodge.IsChecked == true &&
+                _sprintCatchUp.IsChecked == true,
                 out var terrain, out var terrainError);
             valid &= terrainValid;
             _terrainBindingStatus.Text = terrainValid
@@ -2222,19 +2627,31 @@ public sealed class MainWindow : Window
         }
         else _terrainBindingStatus.Text = "当前布局不支持实时地形绑定。";
         _startFollow.IsEnabled = OperatingSystem.IsWindows() && !_busy && !_followStopping && _follow is null &&
-            _followTargetPreferenceReady && _followStopPreferenceReady && _bridge is not null && _pairingSettled &&
+            _followTargetPreferenceReady && _followStopPreferenceReady && _followInputPreferenceReady &&
+            _bridge is not null && _pairingSettled &&
             (!_bridge.IsHybridMode || _hybridPairing?.Phase == HybridPairingPhase.Complete &&
              Volatile.Read(ref _hybridFocusedPlayer) == 1 && Volatile.Read(ref _hybridFocusTransition) == 0) &&
-            (_selectedTopology?.Id is "2-split" or "3-three-singles") &&
-            _launchedClients.Count == _selectedTopology.ClientCount && valid;
+            (_selectedTopology?.Id is "2-split" or "3-three-singles" or "4-balanced" or
+                "5-third-solo" or "5-main-solo" or "6-balanced") &&
+            _launchedClients.Count == _selectedTopology.ClientCount && valid &&
+            (_bridge.AutoFlaskEnabled != true ||
+             _flaskSupportPreferences.Load(_selectedTopology.PlayerCount).Success &&
+             _flaskRulePreferences.Load(_selectedTopology.PlayerCount).Success &&
+             _flaskCustomPreferences.Load(_selectedTopology.PlayerCount).Success);
         _stopFollow.IsEnabled = _follow is not null;
         _pauseFollow.IsEnabled = _follow is not null && !_followStopping;
         _pauseFollow.Content = _follow?.Paused == true ? "恢复跟随" : "暂停跟随";
+        _manualWarpToMain.IsEnabled = _follow is { Paused: false } && !_followStopping &&
+            _experimentalWarpClick.IsChecked != true &&
+            _selectedTopology?.Id is ("4-balanced" or "5-third-solo" or
+                "5-main-solo" or "6-balanced");
     }
 
-    private async Task PrepareBridgeAsync(Client3PreResumeSession? pendingPrivate = null)
+    private async Task PrepareBridgeAsync(Client3PreResumeSession? pendingPrivate = null,
+        ControllerAutoSelection? prelaunchController = null, bool launchBinding = false,
+        IReadOnlyCollection<int>? adoptedLocalClients = null)
     {
-        if ((_busy && pendingPrivate is null) || _bridge is not null ||
+        if ((_busy && pendingPrivate is null && !launchBinding) || _bridge is not null ||
             _selectedTopology is null || !OperatingSystem.IsWindows())
         {
             _pairingStatus.Text = "手柄桥接需要 Windows、已选布局与空闲桥接会话。";
@@ -2253,21 +2670,28 @@ public sealed class MainWindow : Window
             await PrepareHybridBridgeAsync(adoptExistingPrivate: pendingPrivate is not null);
             return;
         }
-        var slots = _selectedTopology.Slots.Where(slot => slot.Client != 3)
+        var processLocal = _selectedTopology.Id is "4-balanced" or "6-balanced";
+        var slots = _selectedTopology.Slots.Where(slot => processLocal || slot.Client != 3)
             .Select(slot => slot.RuntimePad).ToArray();
-        var useWgi = slots.Length == 4;
+        var useWgi = !processLocal && slots.Length == 4;
         PrivateClient3Plan? privatePlan = null;
-        if (_selectedTopology.ClientCount == 3 &&
+        ProcessLocalBridgePlan? localPlan = null;
+        if (processLocal && !ProcessLocalBridgePlan.TryCreate(_selectedTopology,
+                _launchedClients, adoptedLocalClients ?? (pendingPrivate is null ? [] : [3]),
+                out localPlan))
+        {
+            _pairingStatus.Text = "请先核对全部游戏窗口和各客户端的进程身份。";
+            return;
+        }
+        if (!processLocal && _selectedTopology.ClientCount == 3 &&
             !PrivateClient3Plan.TryCreate(_selectedTopology, _launchedClients, out privatePlan))
         {
             _pairingStatus.Text = "请先启动或绑定三个游戏窗口，核对第三客户端的进程与窗口身份。";
             return;
         }
-        if (slots.Length is < 1 or > 4 || slots.Any(slot => slot is < 1 or > 4) ||
-            (slots.Length == 4 && !useWgi) ||
-            (!useWgi && _physicalIndex.SelectedIndex is < 0 or > 3) ||
-            _isolationConfirmed.IsChecked != true ||
-            string.IsNullOrWhiteSpace(_physicalDevice.Text))
+        if (slots.Length < 1 || slots.Length > (processLocal ? 6 : 4) ||
+            slots.Any(slot => slot < 1 || slot > (processLocal ? 6 : 4)) ||
+            (slots.Length == 4 && !useWgi && !processLocal))
         {
             _pairingStatus.Text = "当前布局或实体手柄隔离条件不满足桥接要求。";
             return;
@@ -2286,15 +2710,21 @@ public sealed class MainWindow : Window
         {
             var gameExecutables = Enumerable.Range(0, _selectedTopology.ClientCount)
                 .Select(index => _paths[index].Text?.Trim() ?? "").ToArray();
-            var session = await BridgeSession.StartAsync(executable, _selectedTopology.Slots, _physicalIndex.SelectedIndex,
-                _physicalDevice.Text.Trim(), gameExecutables, _rightStickFollowerOverride.IsChecked == true,
+            var selected = prelaunchController ?? await ControllerLaunchPreflight.DiscoverAsync(
+                executable, gameExecutables, useWgi, prepareIsolation: false);
+            if (!selected.Ready || selected.Device is null)
+                throw new InvalidOperationException(selected.Message);
+            var session = await BridgeSession.StartAsync(executable, _selectedTopology.Slots,
+                selected.PhysicalIndex ?? 0, selected.Device, gameExecutables,
+                _rightStickFollowerOverride.IsChecked == true,
                 _selectedTopology.Id is "2-split" or "3-three-singles" && _autoFlask.IsChecked == true,
-                useWgi, privatePlan, lastFocusedLeads: _lastFocusedLeads.IsChecked == true,
+                selected.UseWgi, privatePlan, lastFocusedLeads: _lastFocusedLeads.IsChecked == true,
                 menuGuardEnabled: _menuGuard.IsChecked == true, followerMirror: _followerMirror,
-                adoptExistingPrivate: pendingPrivate is not null,
+                adoptExistingPrivate: !processLocal && pendingPrivate is not null,
                 engageDodgeEnabled: _rightStickFollowerOverride.IsChecked == true &&
                     _engageDodge.IsChecked == true,
-                engageDodgeBinding: (string)_engageDodgeBinding.SelectedItem!);
+                engageDodgeBinding: (string)_engageDodgeBinding.SelectedItem!,
+                processLocalPlan: localPlan);
             ActivateBridge(session, _selectedTopology);
         }
         catch (Exception error)
@@ -2303,6 +2733,8 @@ public sealed class MainWindow : Window
         }
         finally
         {
+            if (_bridge is null)
+                await ReleaseControllerIsolationAsync();
             _busy = wasBusy;
             UpdateBridgeControls();
         }
@@ -2516,7 +2948,7 @@ public sealed class MainWindow : Window
             HybridPairingPhase.AwaitNativeMain =>
                 "P1 使用鼠标登录和选角；进入游戏后点击“P1 已进入游戏”。此步由用户确认，尚无游戏内身份验证。",
             HybridPairingPhase.AwaitFollowerFocus =>
-                $"在游戏窗口按 {HybridKeyLabel(guide.CurrentPlayer - 1)}，切换到 P{guide.CurrentPlayer} 的客户端。",
+                $"在游戏窗口按 {HybridKeyLabel(guide.CurrentPlayer - 1)}，切换到 P{guide.CurrentPlayer}。",
             HybridPairingPhase.AwaitConfirmRelease =>
                 $"P{guide.CurrentPlayer} 窗口已前台；使用 {HybridKeyLabel(6)}/{HybridKeyLabel(7)}/{HybridKeyLabel(8)}/{HybridKeyLabel(9)} 选角，按 {HybridKeyLabel(11)} 发送虚拟手柄 A。",
             HybridPairingPhase.AwaitUserConfirmation =>
@@ -2587,7 +3019,7 @@ public sealed class MainWindow : Window
         UpdateBridgeControls();
         try
         {
-            if (topology.Clients[current.Client - 1].Count == 1 &&
+            if (current.LocalPlayer == 1 &&
                 _accountPresent[current.Client - 1] &&
                 _autoLoginChoices[current.Client - 1].IsChecked == true &&
                 _manualAutoLoginWindows[current.Client - 1] != client)
@@ -2693,6 +3125,7 @@ public sealed class MainWindow : Window
         ShowCurrentPairingStep();
         UpdateFollowControls();
         UpdateAutoPartyControls();
+        _ = ContinueOneClickFollowAsync();
     }
 
     private async void BridgeEnded(string reason)
@@ -2767,6 +3200,7 @@ public sealed class MainWindow : Window
         UpdateClientRows();
         UpdateFollowControls();
         UpdateAutoPartyControls();
+        if (_pairingSettled) await ContinueOneClickFollowAsync();
     }
 
     private void ShowCurrentPairingStep()
@@ -2799,6 +3233,7 @@ public sealed class MainWindow : Window
 
     private async Task StopBridgeAsync()
     {
+        _oneClickFollowRequested = false;
         var wasHybrid = _bridge?.IsHybridMode == true;
         _gameHotkeys?.SetHybridHandler(null);
         var publisher = _hybridPublisher;
@@ -2834,7 +3269,12 @@ public sealed class MainWindow : Window
         _loginStatus = "waiting";
         UpdateFollowControls();
         UpdateClientRows();
-        if (session is null) return;
+        if (session is null)
+        {
+            if (!await ReleaseControllerIsolationAsync())
+                _pairingStatus.Text = "手柄隔离恢复未完成，请检查 HidHide 设置。";
+            return;
+        }
         session.AReleased -= BridgeAReleased;
         session.PairingArmed -= BridgePairingArmed;
         session.PairingCompleted -= BridgePairingCompleted;
@@ -2842,10 +3282,28 @@ public sealed class MainWindow : Window
         session.HybridFocusChanged -= HybridFocusChanged;
         session.HybridConfirmReleased -= HybridConfirmReleased;
         session.Ended -= BridgeEnded;
-        await session.DisposeAsync();
-        _pairingStatus.Text = wasHybrid
-            ? "键鼠桥接已停止，虚拟手柄已释放。"
-            : "手柄桥接已停止，虚拟手柄已释放。";
+        try { await session.DisposeAsync(); }
+        finally
+        {
+            var restored = await ReleaseControllerIsolationAsync();
+            _pairingStatus.Text = restored
+                ? wasHybrid ? "键鼠桥接已停止，虚拟手柄已释放。" :
+                    "手柄桥接已停止，虚拟手柄已释放。"
+                : "手柄桥接已停止，但手柄隔离恢复未完成；请检查 HidHide 设置。";
+        }
+    }
+
+    private static async Task<bool> ReleaseControllerIsolationAsync()
+    {
+        try
+        {
+            return await ControllerLaunchPreflight.ReleaseAsync(BridgeSession.FindExecutable());
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or
+            System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     private async Task EndSessionAsync()
@@ -2889,12 +3347,51 @@ public sealed class MainWindow : Window
         }
     }
 
+    private async Task EditFlaskRulesAsync()
+    {
+        if (_selectedTopology?.Id is not ("2-split" or "3-three-singles") ||
+            _follow is not null || _busy) return;
+        var current = _flaskRulePreferences.Load(_selectedTopology.PlayerCount);
+        var dialog = new FlaskRuleDialog(_selectedTopology.PlayerCount, current.Players);
+        var edited = await dialog.ShowDialog<FlaskPlayerRule[]?>(this);
+        if (edited is null) return;
+        var saved = _flaskRulePreferences.Save(_selectedTopology.PlayerCount, edited);
+        _flaskRulesStatus.Text = saved.Message;
+        UpdateFollowControls();
+    }
+
+    private async Task EditFlaskSupportAsync()
+    {
+        if (_selectedTopology?.Id is not ("2-split" or "3-three-singles") ||
+            _follow is not null || _busy) return;
+        var current = _flaskSupportPreferences.Load(_selectedTopology.PlayerCount);
+        var dialog = new FlaskSupportDialog(_selectedTopology.PlayerCount, current.Bindings);
+        var edited = await dialog.ShowDialog<FlaskSupportBinding[]?>(this);
+        if (edited is null) return;
+        var saved = _flaskSupportPreferences.Save(_selectedTopology.PlayerCount, edited);
+        _flaskSupportStatus.Text = saved.Message;
+        UpdateFollowControls();
+    }
+
+    private async Task EditFlaskCustomAsync()
+    {
+        if (_selectedTopology?.Id is not ("2-split" or "3-three-singles") ||
+            _follow is not null || _busy) return;
+        var current = _flaskCustomPreferences.Load(_selectedTopology.PlayerCount);
+        var dialog = new FlaskCustomDialog(_selectedTopology.PlayerCount, current.Rules);
+        var edited = await dialog.ShowDialog<FlaskCustomRule[]?>(this);
+        if (edited is null) return;
+        var saved = _flaskCustomPreferences.Save(_selectedTopology.PlayerCount, edited);
+        _flaskCustomStatus.Text = saved.Message;
+        UpdateFollowControls();
+    }
+
     private async Task StartFollowAsync()
     {
         if (_bridge is null || !_pairingSettled || _selectedTopology is null || _follow is not null || _followStopping ||
             _bridge.IsHybridMode && (_hybridPairing?.Phase != HybridPairingPhase.Complete ||
                 Volatile.Read(ref _hybridFocusedPlayer) != 1 || Volatile.Read(ref _hybridFocusTransition) != 0) ||
-            !_followTargetPreferenceReady || !_followStopPreferenceReady ||
+            !_followTargetPreferenceReady || !_followStopPreferenceReady || !_followInputPreferenceReady ||
             !LiveFollowPlan.TryCreate(_followStop.Text, _followCatchup.Text,
                 _followMaxAge.Text, _followLogAge.Text, _followLeaderName.Text, out var plan) || plan is null) return;
         var executable = LiveFollowSession.FindExecutable();
@@ -2906,19 +3403,47 @@ public sealed class MainWindow : Window
         var enableCloseMirror = _selectedTopology.Id is ("2-split" or "3-three-singles") &&
             !_bridge.IsHybridMode &&
             _closeRangeMirror.IsChecked == true;
+        var enableAttackMirror = _selectedTopology.Id is ("2-split" or "3-three-singles") &&
+            !_bridge.IsHybridMode && _mirrorAttackDirection.IsChecked == true;
+        var enableExperimentalWarp = _selectedTopology.Id is
+            ("4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced") &&
+            OperatingSystem.IsWindows() && _experimentalWarpClick.IsChecked == true;
         if (enableCloseMirror && (!int.TryParse(_closeMirrorDuration.Text, NumberStyles.None,
                 CultureInfo.InvariantCulture, out var mirrorDuration) || mirrorDuration is < 50 or > 5000))
         {
             _followStatus.Text = "镜像时长必须为 50–5000 毫秒。";
             return;
         }
+        var radarStartedForFollow = false;
+        if (enableExperimentalWarp && _radar is null)
+        {
+            await StartRadarAsync();
+            if (_radar is null)
+            {
+                _followStatus.Text = $"实验性跨区追赶需要雷达采样：{_radarStatus.Text}";
+                return;
+            }
+            radarStartedForFollow = true;
+        }
         _busy = true;
         UpdateFollowControls();
         _followStatus.Text = "正在核对进程、日志与传感器输入…";
         try
         {
+            var flaskSupport = _flaskSupportPreferences.Load(_selectedTopology.PlayerCount);
+            if (_bridge.AutoFlaskEnabled && !flaskSupport.Success)
+                throw new InvalidOperationException(flaskSupport.Message);
+            var flaskRules = _flaskRulePreferences.Load(_selectedTopology.PlayerCount);
+            if (_bridge.AutoFlaskEnabled && !flaskRules.Success)
+                throw new InvalidOperationException(flaskRules.Message);
+            var flaskCustom = _bridge.AutoFlaskEnabled
+                ? _flaskCustomPreferences.EnsureRuntimeFile(_selectedTopology.PlayerCount)
+                : null;
+            if (flaskCustom is { Success: false })
+                throw new InvalidOperationException(flaskCustom.Message);
             if (!LiveTerrainSelection.TryCreate(_selectedTopology,
                     _terrainBindingPaths.Select(box => box?.Text).ToArray(),
+                    _selectedTopology.Id is ("2-split" or "3-three-singles") &&
                     _classicCollisionDodge.IsChecked == true && _sprintCatchUp.IsChecked == true,
                     out var terrain, out var terrainError))
                 throw new InvalidOperationException(terrainError);
@@ -2935,30 +3460,31 @@ public sealed class MainWindow : Window
                     throw new InvalidOperationException($"P{slot.PartyPlayer} 的停止距离必须在 0–200 之间。");
                 if (stop is double value) playerStops[slot.PartyPlayer] = value;
             }
-            IReadOnlyDictionary<int, string>? memberNames = null;
-            if (AutoPartyInviteNames.TryCreate(_selectedTopology,
-                    _inviteNames.Take(_selectedTopology.PlayerCount).Select(box => box.Text).ToArray(),
-                    out var inviteNames) && inviteNames is not null)
-            {
-                var confirmed = _selectedTopology.Slots.Where(slot => slot.PartyPlayer != 1)
-                    .ToDictionary(slot => slot.PartyPlayer,
-                        slot => inviteNames.ForClient(slot.Client));
-                if (plan.LeaderName.Length == 0) confirmed[1] = inviteNames.ForClient(1);
-                memberNames = confirmed;
-            }
+            var memberNames = LiveMemberNameSelection.TryCreate(_selectedTopology,
+                _inviteNames.Take(_selectedTopology.PlayerCount).Select(box => box.Text).ToArray(),
+                plan.LeaderName);
             var session = await LiveFollowSession.StartAsync(executable, _selectedTopology,
                 _launchedClients, _bridge, plan, memberNames, followTargets, playerStops,
-                terrain, _classicCollisionDodge.IsChecked == true,
+                terrain, _selectedTopology.Id is ("2-split" or "3-three-singles") &&
+                    _classicCollisionDodge.IsChecked == true,
                 _classicSprintCatchUp.IsChecked == true,
                 sprintCatchUp: _sprintCatchUp.IsChecked == true,
+                sprintCatchUpPriority: _sprintCatchUpPriority.IsChecked == true,
+                mirrorAttackDirection: enableAttackMirror,
                 aggressiveBlinkCatchUp: _aggressiveBlinkCatchUp.IsChecked == true,
                 aggressiveSprintRetryDelay: _aggressiveBlinkCatchUp.IsChecked == true
                     ? int.Parse(_aggressiveSprintRetryDelay.Text!, CultureInfo.InvariantCulture) : 800,
-                relayMainInput: enableCloseMirror,
+                relayMainInput: !_bridge.IsHybridMode,
                 closeRangeMirror: enableCloseMirror,
-                closeMirrorDuration: int.Parse(_closeMirrorDuration.Text!, CultureInfo.InvariantCulture),
-                followerMirror: _followerMirror);
+                closeMirrorDuration: enableCloseMirror
+                    ? int.Parse(_closeMirrorDuration.Text!, CultureInfo.InvariantCulture) : 400,
+                followerMirror: _followerMirror,
+                flaskSupportFile: _bridge.AutoFlaskEnabled ? flaskSupport.RuntimeFile : null,
+                flaskRulesFile: _bridge.AutoFlaskEnabled ? flaskRules.RuntimeFile : null,
+                flaskCustomFile: flaskCustom?.RuntimeFile,
+                experimentalWarpClick: enableExperimentalWarp);
             session.StatusChanged += FollowStatusChanged;
+            session.WarpStatusChanged += FollowWarpStatusChanged;
             session.Ended += FollowEnded;
             _follow = session;
             session.StartReading();
@@ -2966,6 +3492,8 @@ public sealed class MainWindow : Window
         }
         catch (Exception error)
         {
+            if (radarStartedForFollow && _follow is null)
+                await StopRadarAsync();
             _followStatus.Text = $"跟随未启动：{error.Message}";
         }
         finally
@@ -2982,7 +3510,51 @@ public sealed class MainWindow : Window
             _followStatus.Text = "跟随已暂停；所有自动方向已回中，恢复后仍需新鲜位置与区域证据。";
             return;
         }
-        if (_selectedTopology?.Id == "3-three-singles" &&
+        if (frame.Handoffs.Count > 0)
+        {
+            var requests = string.Join(" · ", frame.Handoffs.Select(item =>
+                $"客户端 {item.DestinationClient} 的 P{item.DriverPlayer} 需传送至 P{item.TargetPlayer}"));
+            var warpState = _follow?.ManualWarpActive == true
+                ? "正在执行手动追到 MAIN"
+                : _experimentalWarpClick.IsChecked != true
+                ? "自动传送未开启"
+                : _selectedTopology is not null &&
+                  (PartyWarpRoutes.FromFrame(frame, _selectedTopology) is not null ||
+                   PartyWarpControllerPlan.FromFrame(frame, _selectedTopology) is not null)
+                    ? "正在尝试实验性传送"
+                    : "当前跨区请求不支持自动传送";
+            var anchorState = _follow is not null && frame.Handoffs.Any(item =>
+                _follow.MatchTransitionAnchor(item) is not null)
+                ? "；雷达发现同路径入口候选，尚未自动靠近或交互"
+                : string.Empty;
+            _followStatus.Text = $"检测到跨区：{requests}；{warpState}，跨区自动方向已停止{anchorState}。";
+            return;
+        }
+        if (frame.PadCommands.Any(command => command.Status == "approach_blocked"))
+        {
+            var blocked = string.Join("、", frame.PadCommands.Where(command =>
+                command.Status == "approach_blocked").Select(command => $"P{command.Player}"));
+            _followStatus.Text = $"{blocked} 入口追赶无进展，自动方向已停止；请手动处理。";
+            return;
+        }
+        if (_follow?.IndependentProbeStarted == true &&
+            frame.PadCommands.Count > 0 &&
+            frame.PadCommands.All(command => command.Status == "waiting") &&
+            frame.PadCommands.Any(command => command.Reason == "missing position") &&
+            !_follow.IndependentProbeRunning)
+        {
+            _followStatus.Text = "独立探针已退出；跟随者仍在等待位置，自动方向已停止。";
+            return;
+        }
+        if (_follow?.HasUnknownProbeBuild == true && frame.PadCommands.Count > 0 &&
+            frame.PadCommands.All(command => command.Status == "waiting") &&
+            frame.PadCommands.Any(command => command.Reason == "missing position"))
+        {
+            _followStatus.Text = "独立探针未识别至少一个客户端的游戏版本；跟随者仍在等待位置，自动方向已停止。";
+            return;
+        }
+        if (_selectedTopology?.Id is "3-three-singles" or "4-balanced" or
+            "5-third-solo" or "5-main-solo" or "6-balanced" &&
             frame.Reason is not ("party disbanded" or "local client left party" or "followed member left party"))
         {
             var states = string.Join(" · ", frame.PadCommands.Select(command =>
@@ -2990,6 +3562,7 @@ public sealed class MainWindow : Window
                 {
                     "following" => "跟随",
                     "catching_up" => "追赶",
+                    "approaching_transition" => "靠近入口（实验性）",
                     "holding" => "停靠",
                     _ when command.Reason == "dead follower" => "等待（角色死亡）",
                     _ when command.Reason == "missing position" => "等待（缺少位置）",
@@ -3007,7 +3580,7 @@ public sealed class MainWindow : Window
             ("holding", "Close-range mirror") => "近距离镜像方向已输出；游戏内移动效果待验证。",
             ("holding", "Mirrored dodge / sprint") => "镜像闪避／冲刺方向已输出；游戏内效果待验证。",
             ("holding", _) => "跟随者已停靠，自动方向已停止。",
-            ("waiting", "missing position") => "缺少角色位置样本；请检查两端传感器与进程绑定。自动方向已停止。",
+            ("waiting", "missing position") => "没有收到角色位置；自动移动已停止。",
             ("waiting", "different or unknown instance") => "两端尚无可用的同一区域实例证据；自动方向已停止。",
             ("waiting", "stale position") => "角色位置样本已过期；自动方向已停止。",
             ("waiting", "dead follower") => "传感器报告跟随角色生命值为零；自动与右摇杆方向已停止。",
@@ -3017,6 +3590,9 @@ public sealed class MainWindow : Window
             _ => "等待新鲜位置、区域日志与队伍状态；自动方向已停止。"
         };
     }
+
+    private void FollowWarpStatusChanged(string detail) =>
+        _followStatus.Text = $"跨区传送：{detail}";
 
     private async void FollowEnded(string reason)
     {
@@ -3047,6 +3623,22 @@ public sealed class MainWindow : Window
         }
     }
 
+    private void ToggleManualWarpToMain()
+    {
+        if (_follow is not { } session) return;
+        try
+        {
+            var started = session.ToggleManualWarpToMain();
+            _followStatus.Text = started
+                ? "已请求手动追到 MAIN；仅处理当前已确认的跨区传送请求。"
+                : "已请求取消手动追到 MAIN。";
+        }
+        catch (InvalidOperationException error)
+        {
+            _followStatus.Text = $"手动追到 MAIN 未启动：{error.Message}";
+        }
+    }
+
     private async Task StopFollowAsync()
     {
         if (_followStopping) return;
@@ -3058,6 +3650,7 @@ public sealed class MainWindow : Window
         try
         {
             session.StatusChanged -= FollowStatusChanged;
+            session.WarpStatusChanged -= FollowWarpStatusChanged;
             session.Ended -= FollowEnded;
             await session.DisposeAsync();
             _followStatus.Text = "跟随已停止，自动输入已撤销。";
@@ -3069,18 +3662,79 @@ public sealed class MainWindow : Window
         }
     }
 
+    private async Task RunOneClickStartAsync()
+    {
+        var topology = _selectedTopology;
+        if (topology is null)
+        {
+            _status.Text = "先选择人数。";
+            return;
+        }
+        var missing = Enumerable.Range(0, topology.ClientCount)
+            .FirstOrDefault(index => string.IsNullOrWhiteSpace(_paths[index].Text), -1);
+        if (missing >= 0)
+        {
+            _status.Text = $"先为客户端 {missing + 1} 选择游戏目录。";
+            return;
+        }
+        var priorClients = _launchedClients;
+        await RunLauncherAsync(ClientAction.Start);
+        if (ReferenceEquals(_launchedClients, priorClients) ||
+            _launchedClients.Count != topology.ClientCount || !ReferenceEquals(_selectedTopology, topology))
+        {
+            _oneClickFollowRequested = false;
+            return;
+        }
+        if (_bridge is null && topology.PlayerCount > 1)
+            await PrepareBridgeAsync();
+        if (_bridge is null && topology.PlayerCount > 1)
+        {
+            _status.Text = $"游戏已打开，输入连接尚未就绪：{_pairingStatus.Text}";
+            return;
+        }
+        _oneClickFollowRequested = topology.PlayerCount > 1;
+        _status.Text = _follow is not null ? "游戏已打开，跟随已启动。" :
+            topology.PlayerCount == 1 ? "游戏已打开。" :
+            "游戏已打开。按画面提示确认角色，完成后自动尝试跟随。";
+        if (_pairingSettled) await ContinueOneClickFollowAsync();
+    }
+
+    private async Task ContinueOneClickFollowAsync()
+    {
+        if (!_oneClickFollowRequested || !_pairingSettled) return;
+        _oneClickFollowRequested = false;
+        UpdateFollowControls();
+        if (!_startFollow.IsEnabled)
+        {
+            _followStatus.Text = "角色已确认；位置数据或跟随设置尚未就绪。";
+            return;
+        }
+        await StartFollowAsync();
+        _status.Text = _follow is null
+            ? "游戏已打开；跟随未启动，原因见下方。"
+            : "游戏已打开；跟随会话已启动，状态见下方。";
+    }
+
+    private static bool IsStandaloneGamePath(string? path)
+    {
+        var name = Path.GetFileNameWithoutExtension(path?.Trim());
+        return string.Equals(name, "PathOfExile", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(name, "PathOfExile_x64", StringComparison.OrdinalIgnoreCase);
+    }
+
     private async Task RunLauncherAsync(ClientAction action)
     {
         if (HybridSelected && _selectedTopology is not null &&
             !HybridTopologySupport.CanBridge(_selectedTopology) &&
             !(_selectedTopology.PlayerCount == 1 && HybridTopologySupport.HasNativeP1(_selectedTopology)))
         {
-            _status.Text = "目标版键鼠模式要求客户端 1 只有 P1；当前独立版暂不支持此布局的键鼠桥接。";
+            _status.Text = "当前布局的键鼠桥接尚未接入。";
             return;
         }
         var reusePreparedBridge = action == ClientAction.Start && _bridge is not null &&
             !_pairingHasStarted && _launchedClients.Count == 0 &&
-            _selectedTopology?.ClientCount is 1 or 2;
+            _selectedTopology?.ClientCount is 1 or 2 &&
+            _selectedTopology?.Id is not "4-balanced";
         if (_busy || _pairingHasStarted || (_bridge is not null && !reusePreparedBridge))
         {
             _status.Text = "请先停止手柄桥接，再重新检查、启动或绑定游戏窗口。";
@@ -3110,13 +3764,28 @@ public sealed class MainWindow : Window
             _status.Text = "请先选择人数与角色分布。";
             return;
         }
+        var processLocalTopology = !HybridSelected &&
+            _selectedTopology.Id is ("4-balanced" or "6-balanced");
+        var localPreResumeClients = action == ClientAction.Start && processLocalTopology
+            ? Enumerable.Range(1, _selectedTopology.ClientCount)
+                .Where(client => string.IsNullOrWhiteSpace(_uris[client - 1].Text) &&
+                    IsStandaloneGamePath(_paths[client - 1].Text))
+                .ToArray()
+            : [];
         var client3Name = _selectedTopology.ClientCount == 3
             ? Path.GetFileNameWithoutExtension(_paths[2].Text?.Trim()) : "";
         var prepareClient3BeforeResume = action == ClientAction.Start &&
+            !processLocalTopology &&
             _selectedTopology.ClientCount == 3 && string.IsNullOrWhiteSpace(_uris[2].Text) &&
             (string.Equals(client3Name, "PathOfExile", StringComparison.OrdinalIgnoreCase) ||
              string.Equals(client3Name, "PathOfExile_x64", StringComparison.OrdinalIgnoreCase));
-        if (prepareClient3BeforeResume)
+        if (localPreResumeClients.Length > 0)
+        {
+            startInfo.RedirectStandardInput = true;
+            startInfo.ArgumentList.Add("-pre-resume-clients");
+            startInfo.ArgumentList.Add(string.Join(',', localPreResumeClients));
+        }
+        else if (prepareClient3BeforeResume)
         {
             startInfo.RedirectStandardInput = true;
             startInfo.ArgumentList.Add("-pre-resume-client3");
@@ -3170,6 +3839,9 @@ public sealed class MainWindow : Window
         };
         BridgeSession? prelaunchBridge = null;
         Client3PreResumeSession? pendingPrivate = null;
+        var pendingLocals = new List<PrivateClientPreResumeSession>();
+        ControllerAutoSelection? selectedController = null;
+        var startRadarAfterBinding = false;
         try
         {
             if (action == ClientAction.Start && HybridSelected)
@@ -3210,29 +3882,28 @@ public sealed class MainWindow : Window
                     _status.Text = "先确认并保存菜单保护、跟随按键及右摇杆闪避设置；游戏尚未启动。";
                     return;
                 }
-                if (_isolationConfirmed.IsChecked != true || string.IsNullOrWhiteSpace(_physicalDevice.Text))
-                {
-                    _status.Text = "启动前请确认实体手柄隔离并填写所选设备 ID；游戏尚未启动。";
-                    return;
-                }
                 var bridgeExecutable = BridgeSession.FindExecutable();
                 if (bridgeExecutable is null)
                 {
                     _status.Text = "找不到 PartyPilot.Bridge.exe，无法完成启动前检查；游戏尚未启动。";
                     return;
                 }
-                var useWgi = _selectedTopology.Slots.Count(slot => slot.Client != 3) == 4;
+                var processLocal = _selectedTopology.Id is "4-balanced" or "6-balanced";
+                var useWgi = !processLocal &&
+                    _selectedTopology.Slots.Count(slot => slot.Client != 3) == 4;
                 var gameExecutables = Enumerable.Range(0, _selectedTopology.ClientCount)
                     .Select(index => _paths[index].Text?.Trim() ?? string.Empty).ToArray();
-                var preflight = await ControllerLaunchPreflight.CheckAsync(bridgeExecutable,
-                    _physicalDevice.Text.Trim(), gameExecutables,
-                    useWgi ? null : _physicalIndex.SelectedIndex, useWgi);
-                if (!preflight.Ready)
+                if (_bridge is not null && (!reusePreparedBridge || !_bridge.IsRunning))
+                    await StopBridgeAsync();
+                var selected = await ControllerLaunchPreflight.DiscoverAsync(bridgeExecutable,
+                    gameExecutables, useWgi, prepareIsolation: true);
+                if (!selected.Ready || selected.Device is null)
                 {
-                    _status.Text = preflight.Message;
+                    _status.Text = selected.Message;
                     return;
                 }
-                if (_selectedTopology.ClientCount <= 2)
+                selectedController = selected;
+                if (_selectedTopology.ClientCount <= 2 && !processLocal)
                 {
                     if (!_leadershipPreferenceReady || _lastFocusedLeads.IsChecked is not bool)
                     {
@@ -3246,11 +3917,11 @@ public sealed class MainWindow : Window
                         if (_bridge is not null) await StopBridgeAsync();
                         _status.Text = "正在连接虚拟手柄并核对槽位，游戏尚未启动…";
                         var session = await BridgeSession.StartAsync(bridgeExecutable,
-                            _selectedTopology.Slots, _physicalIndex.SelectedIndex,
-                            _physicalDevice.Text.Trim(), gameExecutables,
+                            _selectedTopology.Slots, selected.PhysicalIndex ?? 0,
+                            selected.Device, gameExecutables,
                             _rightStickFollowerOverride.IsChecked == true,
                             _selectedTopology.Id is "2-split" or "3-three-singles" && _autoFlask.IsChecked == true,
-                            useWgi, lastFocusedLeads: _lastFocusedLeads.IsChecked == true,
+                            selected.UseWgi, lastFocusedLeads: _lastFocusedLeads.IsChecked == true,
                             menuGuardEnabled: _menuGuard.IsChecked == true, followerMirror: _followerMirror,
                             engageDodgeEnabled: _rightStickFollowerOverride.IsChecked == true &&
                                 _engageDodge.IsChecked == true,
@@ -3277,10 +3948,58 @@ public sealed class MainWindow : Window
             }
             if (prelaunchBridge is not null && !prelaunchBridge.IsRunning)
                 throw new InvalidOperationException("虚拟手柄在游戏启动前中断；游戏尚未启动。");
+            var logStartOffsets = action == ClientAction.Start
+                ? Enumerable.Range(0, _selectedTopology.ClientCount)
+                    .Select(index => LaunchedClients.CaptureLogStartOffset(_paths[index].Text?.Trim()))
+                    .ToArray()
+                : [];
             using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("启动器未能启动");
             var error = process.StandardError.ReadToEndAsync();
             Task<string> output;
-            if (prepareClient3BeforeResume)
+            if (localPreResumeClients.Length > 0)
+            {
+                try
+                {
+                    var privateBridge = BridgeSession.FindExecutable() ??
+                        throw new InvalidOperationException("找不到客户端私有输入桥接程序。");
+                    foreach (var client in localPreResumeClients)
+                    {
+                        var notice = await process.StandardOutput.ReadLineAsync()
+                            .WaitAsync(TimeSpan.FromMinutes(3));
+                        var expectedGame = _paths[client - 1].Text?.Trim() ?? "";
+                        if (!PrivateClientPreResumeSession.TryReadLauncherNotice(
+                                notice, client, expectedGame, out var pid))
+                            throw new InvalidOperationException($"启动器没有确认客户端 {client} 的暂停进程身份。");
+                        var slots = _selectedTopology.Slots
+                            .Where(slot => slot.Client == client)
+                            .Select(slot => slot.RuntimePad).ToArray();
+                        var privateSession = await PrivateClientPreResumeSession.StartAsync(
+                            privateBridge, client, pid, expectedGame, slots);
+                        pendingLocals.Add(privateSession);
+                        await process.StandardInput.WriteLineAsync($"resume {client} {pid}");
+                        await process.StandardInput.FlushAsync();
+                        await privateSession.ConfirmResumeAsync();
+                    }
+                    output = process.StandardOutput.ReadToEndAsync();
+                }
+                catch (Exception preparationError)
+                {
+                    try { process.StandardInput.Close(); } catch (InvalidOperationException) { }
+                    try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(50)); }
+                    catch (TimeoutException) { }
+                    if (process.HasExited)
+                    {
+                        var detail = (await process.StandardOutput.ReadToEndAsync()).Trim();
+                        var diagnostic = (await error).Trim();
+                        if (detail.Length > 500) detail = detail[..500];
+                        if (diagnostic.Length > 500) diagnostic = diagnostic[..500];
+                        throw new InvalidOperationException(
+                            $"{preparationError.Message} {detail} {diagnostic}".Trim(), preparationError);
+                    }
+                    throw;
+                }
+            }
+            else if (prepareClient3BeforeResume)
             {
                 try
                 {
@@ -3324,7 +4043,12 @@ public sealed class MainWindow : Window
             {
                 try
                 {
-                    _launchedClients = LaunchedClients.ParseSuccessfulLaunch(output.Result, _selectedTopology.ClientCount);
+                    var launched = LaunchedClients.ParseSuccessfulLaunch(output.Result,
+                        _selectedTopology.ClientCount);
+                    _launchedClients = action == ClientAction.Start
+                        ? launched.Select((client, index) => client with
+                            { LogStartOffset = logStartOffsets[index] }).ToArray()
+                        : launched;
                     _sessionGameIdentities = SessionGameClientShutdown.Capture(_launchedClients);
                     if (_pairing is not null) ShowCurrentPairingStep();
                 }
@@ -3370,11 +4094,14 @@ public sealed class MainWindow : Window
                         return;
                     }
                 }
-                else if (pendingPrivate is not null)
+                else if (pendingPrivate is not null ||
+                         _selectedTopology.Id is "4-balanced" or "6-balanced")
                 {
-                    await PrepareBridgeAsync(pendingPrivate);
+                    await PrepareBridgeAsync(pendingPrivate, selectedController,
+                        launchBinding: true,
+                        adoptedLocalClients: pendingLocals.Select(session => session.Client).ToArray());
                     if (_bridge is null)
-                        throw new InvalidOperationException("第三客户端私有手柄未能接入主桥接：" +
+                        throw new InvalidOperationException("各客户端输入未能接入主桥接：" +
                             _pairingStatus.Text);
                 }
                 if (pendingPrivate is not null)
@@ -3383,10 +4110,17 @@ public sealed class MainWindow : Window
                     await pendingPrivate.DisposeAsync();
                     pendingPrivate = null;
                 }
+                foreach (var privateSession in pendingLocals)
+                    await privateSession.HandoffAsync();
+                foreach (var privateSession in pendingLocals)
+                    await privateSession.DisposeAsync();
+                pendingLocals.Clear();
                 var preparation = await PrepareAutoLoginsAfterBindingAsync(_selectedTopology,
                     _launchedClients.ToArray());
                 if (!string.IsNullOrEmpty(preparation))
                     _status.Text = message + Environment.NewLine + preparation;
+                // The supplied 0.6.17 first-run profile enables the radar.
+                startRadarAfterBinding = true;
             }
         }
         catch (Exception exception)
@@ -3395,7 +4129,8 @@ public sealed class MainWindow : Window
                 await StopBridgeAsync();
             else if (prelaunchBridge?.IsRunning == true)
                 await prelaunchBridge.DisposeAsync();
-            else if (pendingPrivate is not null && _bridge is not null)
+            else if ((pendingPrivate is not null || pendingLocals.Count > 0) &&
+                     _bridge is not null)
                 await StopBridgeAsync();
             _status.Text = $"启动或绑定失败：{exception.Message}";
         }
@@ -3404,16 +4139,45 @@ public sealed class MainWindow : Window
             try
             {
                 if (pendingPrivate is not null) await pendingPrivate.DisposeAsync();
+                foreach (var privateSession in pendingLocals)
+                    await privateSession.DisposeAsync();
+                if (action == ClientAction.Start && _bridge is null)
+                    await ReleaseControllerIsolationAsync();
             }
             finally
             {
                 _busy = false;
                 UpdateClientRows();
+                if (startRadarAfterBinding) await StartRadarAsync();
             }
         }
     }
 
     private async Task<string?> PrepareAutoLoginsAfterBindingAsync(PartyTopology topology,
+        IReadOnlyList<LaunchedClient> clients)
+    {
+        string? result;
+        try
+        {
+            result = await PrepareAutoLoginsAfterBindingCoreAsync(topology, clients);
+        }
+        catch
+        {
+            await RestoreMainClientForegroundAsync(clients);
+            throw;
+        }
+        if (await RestoreMainClientForegroundAsync(clients)) return result;
+        return string.IsNullOrEmpty(result)
+            ? "主客户端未能恢复前台，请手动聚焦后再配对。"
+            : result + Environment.NewLine + "主客户端未能恢复前台，请手动聚焦后再配对。";
+    }
+
+    private static Task<bool> RestoreMainClientForegroundAsync(IReadOnlyList<LaunchedClient> clients) =>
+        clients.Count == 0 ? Task.FromResult(false) :
+        PoeChatInviteService.IsExactForeground(clients[0]) ? Task.FromResult(true) :
+        PoeChatInviteService.FocusExactWindowAsync(clients[0], CancellationToken.None);
+
+    private async Task<string?> PrepareAutoLoginsAfterBindingCoreAsync(PartyTopology topology,
         IReadOnlyList<LaunchedClient> clients)
     {
         using var cancellation = new CancellationTokenSource();
@@ -3424,8 +4188,7 @@ public sealed class MainWindow : Window
             var credentials = new AccountCredential?[topology.ClientCount];
             for (var index = 0; index < credentials.Length; index++)
             {
-                if (topology.Clients[index].Count != 1 ||
-                    _autoLoginChoices[index].IsChecked != true) continue;
+                if (_autoLoginChoices[index].IsChecked != true) continue;
                 if (!_autoLoginPreferenceReady[index])
                     return $"客户端 {index + 1} 自动填入设置无效；请重新选择，未发送登录输入。";
                 credentials[index] = _accountProfiles.Load(index + 1);
@@ -3441,8 +4204,7 @@ public sealed class MainWindow : Window
             for (var index = 0; index < configurations.Length; index++)
             {
                 cancellation.Token.ThrowIfCancellationRequested();
-                if (topology.Clients[index].Count != 1 ||
-                    _autoLoginChoices[index].IsChecked != true)
+                if (_autoLoginChoices[index].IsChecked != true)
                 {
                     configurations[index] = new(false, null, null);
                     continue;

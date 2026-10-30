@@ -3,6 +3,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 using Avalonia.Threading;
 
 namespace PartyPilot.Desktop;
@@ -17,18 +19,34 @@ public sealed class RadarOverlayWindow : Window
     private readonly LaunchedClient _client;
     private readonly double _scale;
     private readonly RadarVisibility _visibility;
+    private RadarAppearanceSettings _appearance;
+    private RadarTerrainCapture? _terrain;
+    private readonly bool _renderOnly;
     private readonly Canvas _canvas = new();
+    private Canvas? _terrainLayer;
+    private Canvas? _markerLayer;
+    private RadarFrame? _drawnFrame;
     private readonly DispatcherTimer _positionTimer = new() { Interval = TimeSpan.FromMilliseconds(50) };
     private RadarFrame? _frame;
+    private WriteableBitmap? _terrainBitmap;
+    private (RadarTerrainCapture Terrain, double GridX, double GridY, int Width, int Height)?
+        _terrainRenderKey;
+    private DateTime _terrainRenderedAt;
     public bool TargetIsLost { get; private set; }
+    public bool TerrainVisible => _terrainBitmap is not null;
 
     public event Action? TargetLost;
 
-    public RadarOverlayWindow(LaunchedClient client, double scale, RadarVisibility visibility)
+    public RadarOverlayWindow(LaunchedClient client, double scale, RadarVisibility visibility,
+        RadarTerrainCapture? terrain = null,
+        bool renderOnly = false, RadarAppearanceSettings? appearance = null)
     {
         _client = client;
         _scale = scale;
         _visibility = visibility;
+        _appearance = appearance ?? RadarAppearanceSettings.Default;
+        _terrain = terrain;
+        _renderOnly = renderOnly;
         Title = $"PartyPilot Radar · {client.Pid}";
         SystemDecorations = SystemDecorations.None;
         ShowInTaskbar = false;
@@ -42,7 +60,7 @@ public sealed class RadarOverlayWindow : Window
         Height = 600;
         Opened += (_, _) =>
         {
-            if (OperatingSystem.IsWindows())
+            if (OperatingSystem.IsWindows() && !_renderOnly)
             {
                 EnableClickThrough();
                 _positionTimer.Start();
@@ -50,6 +68,7 @@ public sealed class RadarOverlayWindow : Window
             }
         };
         Closed += (_, _) => _positionTimer.Stop();
+        Closed += (_, _) => ReleaseTerrainBitmap();
         NamePrivacy.Changed += OnNamePrivacyChanged;
         Closed += (_, _) => NamePrivacy.Changed -= OnNamePrivacyChanged;
         SizeChanged += (_, _) => Draw();
@@ -62,12 +81,58 @@ public sealed class RadarOverlayWindow : Window
         else Dispatcher.UIThread.Post(Draw);
     }
 
-    public static string DisplayLabel(RadarMarker marker) => marker.Category switch
+    public static string DisplayLabel(RadarMarker marker, bool dormantCandidate = false)
     {
-        "player" => NamePrivacy.Mask(marker.Label),
-        "loot" => marker.Label ?? string.Empty,
-        _ => marker.Path.Split('/').Last()
+        var label = marker.Category switch
+        {
+            "player" => NamePrivacy.Mask(marker.Label),
+            "loot" => marker.Label ?? string.Empty,
+            "quest" => marker.Label == "任务目标" ? "任务目标" : "任务线索 · " + LocalizeGenericLabel(marker.Label),
+            "boss" => "首领地点 · " + LocalizeGenericLabel(marker.Label),
+            "waypoint" => "传送点",
+            "checkpoint" => "检查点",
+            "portal" => marker.Label is { } portalName ? "传送门 · " + portalName : "传送门",
+            "transition" => marker.Label is { } areaName ? "区域入口 · " + LocalizeGenericLabel(areaName) : "区域入口",
+            "essence" => "精华",
+            _ => marker.Path.Split('/').Last()
+        };
+        return dormantCandidate || marker.QuestStateCandidate ? "候选 · " + label : label;
+    }
+
+    private static string? LocalizeGenericLabel(string? label) => label switch
+    {
+        "Quest marker" => "任务标记",
+        "Campaign landmark" => "战役地点",
+        "Campaign boss arena" => "战役首领区域",
+        "Campaign exit" => "战役出口",
+        "Boss arena" => "首领区域",
+        _ => label
     };
+
+    public static string DisplayTerrainLabel(RadarTerrainRoom room)
+    {
+        var label = room.Label switch
+        {
+            "Checkpoint" => "检查点",
+            "Boss arena" or "Map boss" => "首领区域",
+            "Transition" or "Campaign transition" => "区域入口",
+            "Stairs up" => "上行楼梯",
+            "Stairs down" => "下行楼梯",
+            _ when room.Label.StartsWith("Area exit · ", StringComparison.Ordinal) =>
+                "区域出口 · " + room.Label["Area exit · ".Length..],
+            _ => LocalizeGenericLabel(room.Label) ?? room.Label
+        };
+        var description = room.Category switch
+        {
+            "quest" => "任务线索 · " + label,
+            "boss" when label != "首领区域" => "首领地点 · " + label,
+            "transition" when !label.StartsWith("区域", StringComparison.Ordinal) &&
+                              label is not ("上行楼梯" or "下行楼梯") => "区域入口 · " + label,
+            "campaign" => "战役地点 · " + label,
+            _ => label
+        };
+        return "候选 · " + description;
+    }
 
     public void Apply(RadarFrame frame)
     {
@@ -76,37 +141,179 @@ public sealed class RadarOverlayWindow : Window
         Draw();
     }
 
+    public void Apply(RadarFrame frame, RadarTerrainCapture? terrain)
+    {
+        if (frame.ProcessId != _client.Pid) return;
+        _terrain = terrain;
+        Apply(frame);
+    }
+
+    internal void SetAppearance(RadarAppearanceSettings appearance)
+    {
+        if (_appearance == appearance) return;
+        _appearance = appearance;
+        ReleaseTerrainBitmap();
+        Draw();
+    }
+
+    public void ApplyMotion(RadarFrame frame, RadarTerrainCapture? terrain)
+    {
+        if (frame.ProcessId != _client.Pid) return;
+        var drawn = _drawnFrame;
+        var previousTerrain = _terrain;
+        _frame = frame;
+        _terrain = terrain;
+        if (drawn is null || _markerLayer is null || _terrainLayer is null ||
+            !ReferenceEquals(previousTerrain, terrain) ||
+            terrain?.Matches(frame) != terrain?.Matches(drawn) ||
+            terrain != null && _terrainRenderKey is { } rendered &&
+                (rendered.GridX != frame.GridX || rendered.GridY != frame.GridY) &&
+                frame.SeenUtc - _terrainRenderedAt >= TimeSpan.FromMilliseconds(250))
+        {
+            Draw();
+            return;
+        }
+        var centerX = Bounds.Width / 2;
+        var centerY = Bounds.Height / 2;
+        var (markerX, markerY) = RadarProjection.ProjectGrid(
+            frame.PlayerX / RadarProjection.WorldUnitsPerGridUnit,
+            frame.PlayerY / RadarProjection.WorldUnitsPerGridUnit,
+            drawn.PlayerX / RadarProjection.WorldUnitsPerGridUnit,
+            drawn.PlayerY / RadarProjection.WorldUnitsPerGridUnit,
+            centerX, centerY, _scale * RadarProjection.WorldUnitsPerGridUnit);
+        Canvas.SetLeft(_markerLayer, markerX - centerX);
+        Canvas.SetTop(_markerLayer, markerY - centerY);
+        if (terrain != null && frame.GridX is { } newX && frame.GridY is { } newY &&
+            drawn.GridX is { } oldX && drawn.GridY is { } oldY)
+        {
+            var (terrainX, terrainY) = RadarProjection.ProjectGrid(newX, newY,
+                oldX, oldY, centerX, centerY, _scale * RadarProjection.WorldUnitsPerGridUnit);
+            Canvas.SetLeft(_terrainLayer, terrainX - centerX);
+            Canvas.SetTop(_terrainLayer, terrainY - centerY);
+        }
+    }
+
     private void Draw()
     {
         _canvas.Children.Clear();
-        if (_frame == null || DateTime.UtcNow - _frame.SeenUtc > TimeSpan.FromSeconds(2)) return;
+        _drawnFrame = null;
+        _terrainLayer = null;
+        _markerLayer = null;
+        if (_frame == null || DateTime.UtcNow - _frame.SeenUtc > TimeSpan.FromSeconds(2))
+        {
+            ReleaseTerrainBitmap();
+            return;
+        }
         var centerX = Bounds.Width / 2;
         var centerY = Bounds.Height / 2;
-        AddDot(centerX, centerY, 12, Brushes.White);
-        foreach (var marker in _frame.Markers)
+        _drawnFrame = _frame;
+        _terrainLayer = new Canvas { Width = Bounds.Width, Height = Bounds.Height };
+        _markerLayer = new Canvas { Width = Bounds.Width, Height = Bounds.Height };
+        _canvas.Children.Add(_terrainLayer);
+        var terrainDrawn = false;
+        if (_terrain?.Matches(_frame) == true &&
+            Bounds.Width is >= 1 and <= 4096 && Bounds.Height is >= 1 and <= 4096)
         {
+            var width = (int)Math.Ceiling(Bounds.Width);
+            var height = (int)Math.Ceiling(Bounds.Height);
+            if ((long)width * height <= 4_194_304)
+            {
+                var key = (_terrain, _frame.GridX!.Value, _frame.GridY!.Value, width, height);
+                var sameCaptureAndSize = _terrainBitmap is not null &&
+                    _terrainRenderKey is { } previous &&
+                    ReferenceEquals(previous.Terrain, _terrain) &&
+                    previous.Width == width && previous.Height == height;
+                if (!sameCaptureAndSize ||
+                    _terrainRenderKey != key &&
+                    _frame.SeenUtc - _terrainRenderedAt >= TimeSpan.FromMilliseconds(250))
+                {
+                    ReleaseTerrainBitmap();
+                    var pixels = RadarTerrainRaster.Render(_terrain, _frame, width, height,
+                        _scale * RadarProjection.WorldUnitsPerGridUnit, _appearance);
+                    var bitmap = new WriteableBitmap(new PixelSize(width, height), new Vector(96, 96),
+                        PixelFormats.Bgra8888, AlphaFormat.Premul);
+                    using (var locked = bitmap.Lock())
+                    {
+                        var rowBytes = width * 4;
+                        for (var row = 0; row < height; row++)
+                            Marshal.Copy(pixels, row * rowBytes,
+                                locked.Address + row * locked.RowBytes, rowBytes);
+                    }
+                    _terrainBitmap = bitmap;
+                    _terrainRenderKey = key;
+                    _terrainRenderedAt = _frame.SeenUtc;
+                }
+                var image = new Image
+                {
+                    Source = _terrainBitmap, Width = Bounds.Width, Height = Bounds.Height,
+                    Stretch = Stretch.Fill
+                };
+                if (_terrainRenderKey is { } rendered &&
+                    (rendered.GridX != key.Item2 || rendered.GridY != key.Item3))
+                {
+                    var (offsetX, offsetY) = RadarProjection.ProjectGrid(key.Item2, key.Item3,
+                        rendered.GridX, rendered.GridY, centerX, centerY,
+                        _scale * RadarProjection.WorldUnitsPerGridUnit);
+                    Canvas.SetLeft(image, offsetX - centerX);
+                    Canvas.SetTop(image, offsetY - centerY);
+                }
+                _terrainLayer.Children.Add(image);
+                terrainDrawn = true;
+                foreach (var room in _terrain.Rooms)
+                {
+                    var (x, y) = RadarProjection.ProjectGrid(_frame.GridX!.Value,
+                        _frame.GridY!.Value, room.GridX, room.GridY, centerX, centerY,
+                        _scale * RadarProjection.WorldUnitsPerGridUnit);
+                    if (!double.IsFinite(x) || !double.IsFinite(y) ||
+                        x < 8 || y < 8 || x > Bounds.Width - 8 || y > Bounds.Height - 8) continue;
+                    AddDot(_terrainLayer, x, y, 10, MarkerBrush(room.Category));
+                    if (string.IsNullOrEmpty(room.Label)) continue;
+                    var label = new TextBlock
+                    {
+                        Text = DisplayTerrainLabel(room),
+                        Foreground = Brushes.White,
+                        Background = new SolidColorBrush(Color.FromArgb(190, 8, 12, 20)),
+                        FontSize = 12
+                    };
+                    AddLabel(_terrainLayer, label, x, y);
+                }
+            }
+        }
+        if (!terrainDrawn) ReleaseTerrainBitmap();
+        AddDot(_canvas, centerX, centerY, 12, Brushes.White);
+        _canvas.Children.Add(_markerLayer);
+        foreach (var marker in _frame.Markers.Concat(_frame.DormantCandidates))
+        {
+            var dormantCandidate = _frame.DormantCandidates.Contains(marker);
             var (x, y) = RadarProjection.Project(_frame.PlayerX, _frame.PlayerY,
                 marker, centerX, centerY, _scale);
             if (!double.IsFinite(x) || !double.IsFinite(y) ||
                 x < 8 || y < 8 || x > Bounds.Width - 8 || y > Bounds.Height - 8) continue;
-            AddDot(x, y, marker.Category == "monster" ? 7 : 10, MarkerBrush(marker.Category));
-            if (marker.Category is "checkpoint" or "waypoint" or "portal" or "transition" or "player" or "loot")
+            AddDot(_markerLayer, x, y, marker.Category == "monster" ? 7 : 10,
+                dormantCandidate ? Brushes.Orange : MarkerBrush(marker.Category));
+            if (marker.Category is "checkpoint" or "waypoint" or "portal" or "transition" or
+                "player" or "loot" or "quest" or "boss" or "essence")
             {
                 var label = new TextBlock
                 {
-                    Text = DisplayLabel(marker),
+                    Text = DisplayLabel(marker, dormantCandidate),
                     Foreground = Brushes.White,
                     Background = new SolidColorBrush(Color.FromArgb(190, 8, 12, 20)),
                     FontSize = 12
                 };
-                Canvas.SetLeft(label, x + 9);
-                Canvas.SetTop(label, y - 8);
-                _canvas.Children.Add(label);
+                AddLabel(_markerLayer, label, x, y);
             }
         }
     }
 
-    private void AddDot(double x, double y, double diameter, IBrush brush)
+    private void ReleaseTerrainBitmap()
+    {
+        _terrainBitmap?.Dispose();
+        _terrainBitmap = null;
+        _terrainRenderKey = null;
+    }
+
+    private static void AddDot(Canvas layer, double x, double y, double diameter, IBrush brush)
     {
         var circle = new Ellipse
         {
@@ -118,7 +325,24 @@ public sealed class RadarOverlayWindow : Window
         };
         Canvas.SetLeft(circle, x - diameter / 2);
         Canvas.SetTop(circle, y - diameter / 2);
-        _canvas.Children.Add(circle);
+        layer.Children.Add(circle);
+    }
+
+    private void AddLabel(Canvas layer, TextBlock label, double x, double y)
+    {
+        const double margin = 4;
+        label.MaxWidth = Math.Max(1, Bounds.Width - margin * 2);
+        label.TextWrapping = TextWrapping.Wrap;
+        label.Measure(new Size(label.MaxWidth, double.PositiveInfinity));
+        var width = label.DesiredSize.Width;
+        var height = label.DesiredSize.Height;
+        var left = x + 9;
+        if (left + width > Bounds.Width - margin) left = x - width - 9;
+        Canvas.SetLeft(label, Math.Clamp(left, margin,
+            Math.Max(margin, Bounds.Width - width - margin)));
+        Canvas.SetTop(label, Math.Clamp(y - 8, margin,
+            Math.Max(margin, Bounds.Height - height - margin)));
+        layer.Children.Add(label);
     }
 
     private static IBrush MarkerBrush(string category) => category switch
@@ -127,6 +351,10 @@ public sealed class RadarOverlayWindow : Window
         "player" => Brushes.Cyan,
         "league" => Brushes.Magenta,
         "loot" => Brushes.Yellow,
+        "quest" => Brushes.YellowGreen,
+        "campaign" => Brushes.YellowGreen,
+        "boss" => Brushes.Red,
+        "essence" => Brushes.MediumOrchid,
         "portal" => Brushes.MediumPurple,
         "waypoint" => Brushes.DeepSkyBlue,
         "checkpoint" => Brushes.LimeGreen,

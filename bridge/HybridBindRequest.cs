@@ -17,6 +17,8 @@ internal static class HybridBindRequest
             "2:2" => slots.Order().SequenceEqual([1, 2]),
             "2:3,3:4" or "2:3,3:5" => slots.Order().SequenceEqual([1, 2, 3, 4]),
             "2:3,3:4,4:5,5:6" => slots.Order().SequenceEqual([1, 2, 3, 4]),
+            "2:2,3:3,4:4" => slots.Order().SequenceEqual([1, 2, 3, 4]),
+            "2:2,3:3,4:4,5:5,6:6" => slots.Order().SequenceEqual([1, 2, 3, 4]),
             _ => false
         };
     }

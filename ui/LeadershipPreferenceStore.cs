@@ -32,11 +32,11 @@ internal sealed class LeadershipPreferenceStore
         }
         catch (FileNotFoundException)
         {
-            return new(true, true, "使用目标版默认值：最近手动聚焦的角色成为 MAIN。");
+            return new(true, false, "默认由 P1 带路；可开启最近聚焦者成为主控。");
         }
         catch (DirectoryNotFoundException)
         {
-            return new(true, true, "使用目标版默认值：最近手动聚焦的角色成为 MAIN。");
+            return new(true, false, "默认由 P1 带路；可开启最近聚焦者成为主控。");
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
         {

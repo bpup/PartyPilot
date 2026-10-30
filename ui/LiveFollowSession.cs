@@ -11,6 +11,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
 {
     private readonly Process _process;
     private readonly BridgeSession _bridge;
+    private IndependentProbeSession? _independentProbe;
     private HashSet<int> _followerPads;
     private readonly PartyTopology _topology;
     private readonly Dictionary<int, int> _padToPlayer;
@@ -18,10 +19,28 @@ internal sealed class LiveFollowSession : IAsyncDisposable
     private readonly ConcurrentQueue<(int Player, string State)> _pendingMenu = new();
     private readonly ConcurrentQueue<int> _pendingFocus = new();
     private readonly ConcurrentQueue<bool> _pendingPause = new();
+    private int _manualWarpControl;
     private readonly object _mainInputGate = new();
     private MainInputSample? _pendingMainInput;
     private readonly bool _relayMainInput;
+    private readonly bool _wantsWarpShortcut;
+    private readonly bool _catchUpPriority;
+    private readonly int _customRuleCount;
+    private readonly IReadOnlyList<LaunchedClient> _clients;
+    private readonly TransitionAnchorEvidence _transitionAnchors = new();
+    private readonly bool _experimentalWarpClick;
+    private readonly CancellationTokenSource _warpCancellation = new();
+    private CancellationTokenSource? _warpAttemptCancellation;
+    private Task _warpTask = Task.CompletedTask;
+    private CancellationTokenSource? _entryAttemptCancellation;
+    private Task _entryTask = Task.CompletedTask;
+    private readonly TransitionInteractionBudget _entryBudget = new();
+    private readonly HashSet<FollowHandoffRequest> _attemptedWarps = [];
+    private FollowHandoffRequest? _activeWarp;
+    private int _manualWarpDesired;
+    private bool _manualWarpExecuting;
     private int _inputSubscriptionActive;
+    private int _warpShortcutSubscribed;
     private readonly SemaphoreSlim _controlSignal = new(0);
     private readonly CancellationTokenSource _controlCancellation = new();
     private readonly Task<string> _readError;
@@ -32,11 +51,44 @@ internal sealed class LiveFollowSession : IAsyncDisposable
 
     public FollowBridgeFrame Current { get; private set; }
     public bool Paused { get; private set; }
+    public bool IndependentProbeStarted => _independentProbe is not null;
+    public bool IndependentProbeRunning => _independentProbe?.IsRunning == true;
+    public bool HasUnknownProbeBuild => _independentProbe is { } probe &&
+        _clients.Any(client => probe.HasUnknownBuild(client.Pid));
+    public bool HasProbeReadFailure => _independentProbe is { } probe &&
+        _clients.Any(client => probe.HasReadFailure(client.Pid));
+    public bool ManualWarpActive => Volatile.Read(ref _manualWarpDesired) != 0;
     public event Action<FollowBridgeFrame>? StatusChanged;
+    public event Action<string>? WarpStatusChanged;
     public event Action<string>? Ended;
 
+    private void OnProbeDiagnosticsChanged() => Dispatcher.UIThread.Post(() =>
+    {
+        if (!_stopping) StatusChanged?.Invoke(Current);
+    });
+
+    internal void ObserveRadarFrame(RadarFrame frame)
+    {
+        if (_stopping) return;
+        for (var index = 0; index < _clients.Count; index++)
+            if (_clients[index].Pid == frame.ProcessId)
+            {
+                _transitionAnchors.Observe(index + 1, frame);
+                break;
+            }
+    }
+
+    internal TransitionAnchorMatch? MatchTransitionAnchor(FollowHandoffRequest request) =>
+        _transitionAnchors.Match(request, _topology, DateTime.UtcNow);
+
+    internal FollowBridgeFrame ApplyTransitionApproach(FollowBridgeFrame frame, DateTime nowUtc)
+        => TransitionApproachPlan.Apply(frame, _topology, _transitionAnchors,
+            _experimentalWarpClick, Paused || _stopping, nowUtc);
+
     private LiveFollowSession(Process process, BridgeSession bridge, PartyTopology topology,
-        Task<string> readError, FollowBridgeFrame initialFrame, bool relayMainInput)
+        Task<string> readError, FollowBridgeFrame initialFrame, bool relayMainInput,
+        bool catchUpPriority, int customRuleCount, IReadOnlyList<LaunchedClient> clients,
+        bool experimentalWarpClick)
     {
         _process = process;
         _bridge = bridge;
@@ -46,6 +98,12 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         _playerToPad = topology.Slots.ToDictionary(slot => slot.PartyPlayer, slot => slot.RuntimePad);
         _readError = readError;
         _relayMainInput = relayMainInput;
+        _wantsWarpShortcut = relayMainInput && !experimentalWarpClick &&
+            topology.Id is ("4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced");
+        _catchUpPriority = catchUpPriority;
+        _customRuleCount = customRuleCount;
+        _clients = clients.ToArray();
+        _experimentalWarpClick = experimentalWarpClick;
         Current = initialFrame;
         if (bridge.AutoFlaskEnabled)
         {
@@ -65,6 +123,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             }
         }
         if (relayMainInput) bridge.MainInputChanged += OnMainInputChanged;
+        if (_wantsWarpShortcut) bridge.WarpToMainPressed += OnWarpToMainPressed;
     }
 
     private void OnMainInputChanged(MainInputSample sample)
@@ -97,12 +156,108 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         }
     }
 
+    private void OnWarpToMainPressed()
+    {
+        try
+        {
+            var started = ToggleManualWarpToMain();
+            Dispatcher.UIThread.Post(() => WarpStatusChanged?.Invoke(started
+                ? "手柄 LT + 十字键右：已请求手动追到 MAIN。"
+                : "手柄 LT + 十字键右：已请求取消手动追到 MAIN。"));
+        }
+        catch (InvalidOperationException error)
+        {
+            Dispatcher.UIThread.Post(() => WarpStatusChanged?.Invoke(
+                "手柄追到 MAIN 未执行：" + error.Message));
+        }
+    }
+
     public void SetPaused(bool paused)
     {
         if (_stopping || _process.HasExited) throw new InvalidOperationException("Live follow has stopped.");
         Paused = paused;
+        if (paused)
+        {
+            _warpAttemptCancellation?.Cancel();
+            if (ManualWarpActive) StopManualWarpToMain();
+        }
+        if (paused) _entryAttemptCancellation?.Cancel();
         _pendingPause.Enqueue(paused);
         _controlSignal.Release();
+    }
+
+    public bool ToggleManualWarpToMain()
+    {
+        if (_stopping || _process.HasExited || Paused)
+            throw new InvalidOperationException("实时跟随已停止或暂停。");
+        var cancel = ManualWarpActive;
+        if (!cancel && !_warpTask.IsCompleted)
+            throw new InvalidOperationException("另一项跨区传送仍在执行。");
+        Volatile.Write(ref _manualWarpDesired, cancel ? 0 : 1);
+        Interlocked.Exchange(ref _manualWarpControl, cancel ? -1 : 1);
+        _controlSignal.Release();
+        return !cancel;
+    }
+
+    private void StopManualWarpToMain()
+    {
+        Volatile.Write(ref _manualWarpDesired, 0);
+        Interlocked.Exchange(ref _manualWarpControl, -1);
+        _controlSignal.Release();
+    }
+
+    private static int ReadCustomRuleCount(string path)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object || root.EnumerateObject().Count() != 1 ||
+            !root.TryGetProperty("rules", out var rules) || rules.ValueKind != JsonValueKind.Array)
+            throw new InvalidDataException("Custom recovery settings need a rules array.");
+        return rules.GetArrayLength();
+    }
+
+    internal static IReadOnlyList<string> RosterArguments(PartyTopology topology,
+        IReadOnlyList<LaunchedClient> clients)
+    {
+        if (clients.Count != topology.ClientCount || clients.Any(client => client.Pid <= 0))
+            throw new ArgumentException("Live roster needs a process for every client.");
+        if (topology.Id is "4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced")
+            return ["-experimental-ordered-input", .. topology.Slots.SelectMany(slot =>
+                new[] { "-role-bind",
+                    $"{slot.PartyPlayer}:{slot.Client}:{slot.LocalPlayer}:{clients[slot.Client - 1].Pid}" })];
+        if (topology.Id is "2-split" or "3-three-singles")
+            return ["-roster", string.Join(',', topology.Slots.Select(slot =>
+                $"{slot.PartyPlayer}:{clients[slot.Client - 1].Pid}"))];
+        throw new ArgumentException("Live roster needs a supported layout.");
+    }
+
+    internal static IReadOnlyList<string> ExecutableArguments(PartyTopology topology,
+        IReadOnlyList<LaunchedClient> clients)
+    {
+        if (clients.Count != topology.ClientCount)
+            throw new ArgumentException("Live log sources need one process per client.");
+        if (topology.Id is "4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced")
+            return [.. clients.SelectMany((client, index) =>
+                new[] { "-exe", $"{index + 1}={client.Executable}" })];
+        return [.. topology.Slots.SelectMany(slot =>
+            new[] { "-exe", $"{slot.PartyPlayer}={clients[slot.Client - 1].Executable}" })];
+    }
+
+    internal static IReadOnlyList<string> LogStartArguments(IReadOnlyList<LaunchedClient> clients) =>
+        [.. clients.SelectMany((client, index) => client.LogStartOffset is { } offset
+            ? new[] { "-log-start-offset", $"{index + 1}={offset}" }
+            : Array.Empty<string>())];
+
+    internal static FollowBridgeFrame ParseFrame(string json, PartyTopology topology,
+        bool lastFocusedLeads, int customRuleCount = 0)
+    {
+        var parsed = lastFocusedLeads || topology.PlayerCount > 2
+            ? LiveFollowFrame.ParseDynamic(json, topology, customRuleCount)
+            : LiveFollowFrame.Parse(json, 2, topology.Slots[1].RuntimePad,
+                customRuleCount: customRuleCount);
+        return parsed with { ManualWarpToMain = LiveFollowFrame.ParseManualWarpToMain(json),
+            Handoffs = LiveFollowFrame.ParseHandoffs(json, topology),
+            Positions = LiveFollowFrame.ParsePositions(json, topology) };
     }
 
     public static async Task<LiveFollowSession> StartAsync(string executable, PartyTopology topology,
@@ -114,34 +269,65 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         bool classicCollisionDodge = false,
         bool classicSprintCatchUp = false,
         bool sprintCatchUp = true,
+        bool sprintCatchUpPriority = true,
+        bool mirrorAttackDirection = false,
         bool aggressiveBlinkCatchUp = false,
         int aggressiveSprintRetryDelay = 800,
         bool relayMainInput = false,
         bool closeRangeMirror = false,
         int closeMirrorDuration = 400,
-        FollowerMirrorConfig? followerMirror = null)
+        FollowerMirrorConfig? followerMirror = null,
+        string? flaskSupportFile = null,
+        string? flaskRulesFile = null,
+        string? flaskCustomFile = null,
+        bool experimentalWarpClick = false)
     {
+        if (experimentalWarpClick &&
+            (topology.Id is not ("4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced") ||
+             clients.Count != topology.ClientCount))
+            throw new ArgumentException("Experimental warp requires a paired four-to-six-player layout.");
         if (aggressiveBlinkCatchUp && classicSprintCatchUp)
             throw new ArgumentException("Classic and aggressive sprint modes cannot be combined.");
         if (aggressiveBlinkCatchUp && aggressiveSprintRetryDelay is < 500 or > 1500)
             throw new ArgumentOutOfRangeException(nameof(aggressiveSprintRetryDelay));
         if (closeRangeMirror && !relayMainInput)
             throw new ArgumentException("Close-range mirror requires main-controller input.");
+        if (mirrorAttackDirection && !relayMainInput)
+            throw new ArgumentException("Attack direction requires main-controller input.");
+        if (flaskSupportFile is not null &&
+            (!bridge.AutoFlaskEnabled || !Path.IsPathFullyQualified(flaskSupportFile) ||
+             !File.Exists(flaskSupportFile)))
+            throw new ArgumentException("Drinker support needs enabled flasks and an existing settings file.");
+        if (flaskRulesFile is not null &&
+            (!bridge.AutoFlaskEnabled || !Path.IsPathFullyQualified(flaskRulesFile) ||
+             !File.Exists(flaskRulesFile)))
+            throw new ArgumentException("Player flask rules need enabled flasks and an existing settings file.");
+        if (flaskCustomFile is not null &&
+            (!bridge.AutoFlaskEnabled || !Path.IsPathFullyQualified(flaskCustomFile) ||
+             !File.Exists(flaskCustomFile)))
+            throw new ArgumentException("Custom recovery rules need enabled flasks and an existing settings file.");
+        var customRuleCount = flaskCustomFile is null ? 0 : ReadCustomRuleCount(flaskCustomFile);
         if (closeRangeMirror && closeMirrorDuration is < 50 or > 5000)
             throw new ArgumentOutOfRangeException(nameof(closeMirrorDuration));
-        if (topology.Id is not ("2-split" or "3-three-singles") ||
+        var orderedTopology = topology.Id is "4-balanced" or "5-third-solo" or "5-main-solo" or "6-balanced";
+        if (topology.Id is not ("2-split" or "3-three-singles" or "4-balanced" or
+                "5-third-solo" or "5-main-solo" or "6-balanced") ||
             clients.Count != topology.ClientCount ||
-            topology.Slots.Count != topology.ClientCount ||
-            topology.Slots.Any(slot => slot.LocalPlayer != 1) ||
-            topology.ClientCount == 3 && !bridge.LastFocusedLeadsEnabled)
-            throw new InvalidOperationException("Live control requires a supported one-player-per-client layout.");
+            (!orderedTopology && (topology.Slots.Count != topology.ClientCount ||
+                topology.Slots.Any(slot => slot.LocalPlayer != 1))))
+            throw new InvalidOperationException("Live control requires a supported layout.");
         var terrain = terrainBindings ?? new Dictionary<int, string>();
+        var terrainClients = topology.Slots.GroupBy(slot => slot.Client).ToArray();
         if ((terrain.Count != 0 &&
-             (terrain.Count != topology.ClientCount ||
+             (terrain.Count != topology.Slots.Count ||
               terrain.Keys.Any(player => !topology.Slots.Any(slot => slot.PartyPlayer == player)) ||
               terrain.Values.Any(path => !Path.IsPathFullyQualified(path) || !File.Exists(path)) ||
-              terrain.Values.Distinct(StringComparer.OrdinalIgnoreCase).Count() != terrain.Count)) ||
-            (classicCollisionDodge && sprintCatchUp && terrain.Count != topology.ClientCount))
+              terrainClients.Any(client => client.Select(slot => terrain[slot.PartyPlayer])
+                  .Distinct(StringComparer.OrdinalIgnoreCase).Count() != 1) ||
+              terrainClients.Select(client => terrain[client.First().PartyPlayer])
+                  .Distinct(StringComparer.OrdinalIgnoreCase).Count() != topology.ClientCount)) ||
+            (classicCollisionDodge && (orderedTopology ||
+                sprintCatchUp && terrain.Count != topology.ClientCount)))
             throw new ArgumentException("Live terrain requires one distinct binding file per client.");
         var start = new ProcessStartInfo(executable)
         {
@@ -152,19 +338,19 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             RedirectStandardInput = true,
             CreateNoWindow = true
         };
+        foreach (var argument in RosterArguments(topology, clients))
+            start.ArgumentList.Add(argument);
         foreach (var argument in new[]
         {
-            "-roster", string.Join(',', topology.Slots.Select(slot =>
-                $"{slot.PartyPlayer}:{clients[slot.Client - 1].Pid}")), "-leader", "1",
+            "-leader", "1",
             "-stop", plan.Stop.ToString("R", CultureInfo.InvariantCulture),
             "-catchup", plan.Catchup.ToString("R", CultureInfo.InvariantCulture),
             "-max-age", plan.MaxAge, "-log-max-age", plan.LogMaxAge
         }) start.ArgumentList.Add(argument);
-        foreach (var slot in topology.Slots)
-        {
-            start.ArgumentList.Add("-exe");
-            start.ArgumentList.Add($"{slot.PartyPlayer}={clients[slot.Client - 1].Executable}");
-        }
+        foreach (var argument in ExecutableArguments(topology, clients))
+            start.ArgumentList.Add(argument);
+        foreach (var argument in LogStartArguments(clients))
+            start.ArgumentList.Add(argument);
         if (plan.LeaderName.Length > 0)
         {
             start.ArgumentList.Add("-leader-name");
@@ -210,6 +396,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         }
         if (classicSprintCatchUp) start.ArgumentList.Add("-classic-sprint-catchup");
         if (!sprintCatchUp) start.ArgumentList.Add("-disable-sprint-catchup");
+        if (!sprintCatchUpPriority) start.ArgumentList.Add("-disable-catch-up-priority");
+        if (mirrorAttackDirection) start.ArgumentList.Add("-mirror-attack-direction");
         if (aggressiveBlinkCatchUp)
         {
             start.ArgumentList.Add("-aggressive-blink-catchup");
@@ -232,6 +420,21 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         }
         if (classicCollisionDodge && sprintCatchUp) start.ArgumentList.Add("-classic-collision-dodge");
         if (bridge.AutoFlaskEnabled) start.ArgumentList.Add("-auto-flask");
+        if (flaskSupportFile is not null)
+        {
+            start.ArgumentList.Add("-flask-support-file");
+            start.ArgumentList.Add(flaskSupportFile);
+        }
+        if (flaskRulesFile is not null)
+        {
+            start.ArgumentList.Add("-flask-rules-file");
+            start.ArgumentList.Add(flaskRulesFile);
+        }
+        if (flaskCustomFile is not null)
+        {
+            start.ArgumentList.Add("-flask-custom-file");
+            start.ArgumentList.Add(flaskCustomFile);
+        }
         if (bridge.LastFocusedLeadsEnabled) start.ArgumentList.Add("-last-focused-leads");
         start.ArgumentList.Add("-allow-follow-pause");
         var process = Process.Start(start) ?? throw new InvalidOperationException("Live follow did not start.");
@@ -255,9 +458,10 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 {
                     var first = await process.StandardOutput.ReadLineAsync(startup.Token);
                     if (first is null) throw new InvalidDataException("Live follow exited without a decision frame.");
-                    frame = bridge.LastFocusedLeadsEnabled
-                        ? LiveFollowFrame.ParseDynamic(first, topology)
-                        : LiveFollowFrame.Parse(first, 2, topology.Slots[1].RuntimePad);
+                    frame = ParseFrame(first, topology, bridge.LastFocusedLeadsEnabled,
+                        customRuleCount);
+                    frame = LiveFollowFrame.ApplyCatchUpPriority(frame,
+                        sprintCatchUp && sprintCatchUpPriority);
                 } while (frame.FocusedPlayer != initialLeader);
             }
             initialFrame = frame;
@@ -268,14 +472,30 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 foreach (var request in frame.Flasks)
                 {
                     var pad = topology.Slots.Single(slot => slot.PartyPlayer == request.Player).RuntimePad;
-                    await bridge.SendFlaskAsync(pad, request.Resource);
+                    if (request.DirectInput is { } input)
+                        await bridge.SendRecoveryActionAsync(pad, input);
+                    else
+                        await bridge.SendFlaskAsync(pad, request.Resource);
                 }
             }
-            session = new LiveFollowSession(process, bridge, topology, readError, frame, relayMainInput);
+            session = new LiveFollowSession(process, bridge, topology, readError, frame,
+                relayMainInput, sprintCatchUp && sprintCatchUpPriority, customRuleCount,
+                clients, experimentalWarpClick);
             if (relayMainInput)
             {
                 await bridge.SetMainInputSubscriptionAsync(true);
                 Volatile.Write(ref session._inputSubscriptionActive, 1);
+            }
+            if (session._wantsWarpShortcut)
+            {
+                await bridge.SetWarpToMainSubscriptionAsync(true);
+                Volatile.Write(ref session._warpShortcutSubscribed, 1);
+            }
+            if (orderedTopology && OperatingSystem.IsWindows() &&
+                IndependentProbeSession.FindExecutable() is { } probeExecutable)
+            {
+                session._independentProbe = await IndependentProbeSession.StartAsync(probeExecutable);
+                session._independentProbe.DiagnosticsChanged += session.OnProbeDiagnosticsChanged;
             }
             return session;
         }
@@ -283,7 +503,18 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         {
             if (session is not null)
             {
+                if (session._independentProbe is { } probe)
+                {
+                    probe.DiagnosticsChanged -= session.OnProbeDiagnosticsChanged;
+                    await probe.DisposeAsync();
+                }
                 bridge.MainInputChanged -= session.OnMainInputChanged;
+                bridge.WarpToMainPressed -= session.OnWarpToMainPressed;
+                if (session._wantsWarpShortcut && bridge.IsRunning)
+                {
+                    try { await bridge.SetWarpToMainSubscriptionAsync(false); }
+                    catch (Exception stopError) when (stopError is IOException or InvalidOperationException or TimeoutException) { }
+                }
                 if (relayMainInput && bridge.IsRunning)
                 {
                     try { await bridge.SetMainInputSubscriptionAsync(false); }
@@ -342,9 +573,10 @@ internal sealed class LiveFollowSession : IAsyncDisposable
             {
                 var line = await _process.StandardOutput.ReadLineAsync();
                 if (line is null) break;
-                var frame = _bridge.LastFocusedLeadsEnabled
-                    ? LiveFollowFrame.ParseDynamic(line, _topology)
-                    : LiveFollowFrame.Parse(line, 2, _topology.Slots[1].RuntimePad);
+                var frame = ParseFrame(line, _topology, _bridge.LastFocusedLeadsEnabled,
+                    _customRuleCount);
+                frame = LiveFollowFrame.ApplyCatchUpPriority(frame, _catchUpPriority);
+                frame = ApplyTransitionApproach(frame, DateTime.UtcNow);
                 if (_stopping) break;
                 var nextPads = frame.PadCommands.Select(command => command.Pad).ToHashSet();
                 foreach (var oldPad in _followerPads.Except(nextPads))
@@ -355,14 +587,23 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 if (_bridge.AutoFlaskEnabled)
                 {
                     foreach (var request in frame.Flasks)
-                        await _bridge.SendFlaskAsync(_playerToPad[request.Player], request.Resource);
+                    {
+                        var pad = _playerToPad[request.Player];
+                        if (request.DirectInput is { } input)
+                            await _bridge.SendRecoveryActionAsync(pad, input);
+                        else
+                            await _bridge.SendFlaskAsync(pad, request.Resource);
+                    }
                 }
                 var changed = Current.Status != frame.Status || Current.Reason != frame.Reason ||
                     Current.FocusedPlayer != frame.FocusedPlayer ||
+                    !Current.Handoffs.SequenceEqual(frame.Handoffs) ||
                     !Current.PadCommands.Select(command => (command.Pad, command.Status, command.Reason))
                         .SequenceEqual(frame.PadCommands.Select(command => (command.Pad, command.Status, command.Reason)));
                 Current = frame;
                 if (changed) Dispatcher.UIThread.Post(() => StatusChanged?.Invoke(frame));
+                QueueVisualWarp(frame);
+                QueueTransitionInteraction(frame);
             }
         }
         catch (Exception error)
@@ -373,6 +614,8 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         finally
         {
             _controlCancellation.Cancel();
+            _warpAttemptCancellation?.Cancel();
+            await StopWarpShortcutAsync();
             await StopMainInputAsync();
             if (!_stopping)
             {
@@ -391,11 +634,170 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         }
     }
 
+    private void QueueVisualWarp(FollowBridgeFrame frame)
+    {
+        if (_stopping) return;
+        var manual = ManualWarpActive && frame.ManualWarpToMain;
+        if (!manual && _manualWarpExecuting)
+        {
+            _warpAttemptCancellation?.Cancel();
+            _attemptedWarps.Clear();
+            _activeWarp = null;
+            _manualWarpExecuting = false;
+            Dispatcher.UIThread.Post(() => WarpStatusChanged?.Invoke("手动追到 MAIN 已取消。"));
+        }
+        else if (manual && !_manualWarpExecuting)
+        {
+            _manualWarpExecuting = true;
+            _attemptedWarps.Clear();
+        }
+        if (!_experimentalWarpClick && !manual) return;
+        if (manual)
+            frame = frame with { Handoffs = frame.Handoffs.Where(request =>
+                request.TargetPlayer == frame.FocusedPlayer).ToArray() };
+        var visualRoute = PartyWarpRoutes.FromFrame(frame, _topology);
+        var controllerRoutes = PartyWarpControllerPlan.FromFrameAll(frame, _topology);
+        var available = visualRoute is null
+            ? controllerRoutes.Select(route => route.Request).ToHashSet()
+            : new HashSet<FollowHandoffRequest> { visualRoute.Request };
+        if (available.Count == 0 || Paused)
+        {
+            _warpAttemptCancellation?.Cancel();
+            _attemptedWarps.Clear();
+            _activeWarp = null;
+            if (manual)
+            {
+                StopManualWarpToMain();
+                _manualWarpExecuting = false;
+                Dispatcher.UIThread.Post(() => WarpStatusChanged?.Invoke(
+                    "手动追到 MAIN 未执行：没有符合当前 MAIN 和等待状态的跨区传送请求。"));
+            }
+            return;
+        }
+        _attemptedWarps.IntersectWith(available);
+        if (!_warpTask.IsCompleted)
+        {
+            if (_activeWarp is { } active && !available.Contains(active))
+                _warpAttemptCancellation?.Cancel();
+            return;
+        }
+        var controllerRoute = controllerRoutes.FirstOrDefault(route =>
+            !_attemptedWarps.Contains(route.Request));
+        var request = visualRoute is { } visual && !_attemptedWarps.Contains(visual.Request)
+            ? visual.Request : controllerRoute?.Request;
+        if (request is null)
+        {
+            if (manual)
+            {
+                StopManualWarpToMain();
+                _manualWarpExecuting = false;
+                Dispatcher.UIThread.Post(() => WarpStatusChanged?.Invoke(
+                    "手动追到 MAIN 的已确认传送请求均已发送；请核对区域日志。"));
+            }
+            return;
+        }
+        _attemptedWarps.Add(request);
+        _activeWarp = request;
+        _warpAttemptCancellation?.Dispose();
+        _warpAttemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            _warpCancellation.Token);
+        _warpTask = RunCrossAreaWarpAsync(request, visualRoute, controllerRoute,
+            _warpAttemptCancellation.Token);
+    }
+
+    private void QueueTransitionInteraction(FollowBridgeFrame frame)
+    {
+        if (!_experimentalWarpClick || _stopping) return;
+        var nowUtc = DateTime.UtcNow;
+        var candidate = TransitionApproachPlan.BuildInteraction(frame, _topology,
+            _transitionAnchors, true, Paused, nowUtc);
+        if (candidate is null)
+        {
+            _entryAttemptCancellation?.Cancel();
+            return;
+        }
+        if (!_entryTask.IsCompleted) return;
+        var attempt = _entryBudget.TryReserve(candidate, nowUtc);
+        if (attempt == 0) return;
+        _entryAttemptCancellation?.Dispose();
+        _entryAttemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            _warpCancellation.Token);
+        _entryTask = RunTransitionInteractionAsync(candidate, attempt,
+            _entryAttemptCancellation.Token);
+    }
+
+    private async Task RunTransitionInteractionAsync(TransitionInteractionCandidate candidate,
+        int attempt,
+        CancellationToken token)
+    {
+        try
+        {
+            await TransitionInteractionRunner.RunAsync(
+                new BridgeTransitionInteractionPort(_bridge), candidate.DriverPad, token);
+            Dispatcher.UIThread.Post(() => WarpStatusChanged?.Invoke(
+                $"已向 P{candidate.DriverPlayer} 发送入口 A 短按（第 {attempt}/3 次）；" +
+                (attempt == 3 ? "等待区域变化确认，本次入口不再自动重复。" :
+                    "等待区域变化确认。")));
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception error)
+        {
+            Dispatcher.UIThread.Post(() => WarpStatusChanged?.Invoke(
+                "入口交互未发出：" + error.Message));
+        }
+    }
+
+    private async Task RunCrossAreaWarpAsync(FollowHandoffRequest request,
+        PartyWarpRoute? visualRoute, PartyWarpControllerRoute? controllerRoute,
+        CancellationToken token)
+    {
+        var original = _clients.FirstOrDefault(PoeChatInviteService.IsExactForeground);
+        var destination = _clients[request.DestinationClient - 1];
+        try
+        {
+            string detail;
+            if (visualRoute is not null)
+            {
+                var result = await new PartyWarpClickService(new WindowsLoginInputPort(destination))
+                    .TryClickAsync(visualRoute.RemotePortraitIndex, token);
+                detail = result.Detail;
+            }
+            else if (controllerRoute is not null)
+            {
+                await PartyWarpControllerRunner.RunAsync(
+                    new BridgePartyWarpControllerPort(_bridge, destination), controllerRoute, token);
+                detail = "已发送手柄队伍名单传送序列；仍需区域日志确认是否传送成功。";
+            }
+            else return;
+            Dispatcher.UIThread.Post(() => WarpStatusChanged?.Invoke(detail));
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception error)
+        {
+            Dispatcher.UIThread.Post(() => WarpStatusChanged?.Invoke(
+                "视觉传送停止：" + error.Message));
+        }
+        finally
+        {
+            if (original is not null && original.Pid != destination.Pid &&
+                PoeChatInviteService.IsExactForeground(destination))
+            {
+                try { await PoeChatInviteService.FocusExactWindowAsync(original,
+                    CancellationToken.None); }
+                catch { /* The original window may have exited. */ }
+            }
+        }
+    }
+
     private async Task FlushControlsAsync()
     {
         while (_pendingPause.TryDequeue(out var paused))
             await _process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new
                 { type = "follow_pause", state = paused ? "paused" : "following" }));
+        var manualWarp = Interlocked.Exchange(ref _manualWarpControl, 0);
+        if (manualWarp != 0)
+            await _process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new
+                { type = "warp_main", state = manualWarp > 0 ? "start" : "cancel" }));
         while (_pendingFocus.TryDequeue(out var player))
             await _process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new
                 { type = "manual_focus", slot = player }));
@@ -420,6 +822,7 @@ internal sealed class LiveFollowSession : IAsyncDisposable
                 left_x = Math.Clamp(sample.LeftX / 32767.0, -1.0, 1.0),
                 left_y = Math.Clamp(sample.LeftY / 32767.0, -1.0, 1.0),
                 b_down = sample.BDown, blocked = sample.Blocked,
+                attack_active = sample.AttackActive,
                 observed_at_unix_ms = new DateTimeOffset(sample.ReceivedAtUtc).ToUnixTimeMilliseconds()
             }));
         await _process.StandardInput.FlushAsync();
@@ -434,18 +837,38 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         catch (Exception error) when (error is IOException or InvalidOperationException or TimeoutException) { }
     }
 
+    private async Task StopWarpShortcutAsync()
+    {
+        if (!_wantsWarpShortcut) return;
+        _bridge.WarpToMainPressed -= OnWarpToMainPressed;
+        if (Interlocked.Exchange(ref _warpShortcutSubscribed, 0) == 0 || !_bridge.IsRunning) return;
+        try { await _bridge.SetWarpToMainSubscriptionAsync(false); }
+        catch (Exception error) when (error is IOException or InvalidOperationException or TimeoutException) { }
+    }
+
     public async ValueTask DisposeAsync()
     {
         _stopping = true;
+        _warpCancellation.Cancel();
+        _warpAttemptCancellation?.Cancel();
+        _entryAttemptCancellation?.Cancel();
         _bridge.MenuGuardChanged -= OnMenuGuardChanged;
         _bridge.ManualFocusChanged -= OnManualFocusChanged;
+        await StopWarpShortcutAsync();
         await StopMainInputAsync();
         _controlCancellation.Cancel();
         if (!_process.HasExited) _process.Kill();
         await _process.WaitForExitAsync();
         await _readFrames;
+        await _warpTask;
+        await _entryTask;
         await _writeControls;
         await _readError;
+        if (_independentProbe is { } probe)
+        {
+            probe.DiagnosticsChanged -= OnProbeDiagnosticsChanged;
+            await probe.DisposeAsync();
+        }
         try
         {
             foreach (var pad in _followerPads)
@@ -454,6 +877,9 @@ internal sealed class LiveFollowSession : IAsyncDisposable
         catch (Exception error) when (error is InvalidOperationException or IOException) { }
         _process.Dispose();
         _controlCancellation.Dispose();
+        _warpAttemptCancellation?.Dispose();
+        _entryAttemptCancellation?.Dispose();
+        _warpCancellation.Dispose();
         _controlSignal.Dispose();
     }
 

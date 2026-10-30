@@ -5,10 +5,101 @@ using System.Text.Json;
 namespace PartyPilot.Desktop;
 
 public sealed record RadarMarker(uint Id, string Category, string Path, string? Label,
-    string? ItemPath, int? Stack, string? Rarity, double X, double Y);
+    string? ItemPath, int? Stack, string? Rarity, double X, double Y,
+    bool QuestStateCandidate = false, bool? NavigationIsValid = null,
+    bool? NavigationIsTargetable = null);
 
-public sealed record RadarFrame(int ProcessId, DateTime SeenUtc, double PlayerX, double PlayerY,
-    IReadOnlyList<RadarMarker> Markers);
+public sealed record RadarFrame(int ProcessId, DateTime SeenUtc, uint AreaHash, string? AreaAddress,
+    double PlayerX, double PlayerY,
+    IReadOnlyList<RadarMarker> Markers)
+{
+    public string? StateAreaAddress { get; init; }
+    public double? GridX { get; init; }
+    public double? GridY { get; init; }
+    public IReadOnlyList<RadarMarker> DormantCandidates { get; init; } = [];
+}
+
+public sealed record RadarMotionFrame(int ProcessId, DateTime SeenUtc, uint AreaHash,
+    string? AreaAddress, string? StateAreaAddress, double PlayerX, double PlayerY,
+    double? GridX, double? GridY)
+{
+    public static bool TryParse(ReadOnlySpan<byte> json, int expectedPid, DateTime nowUtc,
+        out RadarMotionFrame? motion)
+    {
+        motion = null;
+        if (json.Length is < 2 or > 2048) return false;
+        try
+        {
+            using var document = JsonDocument.Parse(json.ToArray());
+            var root = document.RootElement;
+            if (!root.TryGetProperty("Kind", out var kind) || kind.GetString() != "radar_motion" ||
+                !root.TryGetProperty("ProcessId", out var process) ||
+                !process.TryGetInt32(out var pid) || pid != expectedPid ||
+                !root.TryGetProperty("SeenUtc", out var seen) ||
+                !seen.TryGetDateTime(out var seenUtc) || seenUtc.Kind != DateTimeKind.Utc ||
+                seenUtc > nowUtc || nowUtc - seenUtc > TimeSpan.FromSeconds(2) ||
+                !root.TryGetProperty("AreaHash", out var hash) ||
+                !hash.TryGetUInt32(out var areaHash) || areaHash == 0 ||
+                !root.TryGetProperty("RadarAreaAddress", out var address) ||
+                address.ValueKind is not (JsonValueKind.String or JsonValueKind.Null) ||
+                (address.ValueKind == JsonValueKind.String &&
+                 (address.GetString() is not { } parsedAddress ||
+                  !RadarFrames.ValidAddress(parsedAddress))) ||
+                !TryFinite(root, "X", out var x) || !TryFinite(root, "Y", out var y))
+                return false;
+            var areaAddress = address.ValueKind == JsonValueKind.String ? address.GetString() : null;
+            string? stateAddress = null;
+            if (root.TryGetProperty("RadarStateAreaAddress", out var state) &&
+                state.ValueKind != JsonValueKind.Null)
+            {
+                stateAddress = state.GetString();
+                if (stateAddress == null || !RadarFrames.ValidAddress(stateAddress)) return false;
+            }
+            if (areaAddress == null && stateAddress == null) return false;
+            double? gridX = null;
+            double? gridY = null;
+            if (root.TryGetProperty("RadarGridX", out var rawX) &&
+                rawX.ValueKind != JsonValueKind.Null)
+            {
+                if (!rawX.TryGetDouble(out var value) || !double.IsFinite(value)) return false;
+                gridX = value;
+            }
+            if (root.TryGetProperty("RadarGridY", out var rawY) &&
+                rawY.ValueKind != JsonValueKind.Null)
+            {
+                if (!rawY.TryGetDouble(out var value) || !double.IsFinite(value)) return false;
+                gridY = value;
+            }
+            if (gridX.HasValue != gridY.HasValue) return false;
+            motion = new RadarMotionFrame(pid, seenUtc, areaHash, areaAddress,
+                stateAddress, x, y, gridX, gridY);
+            return true;
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException)
+        { return false; }
+    }
+
+    public bool TryApply(RadarFrame full, out RadarFrame? moved)
+    {
+        moved = null;
+        if (full.ProcessId != ProcessId || full.AreaHash != AreaHash ||
+            !string.Equals(full.AreaAddress, AreaAddress, StringComparison.OrdinalIgnoreCase) ||
+            full.SeenUtc > SeenUtc || SeenUtc - full.SeenUtc > TimeSpan.FromSeconds(2) ||
+            full.StateAreaAddress != null &&
+            !string.Equals(full.StateAreaAddress, StateAreaAddress, StringComparison.OrdinalIgnoreCase))
+            return false;
+        moved = full with { SeenUtc = SeenUtc, PlayerX = PlayerX, PlayerY = PlayerY,
+            StateAreaAddress = StateAreaAddress, GridX = GridX, GridY = GridY };
+        return true;
+    }
+
+    private static bool TryFinite(JsonElement element, string name, out double value)
+    {
+        value = 0;
+        return element.TryGetProperty(name, out var field) &&
+            field.TryGetDouble(out value) && double.IsFinite(value);
+    }
+}
 
 public static class RadarFrames
 {
@@ -27,11 +118,39 @@ public static class RadarFrames
                 !seenValue.TryGetDateTime(out var seenUtc) ||
                 seenUtc.Kind != DateTimeKind.Utc ||
                 nowUtc - seenUtc < TimeSpan.Zero || nowUtc - seenUtc > TimeSpan.FromSeconds(2) ||
+                !root.TryGetProperty("AreaHash", out var areaValue) || !areaValue.TryGetUInt32(out var areaHash) ||
+                !root.TryGetProperty("RadarAreaAddress", out var addressValue) ||
+                addressValue.ValueKind is not (JsonValueKind.String or JsonValueKind.Null) ||
+                (addressValue.ValueKind == JsonValueKind.String &&
+                 (addressValue.GetString() is not { } address || !ValidAddress(address))) ||
                 !TryFinite(root, "X", out var playerX) || !TryFinite(root, "Y", out var playerY) ||
                 !root.TryGetProperty("RadarEntities", out var entities) ||
                 entities.ValueKind != JsonValueKind.Array || entities.GetArrayLength() > 96)
                 return false;
             var markers = new List<RadarMarker>(entities.GetArrayLength());
+            string? stateAreaAddress = null;
+            if (root.TryGetProperty("RadarStateAreaAddress", out var stateAreaValue) &&
+                stateAreaValue.ValueKind != JsonValueKind.Null)
+            {
+                if (stateAreaValue.ValueKind != JsonValueKind.String ||
+                    stateAreaValue.GetString() is not { } parsedStateAddress || !ValidAddress(parsedStateAddress)) return false;
+                stateAreaAddress = parsedStateAddress;
+            }
+            double? gridX = null;
+            double? gridY = null;
+            if (root.TryGetProperty("RadarGridX", out var gridXValue) &&
+                gridXValue.ValueKind != JsonValueKind.Null)
+            {
+                if (!gridXValue.TryGetDouble(out var value) || !double.IsFinite(value)) return false;
+                gridX = value;
+            }
+            if (root.TryGetProperty("RadarGridY", out var gridYValue) &&
+                gridYValue.ValueKind != JsonValueKind.Null)
+            {
+                if (!gridYValue.TryGetDouble(out var value) || !double.IsFinite(value)) return false;
+                gridY = value;
+            }
+            if (gridX.HasValue != gridY.HasValue) return false;
             var ids = new HashSet<uint>();
             foreach (var item in entities.EnumerateArray())
             {
@@ -69,6 +188,30 @@ public static class RadarFrames
                     if (rarityValue.ValueKind != JsonValueKind.String) return false;
                     rarity = rarityValue.GetString();
                 }
+                var questStateCandidate = false;
+                if (item.TryGetProperty("QuestStateCandidate", out var questStateValue))
+                {
+                    if (questStateValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return false;
+                    questStateCandidate = questStateValue.GetBoolean();
+                }
+                if (questStateCandidate && (category != "quest" || itemPath != null ||
+                    !ValidQuestCandidatePath(path))) return false;
+                bool? navigationIsValid = null;
+                bool? navigationIsTargetable = null;
+                if (item.TryGetProperty("NavigationIsValid", out var validValue) &&
+                    validValue.ValueKind != JsonValueKind.Null)
+                {
+                    if (validValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
+                        category is not ("transition" or "waypoint" or "checkpoint" or "portal")) return false;
+                    navigationIsValid = validValue.GetBoolean();
+                }
+                if (item.TryGetProperty("NavigationIsTargetable", out var targetableValue) &&
+                    targetableValue.ValueKind != JsonValueKind.Null)
+                {
+                    if (targetableValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
+                        category is not ("transition" or "waypoint" or "checkpoint" or "portal")) return false;
+                    navigationIsTargetable = targetableValue.GetBoolean();
+                }
                 if (category == "player" &&
                     (!path.StartsWith("Metadata/Characters/", StringComparison.OrdinalIgnoreCase) ||
                      string.IsNullOrWhiteSpace(label) || Encoding.UTF8.GetByteCount(label) > 64 ||
@@ -81,11 +224,33 @@ public static class RadarFrames
                      Encoding.UTF8.GetByteCount(itemPath) > 256 ||
                      stack is < 1 or > 999_999 ||
                      (rarity != null && rarity is not ("normal" or "magic" or "rare" or "unique")))) return false;
-                if (category is not ("player" or "loot") &&
-                    (label != null || itemPath != null || stack != null || rarity != null)) return false;
-                markers.Add(new RadarMarker(id, category, path, label, itemPath, stack, rarity, x, y));
+                if (category == "boss" &&
+                    (!path.Equals("Metadata/Monsters/HyenaMonster/Objects/BossRoomMinimapIcon",
+                        StringComparison.OrdinalIgnoreCase) || label != "Rathbreaker" ||
+                     itemPath != null || stack != null || rarity != null)) return false;
+                if (category == "quest" &&
+                    (string.IsNullOrWhiteSpace(label) || Encoding.UTF8.GetByteCount(label) > 96 ||
+                     (itemPath != null && (!WorldItemWrapperPath(path) ||
+                         !itemPath.StartsWith("Metadata/Items/QuestItems/", StringComparison.OrdinalIgnoreCase) ||
+                         Encoding.UTF8.GetByteCount(itemPath) > 256)) ||
+                     stack != null || rarity != null)) return false;
+                if (category is "transition" or "portal" &&
+                    (label != null && (PartyPilot.RadarDestinationName.Accept(label) != label ||
+                        Encoding.UTF8.GetByteCount(label) > 96))) return false;
+                if (category is not ("player" or "loot" or "quest" or "boss") &&
+                    (category is not ("transition" or "portal") && label != null ||
+                     itemPath != null || stack != null || rarity != null)) return false;
+                markers.Add(new RadarMarker(id, category, path, label, itemPath, stack, rarity, x, y,
+                    questStateCandidate, navigationIsValid, navigationIsTargetable));
             }
-            frame = new RadarFrame(pid, seenUtc, playerX, playerY, markers);
+            frame = new RadarFrame(pid, seenUtc, areaHash, addressValue.GetString(), playerX, playerY, markers)
+            {
+                StateAreaAddress = stateAreaAddress,
+                GridX = gridX,
+                GridY = gridY,
+                DormantCandidates = ParseDormantCandidates(root, stateAreaAddress, seenUtc,
+                    playerX, playerY, ids)
+            };
             return true;
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException)
@@ -94,14 +259,88 @@ public static class RadarFrames
         }
     }
 
+    private static IReadOnlyList<RadarMarker> ParseDormantCandidates(JsonElement root,
+        string? stateAreaAddress, DateTime frameSeenUtc, double playerX, double playerY,
+        HashSet<uint> visibleIds)
+    {
+        try { return ParseDormantCandidatesCore(root, stateAreaAddress, frameSeenUtc,
+            playerX, playerY, visibleIds); }
+        catch (Exception exception) when (exception is InvalidOperationException or FormatException)
+        { return []; }
+    }
+
+    private static IReadOnlyList<RadarMarker> ParseDormantCandidatesCore(JsonElement root,
+        string? stateAreaAddress, DateTime frameSeenUtc, double playerX, double playerY,
+        HashSet<uint> visibleIds)
+    {
+        if (stateAreaAddress == null ||
+            !root.TryGetProperty("DormantAreaMap", out var map) || map.ValueKind != JsonValueKind.Object ||
+            !map.TryGetProperty("Status", out var status) || status.GetString() != "candidate_unverified_build" ||
+            !map.TryGetProperty("SeenUtc", out var mapSeenValue) ||
+            !mapSeenValue.TryGetDateTime(out var mapSeenUtc) ||
+            mapSeenUtc.Kind != DateTimeKind.Utc || mapSeenUtc > frameSeenUtc ||
+            frameSeenUtc - mapSeenUtc > TimeSpan.FromSeconds(3) ||
+            !map.TryGetProperty("AreaAddress", out var area) ||
+            area.GetString() != stateAreaAddress ||
+            !map.TryGetProperty("EntityListOffset", out var offsetValue) ||
+            !offsetValue.TryGetInt32(out var offset) ||
+            offset is < 1024 or > 3584 || offset % 8 != 0 ||
+            !map.TryGetProperty("AwakeCount", out var awakeValue) ||
+            !awakeValue.TryGetInt32(out var awakeCount) || awakeCount < 1 ||
+            !map.TryGetProperty("SleepingCount", out var sleepingValue) ||
+            !sleepingValue.TryGetInt32(out var sleepingCount) || sleepingCount < 1 ||
+            !map.TryGetProperty("LocalPosition", out var local) || local.ValueKind != JsonValueKind.Object ||
+            !TryFinite(local, "WorldX", out var rawX) || !TryFinite(local, "WorldY", out var rawY) ||
+            Math.Abs(rawX - playerX) > 3 || Math.Abs(rawY - playerY) > 3 ||
+            !map.TryGetProperty("NavigationCandidates", out var candidates) ||
+            candidates.ValueKind != JsonValueKind.Array || candidates.GetArrayLength() > 24 ||
+            candidates.GetArrayLength() > sleepingCount)
+            return [];
+        var result = new List<RadarMarker>();
+        var ids = new HashSet<uint>(visibleIds);
+        foreach (var item in candidates.EnumerateArray())
+        {
+            if (!item.TryGetProperty("EntityId", out var idValue) || !idValue.TryGetUInt32(out var id) ||
+                id == 0 || !ids.Add(id) ||
+                !item.TryGetProperty("Path", out var pathValue) || pathValue.GetString() is not string path ||
+                !path.StartsWith("Metadata/", StringComparison.Ordinal) ||
+                Encoding.UTF8.GetByteCount(path) > 256 ||
+                !item.TryGetProperty("Category", out var categoryValue) ||
+                categoryValue.GetString() is not string category ||
+                category is not ("waypoint" or "checkpoint" or "portal" or "transition" or
+                    "quest" or "boss" or "essence") ||
+                !TryFinite(item, "X", out var x) || !TryFinite(item, "Y", out var y))
+                return [];
+            string? label = null;
+            if (item.TryGetProperty("Label", out var labelValue) && labelValue.ValueKind != JsonValueKind.Null)
+            {
+                if (labelValue.ValueKind != JsonValueKind.String) return [];
+                label = labelValue.GetString();
+            }
+            if ((category is "quest" or "boss") != !string.IsNullOrWhiteSpace(label) ||
+                (label != null && Encoding.UTF8.GetByteCount(label) > 96) ||
+                (category == "boss" &&
+                 (path != "Metadata/Monsters/HyenaMonster/Objects/BossRoomMinimapIcon" ||
+                  label != "Rathbreaker"))) return [];
+            result.Add(new RadarMarker(id, category, path, label, null, null, null, x, y));
+        }
+        return result;
+    }
+
     private static bool TryFinite(JsonElement element, string name, out double value)
     {
         value = 0;
         return element.TryGetProperty(name, out var field) && field.TryGetDouble(out value) && double.IsFinite(value);
     }
 
+    internal static bool ValidAddress(string value) => value.Length is >= 4 and <= 18 &&
+        value.StartsWith("0x", StringComparison.Ordinal) &&
+        value.AsSpan(2).IndexOfAnyExcept("0123456789ABCDEFabcdef") < 0 &&
+        ulong.TryParse(value.AsSpan(2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var address) &&
+        address > 0;
+
     private static bool KnownCategory(string value) => value is
-        "monster" or "checkpoint" or "waypoint" or "portal" or "transition" or "npc" or "chest" or "shrine" or "player" or "league" or "loot";
+        "monster" or "checkpoint" or "waypoint" or "portal" or "transition" or "npc" or "chest" or "shrine" or "player" or "league" or "loot" or "quest" or "boss" or "essence";
 
     private static bool WorldItemWrapperPath(string path)
     {
@@ -110,28 +349,126 @@ public static class RadarFrames
         if (suffix >= 0) name = name[..suffix];
         return name.Equals("WorldItem", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool ValidQuestCandidatePath(string path) =>
+        path.StartsWith("Metadata/", StringComparison.Ordinal) &&
+        !path.StartsWith("Metadata/Items/", StringComparison.OrdinalIgnoreCase) &&
+        !path.StartsWith("Metadata/Effects/", StringComparison.OrdinalIgnoreCase) &&
+        !path.StartsWith("Metadata/Projectiles/", StringComparison.OrdinalIgnoreCase) &&
+        !path.StartsWith("Metadata/Monsters/", StringComparison.OrdinalIgnoreCase) &&
+        !WorldItemWrapperPath(path) &&
+        (path.Contains("Quest", StringComparison.OrdinalIgnoreCase) ||
+         path.Contains("Objective", StringComparison.OrdinalIgnoreCase));
+}
+
+public sealed class RadarLandmarkCache
+{
+    private const int MaximumLandmarks = 256;
+    private readonly Dictionary<uint, RadarMarker> _landmarks = new();
+    private uint _areaHash;
+    private string? _areaAddress;
+    private DateTime _lastSeenUtc;
+
+    public bool TryApply(RadarFrame frame, out RadarFrame? enriched)
+    {
+        enriched = null;
+        if (_lastSeenUtc != default && frame.SeenUtc <= _lastSeenUtc)
+            return false;
+        enriched = Apply(frame);
+        return true;
+    }
+
+    public RadarFrame Apply(RadarFrame frame)
+    {
+        if (_lastSeenUtc != default && frame.SeenUtc < _lastSeenUtc)
+            return frame with { Markers = [], DormantCandidates = [] };
+        // The standalone probe knows the state area pointer but has no separate
+        // ExileCore2 data address. Either validated area address scopes landmarks.
+        var areaIdentity = frame.AreaAddress ?? frame.StateAreaAddress;
+        if (frame.AreaHash == 0 || areaIdentity == null)
+        {
+            _landmarks.Clear();
+            _areaHash = 0;
+            _areaAddress = null;
+            _lastSeenUtc = frame.SeenUtc;
+            return frame;
+        }
+        if (_areaHash != frame.AreaHash || !string.Equals(_areaAddress, areaIdentity, StringComparison.Ordinal))
+        {
+            _landmarks.Clear();
+            _areaHash = frame.AreaHash;
+            _areaAddress = areaIdentity;
+        }
+        _lastSeenUtc = frame.SeenUtc;
+        foreach (var marker in frame.Markers)
+        {
+            if (marker.Category is not ("waypoint" or "checkpoint" or "transition"))
+            {
+                _landmarks.Remove(marker.Id);
+                continue;
+            }
+            if (!_landmarks.ContainsKey(marker.Id) && _landmarks.Count >= MaximumLandmarks)
+                _landmarks.Remove(_landmarks.Keys.First());
+            _landmarks[marker.Id] = marker;
+        }
+        var visibleIds = frame.Markers.Concat(frame.DormantCandidates)
+            .Select(marker => marker.Id).ToHashSet();
+        return frame with { Markers = frame.Markers.Concat(_landmarks.Values.Where(marker =>
+            !visibleIds.Contains(marker.Id))).ToArray() };
+    }
 }
 
 public static class RadarProjection
 {
+    public const double WorldUnitsPerGridUnit = 10.869565;
+    private const double ViewAngle = 0.6754424205218056;
+    private static readonly double Horizontal = Math.Cos(ViewAngle);
+    private static readonly double Vertical = Math.Sin(ViewAngle);
+
     public static bool TryScale(string? text, out double scale) =>
         double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out scale) &&
         double.IsFinite(scale) && scale > 0;
 
+    public static (double X, double Y) ProjectGrid(double playerX, double playerY,
+        double gridX, double gridY, double centerX, double centerY, double pixelsPerGridUnit)
+    {
+        var dx = gridX - playerX;
+        var dy = gridY - playerY;
+        return (centerX + (dx - dy) * Horizontal * pixelsPerGridUnit,
+            centerY - (dx + dy) * Vertical * pixelsPerGridUnit);
+    }
+
+    public static (double X, double Y) UnprojectGrid(double playerX, double playerY,
+        double screenX, double screenY, double centerX, double centerY, double pixelsPerGridUnit)
+    {
+        var difference = (screenX - centerX) / (Horizontal * pixelsPerGridUnit);
+        var sum = -(screenY - centerY) / (Vertical * pixelsPerGridUnit);
+        return (playerX + (sum + difference) / 2,
+            playerY + (sum - difference) / 2);
+    }
+
     public static (double X, double Y) Project(double playerX, double playerY,
         RadarMarker marker, double centerX, double centerY, double pixelsPerUnit) =>
-        (centerX + (marker.X - playerX) * pixelsPerUnit,
-         centerY + (marker.Y - playerY) * pixelsPerUnit);
+        ProjectGrid(playerX / WorldUnitsPerGridUnit, playerY / WorldUnitsPerGridUnit,
+            marker.X / WorldUnitsPerGridUnit, marker.Y / WorldUnitsPerGridUnit,
+            centerX, centerY, pixelsPerUnit * WorldUnitsPerGridUnit);
 }
 
 public sealed class RadarVisibility
 {
     private bool _keyWasDown;
-    public bool Enabled { get; private set; } = true;
+    public bool Enabled { get; private set; }
 
     public void Observe(bool gameForeground, bool keyDown)
     {
         if (gameForeground && keyDown && !_keyWasDown) Enabled = !Enabled;
         _keyWasDown = keyDown;
+    }
+
+    // WM_HOTKEY is a distinct press event. Its release may occur entirely
+    // between polling ticks, so it must not share the polling edge latch.
+    public void ObserveRegisteredPress(bool gameForeground)
+    {
+        if (gameForeground) Enabled = !Enabled;
     }
 }

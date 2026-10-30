@@ -1,0 +1,18 @@
+{
+  "bindings": [
+    {
+      "drinker_player": 2,
+      "support_build": true,
+      "build_has_no_mana": false,
+      "sustained_use": false,
+      "monitor": {
+        "enabled": true,
+        "target_player": 1,
+        "monitor_resource": "Life",
+        "trigger_percent": 50,
+        "flask_resource": "Life",
+        "quick_top_up": false
+      }
+    }
+  ]
+}

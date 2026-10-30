@@ -57,3 +57,29 @@ func TestTargetClaimsExpireAndDeadTargetsRelease(t *testing.T) {
 		t.Fatalf("dead unique target should release claim: %+v", plans[0])
 	}
 }
+
+func TestTargetRequiredComboUsesNearestAliveWhenMainHasNoTarget(t *testing.T) {
+	profile := DefaultProfile()
+	profile.Enabled = true
+	world := testWorld()
+	world.Players[1] = Player{Alive: ptr(false), Loading: ptr(false), ActiveCombo: ptr(false),
+		DistanceFromMainM: ptr(0.0), HealthPercent: ptr(0.0)}
+	world.Monsters[0].Rarity = "rare"
+	world.Monsters[1].Rarity = "unique"
+	world.Monsters[2].Rarity = "rare"
+	world.Monsters[0].DistanceByPlayer[6] = 30
+	world.Monsters[1].DistanceByPlayer[6] = 10
+	world.Monsters[2].DistanceByPlayer[6] = 25
+	plans, err := Evaluate(profile, world)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plans[0].Status != "BLOCK_CHARACTER_DEAD" || plans[5].ComboID != "finisher-ready" {
+		t.Fatalf("test did not establish a targetless MAIN and finisher combo: %+v", plans)
+	}
+	var targets TargetCoordinator
+	targets.Assign(profile, world, plans)
+	if plans[5].TargetID != "b" || plans[4].TargetID != "" {
+		t.Fatalf("required-target fallback or targetless defence differs from source: %+v", plans)
+	}
+}

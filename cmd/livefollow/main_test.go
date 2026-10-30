@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,11 +10,116 @@ import (
 	"time"
 
 	"partypilot/internal/arealog"
+	"partypilot/internal/clientprocess"
 	"partypilot/internal/follow"
 	"partypilot/internal/live"
+	"partypilot/internal/telemetry"
 )
 
+func TestOrderedLoopEmitsWaitingFramesBeforeSourceTimeout(t *testing.T) {
+	if clientprocess.Supported {
+		t.Skip("the fixture uses synthetic process IDs")
+	}
+	directory := t.TempDir()
+	paths := map[int]string{1: filepath.Join(directory, "first.log"),
+		2: filepath.Join(directory, "second.log")}
+	for _, path := range paths {
+		if err := os.WriteFile(path, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	roster := map[int]int{1: 101, 2: 202}
+	engine, err := live.New(roster, 1, follow.Config{StopDistance: 2,
+		ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		writer.Close()
+		reader.Close()
+	}()
+	frames := make(chan frame, 16)
+	go func() {
+		scanner := bufio.NewScanner(reader)
+		for scanner.Scan() {
+			var current frame
+			if json.Unmarshal(scanner.Bytes(), &current) == nil {
+				frames <- current
+			}
+		}
+	}()
+	controls := make(chan menuInput)
+	controlsClosed := false
+	defer func() {
+		if !controlsClosed {
+			close(controls)
+		}
+	}()
+	done := make(chan error, 1)
+	go func() {
+		done <- run("127.0.0.1:0", roster, paths, nil, 1, engine,
+			nil, controls, true, false, writer)
+	}()
+	timer := time.NewTimer(600 * time.Millisecond)
+	defer timer.Stop()
+	for count := 0; count < 8; count++ {
+		select {
+		case current := <-frames:
+			if current.Commands[2].State != follow.Waiting {
+				t.Fatalf("missing sensor position produced movement: %+v", current.Commands[2])
+			}
+		case err := <-done:
+			t.Fatalf("ordered loop stopped before a sensor arrived: %v", err)
+		case <-timer.C:
+			t.Fatal("ordered loop did not emit eight waiting frames within 600 ms")
+		}
+	}
+	close(controls)
+	controlsClosed = true
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("ordered loop did not stop after control input closed")
+	}
+}
+
+func TestOrderedModeAcceptsOnlyOrdinarySingleClientSamples(t *testing.T) {
+	now := time.Now().UTC()
+	packet, err := json.Marshal(telemetry.Sample{ProcessID: 303, SeenUTC: now,
+		TickMS: now.UnixMilli(), CoordinateSpace: "world", X: 10, Y: 20, Z: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sample, err := decodeStandaloneSample(packet)
+	if err != nil || sample.ProcessID != 303 || sample.X != 10 {
+		t.Fatalf("single-client sample was rejected: %+v %v", sample, err)
+	}
+	for _, invalid := range [][]byte{
+		append([]byte(`{"Kind":"ordered_client",`), packet[1:]...),
+		append([]byte(`{"kind":"ordered_client",`), packet[1:]...),
+		[]byte(`{"ProcessId":303,"SeenUtc":"2026-10-27T00:00:00Z","TickMs":1,"CoordinateSpace":"world"}`),
+	} {
+		if _, err := decodeStandaloneSample(invalid); err == nil {
+			t.Fatalf("ordered or incomplete packet impersonated a solo sensor: %s", invalid)
+		}
+	}
+}
+
 func TestSourcesAndRoster(t *testing.T) {
+	var offsets logStartOffsets
+	if err := offsets.Set("1=42"); err != nil || offsets[1] != 42 {
+		t.Fatalf("session log boundary was rejected: %v", err)
+	}
+	for _, value := range []string{"1=43", "0=0", "4=0", "2=-1", "2=bad"} {
+		if err := offsets.Set(value); err == nil {
+			t.Fatalf("invalid session log boundary was accepted: %q", value)
+		}
+	}
 	roster, err := parseRoster("1:101,2:202")
 	if err != nil || len(roster) != 2 {
 		t.Fatalf("valid roster rejected: %v", err)
@@ -40,6 +147,72 @@ func TestSourcesAndRoster(t *testing.T) {
 	if _, err := resolveLogs(roster, sources{1: first}, nil); err == nil {
 		t.Fatal("missing log accepted")
 	}
+}
+
+func TestFlaskSupportFileNeedsExplicitBinding(t *testing.T) {
+	bindings, err := loadFlaskSupportBindings("../../testdata/flask-support-live.json")
+	if err != nil || len(bindings) != 1 || bindings[0].DrinkerPlayer != 2 ||
+		bindings[0].Monitor.TargetPlayer != 1 {
+		t.Fatalf("support fixture did not load: %+v %v", bindings, err)
+	}
+	path := filepath.Join(t.TempDir(), "support.json")
+	for _, contents := range []string{"{}", "{\"bindings\":[],\"unknown\":true}",
+		"{\"bindings\":[]}{}"} {
+		if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadFlaskSupportBindings(path); err == nil {
+			t.Fatalf("invalid support file accepted: %s", contents)
+		}
+	}
+}
+
+func TestFlaskRulesFileRequiresEveryExplicitField(t *testing.T) {
+	bindings, err := loadFlaskRuleBindings("../../testdata/flask-rules-live.json")
+	if err != nil || len(bindings) != 2 || bindings[0].LifeCooldownMS != 200 ||
+		bindings[1].LifeMinMissing != 25 {
+		t.Fatalf("flask rule fixture did not load: %+v %v", bindings, err)
+	}
+	path := filepath.Join(t.TempDir(), "rules.json")
+	for _, contents := range []string{"{}", "{\"players\":[]}",
+		"{\"players\":[{\"player\":1}]}",
+		"{\"players\":[{\"player\":1}],\"unknown\":true}"} {
+		if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadFlaskRuleBindings(path); err == nil {
+			t.Fatalf("incomplete flask rules accepted: %s", contents)
+		}
+	}
+}
+
+func TestFlaskCustomFileRequiresEveryTargetField(t *testing.T) {
+	rules, err := loadFlaskCustomRules("../../testdata/flask-custom-live.json")
+	if err != nil || len(rules) != 1 || rules[0].Input != "X" ||
+		!rules[0].CombatOnly || rules[0].Player != "P1" {
+		t.Fatalf("custom recovery fixture did not load: %+v %v", rules, err)
+	}
+	path := filepath.Join(t.TempDir(), "custom.json")
+	for _, contents := range []string{"{}", "{\"rules\":null}",
+		"{\"rules\":[{\"id\":\"one\"}]}",
+		"{\"rules\":[],\"unknown\":true}",
+		strings.ReplaceAll(string(mustReadCustomFixture(t)), `"input": "X"`, `"input": "A"`)} {
+		if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadFlaskCustomRules(path); err == nil {
+			t.Fatalf("invalid custom recovery file accepted: %s", contents)
+		}
+	}
+}
+
+func mustReadCustomFixture(t *testing.T) []byte {
+	t.Helper()
+	contents, err := os.ReadFile("../../testdata/flask-custom-live.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return contents
 }
 
 func TestClassicCollisionDodgeRequiresAllBoundTerrain(t *testing.T) {
@@ -144,12 +317,13 @@ func TestIndividualStopArguments(t *testing.T) {
 }
 
 func TestMenuInputRequiresBoundPlayerAndOpenStream(t *testing.T) {
-	session, err := live.NewFlaskSession(map[int]int{1: 101, 2: 202}, time.Second)
+	engine, err := live.New(map[int]int{1: 101, 2: 202}, 1,
+		follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
-	engine, err := live.New(map[int]int{1: 101, 2: 202}, 1,
-		follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10, MaxAge: time.Second}, time.Minute)
+	defer engine.Close()
+	session, err := live.NewFlaskSession(engine, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,6 +383,18 @@ func TestFollowPauseControlRequiresOptInAndExplicitState(t *testing.T) {
 	if err := applyMenuInput(nil, engine, input, true); err != nil || engine.FollowPaused() {
 		t.Fatalf("explicit resume was lost: %v", err)
 	}
+	input <- menuInput{Type: "warp_main", State: "start"}
+	if err := applyMenuInput(nil, engine, input, true); err != nil || !engine.ManualWarpToMain() {
+		t.Fatalf("manual warp request was lost: %v", err)
+	}
+	input <- menuInput{Type: "warp_main", State: "cancel"}
+	if err := applyMenuInput(nil, engine, input, true); err != nil || engine.ManualWarpToMain() {
+		t.Fatalf("manual warp cancellation was lost: %v", err)
+	}
+	input <- menuInput{Type: "warp_main", State: "start", Slot: 2}
+	if err := applyMenuInput(nil, engine, input, true); err == nil || engine.ManualWarpToMain() {
+		t.Fatal("unbound manual warp control was accepted")
+	}
 }
 
 func TestMainInputControlRequiresOptInAndCurrentLeader(t *testing.T) {
@@ -221,8 +407,9 @@ func TestMainInputControlRequiresOptInAndCurrentLeader(t *testing.T) {
 	defer engine.Close()
 	at := time.Now().UTC()
 	input := make(chan menuInput, 1)
+	attack := true
 	control := menuInput{Type: "main_input", Slot: 1, LeftX: 0.5,
-		LeftY: -0.25, BDown: true, ObservedAtMS: at.UnixMilli()}
+		LeftY: -0.25, BDown: true, AttackActive: &attack, ObservedAtMS: at.UnixMilli()}
 	input <- control
 	if err := applyMenuInput(nil, engine, input, false); err == nil {
 		t.Fatal("main controller sample bypassed opt-in")
@@ -233,7 +420,7 @@ func TestMainInputControlRequiresOptInAndCurrentLeader(t *testing.T) {
 		t.Fatalf("bound main controller sample was rejected: %v", err)
 	}
 	if got, ok := engine.CurrentMainInput(time.Now().UTC()); !ok ||
-		got.Slot != 1 || got.LeftX != 0.5 || !got.BDown {
+		got.Slot != 1 || got.LeftX != 0.5 || !got.BDown || !got.AttackActive {
 		t.Fatalf("accepted input was not retained: %+v %v", got, ok)
 	}
 	control.Slot = 2

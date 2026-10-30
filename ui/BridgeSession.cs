@@ -18,9 +18,13 @@ internal sealed class BridgeSession : IAsyncDisposable
     private readonly IReadOnlyDictionary<int, int> _hybridOutputForRuntime;
     private readonly SemaphoreSlim _inputGate = new(1, 1);
     private readonly SemaphoreSlim _partyGate = new(1, 1);
+    private int _autoPartySessionActive;
+    private readonly SemaphoreSlim _combatGate = new(1, 1);
     private AutoPartyPending? _pendingAutoParty;
+    private CombatPending? _pendingCombat;
     private TaskCompletionSource? _pendingHybridPairingComplete;
     private TaskCompletionSource<bool>? _pendingMainInputSubscription;
+    private TaskCompletionSource<bool>? _pendingWarpToMainSubscription;
     private bool _mainInputStreaming;
     private int _lastFocusedSlot;
     private int _lastManualFocusedSlot;
@@ -30,6 +34,8 @@ internal sealed class BridgeSession : IAsyncDisposable
     private int[]? _hybridPrelaunchSlots;
 
     public bool AutoFlaskEnabled { get; }
+    internal bool AutoCastEnabled { get; }
+    internal bool CombatEnabled { get; }
     internal bool IsHybridMode { get; }
     internal bool LastFocusedLeadsEnabled { get; }
     internal int LastFocusedSlot => Volatile.Read(ref _lastFocusedSlot);
@@ -52,13 +58,16 @@ internal sealed class BridgeSession : IAsyncDisposable
     public event Action? AutoPartyExpired;
     public event Action<int>? ManualFocusChanged;
     public event Action<MainInputSample>? MainInputChanged;
+    public event Action? WarpToMainPressed;
     public event Action<int, int, long>? HybridFocusChanged;
     public event Action<int, int, long>? HybridConfirmReleased;
 
     private sealed record AutoPartyPending(string Type, int Slot, ushort Buttons,
         TaskCompletionSource Completion);
+    private sealed record CombatPending(string Type, int Slot, TaskCompletionSource Completion);
 
-    private BridgeSession(Process process, Task<string> readError, bool autoFlaskEnabled,
+    private BridgeSession(Process process, Task<string> readError, bool autoFlaskEnabled, bool combatEnabled,
+        bool autoCastEnabled,
         bool lastFocusedLeads,
         int[] slots, int[] allSlots, bool hybridMode = false,
         IReadOnlyDictionary<int, int>? hybridOutputForRuntime = null)
@@ -66,6 +75,8 @@ internal sealed class BridgeSession : IAsyncDisposable
         _process = process;
         _readError = readError;
         AutoFlaskEnabled = autoFlaskEnabled;
+        AutoCastEnabled = autoCastEnabled;
+        CombatEnabled = combatEnabled;
         IsHybridMode = hybridMode;
         LastFocusedLeadsEnabled = lastFocusedLeads;
         _slots = slots.ToHashSet();
@@ -80,20 +91,32 @@ internal sealed class BridgeSession : IAsyncDisposable
         bool autoFlaskEnabled = false, bool useWgi = false, PrivateClient3Plan? privatePlan = null,
         bool lastFocusedLeads = false, bool menuGuardEnabled = true,
         FollowerMirrorConfig? followerMirror = null, bool adoptExistingPrivate = false,
-        bool engageDodgeEnabled = false, string engageDodgeBinding = "B")
+        bool engageDodgeEnabled = false, string engageDodgeBinding = "B", bool combatEnabled = false,
+        bool autoCastEnabled = false, ProcessLocalBridgePlan? processLocalPlan = null)
     {
         if (engageDodgeEnabled && (!rightStickFollowerOverride ||
             !RightStickDodgePreferenceStore.TryNormalizeBinding(engageDodgeBinding, out engageDodgeBinding)))
             throw new ArgumentException("Right-stick dodge needs a known button and follower movement enabled.");
-        var slots = partySlots.Where(item => item.Client != 3).Select(item => item.RuntimePad).ToArray();
-        var privateSlots = partySlots.Where(item => item.Client == 3)
+        var slots = partySlots.Where(item => processLocalPlan is not null || item.Client != 3)
             .Select(item => item.RuntimePad).ToArray();
-        if (slots.Length is < 1 or > 4 || slots.Any(slot => slot is < 1 or > 4) ||
+        var privateSlots = partySlots.Where(item => processLocalPlan is null && item.Client == 3)
+            .Select(item => item.RuntimePad).ToArray();
+        if (slots.Length < 1 || slots.Length > (processLocalPlan is null ? 4 : 6) ||
+            slots.Any(slot => slot < 1 || slot > (processLocalPlan is null ? 4 : 6)) ||
             slots.Distinct().Count() != slots.Length ||
-            (!useWgi && (physicalIndex is < 0 or > 3 || slots.Length > 3)) ||
+            (!useWgi && (physicalIndex is < 0 or > 3 ||
+                         processLocalPlan is null && slots.Length > 3)) ||
             !partySlots.Select(item => item.PartyPlayer).SequenceEqual(Enumerable.Range(1, partySlots.Count)) ||
             string.IsNullOrWhiteSpace(deviceInstance) || gameExecutables.Count is < 1 or > 3 ||
             gameExecutables.Any(string.IsNullOrWhiteSpace) ||
+            (processLocalPlan is not null &&
+             (privatePlan is not null || processLocalPlan.Clients.Length != gameExecutables.Count ||
+              !processLocalPlan.Clients.SelectMany(client => client.Slots).SequenceEqual(slots) ||
+              processLocalPlan.Clients.Where((client, index) =>
+                      client.Client != index + 1 ||
+                      !string.Equals(client.Executable,
+                          Path.GetFullPath(gameExecutables[index]), StringComparison.OrdinalIgnoreCase))
+                  .Any())) ||
             (privatePlan is null && (privateSlots.Length != 0 || adoptExistingPrivate)) ||
             (privatePlan is not null &&
              (!privateSlots.SequenceEqual(privatePlan.IncludePad6 ? [5, 6] : [5]) ||
@@ -147,6 +170,16 @@ internal sealed class BridgeSession : IAsyncDisposable
             }) start.ArgumentList.Add(argument);
             if (adoptExistingPrivate) start.ArgumentList.Add("--client3-adopt-existing");
         }
+        if (processLocalPlan is not null)
+        {
+            start.ArgumentList.Add("--process-local-bindings");
+            start.ArgumentList.Add(processLocalPlan.EncodedBindings);
+            if (processLocalPlan.EncodedAdoptions.Length > 0)
+            {
+                start.ArgumentList.Add("--process-local-adopt");
+                start.ArgumentList.Add(processLocalPlan.EncodedAdoptions);
+            }
+        }
         if (rightStickFollowerOverride) start.ArgumentList.Add("--right-stick-follower-override");
         if (engageDodgeEnabled)
         {
@@ -155,6 +188,8 @@ internal sealed class BridgeSession : IAsyncDisposable
             start.ArgumentList.Add(engageDodgeBinding);
         }
         if (autoFlaskEnabled) start.ArgumentList.Add("--enable-auto-flask");
+        if (autoCastEnabled) start.ArgumentList.Add("--enable-auto-cast");
+        if (combatEnabled) start.ArgumentList.Add("--enable-combat");
         if (!menuGuardEnabled) start.ArgumentList.Add("--disable-menu-guard");
         if (followerMirror is not null)
         {
@@ -172,15 +207,18 @@ internal sealed class BridgeSession : IAsyncDisposable
         try
         {
             var readyLine = await process.StandardOutput.ReadLineAsync().WaitAsync(
-                TimeSpan.FromSeconds(privatePlan is null ? 15 : 45));
+                TimeSpan.FromSeconds(processLocalPlan is not null ? 120 :
+                    privatePlan is null ? 15 : 45));
             if (readyLine is null || !IsExpectedReady(readyLine, slots, focusPadMap,
                 rightStickFollowerOverride, directRightStickSlot, autoFlaskEnabled, useWgi, privatePlan,
                 lastFocusedLeads, menuGuardEnabled, followerMirror, adoptExistingPrivate,
-                engageDodgeEnabled, engageDodgeBinding))
+                engageDodgeEnabled, engageDodgeBinding, combatEnabled, autoCastEnabled,
+                processLocalPlan))
             {
                 throw new InvalidOperationException("Virtual controller bridge did not confirm the requested pad slots.");
             }
-            return new BridgeSession(process, readError, autoFlaskEnabled, lastFocusedLeads, slots,
+            return new BridgeSession(process, readError, autoFlaskEnabled, combatEnabled, autoCastEnabled,
+                lastFocusedLeads, slots,
                 partySlots.Select(item => item.RuntimePad).ToArray());
         }
         catch (Exception error)
@@ -210,7 +248,9 @@ internal sealed class BridgeSession : IAsyncDisposable
         var runtimePads = partySlots.Select(slot => slot.RuntimePad).ToArray();
         if (!(runtimePads.SequenceEqual([1, 3]) || runtimePads.SequenceEqual([1, 3, 4]) ||
               runtimePads.SequenceEqual([1, 3, 5]) ||
-              runtimePads.SequenceEqual([1, 3, 4, 5, 6])) ||
+              runtimePads.SequenceEqual([1, 3, 4, 5, 6]) ||
+              runtimePads.SequenceEqual([1, 2, 3, 4]) ||
+              runtimePads.SequenceEqual([1, 2, 3, 4, 5, 6])) ||
             gameExecutables.Count != (runtimePads.Max() >= 5 ? 3 : 2) ||
             gameExecutables.Any(path => !Path.IsPathFullyQualified(path) || !File.Exists(path)))
             throw new ArgumentException("Keyboard prelaunch needs the selected topology and existing game executables.");
@@ -243,7 +283,7 @@ internal sealed class BridgeSession : IAsyncDisposable
             if (!IsExpectedHybridPrelaunch(line, slots, playerPads, bindings.Encode(),
                     menuGuardEnabled, followerMirror.Encode()))
                 throw new InvalidOperationException("Keyboard bridge did not confirm prelaunch virtual pads.");
-            return new BridgeSession(process, readError, false, false, slots,
+            return new BridgeSession(process, readError, false, false, false, false, slots,
                 [1, ..outputForRuntime.Values], hybridMode: true,
                 hybridOutputForRuntime: outputForRuntime)
             {
@@ -332,7 +372,9 @@ internal sealed class BridgeSession : IAsyncDisposable
         var supportedLayout = runtimePads.SequenceEqual([1, 3]) ||
             runtimePads.SequenceEqual([1, 3, 4]) ||
             runtimePads.SequenceEqual([1, 3, 5]) ||
-            runtimePads.SequenceEqual([1, 3, 4, 5, 6]);
+            runtimePads.SequenceEqual([1, 3, 4, 5, 6]) ||
+            runtimePads.SequenceEqual([1, 2, 3, 4]) ||
+            runtimePads.SequenceEqual([1, 2, 3, 4, 5, 6]);
         if (!supportedLayout || clients.Count != (runtimePads.Max() >= 5 ? 3 : 2) ||
             !partySlots.Select(slot => slot.PartyPlayer).SequenceEqual(Enumerable.Range(1, partySlots.Count)) ||
             partySlots.Any(slot => slot.Client != (slot.RuntimePad - 1) / 2 + 1 ||
@@ -405,7 +447,7 @@ internal sealed class BridgeSession : IAsyncDisposable
                     windowMap, bindings?.Encode(), menuGuardEnabled, followerMirror, privatePlan,
                     adoptExistingPrivate))
                 throw new InvalidOperationException("Keyboard bridge did not confirm its pad and window binding.");
-            return new BridgeSession(process, readError, false, false, slots,
+            return new BridgeSession(process, readError, false, false, false, false, slots,
                 [1, ..outputForRuntime.Values], hybridMode: true,
                 hybridOutputForRuntime: outputForRuntime);
         }
@@ -464,7 +506,8 @@ internal sealed class BridgeSession : IAsyncDisposable
         PrivateClient3Plan? privatePlan, bool lastFocusedLeads = false,
         bool menuGuardEnabled = true, FollowerMirrorConfig? followerMirror = null,
         bool adoptExistingPrivate = false, bool engageDodgeEnabled = false,
-        string engageDodgeBinding = "B")
+        string engageDodgeBinding = "B", bool combatEnabled = false,
+        bool autoCastEnabled = false, ProcessLocalBridgePlan? processLocalPlan = null)
     {
         try
         {
@@ -477,6 +520,10 @@ internal sealed class BridgeSession : IAsyncDisposable
                    root.TryGetProperty("hidhide_preflight", out var preflight) && preflight.GetBoolean() &&
                    root.TryGetProperty("auto_flask_enabled", out var flaskMode) &&
                    flaskMode.GetBoolean() == autoFlaskEnabled &&
+                   (root.TryGetProperty("auto_cast_enabled", out var castMode)
+                       ? castMode.GetBoolean() == autoCastEnabled : !autoCastEnabled) &&
+                   (root.TryGetProperty("combat_enabled", out var combatMode)
+                       ? combatMode.GetBoolean() == combatEnabled : !combatEnabled) &&
                    root.TryGetProperty("menu_guard_enabled", out var menuGuard) &&
                    menuGuard.GetBoolean() == menuGuardEnabled &&
                    (followerMirror is null || root.TryGetProperty("follower_mirror", out var mirror) &&
@@ -496,6 +543,9 @@ internal sealed class BridgeSession : IAsyncDisposable
                    focusMap.GetString() == focusPadMap &&
                    root.TryGetProperty("slots", out var selected) &&
                    selected.EnumerateArray().Select(value => value.GetInt32()).SequenceEqual(slots.Order()) &&
+                   (processLocalPlan is null
+                       ? !root.TryGetProperty("process_local", out var local) || !local.GetBoolean()
+                       : processLocalPlan.MatchesReady(root)) &&
                    root.TryGetProperty("private_client3_pid", out var privatePid) &&
                    privatePid.GetInt32() == (privatePlan?.Pid ?? 0) &&
                    root.TryGetProperty("private_client3_window_handle", out var privateWindow) &&
@@ -588,8 +638,35 @@ internal sealed class BridgeSession : IAsyncDisposable
         await WriteCommandAsync(JsonSerializer.Serialize(new { type = "flask", slot, resource }));
     }
 
-    internal Task BeginAutoPartyAsync(CancellationToken token) =>
-        SendAutoPartyControlAsync("auto_party_begin", 0, 0, 0, token);
+    internal async Task SendRecoveryActionAsync(int slot, string input)
+    {
+        if (!AutoFlaskEnabled || !_allSlots.Contains(slot) ||
+            input is not ("X" or "Y" or "LB" or "RB" or "LT" or "RT" or "D-pad Up" or "D-pad Down") ||
+            _stopping || _process.HasExited)
+            throw new InvalidOperationException("Custom recovery input is unavailable for this pad.");
+        await WriteCommandAsync(JsonSerializer.Serialize(new { type = "recovery_action", slot, input }));
+    }
+
+    internal async Task SendAutoCastAsync(int slot, string input)
+    {
+        if (!AutoCastEnabled || !_allSlots.Contains(slot) ||
+            input is not ("D-pad Up" or "D-pad Down" or "A" or "B" or "X" or "Y" or "LB" or "RB") ||
+            _stopping || _process.HasExited)
+            throw new InvalidOperationException("Automatic cast input is unavailable for this pad.");
+        await WriteCommandAsync(JsonSerializer.Serialize(new { type = "auto_cast", slot, input }));
+    }
+
+    internal async Task BeginAutoPartyAsync(CancellationToken token)
+    {
+        if (Interlocked.CompareExchange(ref _autoPartySessionActive, 1, 0) != 0)
+            throw new InvalidOperationException("Another menu automation owns the controller bridge.");
+        try { await SendAutoPartyControlAsync("auto_party_begin", 0, 0, 0, token); }
+        catch
+        {
+            Volatile.Write(ref _autoPartySessionActive, 0);
+            throw;
+        }
+    }
 
     internal Task RenewAutoPartyAsync(CancellationToken token) =>
         SendAutoPartyControlAsync("auto_party_renew", 0, 0, 0, token);
@@ -605,16 +682,71 @@ internal sealed class BridgeSession : IAsyncDisposable
         return SendAutoPartyControlAsync("auto_party_pulse", slot, buttons, holdMilliseconds, token);
     }
 
-    internal Task EndAutoPartyAsync(CancellationToken token) =>
-        SendAutoPartyControlAsync("auto_party_end", 0, 0, 0, token);
+    internal async Task EndAutoPartyAsync(CancellationToken token)
+    {
+        if (Volatile.Read(ref _autoPartySessionActive) == 0) return;
+        await SendAutoPartyControlAsync("auto_party_end", 0, 0, 0, token);
+        Volatile.Write(ref _autoPartySessionActive, 0);
+    }
 
     internal static bool ValidAutoPartyPulse(ushort buttons, int duration) => buttons switch
     {
         0x0010 => duration is 80 or 100,
-        0x0004 or 0x1000 => duration == 80,
+        0x0004 => duration == 80,
+        0x0002 => duration == 80,
+        0x1000 => duration is 60 or 80,
         0x2000 => duration == 60,
         _ => false
     };
+
+    internal Task BeginCombatAsync(int slot, CancellationToken token = default) =>
+        SendCombatControlAsync("combat_begin", slot, null, 0, 0, 0, token);
+
+    internal Task PulseCombatAsync(int slot, string input, int holdMilliseconds,
+        short rightX = 0, short rightY = 0, CancellationToken token = default) =>
+        SendCombatControlAsync("combat_pulse", slot, input, holdMilliseconds, rightX, rightY, token);
+
+    internal Task EndCombatAsync(int slot, CancellationToken token = default) =>
+        SendCombatControlAsync("combat_end", slot, null, 0, 0, 0, token);
+
+    internal static bool ValidCombatInput(string? input, int holdMilliseconds)
+    {
+        if (holdMilliseconds is < 45 or > 160 || input is null) return false;
+        var normalized = input.Trim().ToUpperInvariant();
+        var baseInput = normalized.StartsWith("LT+", StringComparison.Ordinal)
+            ? normalized[3..] : normalized;
+        if (normalized == "LT" || baseInput == "RT") return true;
+        return baseInput is "A" or "B" or "X" or "Y" or "LB" or "RB" or
+            "D-PAD UP" or "D-PAD DOWN" or "D-PAD LEFT" or "D-PAD RIGHT";
+    }
+
+    private async Task SendCombatControlAsync(string type, int slot, string? input,
+        int holdMilliseconds, short rightX, short rightY, CancellationToken token)
+    {
+        if (!CombatEnabled || IsHybridMode || !_slots.Contains(slot) ||
+            (type == "combat_pulse" && !ValidCombatInput(input, holdMilliseconds)))
+            throw new InvalidOperationException("Combat input is unavailable for this pad or binding.");
+        await _combatGate.WaitAsync(token);
+        try
+        {
+            if (_readEvents == Task.CompletedTask || !IsRunning)
+                throw new InvalidOperationException("Combat input requires a running bridge event reader.");
+            var pending = new CombatPending(type, slot,
+                new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+            Volatile.Write(ref _pendingCombat, pending);
+            var command = type == "combat_pulse"
+                ? JsonSerializer.Serialize(new { type, slot, input = input!.Trim().ToUpperInvariant(),
+                    hold_ms = holdMilliseconds, right_x = rightX, right_y = rightY })
+                : JsonSerializer.Serialize(new { type, slot });
+            await WriteCommandAsync(command, token);
+            await pending.Completion.Task.WaitAsync(TimeSpan.FromSeconds(2), token);
+        }
+        finally
+        {
+            Volatile.Write(ref _pendingCombat, null);
+            _combatGate.Release();
+        }
+    }
 
     private async Task SendAutoPartyControlAsync(string type, int slot, ushort buttons,
         int holdMilliseconds, CancellationToken token)
@@ -658,6 +790,28 @@ internal sealed class BridgeSession : IAsyncDisposable
         finally
         {
             Interlocked.CompareExchange(ref _pendingMainInputSubscription, null, pending);
+        }
+    }
+
+    internal async Task SetWarpToMainSubscriptionAsync(bool enabled,
+        CancellationToken token = default)
+    {
+        if (IsHybridMode) throw new InvalidOperationException("追到 MAIN 手柄快捷键需要实体手柄。");
+        if (_readEvents == Task.CompletedTask || !IsRunning)
+            throw new InvalidOperationException("桥接事件未运行，无法设置追到 MAIN 快捷键。");
+        var pending = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (Interlocked.CompareExchange(ref _pendingWarpToMainSubscription, pending, null) is not null)
+            throw new InvalidOperationException("追到 MAIN 快捷键设置仍在进行。");
+        try
+        {
+            await WriteCommandAsync(JsonSerializer.Serialize(new
+                { type = "warp_to_main_subscription", enabled }), token);
+            if (await pending.Task.WaitAsync(TimeSpan.FromSeconds(2), token) != enabled)
+                throw new InvalidDataException("追到 MAIN 快捷键确认与请求不一致。");
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref _pendingWarpToMainSubscription, null, pending);
         }
     }
 
@@ -737,6 +891,14 @@ internal sealed class BridgeSession : IAsyncDisposable
                         Volatile.Write(ref _mainInputStreaming, enabled);
                         Volatile.Read(ref _pendingMainInputSubscription)?.TrySetResult(enabled);
                     }
+                    else if (kind.GetString() == "warp_to_main_subscription" &&
+                        root.TryGetProperty("enabled", out var warpSubscriptionValue) &&
+                        warpSubscriptionValue.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                        Volatile.Read(ref _pendingWarpToMainSubscription)?.TrySetResult(
+                            warpSubscriptionValue.GetBoolean());
+                    else if (kind.GetString() == "warp_to_main_pressed" &&
+                        root.EnumerateObject().Count() == 1)
+                        WarpToMainPressed?.Invoke();
                     else if (kind.GetString() == "main_input" &&
                         Volatile.Read(ref _mainInputStreaming) &&
                         MainInputSample.TryParse(root, _allSlots, DateTime.UtcNow, out var input))
@@ -773,6 +935,17 @@ internal sealed class BridgeSession : IAsyncDisposable
                             ackSlot == pending.Slot && ackButtons == pending.Buttons)
                             pending.Completion.TrySetResult();
                     }
+                    else if (kind.GetString() == "combat_control" &&
+                        root.TryGetProperty("type", out var combatType) &&
+                        combatType.ValueKind == JsonValueKind.String &&
+                        root.TryGetProperty("slot", out var combatSlot) &&
+                        combatSlot.TryGetInt32(out var acknowledgedSlot))
+                    {
+                        var pending = Volatile.Read(ref _pendingCombat);
+                        if (pending is not null && pending.Type == combatType.GetString() &&
+                            pending.Slot == acknowledgedSlot)
+                            pending.Completion.TrySetResult();
+                    }
                     else if (kind.GetString() == "hybrid_pairing_complete" && IsHybridMode)
                         Volatile.Read(ref _pendingHybridPairingComplete)?.TrySetResult();
                     else if (kind.GetString() == "auto_party_expired")
@@ -793,10 +966,14 @@ internal sealed class BridgeSession : IAsyncDisposable
         {
             Volatile.Read(ref _pendingAutoParty)?.Completion.TrySetException(
                 new InvalidOperationException("Virtual controller bridge exited."));
+            Volatile.Read(ref _pendingCombat)?.Completion.TrySetException(
+                new InvalidOperationException("Combat controller bridge exited."));
             Volatile.Read(ref _pendingHybridPairingComplete)?.TrySetException(
                 new InvalidOperationException("Keyboard bridge exited before pairing completion."));
             Volatile.Read(ref _pendingMainInputSubscription)?.TrySetException(
                 new InvalidOperationException("Controller bridge exited before main input subscription."));
+            Volatile.Read(ref _pendingWarpToMainSubscription)?.TrySetException(
+                new InvalidOperationException("Controller bridge exited before warp shortcut subscription."));
             if (!_stopping)
             {
                 Dispatcher.UIThread.Post(() => Ended?.Invoke(failure ?? "Virtual controller bridge exited."));

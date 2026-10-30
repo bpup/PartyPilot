@@ -1,9 +1,11 @@
 """Bundle tracked PartyPilot sources with the built Windows preview artifacts."""
 
 from pathlib import Path
-from subprocess import check_output
+from subprocess import check_output, run
 from zipfile import ZIP_DEFLATED, ZipFile
+import argparse
 import os
+import xml.etree.ElementTree as ET
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -11,12 +13,14 @@ OUTPUT = ROOT.parent / "PartyPilot-preview.zip"
 TEMP = OUTPUT.with_suffix(".zip.tmp")
 REQUIRED = {
     "release/desktop/PartyPilot.Desktop.exe",
+    "release/probe/PartyPilot.Probe.exe",
     "release/bridge/PartyPilot.Bridge.exe",
     "release/PartyPilot-LiveFollow.exe",
+    "release/PartyPilot-BridgeFeed.exe",
+    "release/PartyPilot-PartyReplay.exe",
+    "release/PartyPilot.exe",
     "release/PartyPilot-FpsConfig.exe",
     "release/PartyPilot-ClientLaunch.exe",
-    "release/PartyPilot.Sensor.dll",
-    "release/PartyPilot.Sensor.deps.json",
     "release/PartyPilot-SensorLog.exe",
     "release/PartyPilot-SlotAudit.exe",
     "release/PartyPilot-OrderedMotionLog.exe",
@@ -28,8 +32,75 @@ REQUIRED = {
     "release/native/PartyPilot.MultiInstance.Smoke.exe",
 }
 
+FOLLOW_BINARIES = {
+    "release/PartyPilot-BridgeFeed.exe": "bridgefeed",
+    "release/PartyPilot-LiveFollow.exe": "livefollow",
+    "release/PartyPilot-PartyReplay.exe": "partyreplay",
+    "release/PartyPilot.exe": "partypilot",
+}
+
+
+def refresh_binaries() -> None:
+    run(["dotnet", "publish", "ui/PartyPilot.Desktop.csproj", "-c", "Release",
+         "-r", "win-x64", "--self-contained", "true",
+         "-p:PublishSingleFile=true", "-p:IncludeNativeLibrariesForSelfExtract=true",
+         "-o", "release/desktop"], cwd=ROOT, check=True)
+    run(["dotnet", "publish", "bridge/PartyPilot.Bridge.csproj", "-c", "Release",
+         "-r", "win-x64", "--self-contained", "true",
+         "-p:PublishSingleFile=true", "-p:IncludeNativeLibrariesForSelfExtract=true",
+         "-o", "release/bridge"], cwd=ROOT, check=True)
+    run(["dotnet", "publish", "probe/PartyPilot.Probe.csproj", "-c", "Release",
+         "-r", "win-x64", "--self-contained", "true",
+         "-p:PublishSingleFile=true", "-p:IncludeNativeLibrariesForSelfExtract=true",
+         "-o", "release/probe"], cwd=ROOT, check=True)
+    for output, command in FOLLOW_BINARIES.items():
+        run(["go", "build", "-o", output, "./cmd/" + command], cwd=ROOT,
+            env={**os.environ, "GOOS": "windows", "GOARCH": "amd64"}, check=True)
+
+
+def check_binaries_current() -> None:
+    def source_files(folder: str) -> list[Path]:
+        return [path for path in (ROOT / folder).rglob("*.cs")
+                if "obj" not in path.parts and "bin" not in path.parts]
+
+    probe_project = ROOT / "probe/PartyPilot.Probe.csproj"
+    probe_linked = [
+        (probe_project.parent / item.attrib["Include"]).resolve()
+        for item in ET.parse(probe_project).iter()
+        if item.tag in {"Compile", "EmbeddedResource"} and "Include" in item.attrib
+    ]
+    shared = [*ROOT.glob("data/*.json"), ROOT / "common/PackedTerrainValueProfile.cs",
+              ROOT / "sensor/QuestTileRules.cs",
+              ROOT / "sensor/GeneratedRoomClassifier.cs"]
+    binaries = {
+        ROOT / "release/desktop/PartyPilot.Desktop.exe":
+            [*source_files("ui"), *ROOT.glob("common/*.cs"), *shared,
+             ROOT / "ui/PartyPilot.Desktop.csproj"],
+        ROOT / "release/bridge/PartyPilot.Bridge.exe":
+            [*source_files("bridge"), *ROOT.glob("common/*.cs"),
+             ROOT / "bridge/PartyPilot.Bridge.csproj"],
+        ROOT / "release/probe/PartyPilot.Probe.exe":
+            [*source_files("probe"), probe_project, *probe_linked]
+    }
+    follow_sources = [*ROOT.glob("internal/**/*.go"), ROOT / "go.mod"]
+    for output, command in FOLLOW_BINARIES.items():
+        binaries[ROOT / output] = [*follow_sources, *ROOT.glob(f"cmd/{command}/*.go")]
+    stale = [str(path.relative_to(ROOT)) for path, sources in binaries.items()
+             if not path.is_file() or not sources or
+             path.stat().st_mtime_ns < max(source.stat().st_mtime_ns for source in sources)]
+    if stale:
+        raise SystemExit("Preview binaries are older than source: " + ", ".join(stale)
+                         + "; rebuild with --refresh")
+
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--refresh", action="store_true",
+                        help="rebuild desktop, probe, and follow binaries before packaging")
+    args = parser.parse_args()
+    if args.refresh:
+        refresh_binaries()
+    check_binaries_current()
     tracked = {
         ROOT / Path(name.decode())
         for name in check_output(["git", "ls-files", "-z"], cwd=ROOT).split(b"\0")
@@ -41,6 +112,8 @@ def main() -> None:
         if path.is_file()
         and (path.suffix.lower() in {".exe", ".dll", ".pdb"}
              or path.name == "PartyPilot.Sensor.deps.json")
+        and "sensor-plugin" not in path.relative_to(ROOT / "release").parts
+        and not path.name.startswith("PartyPilot.Sensor.")
     }
     missing = [name for name in sorted(REQUIRED) if not (ROOT / name).is_file()]
     if missing:

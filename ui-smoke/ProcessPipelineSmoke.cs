@@ -5,11 +5,183 @@ internal static class ProcessPipelineSmoke
 {
     public static async Task RunAsync()
     {
+        if (!LiveFollowFrame.ParseManualWarpToMain("{\"manual_warp_to_main\":true}") ||
+            LiveFollowFrame.ParseManualWarpToMain("{}"))
+            throw new Exception("Manual warp acknowledgement was not parsed exactly.");
+        try
+        {
+            LiveFollowFrame.ParseManualWarpToMain("{\"manual_warp_to_main\":false}");
+            throw new Exception("Invalid manual warp acknowledgement was accepted.");
+        }
+        catch (InvalidDataException) { }
+        var paired = PartyTopologies.ForPlayerCount(4)
+            .Single(item => item.Id == "4-balanced");
+        static FollowPadCommand Waiting(int player) => new(player, player, "{}", "waiting", null);
+        var outward = new FollowBridgeFrame("{}", "waiting", null)
+        {
+            Handoffs = [new FollowHandoffRequest(2, 3, 2)],
+            PadCommands = [Waiting(3), Waiting(4)]
+        };
+        var returnTrip = new FollowBridgeFrame("{}", "waiting", null)
+        {
+            Handoffs = [new FollowHandoffRequest(1, 1, 4)],
+            PadCommands = [Waiting(1), Waiting(2)]
+        };
+        if (PartyWarpRoutes.FromFrame(outward, paired)?.RemotePortraitIndex != 1 ||
+            PartyWarpRoutes.FromFrame(outward with
+                { Handoffs = [new FollowHandoffRequest(2, 3, 1)] }, paired)?.RemotePortraitIndex != 0 ||
+            PartyWarpRoutes.FromFrame(returnTrip, paired)?.RemotePortraitIndex != 1 ||
+            PartyWarpRoutes.FromFrame(returnTrip with
+                { Handoffs = [new FollowHandoffRequest(1, 1, 3)] }, paired)?.RemotePortraitIndex != 0 ||
+            PartyWarpRoutes.FromFrame(returnTrip with { PadCommands = [Waiting(1)] }, paired) is not null ||
+            PartyWarpRoutes.FromFrame(returnTrip with
+                { PadCommands = [Waiting(1), Waiting(2) with { Status = "following" }] }, paired) is not null ||
+            PartyWarpRoutes.FromFrame(outward with
+                { Handoffs = [new FollowHandoffRequest(2, 3, 2),
+                    new FollowHandoffRequest(1, 1, 4)] }, paired) is not null)
+            throw new Exception("Paired warp routes accepted an incomplete or ambiguous destination.");
+        var warpSixTopology = PartyTopologies.ForPlayerCount(6).Single(item => item.Id == "6-balanced");
+        var thirdClientWarp = new FollowBridgeFrame("{}", "waiting", null)
+        {
+            Handoffs = [new FollowHandoffRequest(3, 5, 1)],
+            PadCommands = [Waiting(2), Waiting(3), Waiting(4), Waiting(5), Waiting(6)]
+        };
+        var thirdRoute = PartyWarpControllerPlan.FromFrame(thirdClientWarp, warpSixTopology);
+        var twoSourceWarp = thirdClientWarp with
+        {
+            Handoffs = [new FollowHandoffRequest(2, 3, 1),
+                new FollowHandoffRequest(3, 5, 1)]
+        };
+        var twoSourceRoutes = PartyWarpControllerPlan.FromFrameAll(twoSourceWarp,
+            warpSixTopology);
+        if (thirdRoute is null || thirdRoute.DriverPad != 5 || thirdRoute.RosterIndex != 0 ||
+            twoSourceRoutes.Count != 2 || twoSourceRoutes[0].DriverPad != 3 ||
+            twoSourceRoutes[1].DriverPad != 5 ||
+            PartyWarpControllerPlan.FromFrame(twoSourceWarp, warpSixTopology)?.DriverPad != 3 ||
+            PartyWarpControllerPlan.FromFrameAll(twoSourceWarp with
+                { PadCommands = [Waiting(2), Waiting(3) with { Status = "following" },
+                    Waiting(4), Waiting(5), Waiting(6)] }, warpSixTopology).Select(route =>
+                    route.DriverPad).SingleOrDefault() != 5 ||
+            PartyWarpControllerPlan.FromFrame(twoSourceWarp with
+                { PadCommands = [Waiting(2), Waiting(3) with { Status = "following" },
+                    Waiting(4), Waiting(5), Waiting(6)] }, warpSixTopology)?.DriverPad != 5 ||
+            PartyWarpControllerPlan.FromFrameAll(twoSourceWarp with
+                { Handoffs = [new FollowHandoffRequest(2, 3, 1),
+                    new FollowHandoffRequest(3, 5, 3)] }, warpSixTopology).Count != 0 ||
+            PartyWarpControllerPlan.FromFrame(twoSourceWarp with
+                { Handoffs = [new FollowHandoffRequest(2, 3, 1),
+                    new FollowHandoffRequest(3, 5, 3)] }, warpSixTopology) is not null ||
+            PartyWarpControllerPlan.FromFrame(thirdClientWarp with
+                { PadCommands = [Waiting(2), Waiting(3), Waiting(4), Waiting(5)] }, warpSixTopology) is not null)
+            throw new Exception("Client 3 warp routing did not require both local roles to wait.");
+        var controllerPort = new FakePartyWarpControllerPort();
+        await PartyWarpControllerRunner.RunAsync(controllerPort, thirdRoute,
+            CancellationToken.None, (_, _) => Task.CompletedTask);
+        if (controllerPort.Begins != 1 || controllerPort.Ends != 1 ||
+            controllerPort.Pulses.Count != 6 ||
+            controllerPort.Pulses.Any(pulse => pulse.Pad != 5) ||
+            controllerPort.Pulses[^1].Buttons != 0x2000)
+            throw new Exception("Client 3 controller warp did not route and release the bound pad.");
+        var lostForeground = new FakePartyWarpControllerPort { Foreground = false };
+        try
+        {
+            await PartyWarpControllerRunner.RunAsync(lostForeground, thirdRoute,
+                CancellationToken.None, (_, _) => Task.CompletedTask);
+            throw new Exception("Controller warp ran without exact foreground.");
+        }
+        catch (InvalidOperationException) when (lostForeground.Ends == 1 &&
+            lostForeground.Pulses.Count == 0) { }
+        using var warpCancellation = new CancellationTokenSource();
+        var interrupted = new FakePartyWarpControllerPort();
+        try
+        {
+            await PartyWarpControllerRunner.RunAsync(interrupted, thirdRoute,
+                warpCancellation.Token, (_, token) =>
+                {
+                    warpCancellation.Cancel();
+                    return Task.FromCanceled(token);
+                });
+            throw new Exception("Cancelled controller warp continued after the first pulse.");
+        }
+        catch (OperationCanceledException) when (interrupted.Ends == 1 &&
+            interrupted.Pulses.Count == 1) { }
+        const int visionWidth = 1280;
+        const int visionHeight = 720;
+        var portraitPixels = new byte[visionWidth * visionHeight * 4];
+        for (var y = 150; y < 195; y++)
+        for (var x = 4; x < 80; x++)
+        for (var channel = 0; channel < 3; channel++)
+            portraitPixels[(y * visionWidth + x) * 4 + channel] = (byte)(x % 3 == 0 ? 220 : 20);
+        for (var y = 270; y < 315; y++)
+        for (var x = 4; x < 80; x++)
+        for (var channel = 0; channel < 3; channel++)
+            portraitPixels[(y * visionWidth + x) * 4 + channel] = (byte)(x % 3 == 0 ? 220 : 20);
+        var portraits = PartyWarpVision.FindTwoPortraits(portraitPixels, visionWidth, visionHeight);
+        if (portraits is null || portraits.FirstY is < 150 or > 195 ||
+            portraits.SecondY is < 270 or > 315 ||
+            PartyWarpVision.FindTwoPortraits(new byte[portraitPixels.Length],
+                visionWidth, visionHeight) is not null)
+            throw new Exception($"Warp portrait detection did not require two live textured rows: {portraits}.");
+        var menuBefore = new byte[portraitPixels.Length];
+        var menuAfter = new byte[portraitPixels.Length];
+        for (var y = 50; y < 450; y++)
+        for (var x = 80; x < 450; x++)
+        {
+            var offset = (y * visionWidth + x) * 4;
+            menuAfter[offset] = 80;
+            menuAfter[offset + 1] = 80;
+            menuAfter[offset + 2] = 80;
+        }
+        foreach (var y in new[] { 185, 240 })
+        for (var x = 84; x < 373; x++)
+        {
+            var offset = (y * visionWidth + x) * 4;
+            menuAfter[offset] = 65;
+            menuAfter[offset + 1] = 115;
+            menuAfter[offset + 2] = 140;
+        }
+        var menuAction = PartyWarpVision.FindFirstAction(menuBefore, menuAfter,
+            visionWidth, visionHeight);
+        if (menuAction is null || menuAction.Y is < 190 or > 235 ||
+            PartyWarpVision.FindFirstAction(menuBefore, menuBefore,
+                visionWidth, visionHeight) is not null)
+            throw new Exception("Warp action detection did not require a changed menu and live action borders.");
+        var warpBefore = new LoginWindowFrame(portraitPixels, visionWidth, visionHeight, 100, 200);
+        var warpMenu = new byte[portraitPixels.Length];
+        for (var index = 0; index < warpMenu.Length; index++)
+            warpMenu[index] = menuAfter[index] != 0 ? menuAfter[index] : portraitPixels[index];
+        var warpPort = new FakeWarpPort(warpBefore,
+            new LoginWindowFrame(warpMenu, visionWidth, visionHeight, 100, 200), warpBefore);
+        var warpClick = await new PartyWarpClickService(warpPort, TimeSpan.Zero)
+            .TryClickAsync(0, CancellationToken.None);
+        if (!warpClick.ActionClicked || !warpClick.MenuDismissed ||
+            warpPort.RightClicks.Count != 1 || warpPort.LeftClicks.Count != 1 ||
+            warpPort.RestoredCursor != (4, 5))
+            throw new Exception("Bound warp click did not require current portraits and menu dismissal.");
+        var noMenu = new FakeWarpPort(warpBefore, warpBefore);
+        var noMenuResult = await new PartyWarpClickService(noMenu, TimeSpan.Zero)
+            .TryClickAsync(1, CancellationToken.None);
+        if (noMenuResult.ActionClicked || noMenu.LeftClicks.Count != 0)
+            throw new Exception("Warp clicked without a visually confirmed current menu.");
         var triple = PartyTopologies.ForPlayerCount(3)
             .Single(item => item.Id == "3-three-singles");
         var tripleFrame = LiveFollowFrame.ParseDynamic(
             "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0},\"3\":{\"state\":\"waiting\"}}}",
             triple);
+        var plainPriorityFixture = LiveFollowFrame.Parse(
+            "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0}}}",
+            2, 3);
+        var priorityFrame = LiveFollowFrame.ApplyCatchUpPriority(plainPriorityFixture, enabled: true);
+        if (!priorityFrame.Command.Contains("\"catch_up_priority\":true", StringComparison.Ordinal) ||
+            !priorityFrame.PadCommands[0].Command.Contains("\"catch_up_priority\":true", StringComparison.Ordinal) ||
+            LiveFollowFrame.ApplyCatchUpPriority(plainPriorityFixture, enabled: false) != plainPriorityFixture)
+            throw new Exception("Desktop did not pass through the observed catch-up priority option.");
+        var attackFrame = LiveFollowFrame.Parse(
+            "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"holding\",\"x\":0,\"y\":1,\"attack_direction\":true}}}",
+            2, 3);
+        if (!attackFrame.Command.Contains("\"attack_direction\":true", StringComparison.Ordinal) ||
+            !attackFrame.Command.Contains("\"y\":1", StringComparison.Ordinal))
+            throw new Exception("Desktop dropped attack direction during a trail hold.");
         var switchedTriple = LiveFollowFrame.ParseDynamic(
             "{\"focused\":3,\"commands\":{\"1\":{\"state\":\"waiting\"},\"2\":{\"state\":\"following\",\"x\":0,\"y\":1}}}",
             triple);
@@ -31,18 +203,179 @@ internal static class ProcessPipelineSmoke
             throw new Exception("Three-client live follow accepted an unknown role.");
         }
         catch (InvalidDataException) { }
+        var fourTopology = PartyTopologies.ForPlayerCount(4).Single(item => item.Id == "4-balanced");
+        var fourRoster = LiveFollowSession.RosterArguments(fourTopology,
+            [new LaunchedClient(101, 201, "C:/GameA.exe"),
+             new LaunchedClient(102, 202, "D:/GameB.exe")]);
+        if (!fourRoster.SequenceEqual(["-experimental-ordered-input",
+                "-role-bind", "1:1:1:101", "-role-bind", "2:1:2:101",
+                "-role-bind", "3:2:1:102", "-role-bind", "4:2:2:102"]))
+            throw new Exception("Four-player desktop startup lost an ordered local role binding.");
+        var fourSources = LiveFollowSession.ExecutableArguments(fourTopology,
+            [new LaunchedClient(101, 201, "C:/GameA.exe"),
+             new LaunchedClient(102, 202, "D:/GameB.exe")]);
+        if (!fourSources.SequenceEqual(["-exe", "1=C:/GameA.exe", "-exe", "2=D:/GameB.exe"]))
+            throw new Exception("Four-player live logs were bound by role instead of client.");
+        var sessionLogs = LiveFollowSession.LogStartArguments(
+            [new LaunchedClient(101, 201, "C:/GameA.exe") { LogStartOffset = 42 },
+             new LaunchedClient(102, 202, "D:/GameB.exe")]);
+        if (!sessionLogs.SequenceEqual(["-log-start-offset", "1=42"]))
+            throw new Exception("Live follow lost the launched client's log boundary or replayed an attached client.");
+        var logRoot = Path.Combine(Path.GetTempPath(),
+            "partypilot-log-start-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(logRoot, "logs"));
+            var gamePath = Path.Combine(logRoot, "PathOfExile_x64.exe");
+            var logPath = Path.Combine(logRoot, "logs", "Client.txt");
+            File.WriteAllText(logPath, "previous session\n");
+            var startOffset = LaunchedClients.CaptureLogStartOffset(gamePath);
+            if (startOffset != "previous session\n".Length ||
+                LaunchedClients.CaptureLogStartOffset("relative-game.exe") is not null)
+                throw new Exception("Desktop did not capture the exact pre-launch game log boundary.");
+            File.AppendAllText(logPath, "current session\n");
+            if (!LiveFollowSession.LogStartArguments(
+                    [new LaunchedClient(101, 201, gamePath) { LogStartOffset = startOffset }])
+                .SequenceEqual(["-log-start-offset", $"1={startOffset}"]))
+                throw new Exception("Desktop did not pass the captured launch boundary to live follow.");
+        }
+        finally { if (Directory.Exists(logRoot)) Directory.Delete(logRoot, true); }
+        var fourFrame = LiveFollowFrame.ParseDynamic(
+            "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0}," +
+            "\"3\":{\"state\":\"following\",\"x\":0,\"y\":1},\"4\":{\"state\":\"waiting\"}}}", fourTopology);
+        var fixedFourFrame = LiveFollowSession.ParseFrame(
+            "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0}," +
+            "\"3\":{\"state\":\"following\",\"x\":0,\"y\":1},\"4\":{\"state\":\"waiting\"}}}",
+            fourTopology, lastFocusedLeads: false);
+        if (!fixedFourFrame.PadCommands.Select(command => command.Player).SequenceEqual([2, 3, 4]))
+            throw new Exception("Fixed P1 leadership lost followers in the four-player layout.");
+        var crossArea = LiveFollowSession.ParseFrame(
+            "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}," +
+            "\"3\":{\"state\":\"waiting\"},\"4\":{\"state\":\"waiting\"}}," +
+            "\"handoffs\":[{\"destination_client\":2,\"driver_player\":3," +
+            "\"target_player\":1,\"state\":\"warp_requested\"}]}",
+            fourTopology, lastFocusedLeads: false);
+        if (crossArea.Handoffs.Count != 1 ||
+            crossArea.Handoffs[0] != new FollowHandoffRequest(2, 3, 1) ||
+            crossArea.PadCommands.Any(command => command.Status != "waiting"))
+            throw new Exception("Cross-area request changed a neutral follower or lost its bound client.");
+        try
+        {
+            LiveFollowSession.ParseFrame(
+                "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}," +
+                "\"3\":{\"state\":\"waiting\"},\"4\":{\"state\":\"waiting\"}}," +
+                "\"handoffs\":[{\"destination_client\":2,\"driver_player\":4," +
+                "\"target_player\":1,\"state\":\"warp_requested\"}]}",
+                fourTopology, lastFocusedLeads: false);
+            throw new Exception("Cross-area request accepted P4 as the wrong client driver.");
+        }
+        catch (InvalidDataException) { }
+        var fourSwitched = LiveFollowFrame.ParseDynamic(
+            "{\"focused\":4,\"commands\":{\"1\":{\"state\":\"waiting\"}," +
+            "\"2\":{\"state\":\"waiting\"},\"3\":{\"state\":\"waiting\"}}}", fourTopology);
+        if (!fourFrame.PadCommands.Select(command => command.Pad).SequenceEqual([2, 3, 4]) ||
+            fourFrame.PadCommands[0].Status != "catching_up" ||
+            !fourFrame.PadCommands[1].Command.Contains("\"slot\":3", StringComparison.Ordinal) ||
+            !fourSwitched.PadCommands.Select(command => command.Pad).SequenceEqual([1, 2, 3]))
+            throw new Exception("Four-player follow frames lost a local role or pad mapping.");
+        try
+        {
+            LiveFollowFrame.ParseDynamic(
+                "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}," +
+                "\"3\":{\"state\":\"waiting\"}}}", fourTopology);
+            throw new Exception("Four-player follow accepted a missing P4 command.");
+        }
+        catch (InvalidDataException) { }
+        foreach (var id in new[] { "5-third-solo", "5-main-solo" })
+        {
+            var five = PartyTopologies.ForPlayerCount(5).Single(item => item.Id == id);
+            var fiveClients = new[]
+            {
+                new LaunchedClient(101, 201, "C:/GameA.exe"),
+                new LaunchedClient(102, 202, "D:/GameB.exe"),
+                new LaunchedClient(103, 203, "E:/GameC.exe")
+            };
+            var expectedRoster = new[] { "-experimental-ordered-input" }.Concat(
+                five.Slots.SelectMany(slot => new[] { "-role-bind",
+                    $"{slot.PartyPlayer}:{slot.Client}:{slot.LocalPlayer}:{fiveClients[slot.Client - 1].Pid}" }));
+            if (!LiveFollowSession.RosterArguments(five, fiveClients).SequenceEqual(expectedRoster) ||
+                !LiveFollowSession.ExecutableArguments(five, fiveClients).SequenceEqual(
+                    ["-exe", "1=C:/GameA.exe", "-exe", "2=D:/GameB.exe", "-exe", "3=E:/GameC.exe"]))
+                throw new Exception($"Five-player {id} did not bind each role and client log.");
+            var fiveFrame = LiveFollowSession.ParseFrame(
+                "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0}," +
+                "\"3\":{\"state\":\"waiting\"},\"4\":{\"state\":\"waiting\"}," +
+                "\"5\":{\"state\":\"following\",\"x\":0,\"y\":1}}}",
+                five, lastFocusedLeads: false);
+            if (!fiveFrame.PadCommands.Select(command => command.Player).SequenceEqual([2, 3, 4, 5]) ||
+                fiveFrame.PadCommands.Last().Pad != (id == "5-third-solo" ? 5 : 6))
+                throw new Exception($"Five-player {id} lost the Client 3 follower pad.");
+        }
+        var six = PartyTopologies.ForPlayerCount(6).Single(item => item.Id == "6-balanced");
+        var sixRoster = LiveFollowSession.RosterArguments(six,
+            [new LaunchedClient(101, 201, "C:/GameA.exe"),
+             new LaunchedClient(102, 202, "D:/GameB.exe"),
+             new LaunchedClient(103, 203, "E:/GameC.exe")]);
+        if (!sixRoster.SequenceEqual(["-experimental-ordered-input",
+                "-role-bind", "1:1:1:101", "-role-bind", "2:1:2:101",
+                "-role-bind", "3:2:1:102", "-role-bind", "4:2:2:102",
+                "-role-bind", "5:3:1:103", "-role-bind", "6:3:2:103"]))
+            throw new Exception("Six-player desktop startup lost an ordered local role binding.");
+        var sixSources = LiveFollowSession.ExecutableArguments(six,
+            [new LaunchedClient(101, 201, "C:/GameA.exe"),
+             new LaunchedClient(102, 202, "D:/GameB.exe"),
+             new LaunchedClient(103, 203, "E:/GameC.exe")]);
+        if (!sixSources.SequenceEqual(["-exe", "1=C:/GameA.exe", "-exe", "2=D:/GameB.exe",
+                "-exe", "3=E:/GameC.exe"]))
+            throw new Exception("Six-player live logs were bound by role instead of client.");
+        var sixFrame = LiveFollowFrame.ParseDynamic(
+            "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0,\"sprint_down\":true}," +
+            "\"3\":{\"state\":\"following\",\"x\":0,\"y\":1},\"4\":{\"state\":\"waiting\"}," +
+            "\"5\":{\"state\":\"waiting\"},\"6\":{\"state\":\"following\",\"x\":0,\"y\":-1}}}", six);
+        var fixedSixFrame = LiveFollowSession.ParseFrame(
+            "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0}," +
+            "\"3\":{\"state\":\"following\",\"x\":0,\"y\":1},\"4\":{\"state\":\"waiting\"}," +
+            "\"5\":{\"state\":\"waiting\"},\"6\":{\"state\":\"following\",\"x\":0,\"y\":-1}}}",
+            six, lastFocusedLeads: false);
+        if (!fixedSixFrame.PadCommands.Select(command => command.Player).SequenceEqual([2, 3, 4, 5, 6]))
+            throw new Exception("Fixed P1 leadership lost followers in the six-player layout.");
+        var sixPriority = LiveFollowFrame.ApplyCatchUpPriority(sixFrame, enabled: true);
+        var sixSwitched = LiveFollowFrame.ParseDynamic(
+            "{\"focused\":6,\"commands\":{\"1\":{\"state\":\"waiting\"},\"2\":{\"state\":\"waiting\"}," +
+            "\"3\":{\"state\":\"waiting\"},\"4\":{\"state\":\"waiting\"},\"5\":{\"state\":\"waiting\"}}}", six);
+        if (!sixFrame.PadCommands.Select(command => command.Pad).SequenceEqual([2, 3, 4, 5, 6]) ||
+            sixFrame.PadCommands[0].Status != "catching_up" ||
+            sixFrame.PadCommands[4].Status != "following" ||
+            !sixFrame.PadCommands[4].Command.Contains("\"slot\":6", StringComparison.Ordinal) ||
+            !sixPriority.PadCommands[0].Command.Contains("\"catch_up_priority\":true", StringComparison.Ordinal) ||
+            sixPriority.PadCommands.Skip(1).Any(command => command.Command.Contains("catch_up_priority", StringComparison.Ordinal)) ||
+            !sixSwitched.PadCommands.Select(command => command.Pad).SequenceEqual([1, 2, 3, 4, 5]))
+            throw new Exception("Six-player follow frames lost a role, pad, or catch-up state.");
+        try
+        {
+            LiveFollowFrame.ParseDynamic(
+                "{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"},\"3\":{\"state\":\"waiting\"}," +
+                "\"4\":{\"state\":\"waiting\"},\"5\":{\"state\":\"waiting\"}}}", six);
+            throw new Exception("Six-player follow accepted a missing P6 command.");
+        }
+        catch (InvalidDataException) { }
         if (OperatingSystem.IsWindows()) return; // The local fake executables use a Unix shebang.
         var directory = Path.Combine(Path.GetTempPath(), "partypilot-pipeline-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         var log = Path.Combine(directory, "bridge-input.jsonl");
         var bridgeExe = Path.Combine(directory, "fake-bridge");
         var mainInputBridgeExe = Path.Combine(directory, "fake-main-input-bridge");
+        var combatBridgeExe = Path.Combine(directory, "fake-combat-bridge");
+        var combatLog = Path.Combine(directory, "combat-input.jsonl");
         var mainInputFollowExe = Path.Combine(directory, "fake-main-input-follow");
         var mainInputLog = Path.Combine(directory, "main-input-control.jsonl");
+        var attackInputFollowExe = Path.Combine(directory, "fake-attack-input-follow");
+        var attackInputLog = Path.Combine(directory, "attack-input-control.jsonl");
         var couchBridgeExe = Path.Combine(directory, "fake-couch-bridge");
         var wgiBridgeExe = Path.Combine(directory, "fake-wgi-bridge");
         var client3BridgeExe = Path.Combine(directory, "fake-client3-bridge");
         var followExe = Path.Combine(directory, "fake-follow");
+        var customFollowExe = Path.Combine(directory, "fake-custom-follow");
         var terrainFollowExe = Path.Combine(directory, "fake-terrain-follow");
         var disabledClassicExe = Path.Combine(directory, "fake-disabled-classic-follow");
         var aggressiveFollowExe = Path.Combine(directory, "fake-aggressive-follow");
@@ -71,8 +404,15 @@ internal static class ProcessPipelineSmoke
                 "    enabled=command['enabled']\n" +
                 "    print(json.dumps({'event':'main_input_subscription','enabled':enabled}), flush=True)\n" +
                 "    if enabled:\n" +
-                "        print('{\"event\":\"main_input\",\"slot\":1,\"left_x\":40000,\"left_y\":0,\"b_down\":true,\"blocked\":false}', flush=True)\n" +
-                "        print('{\"event\":\"main_input\",\"slot\":1,\"left_x\":1234,\"left_y\":-2345,\"b_down\":true,\"blocked\":false}', flush=True)\n");
+                "        print('{\"event\":\"main_input\",\"slot\":1,\"left_x\":40000,\"left_y\":0,\"b_down\":true,\"attack_active\":false,\"blocked\":false}', flush=True)\n" +
+                "        print('{\"event\":\"main_input\",\"slot\":1,\"left_x\":1234,\"left_y\":-2345,\"b_down\":true,\"attack_active\":true,\"blocked\":false}', flush=True)\n");
+            File.WriteAllText(combatBridgeExe, "#!/usr/bin/env python3\nimport sys,json\n" +
+                "if '--enable-combat' not in sys.argv: sys.exit(2)\n" +
+                "print('{\"event\":\"ready\",\"slots\":[1,3],\"physical_mode\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"menu_guard_enabled\":true,\"last_focused_leads\":false,\"auto_flask_enabled\":false,\"combat_enabled\":true,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:3\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
+                "for line in sys.stdin:\n" +
+                "    command=json.loads(line)\n" +
+                $"    with open({JsonSerializer.Serialize(combatLog)}, 'a') as out: out.write(line)\n" +
+                "    print(json.dumps({'event':'combat_control','type':command['type'],'slot':command['slot']}), flush=True)\n");
             File.WriteAllText(mainInputFollowExe, "#!/usr/bin/env python3\nimport sys,json,time\n" +
                 "if '-accept-main-input' not in sys.argv or '-close-range-mirror' not in sys.argv: sys.exit(2)\n" +
                 "if '-close-mirror-duration' not in sys.argv or sys.argv[sys.argv.index('-close-mirror-duration')+1] != '650ms': sys.exit(2)\n" +
@@ -81,17 +421,36 @@ internal static class ProcessPipelineSmoke
                 "for line in sys.stdin:\n" +
                 "    control=json.loads(line)\n" +
                 "    if control.get('type') == 'main_input':\n" +
-                "        if control.get('slot') != 1 or abs(control.get('left_x',0)-1234/32767) > 0.0001 or abs(control.get('left_y',0)+2345/32767) > 0.0001 or not control.get('b_down') or control.get('blocked') or control.get('observed_at_unix_ms',0) <= 0: sys.exit(2)\n" +
+                "        if control.get('slot') != 1 or abs(control.get('left_x',0)-1234/32767) > 0.0001 or abs(control.get('left_y',0)+2345/32767) > 0.0001 or not control.get('b_down') or not control.get('attack_active') or control.get('blocked') or control.get('observed_at_unix_ms',0) <= 0: sys.exit(2)\n" +
                 $"        open({JsonSerializer.Serialize(mainInputLog)}, 'w').write(line)\n" +
                 "        time.sleep(0.5)\n        break\n");
+            File.WriteAllText(attackInputFollowExe, "#!/usr/bin/env python3\nimport sys,json\n" +
+                "if '-accept-main-input' not in sys.argv or '-mirror-attack-direction' not in sys.argv or '-close-range-mirror' in sys.argv: sys.exit(2)\n" +
+                "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}}}', flush=True)\n" +
+                "for line in sys.stdin:\n" +
+                "    command=json.loads(line)\n" +
+                "    if command.get('type')!='main_input': continue\n" +
+                "    if not command.get('attack_active') or command.get('blocked'): sys.exit(2)\n" +
+                $"    open({JsonSerializer.Serialize(attackInputLog)}, 'w').write(line)\n" +
+                "    break\n");
             File.WriteAllText(followExe, "#!/usr/bin/env python3\nimport sys,json\n" +
                 "if '-auto-flask' not in sys.argv: sys.exit(2)\n" +
+                "if '-flask-support-file' not in sys.argv: sys.exit(2)\n" +
+                "support=json.load(open(sys.argv[sys.argv.index('-flask-support-file')+1]))\n" +
+                "if support['bindings'][0]['drinker_player'] != 2 or support['bindings'][0]['monitor']['target_player'] != 1: sys.exit(2)\n" +
+                "if '-flask-rules-file' not in sys.argv: sys.exit(2)\n" +
+                "rules=json.load(open(sys.argv[sys.argv.index('-flask-rules-file')+1]))\n" +
+                "if len(rules['players']) != 2 or rules['players'][1]['life_trigger'] != 60 or not rules['players'][1]['combined_defence']: sys.exit(2)\n" +
                 "if '-classic-sprint-catchup' in sys.argv: sys.exit(2)\n" +
                 "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"reason\":\"missing position\"}}}', flush=True)\n" +
                 "states = [json.loads(sys.stdin.readline()) for _ in range(2)]\n" +
                 "if {(s['slot'],s['state']) for s in states} != {(1,'clear'),(2,'clear')}: sys.exit(2)\n" +
-                "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0,\"manual_override_eligible\":true,\"sprint_down\":true}},\"flasks\":[{\"player\":2,\"resource\":\"life\",\"percent\":30,\"reason\":\"threshold\"}]}', flush=True)\n" +
+                "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"catching_up\",\"x\":1,\"y\":0,\"manual_override_eligible\":true,\"sprint_down\":true}},\"flasks\":[{\"player\":2,\"resource\":\"life\",\"percent\":30,\"reason\":\"support\"}]}', flush=True)\n" +
                 "for line in sys.stdin:\n    control=json.loads(line)\n    if control.get('type')!='follow_pause': sys.exit(2)\n    if control.get('state')=='paused': print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\",\"reason\":\"follow paused\"}}}', flush=True)\n    elif control.get('state')=='following': print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"following\",\"x\":1,\"y\":0}}}', flush=True)\n    else: sys.exit(2)\n");
+            File.WriteAllText(customFollowExe, "#!/usr/bin/env python3\nimport sys\n" +
+                "if '-auto-flask' not in sys.argv or '-flask-custom-file' not in sys.argv: sys.exit(2)\n" +
+                "print('{\"focused\":1,\"commands\":{\"2\":{\"state\":\"waiting\"}},\"flasks\":[{\"player\":2,\"resource\":\"action\",\"percent\":30,\"reason\":\"custom Energy Shield ≤50% · priority 50\",\"direct_input\":\"X\"}]}', flush=True)\n" +
+                "for line in sys.stdin: pass\n");
             var terrainClient1 = Path.Combine(directory, "terrain-client-1.json");
             var terrainClient2 = Path.Combine(directory, "terrain-client-2.json");
             File.WriteAllText(terrainClient1, "{}");
@@ -168,11 +527,18 @@ internal static class ProcessPipelineSmoke
                 "if dodge and ('--right-stick-dodge-button' not in sys.argv or sys.argv[sys.argv.index('--right-stick-dodge-button')+1] != 'RB'): sys.exit(2)\n" +
                 "print(json.dumps({'event':'ready','slots':[1,2],'physical_mode':True,'pairing_protected':True,'hidhide_preflight':True,'menu_guard_enabled':True,'last_focused_leads':False,'auto_flask_enabled':False,'right_stick_follower_override':True,'right_stick_dodge_on_engage':dodge,'right_stick_dodge_button':'RB' if dodge else 'B','direct_right_stick_slot':2,'focus_pad_map':'1:1,2:2','private_client3_pid':0,'private_client3_window_handle':0,'private_client3_slots':[]}), flush=True)\n" +
                 "for line in sys.stdin: pass\n");
-            File.WriteAllText(wgiBridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
+            File.WriteAllText(wgiBridgeExe, "#!/usr/bin/env python3\nimport sys,json\n" +
                 "if '--physical-wgi' not in sys.argv or '--physical-index' in sys.argv: sys.exit(2)\n" +
                 "if '--focus-pad-map' not in sys.argv or sys.argv[sys.argv.index('--focus-pad-map')+1] != '1:1,2:2,3:3,4:4': sys.exit(2)\n" +
                 "print('{\"event\":\"ready\",\"slots\":[1,2,3,4],\"physical_mode\":true,\"physical_wgi\":true,\"pairing_protected\":true,\"hidhide_preflight\":true,\"menu_guard_enabled\":true,\"last_focused_leads\":false,\"auto_flask_enabled\":false,\"right_stick_follower_override\":false,\"direct_right_stick_slot\":0,\"focus_pad_map\":\"1:1,2:2,3:3,4:4\",\"private_client3_pid\":0,\"private_client3_window_handle\":0,\"private_client3_slots\":[]}', flush=True)\n" +
-                "for line in sys.stdin: pass\n");
+                "for line in sys.stdin:\n" +
+                "    command=json.loads(line)\n" +
+                "    if command.get('type') == 'warp_to_main_subscription':\n" +
+                "        enabled=command['enabled']\n" +
+                "        print(json.dumps({'event':'warp_to_main_subscription','enabled':enabled}),flush=True)\n" +
+                "        if enabled: print('{\"event\":\"warp_to_main_pressed\"}',flush=True)\n" +
+                "    if command.get('type','').startswith('auto_party_'):\n" +
+                "        print(json.dumps({'event':'auto_party_control','type':command['type'],'slot':command.get('slot',0),'buttons':command.get('buttons',0)}),flush=True)\n");
             File.WriteAllText(client3BridgeExe, "#!/usr/bin/env python3\nimport sys\n" +
                 "def value(flag):\n    return sys.argv[sys.argv.index(flag)+1] if flag in sys.argv else None\n" +
                 "if value('--slots') != '1,3,4' or value('--focus-pad-map') != '1:1,2:3,3:4,4:5,5:6': sys.exit(2)\n" +
@@ -183,8 +549,11 @@ internal static class ProcessPipelineSmoke
                 "for line in sys.stdin: pass\n");
             File.SetUnixFileMode(bridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(mainInputBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(combatBridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(mainInputFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(attackInputFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(followExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(customFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(terrainFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(disabledClassicExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             File.SetUnixFileMode(aggressiveFollowExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -199,6 +568,31 @@ internal static class ProcessPipelineSmoke
             File.SetUnixFileMode(client3BridgeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             Console.WriteLine("Pipeline smoke: starting fake bridge.");
             var topology = PartyTopologies.ForPlayerCount(2).Single(item => item.Id == "2-split");
+            await using (var combatBridge = await BridgeSession.StartAsync(combatBridgeExe,
+                topology.Slots, 0, @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"],
+                false, combatEnabled: true))
+            {
+                combatBridge.StartReading();
+                if (!combatBridge.CombatEnabled ||
+                    BridgeSession.ValidCombatInput("LT+L3", 85) ||
+                    BridgeSession.ValidCombatInput("LT+X", 44))
+                    throw new Exception("Combat input gate accepted an unsupported binding or duration.");
+                await combatBridge.BeginCombatAsync(3);
+                await combatBridge.PulseCombatAsync(3, "LT+X", 85, 32767, 0);
+                await combatBridge.EndCombatAsync(3);
+                var sent = File.ReadAllLines(combatLog).Select(line => JsonDocument.Parse(line)).ToArray();
+                try
+                {
+                    if (sent.Length != 3 || sent[0].RootElement.GetProperty("type").GetString() != "combat_begin" ||
+                        sent[1].RootElement.GetProperty("input").GetString() != "LT+X" ||
+                        sent[1].RootElement.GetProperty("hold_ms").GetInt32() != 85 ||
+                        sent[1].RootElement.GetProperty("right_x").GetInt32() != 32767 ||
+                        sent[1].RootElement.GetProperty("right_y").GetInt32() != 0 ||
+                        sent[2].RootElement.GetProperty("type").GetString() != "combat_end")
+                        throw new Exception("Combat ownership and pulse did not cross the desktop process boundary.");
+                }
+                finally { foreach (var document in sent) document.Dispose(); }
+            }
             await using (var mainInputBridge = await BridgeSession.StartAsync(mainInputBridgeExe,
                 topology.Slots, 0, @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"], false))
             {
@@ -206,10 +600,18 @@ internal static class ProcessPipelineSmoke
                     TaskCreationOptions.RunContinuationsAsynchronously);
                 mainInputBridge.MainInputChanged += sample => sampleReceived.TrySetResult(sample);
                 mainInputBridge.StartReading();
+                if (mainInputBridge.CombatEnabled) throw new Exception("Combat must remain disabled by default.");
+                try
+                {
+                    await mainInputBridge.BeginCombatAsync(3);
+                    throw new Exception("A bridge without combat enabled accepted a combat lease.");
+                }
+                catch (InvalidOperationException) { }
                 await mainInputBridge.SetMainInputSubscriptionAsync(true);
                 var sample = await sampleReceived.Task.WaitAsync(TimeSpan.FromSeconds(2));
                 if (sample.Pad != 1 || sample.LeftX != 1234 || sample.LeftY != -2345 ||
-                    !sample.BDown || sample.Blocked || sample.ReceivedAtUtc.Kind != DateTimeKind.Utc)
+                    !sample.BDown || !sample.AttackActive || sample.Blocked ||
+                    sample.ReceivedAtUtc.Kind != DateTimeKind.Utc)
                     throw new Exception("Main input event was not bound to the physical pad sample.");
                 await mainInputBridge.SetMainInputSubscriptionAsync(false);
             }
@@ -241,8 +643,34 @@ internal static class ProcessPipelineSmoke
                     throw new Exception("Main controller sample did not reach the live follow process.");
             }
             Console.WriteLine("Main controller input passed through bridge, desktop, and live process fakes.");
+            await using (var attackBridge = await BridgeSession.StartAsync(mainInputBridgeExe,
+                topology.Slots, 0, @"HID\VID_1234&PID_5678\DEVICE", ["C:/GameA.exe", "D:/GameB.exe"], false))
+            {
+                attackBridge.StartReading();
+                await using var attackFollow = await LiveFollowSession.StartAsync(attackInputFollowExe,
+                    topology, clients, attackBridge, plan, mirrorAttackDirection: true,
+                    relayMainInput: true);
+                attackFollow.StartReading();
+                var attackDeadline = DateTime.UtcNow.AddSeconds(3);
+                while (!File.Exists(attackInputLog) && DateTime.UtcNow < attackDeadline)
+                    await Task.Delay(20);
+                if (!File.Exists(attackInputLog))
+                    throw new Exception("Attack direction did not subscribe to main input independently.");
+            }
+            Console.WriteLine("Attack direction subscribed without close-range mirroring.");
             Console.WriteLine("Pipeline smoke: starting fake follow.");
-            await using (var follow = await LiveFollowSession.StartAsync(followExe, topology, clients, bridge, plan))
+            var supportFile = new FlaskSupportPreferenceStore(directory).Save(2,
+                [FlaskSupportPreferenceStore.Default(2, 1) with
+                {
+                    SupportBuild = true,
+                    Monitor = new FlaskSupportMonitor(true, 1, "Life", 50, "Life", false)
+                }]).RuntimeFile ?? throw new Exception("Drinker test file was not saved.");
+            var ruleFile = new FlaskRulePreferenceStore(directory).Save(2,
+                [FlaskRulePreferenceStore.DefaultFor(1),
+                    FlaskRulePreferenceStore.DefaultFor(2) with { LifeTrigger = 60, CombinedDefence = true }])
+                .RuntimeFile ?? throw new Exception("Player flask rule test file was not saved.");
+            await using (var follow = await LiveFollowSession.StartAsync(followExe, topology, clients, bridge, plan,
+                flaskSupportFile: supportFile, flaskRulesFile: ruleFile))
             {
                 Console.WriteLine("Pipeline smoke: fake follow ready.");
                 follow.StartReading();
@@ -274,12 +702,29 @@ internal static class ProcessPipelineSmoke
                 !lines[1].Contains("\"slot\":3,\"state\":\"catching_up\"") ||
                 !lines[1].Contains("\"manual_override_eligible\":true") ||
                 !lines[1].Contains("\"sprint_down\":true") ||
+                !lines[1].Contains("\"catch_up_priority\":true") ||
                 !lines[2].Contains("\"type\":\"flask\",\"slot\":3,\"resource\":\"life\"") ||
                 !lines.Any(line => line.Contains("\"slot\":3,\"state\":\"following\"")) ||
                 !lines.Any(line => line.Contains("\"slot\":3,\"state\":\"waiting\"")) ||
                 !lines[^1].Contains("\"slot\":3,\"state\":\"waiting\""))
                 throw new Exception("Live follow did not hand off movement/flasks and neutralize on exit: " + string.Join(" | ", lines));
             Console.WriteLine("Desktop movement, flask, pause/resume, and stop handoff checked with local fake executables.");
+            var customFile = Path.Combine(directory, "custom-recovery.json");
+            File.Copy(Path.GetFullPath("testdata/flask-custom-live.json"), customFile);
+            await using (var customFollow = await LiveFollowSession.StartAsync(customFollowExe,
+                topology, clients, bridge, plan, flaskCustomFile: customFile))
+            {
+                customFollow.StartReading();
+                var customDeadline = DateTime.UtcNow.AddSeconds(3);
+                while ((!File.Exists(log) || !File.ReadAllLines(log).Any(line =>
+                           line.Contains("\"type\":\"recovery_action\",\"slot\":3,\"input\":\"X\""))) &&
+                       DateTime.UtcNow < customDeadline)
+                    await Task.Delay(20);
+                if (!File.Exists(log) || !File.ReadAllLines(log).Any(line =>
+                        line.Contains("\"type\":\"recovery_action\",\"slot\":3,\"input\":\"X\"")))
+                    throw new Exception("Desktop did not hand off custom X recovery to P2's pad.");
+            }
+            Console.WriteLine("Desktop custom recovery decision reached the assigned bridge pad.");
             try
             {
                 await LiveFollowSession.StartAsync(terrainFollowExe, topology, clients, bridge, plan,
@@ -459,6 +904,26 @@ internal static class ProcessPipelineSmoke
                 false, useWgi: true))
             {
                 wgiBridge.StartReading();
+                var warpPresses = 0;
+                wgiBridge.WarpToMainPressed += () => Interlocked.Increment(ref warpPresses);
+                await wgiBridge.SetWarpToMainSubscriptionAsync(true);
+                var warpDeadline = DateTime.UtcNow.AddSeconds(2);
+                while (Volatile.Read(ref warpPresses) == 0 && DateTime.UtcNow < warpDeadline)
+                    await Task.Delay(10);
+                if (Volatile.Read(ref warpPresses) != 1)
+                    throw new Exception("Warp to MAIN bridge event did not reach the desktop session.");
+                await wgiBridge.SetWarpToMainSubscriptionAsync(false);
+                await wgiBridge.BeginAutoPartyAsync(CancellationToken.None);
+                try
+                {
+                    await wgiBridge.BeginAutoPartyAsync(CancellationToken.None);
+                    throw new Exception("Two menu automations acquired the same bridge.");
+                }
+                catch (InvalidOperationException) { }
+                await wgiBridge.PulseAutoPartyAsync(3, 0x0002, 80, CancellationToken.None);
+                await wgiBridge.EndAutoPartyAsync(CancellationToken.None);
+                await wgiBridge.BeginAutoPartyAsync(CancellationToken.None);
+                await wgiBridge.EndAutoPartyAsync(CancellationToken.None);
             }
             Console.WriteLine("Four public pads and WGI startup arguments checked with a local fake executable.");
             var five = PartyTopologies.ForPlayerCount(5).Single(item => item.Id == "5-main-solo");
@@ -483,5 +948,38 @@ internal static class ProcessPipelineSmoke
         {
             Directory.Delete(directory, recursive: true);
         }
+    }
+
+    private sealed class FakeWarpPort(params LoginWindowFrame[] captures) : IWarpInputPort
+    {
+        private int _next;
+        internal readonly List<(int X, int Y)> RightClicks = [];
+        internal readonly List<(int X, int Y)> LeftClicks = [];
+        internal (int X, int Y)? RestoredCursor;
+        public Task<bool> FocusAsync(CancellationToken token) => Task.FromResult(true);
+        public Task<LoginWindowFrame?> CaptureAsync(CancellationToken token) =>
+            Task.FromResult<LoginWindowFrame?>(_next < captures.Length ? captures[_next++] : null);
+        public bool IsExact(LoginWindowFrame frame) => true;
+        public bool TryGetCursor(out (int X, int Y) cursor) { cursor = (4, 5); return true; }
+        public bool RightClick(int screenX, int screenY)
+        { RightClicks.Add((screenX, screenY)); return true; }
+        public bool Click(int screenX, int screenY)
+        { LeftClicks.Add((screenX, screenY)); return true; }
+        public void RestoreCursor((int X, int Y) cursor) => RestoredCursor = cursor;
+    }
+
+    private sealed class FakePartyWarpControllerPort : IPartyWarpControllerPort
+    {
+        internal int Begins;
+        internal int Ends;
+        internal bool Foreground = true;
+        internal readonly List<(int Pad, ushort Buttons)> Pulses = [];
+        public Task BeginAsync(CancellationToken token) { Begins++; return Task.CompletedTask; }
+        public Task RenewAsync(CancellationToken token) => Task.CompletedTask;
+        public Task EndAsync(CancellationToken token) { Ends++; return Task.CompletedTask; }
+        public Task<bool> FocusAsync(CancellationToken token) => Task.FromResult(Foreground);
+        public bool HasExactForeground() => Foreground;
+        public Task PulseAsync(int pad, ushort buttons, int holdMs, CancellationToken token)
+        { Pulses.Add((pad, buttons)); return Task.CompletedTask; }
     }
 }

@@ -90,6 +90,18 @@ func (e *Engine) SetTerrainBinding(slot int, binding TerrainBinding) error {
 		math.IsInf(binding.CellSize, 0) || binding.CellSize <= 0 {
 		return fmt.Errorf("slot %d: invalid terrain binding", slot)
 	}
+	for otherSlot, other := range e.terrains {
+		if otherSlot == slot || e.slotToPID[otherSlot] != binding.ProcessID {
+			continue
+		}
+		if other.binding != binding {
+			return fmt.Errorf("slot %d: terrain binding differs from slot %d in the same client", slot, otherSlot)
+		}
+		e.terrains[slot] = other
+		e.terrainStable = make(map[int]terrainStability)
+		e.coordinator.ResetFollow()
+		return nil
+	}
 	capture, err := navigation.LoadCandidateCapture(binding.CaptureMetadataFile)
 	if err != nil || capture.ProcessID != binding.ProcessID ||
 		capture.AreaHash != strconv.FormatUint(uint64(binding.AreaHash), 10) || capture.SeenUTC.IsZero() {

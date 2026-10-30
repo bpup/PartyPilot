@@ -29,6 +29,36 @@ type Role struct {
 	PressMS         int               `json:"pressMs"`
 	RoleOffsetMinMS int               `json:"roleOffsetMinMs"`
 	RoleOffsetMaxMS int               `json:"roleOffsetMaxMs"`
+	Logic           RoleLogic         `json:"logic"`
+}
+
+// RoleLogic mirrors the supplied resolver fields that affect default-slot
+// eligibility and read-only target-lock previews.
+type RoleLogic struct {
+	StartHelpingAtHealthPercent   int     `json:"startHelpingAtHealthPercent"`
+	FullAggressionAtHealthPercent int     `json:"fullAggressionAtHealthPercent"`
+	AttackNormal                  bool    `json:"attackNormal"`
+	AttackMagic                   bool    `json:"attackMagic"`
+	AttackRare                    bool    `json:"attackRare"`
+	AttackUnique                  bool    `json:"attackUnique"`
+	MaximumLeashM                 float64 `json:"maximumLeashM"`
+	EngageAroundMain              bool    `json:"engageAroundMain"`
+	TargetLock                    string  `json:"targetLock"`
+}
+
+func (l RoleLogic) Allows(rarity string) bool {
+	switch rarity {
+	case "normal":
+		return l.AttackNormal
+	case "magic":
+		return l.AttackMagic
+	case "rare":
+		return l.AttackRare
+	case "unique":
+		return l.AttackUnique
+	default:
+		return false
+	}
 }
 
 type Combo struct {
@@ -55,22 +85,28 @@ func DefaultProfile() Profile {
 	roles := []Role{
 		{1, "Main DPS", "main-dps", "independent-in-combat",
 			map[string]string{"pack": "primary-clear", "rare": "rare-dps", "boss": "boss-engage", "emergency": "emergency-defence"},
-			map[string]string{"pack": "highest-threat", "rare": "highest-threat", "boss": "unique", "emergency": "none"}, buttons(), 85, 0, 0},
+			map[string]string{"pack": "highest-threat", "rare": "highest-threat", "boss": "unique", "emergency": "none"}, buttons(), 85, 0, 0, RoleLogic{}},
 		{2, "Companion A", "companion-dps", "main",
 			map[string]string{"pack": "companion-rally-clear", "rare": "companion-rally-rare", "boss": "companion-rally-boss", "emergency": "companion-recovery"},
-			map[string]string{"pack": "nearest-valid", "rare": "assigned-target", "boss": "assigned-target", "emergency": "none"}, buttons(), 85, 20, 80},
+			map[string]string{"pack": "nearest-valid", "rare": "assigned-target", "boss": "assigned-target", "emergency": "none"}, buttons(), 85, 20, 80, RoleLogic{}},
 		{3, "Companion B", "companion-dps", "main",
 			map[string]string{"pack": "companion-rally-clear", "rare": "companion-rally-rare", "boss": "companion-rally-boss", "emergency": "companion-recovery"},
-			map[string]string{"pack": "nearest-valid", "rare": "assigned-target", "boss": "assigned-target", "emergency": "none"}, buttons(), 85, 35, 95},
+			map[string]string{"pack": "nearest-valid", "rare": "assigned-target", "boss": "assigned-target", "emergency": "none"}, buttons(), 85, 35, 95, RoleLogic{}},
 		{4, "Support", "support", "main",
 			map[string]string{"pack": "pack-support", "rare": "rare-support", "boss": "boss-support", "emergency": "emergency-support"},
-			map[string]string{"pack": "main-target", "rare": "main-target", "boss": "main-target", "emergency": "party-centre"}, buttons(), 85, 90, 220},
+			map[string]string{"pack": "main-target", "rare": "main-target", "boss": "main-target", "emergency": "party-centre"}, buttons(), 85, 90, 220, RoleLogic{}},
 		{5, "Defence", "defence", "party-centre",
 			map[string]string{"pack": "defensive-standby", "rare": "defensive-setup", "boss": "boss-defence", "emergency": "emergency-defence"},
-			map[string]string{"pack": "party-centre", "rare": "party-centre", "boss": "party-centre", "emergency": "party-centre"}, buttons(), 85, 140, 280},
+			map[string]string{"pack": "party-centre", "rare": "party-centre", "boss": "party-centre", "emergency": "party-centre"}, buttons(), 85, 140, 280, RoleLogic{}},
 		{6, "Rarity Finisher", "rarity-finisher", "main",
 			map[string]string{"pack": "safe-follow", "rare": "finisher-ready", "boss": "finisher-ready", "emergency": "escape-return"},
-			map[string]string{"pack": "none", "rare": "main-target", "boss": "main-target", "emergency": "none"}, buttons(), 85, 180, 360},
+			map[string]string{"pack": "none", "rare": "main-target", "boss": "main-target", "emergency": "none"}, buttons(), 85, 180, 360, RoleLogic{}},
+	}
+	for index := range roles {
+		roles[index].Logic = RoleLogic{StartHelpingAtHealthPercent: 100,
+			FullAggressionAtHealthPercent: 10,
+			AttackNormal:                  true, AttackMagic: true, AttackRare: true, AttackUnique: true,
+			TargetLock: "free"}
 	}
 	skill := func(id string, slot int, condition string, min, max int) Step {
 		return Step{ID: id, Action: "skill", SkillSlot: slot, Condition: condition, DelayMin: min, DelayMax: max}

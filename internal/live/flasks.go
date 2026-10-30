@@ -12,13 +12,111 @@ import (
 // FlaskSession evaluates explicitly bound characters. A menu state must be
 // supplied for each role before any dose is requested.
 type FlaskSession struct {
-	engine   *flask.Engine
-	pidSlot  map[int]int
-	pidRoles map[int][]RoleBinding
-	live     *Engine
-	menuOpen map[int]bool
-	seen     map[int]time.Time
-	maxAge   time.Duration
+	engine         *flask.Engine
+	pidSlot        map[int]int
+	pidRoles       map[int][]RoleBinding
+	live           *Engine
+	menuOpen       map[int]bool
+	seen           map[int]time.Time
+	maxAge         time.Duration
+	custom         []flask.CustomRule
+	combatAt       map[int]time.Time
+	support        []FlaskSupportBinding
+	supportOptions map[int]FlaskSupportBinding
+	ownRules       map[int]flask.Settings
+}
+
+func (session *FlaskSession) ConfigureCustomRules(rules []flask.CustomRule) error {
+	if err := flask.ValidateCustomRules(rules); err != nil {
+		return err
+	}
+	session.custom = append([]flask.CustomRule(nil), rules...)
+	return nil
+}
+
+// ObserveMainAttack records only a validated, unblocked input for a bound role.
+// The target tracks combat per P1/P2, P3/P4, or P5/P6 pair, with a 20-second window.
+func (session *FlaskSession) ObserveMainAttack(slot int, observedAt time.Time, active bool) error {
+	if _, bound := session.menuOpen[slot]; !bound || observedAt.IsZero() {
+		return errors.New("combat input refers to an unbound player or invalid time")
+	}
+	if !active {
+		return nil
+	}
+	if session.combatAt == nil {
+		session.combatAt = make(map[int]time.Time)
+	}
+	pair := (slot - 1) / 2
+	if observedAt.After(session.combatAt[pair]) {
+		session.combatAt[pair] = observedAt
+	}
+	return nil
+}
+
+func (session *FlaskSession) combatRecent(slot int, now time.Time) bool {
+	last := session.combatAt[(slot-1)/2]
+	return !last.IsZero() && !now.Before(last) && now.Sub(last) <= 20*time.Second
+}
+
+type FlaskSupportBinding struct {
+	DrinkerPlayer  int                  `json:"drinker_player"`
+	SupportBuild   bool                 `json:"support_build"`
+	BuildHasNoMana bool                 `json:"build_has_no_mana"`
+	SustainedUse   bool                 `json:"sustained_use"`
+	Monitor        flask.SupportMonitor `json:"monitor"`
+}
+
+func (session *FlaskSession) ConfigureSupport(bindings []FlaskSupportBinding) error {
+	if len(bindings) > 30 {
+		return errors.New("too many flask support bindings")
+	}
+	seen := make(map[[2]int]bool)
+	options := make(map[int]FlaskSupportBinding)
+	for _, binding := range bindings {
+		target := binding.Monitor.TargetPlayer
+		if _, exists := session.menuOpen[binding.DrinkerPlayer]; !exists ||
+			binding.DrinkerPlayer == target {
+			return errors.New("support drinker or target is not a different bound player")
+		}
+		if _, exists := session.menuOpen[target]; !exists {
+			return errors.New("support target is not bound")
+		}
+		if err := flask.ValidateSupportMonitor(binding.Monitor); err != nil {
+			return err
+		}
+		key := [2]int{binding.DrinkerPlayer, target}
+		if seen[key] {
+			return errors.New("duplicate support drinker and target")
+		}
+		if previous, exists := options[binding.DrinkerPlayer]; exists &&
+			(previous.SupportBuild != binding.SupportBuild ||
+				previous.BuildHasNoMana != binding.BuildHasNoMana ||
+				previous.SustainedUse != binding.SustainedUse) {
+			return errors.New("inconsistent drinker flask settings")
+		}
+		options[binding.DrinkerPlayer] = binding
+		seen[key] = true
+	}
+	session.support = append([]FlaskSupportBinding(nil), bindings...)
+	session.supportOptions = options
+	return nil
+}
+
+func (session *FlaskSession) rulesFor(slot int) (flask.Settings, error) {
+	rules, exists := session.ownRules[slot]
+	if !exists {
+		var err error
+		rules, err = flask.ResetProfiles(slot)
+		if err != nil {
+			return flask.Settings{}, err
+		}
+	}
+	if option, exists := session.supportOptions[slot]; exists {
+		rules.SupportBuild = option.SupportBuild
+		rules.BuildHasNoMana = option.BuildHasNoMana
+		rules.SustainedUse = option.SustainedUse
+	}
+	return rules, nil
 }
 
 // NewOrderedFlaskSession binds each local role separately while retaining one
@@ -37,16 +135,19 @@ func NewOrderedFlaskSession(liveEngine *Engine, maxAge time.Duration) (*FlaskSes
 	return session, nil
 }
 
-func NewFlaskSession(roster map[int]int, maxAge time.Duration) (*FlaskSession, error) {
-	if len(roster) < 1 || len(roster) > 3 || maxAge <= 0 {
+func NewFlaskSession(liveEngine *Engine, maxAge time.Duration) (*FlaskSession, error) {
+	if liveEngine == nil || len(liveEngine.pidToRoles) < 1 ||
+		len(liveEngine.pidToRoles) > 3 || maxAge <= 0 {
 		return nil, errors.New("flasks require 1–3 bound clients and positive sample age")
 	}
 	session := &FlaskSession{engine: flask.New(), pidSlot: make(map[int]int),
-		menuOpen: make(map[int]bool), seen: make(map[int]time.Time), maxAge: maxAge}
-	for slot, pid := range roster {
-		if slot < 1 || slot > 6 || pid <= 0 || session.pidSlot[pid] != 0 {
-			return nil, errors.New("invalid or duplicate flask process binding")
+		live: liveEngine, menuOpen: make(map[int]bool), seen: make(map[int]time.Time),
+		maxAge: maxAge}
+	for pid, roles := range liveEngine.pidToRoles {
+		if pid <= 0 || len(roles) != 1 || roles[0].Slot < 1 || roles[0].Slot > 6 {
+			return nil, errors.New("separate-client flasks require one bound role per process")
 		}
+		slot := roles[0].Slot
 		session.pidSlot[pid] = slot
 		session.menuOpen[slot] = true // Unknown is held until the bridge reports a state.
 	}
@@ -76,11 +177,13 @@ func (session *FlaskSession) ObserveSample(sample telemetry.Sample, now time.Tim
 		return nil, nil
 	}
 	session.seen[slot] = sample.SeenUTC
-	if sample.Life == nil || sample.LifeMax == nil || *sample.Life <= 0 || *sample.LifeMax <= 0 ||
-		sample.Mana == nil || sample.ManaMax == nil || *sample.ManaMax <= 0 {
+	if !session.live.flaskActionReady(slot, now) {
 		return nil, nil
 	}
-	rules, err := flask.ResetProfiles(slot)
+	if sample.Life == nil || sample.LifeMax == nil || *sample.Life <= 0 || *sample.LifeMax <= 0 {
+		return nil, nil
+	}
+	rules, err := session.rulesFor(slot)
 	if err != nil {
 		return nil, err
 	}
@@ -89,8 +192,15 @@ func (session *FlaskSession) ObserveSample(sample telemetry.Sample, now time.Tim
 		Mana:         flask.Pool{Current: sample.Mana, Maximum: sample.ManaMax},
 		EnergyShield: flask.Pool{Current: sample.EnergyShield, Maximum: sample.EnergyShieldMax},
 	}
-	// The target's live call passes recovering=false; Ward has no verified live source.
-	return session.engine.Step(slot, sample.SeenUTC, data, rules, session.menuOpen[slot], false)
+	// The target's local and distributed live calls pass recovering=false;
+	// Ward has no verified live source here.
+	activations, err := session.engine.StepWithCustom(slot, sample.SeenUTC, data, rules,
+		session.menuOpen[slot], false, session.custom, session.combatRecent(slot, now))
+	if err != nil {
+		return nil, err
+	}
+	support, err := session.evaluateSupport(now, slot)
+	return append(activations, support...), err
 }
 
 // ObserveOrderedVitals evaluates a complete slow frame only after every local
@@ -109,9 +219,8 @@ func (session *FlaskSession) ObserveOrderedVitals(frame OrderedVitalsFrame,
 	for _, player := range frame.Players {
 		if player.LocalPlayer < 1 || player.LocalPlayer > len(roles) ||
 			player.Life == nil || player.LifeMax == nil ||
-			player.Mana == nil || player.ManaMax == nil ||
 			!validOrderedPool(player.Life, player.LifeMax) || *player.LifeMax <= 0 ||
-			!validOrderedPool(player.Mana, player.ManaMax) || *player.ManaMax <= 0 ||
+			!validOrderedPool(player.Mana, player.ManaMax) ||
 			!validOrderedPool(player.EnergyShield, player.EnergyShieldMax) {
 			return nil, nil
 		}
@@ -134,7 +243,7 @@ func (session *FlaskSession) ObserveOrderedVitals(frame OrderedVitalsFrame,
 		if *player.Life <= 0 {
 			continue
 		}
-		rules, err := flask.ResetProfiles(role.Slot)
+		rules, err := session.rulesFor(role.Slot)
 		if err != nil {
 			return nil, err
 		}
@@ -143,12 +252,48 @@ func (session *FlaskSession) ObserveOrderedVitals(frame OrderedVitalsFrame,
 			Mana:         flask.Pool{Current: player.Mana, Maximum: player.ManaMax},
 			EnergyShield: flask.Pool{Current: player.EnergyShield, Maximum: player.EnergyShieldMax},
 		}
-		requested, err := session.engine.Step(role.Slot, frame.SeenUTC,
-			data, rules, session.menuOpen[role.Slot], false)
+		requested, err := session.engine.StepWithCustom(role.Slot, frame.SeenUTC,
+			data, rules, session.menuOpen[role.Slot], false, session.custom,
+			session.combatRecent(role.Slot, now))
 		if err != nil {
 			return nil, err
 		}
 		activations = append(activations, requested...)
+	}
+	support, err := session.evaluateSupport(now, 0)
+	return append(activations, support...), err
+}
+
+func (session *FlaskSession) evaluateSupport(now time.Time, changedSlot int) ([]flask.Activation, error) {
+	var activations []flask.Activation
+	for _, binding := range session.support {
+		target := binding.Monitor.TargetPlayer
+		if changedSlot != 0 && changedSlot != binding.DrinkerPlayer && changedSlot != target {
+			continue
+		}
+		if !session.live.flaskSupportPairReady(binding.DrinkerPlayer, target, now) {
+			continue
+		}
+		targetVital := session.live.vitals[target]
+		rules, err := session.rulesFor(binding.DrinkerPlayer)
+		if err != nil {
+			return nil, err
+		}
+		data := flask.Vitals{
+			Life: flask.Pool{Current: targetVital.Life, Maximum: targetVital.LifeMax},
+			Mana: flask.Pool{Current: targetVital.Mana, Maximum: targetVital.ManaMax},
+			EnergyShield: flask.Pool{Current: targetVital.EnergyShield,
+				Maximum: targetVital.EnergyShieldMax},
+		}
+		requested, err := session.engine.StepSupport(binding.DrinkerPlayer, now, data,
+			rules, binding.Monitor, session.menuOpen[binding.DrinkerPlayer])
+		if err != nil {
+			return nil, err
+		}
+		for _, activation := range requested {
+			activation.Reason = "support" // The desktop wire carries a bounded reason enum.
+			activations = append(activations, activation)
+		}
 	}
 	return activations, nil
 }

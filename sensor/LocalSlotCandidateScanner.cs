@@ -4,7 +4,7 @@ namespace PartyPilot.Sensor;
 // evidence of the active runtime profile or of this reader's anchor address.
 public static class LocalSlotCandidateScanner
 {
-    private sealed record VectorMatch(long HeaderAddress, long[] Ordered, int Delta,
+    private sealed record VectorMatch(long AreaAddress, long HeaderAddress, long[] Ordered, int Delta,
         int StructOffset, int RawPathEntries, int VisiblePathEntries, bool ContainsObservedLocal);
     private static readonly int[] ReferenceStructOffsets = [1408, 2552];
     private const int ReferenceAreaPointerOffset = 656;
@@ -15,11 +15,13 @@ public static class LocalSlotCandidateScanner
         bool? StatePointerMatchesDataAddress, string[] CandidateAreaAddresses)
     {
         public string? VectorHeaderAddress { get; init; }
+        public string? SelectedAreaAddress { get; init; }
         public int? SelectedStructOffset { get; init; }
         public int? SelectedVectorOffset { get; init; }
         public int RawPathEntries { get; init; }
         public int VisiblePathEntries { get; init; }
         public RawRenderPositionReader.Position?[]? RawPositions { get; init; }
+        public int? RawPositionOffset { get; init; }
         public DateTime? RawPositionsSeenUtc { get; init; }
         public RawRenderPositionReader.LocalComparison? ObservedLocalPositionComparison { get; init; }
         public RawRenderPositionReader.LocalComparison?[]? VisiblePositionComparisons { get; init; }
@@ -70,7 +72,7 @@ public static class LocalSlotCandidateScanner
                         continue;
                     matchingHeaders++;
                     matchedAreas.Add(areaAddress);
-                    matches.Add(new VectorMatch(headerAddress, order, delta, structOffset,
+                    matches.Add(new VectorMatch(areaAddress, headerAddress, order, delta, structOffset,
                         rawPaths, visiblePathsCount, containsObservedLocal));
                 }
             }
@@ -91,6 +93,7 @@ public static class LocalSlotCandidateScanner
             statePointerText, pointerMatchesData, candidateAreas)
         {
             VectorHeaderAddress = $"0x{selected.HeaderAddress:X}",
+            SelectedAreaAddress = $"0x{selected.AreaAddress:X}",
             SelectedStructOffset = selected.StructOffset,
             SelectedVectorOffset = ReferenceVectorOffset + selected.Delta,
             RawPathEntries = selected.RawPathEntries,
@@ -101,8 +104,17 @@ public static class LocalSlotCandidateScanner
 
     public static bool Revalidate(Result candidate, long observedLocalAddress,
         IReadOnlyDictionary<long, string> visiblePaths, Func<long, int, byte[]?> read,
-        Func<long, string?>? readMissingPath = null)
+        Func<long, string?>? readMissingPath = null, long ingameStateAddress = 0)
     {
+        if (ingameStateAddress != 0 && candidate.SelectedAreaAddress != null &&
+            candidate.SelectedAreaAddress == candidate.StatePointerAreaAddress)
+        {
+            if (!Plausible(ingameStateAddress)) return false;
+            var pointerBytes = read(ingameStateAddress + ReferenceAreaPointerOffset, 8);
+            if (pointerBytes is not { Length: 8 } ||
+                $"0x{BitConverter.ToInt64(pointerBytes, 0):X}" != candidate.SelectedAreaAddress)
+                return false;
+        }
         if (candidate.Status is not ("single_slot_candidate" or "two_slot_candidate") ||
             candidate.VectorHeaderAddress is null ||
             !candidate.VectorHeaderAddress.StartsWith("0x", StringComparison.Ordinal) ||
@@ -112,8 +124,10 @@ public static class LocalSlotCandidateScanner
                 System.Globalization.CultureInfo.InvariantCulture, out var headerAddress) ||
             !Plausible(headerAddress) ||
             !TryReadOrder(headerAddress, observedLocalAddress, visiblePaths, read,
-                readMissingPath, out var ordered, out _, out _, out _)) return false;
-        return ordered.Select(value => $"0x{value:X}").SequenceEqual(candidate.OrderedAddresses);
+                readMissingPath, out var ordered, out _, out _, out var containsObservedLocal))
+            return false;
+        return containsObservedLocal == candidate.ContainsObservedLocal &&
+            ordered.Select(value => $"0x{value:X}").SequenceEqual(candidate.OrderedAddresses);
     }
 
     private static IEnumerable<int> SearchDeltas()

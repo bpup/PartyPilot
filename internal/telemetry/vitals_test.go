@@ -26,6 +26,21 @@ func TestDecodeOptionalVitals(t *testing.T) {
 	}
 }
 
+func TestDecodeReservedVitalsAsRawEvidence(t *testing.T) {
+	sample, err := Decode([]byte(`{"ProcessId":123,"SeenUtc":"2026-10-26T00:00:00Z",` +
+		`"X":1,"Y":2,"Z":3,"Life":70,"LifeMax":100,` +
+		`"LifeReservedFlat":10,"LifeReservedPercent":20,` +
+		`"Mana":40,"ManaMax":80,"ManaReservedFlat":5,"ManaReservedPercent":25}`))
+	if err != nil || sample.LifeReservedFlat == nil || *sample.LifeReservedFlat != 10 ||
+		sample.LifeReservedPercent == nil || *sample.LifeReservedPercent != 20 ||
+		sample.ManaReservedFlat == nil || *sample.ManaReservedFlat != 5 ||
+		sample.ManaReservedPercent == nil || *sample.ManaReservedPercent != 25 ||
+		sample.LifeMax == nil || *sample.LifeMax != 100 ||
+		sample.ManaMax == nil || *sample.ManaMax != 80 {
+		t.Fatalf("reserved vitals changed or replaced raw maxima: %+v, %v", sample, err)
+	}
+}
+
 func TestVisiblePlayerDiagnosticsCannotDeclareTwoLocalEntities(t *testing.T) {
 	base := `{"ProcessId":123,"SeenUtc":"2026-10-26T00:00:00Z","X":1,"Y":2,"Z":3`
 	valid := base + `,"VisiblePlayersStatus":"ok","VisiblePlayers":[` +
@@ -115,12 +130,20 @@ func TestLocalSlotCandidateDiagnosticCannotAssertUnobservedOrder(t *testing.T) {
 		t.Fatalf("candidate diagnostic rejected: %+v, %v", got, err)
 	}
 	withPathEvidence := strings.Replace(base, `"MatchingHeaders":1,`,
-		`"MatchingHeaders":1,"SelectedStructOffset":1408,"SelectedVectorOffset":72,`+
+		`"MatchingHeaders":1,"VectorHeaderAddress":"0x1005C8",`+
+			`"SelectedAreaAddress":"0x100000",`+
+			`"SelectedStructOffset":1408,"SelectedVectorOffset":72,`+
 			`"RawPathEntries":1,"VisiblePathEntries":1,`, 1)
 	if detailed, err := Decode([]byte(withPathEvidence)); err != nil ||
+		detailed.LocalSlotCandidates.SelectedAreaAddress != "0x100000" ||
 		detailed.LocalSlotCandidates.RawPathEntries != 1 ||
 		*detailed.LocalSlotCandidates.SelectedVectorOffset != 72 {
 		t.Fatalf("path evidence lost: %+v, %v", detailed.LocalSlotCandidates, err)
+	}
+	wrongArea := strings.Replace(withPathEvidence, `"SelectedAreaAddress":"0x100000"`,
+		`"SelectedAreaAddress":"0x900000"`, 1)
+	if _, err := Decode([]byte(wrongArea)); err == nil {
+		t.Fatal("candidate selected an area absent from the scanned anchors")
 	}
 	withoutObservedAlias := strings.Replace(base, `"0x200000","0x300000"`,
 		`"0x300000","0x400000"`, 1)
@@ -172,6 +195,18 @@ func TestRawLocalSlotPositionsRemainDiagnostic(t *testing.T) {
 		len(got.LocalSlotCandidates.RawPositions) != 2 ||
 		got.LocalSlotCandidates.RawPositions[0].GridX != 10 {
 		t.Fatalf("raw diagnostic positions lost: %+v, %v", got.LocalSlotCandidates, err)
+	}
+	withOffset := strings.Replace(base, `"RawPositionsSeenUtc":`,
+		`"RawPositionOffset":184,"RawPositionsSeenUtc":`, 1)
+	if candidate, err := Decode([]byte(withOffset)); err != nil ||
+		candidate.LocalSlotCandidates == nil ||
+		candidate.LocalSlotCandidates.RawPositionOffset == nil ||
+		*candidate.LocalSlotCandidates.RawPositionOffset != 184 {
+		t.Fatalf("alternate Render position offset was lost: %+v, %v", candidate.LocalSlotCandidates, err)
+	}
+	if _, err := Decode([]byte(strings.Replace(withOffset,
+		`"RawPositionOffset":184`, `"RawPositionOffset":200`, 1))); err == nil {
+		t.Fatal("unknown Render position offset was accepted")
 	}
 	withVisible := strings.Replace(base, `"GridXYDistance":0}}}`,
 		`"GridXYDistance":0},"VisiblePositionComparisons":[{"ObservedX":10,"ObservedY":20,`+

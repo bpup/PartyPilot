@@ -10,8 +10,8 @@ internal static class LeadershipPreferenceSmoke
         {
             var store = new LeadershipPreferenceStore(path);
             var first = store.Load();
-            if (!first.Success || !first.LastFocusedPlayerLeads)
-                throw new Exception("New profiles must use the observed enabled default.");
+            if (!first.Success || first.LastFocusedPlayerLeads)
+                throw new Exception("New profiles must keep P1 as the requested leader.");
             if (!store.Save(false).Success || store.Load() is not { Success: true, LastFocusedPlayerLeads: false })
                 throw new Exception("An explicitly disabled leadership choice did not survive reload.");
             File.WriteAllText(path, "{}");

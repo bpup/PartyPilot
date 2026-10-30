@@ -1,0 +1,962 @@
+[
+  {
+    "area": "MapHeadland",
+    "path": "Metadata/Terrain/Desert/Gates/Ruins/ruin_ruinwall_Cv_MMMM_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapTrenches",
+    "path": "Metadata/Terrain/Maps/Trenches/Tiles/mudburrow_devourertrap_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapWetlands",
+    "path": "Metadata/Terrain/Maps/Wetlands/Tiles/WetlandsArena01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapCanyon",
+    "path": "Metadata/Terrain/Interlude/Part2/Gates/AreaTransitions/GatesEnd_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapSump",
+    "path": "Metadata/Terrain/Maps/Sump/Tiles/SumpArena.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapSpiderWoods",
+    "path": "Metadata/Terrain/Maps/SpiderWoods/Tiles/PlantBoss_02.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapMire",
+    "path": "Metadata/Terrain/Maps/Mire/Tiles/MireArena.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapOasis",
+    "path": "Metadata/Terrain/Desert/Oasis/Features/OasisArena01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapSpring_",
+    "path": "Metadata/Terrain/Maps/Spring/Tiles/SpringArena_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapCaldera",
+    "path": "Metadata/Terrain/Islands/Tiles/Island/Volcano/Goblins/Features/GoblinTownArena_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapRugosa",
+    "path": "Metadata/Terrain/Islands/Tiles/CoralDungeon/Features/SirenDonut_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapFlotsam",
+    "path": "Metadata/Terrain/Maps/Flotsam/Tiles/Features/BossArena_02.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapHiddenGrotto",
+    "path": "Metadata/Terrain/Islands/Tiles/CoralDungeon/Grove/Features/SirenDonut_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapSulphuricCaverns",
+    "path": "Metadata/Terrain/Maps/SulphuricCaverns/Tiles/Features/SulphuricCaverns_Boss_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapVaalFactory",
+    "path": "Metadata/Terrain/Dungeon/Machinarium/BossWall01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapSteppe",
+    "path": "Metadata/Terrain/Maps/Steppe/Tiles/SteppeArena02.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapSteamingSprings",
+    "path": "Metadata/Terrain/Maps/SteamingSprings/Tiles/SteamingSprings_boss_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapAzmerianRanges",
+    "path": "Metadata/Terrain/Interlude/Part3/P3_2/KriarVillage_Bossroom.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapRavine",
+    "path": "Metadata/Terrain/Maps/Ravine/Tiles/RavineArena.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapEpitaph",
+    "path": "Metadata/Terrain/Maps/Epitaph/Tiles/Feature/TombBoss_ArenaFloor.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapCrypt",
+    "path": "Metadata/Terrain/Woods/GraveyardDungeons/Stairs/Stairs_St_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapRustbowl",
+    "path": "Metadata/Terrain/Desert/UnwalkableDune/Titans/Feature/UniqueBoss01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapGrimhaven",
+    "path": "Metadata/Terrain/Maps/GothicCity/Tiles/TombBoss_ArenaFloor.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapHive",
+    "path": "Metadata/Terrain/Maps/Hive/Tiles/HiveArena_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapIceCave",
+    "path": "Metadata/Terrain/Interlude/Part3/P3_4/Cave_Bossroom.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapFrozenFalls",
+    "path": "Metadata/Terrain/Interlude/Part3/P3_3/GlacialTarn_Bossroom.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapWaywardIsle",
+    "path": "Metadata/Terrain/Maps/WaywardIsle/Tiles/BossArena_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapOrnateChambers",
+    "path": "Metadata/Terrain/Interlude/Part2/P2_3/BossRoomTile.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapMineshaft",
+    "path": "Metadata/Terrain/Desert/Foundry/Features/Foundry_Bossroom_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapWillow",
+    "path": "Metadata/Terrain/Maps/Willow/Tiles/arena_flat.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapWillow",
+    "path": "Metadata/Terrain/Maps/Willow/Tiles/arena_flat2.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapChannel",
+    "path": "Metadata/Terrain/Maps/Channel/Tiles/CentrePattern_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapSavanna",
+    "path": "Metadata/Terrain/Desert/UnwalkableDune/DunePlatform/Dune_Platform_Feature_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapRiverhold",
+    "path": "Metadata/Terrain/Interlude/Part1/P1_4/Chaple_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapMarrow",
+    "path": "Metadata/Terrain/Desert/CavePath/Ambush/ambush_CenterHoleLarge_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapCenotes",
+    "path": "Metadata/Terrain/Maps/Cenotes/Tiles/CenotesArena01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapSinkhole",
+    "path": "Metadata/Terrain/Islands/Tiles/CoralDungeon/Thickwall/CoralSinkhole/Arena/YamaArena_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapFortress",
+    "path": "Metadata/Terrain/Desert/BuriedCity/Features/Fortress/fortress_boss_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapBastille",
+    "path": "Metadata/Terrain/Interlude/Part1/P1_5/Holten_Prison_Bossroom.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapBackwash",
+    "path": "Metadata/Terrain/Maps/Backwash/Tiles/BackWashBossPool_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapOvergrown",
+    "path": "Metadata/Terrain/Maps/Overgrown/Tiles/OvergrownRuinArena_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapForge",
+    "path": "Metadata/Terrain/Maps/Forge/Tiles/Titan_Arena_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapRockpools",
+    "path": "Metadata/Terrain/Maps/RockPools/Tiles/BossArena_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapExcavation",
+    "path": "Metadata/Terrain/Islands/Tiles/TwilightIsland/PrecursorRuins/Arena/BossArena_Forge_PCR_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapRupture",
+    "path": "Metadata/Terrain/Maps/Rupture/Tiles/arena_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapSlick",
+    "path": "Metadata/Terrain/Maps/Slick/Tiles/SlickArena01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapSandspit",
+    "path": "Metadata/Terrain/Islands/Tiles/TropicalIsland/Features/Shark_Arena_02.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapCliffside",
+    "path": "Metadata/Terrain/Islands/Tiles/TwilightIsland/Feature/TwilightArena.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapLoftySummit",
+    "path": "Metadata/Terrain/Islands/Tiles/LoftySummit/Boss_Temple_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapPenitentiary",
+    "path": "Metadata/Terrain/Maps/Penitentiary/Tiles/VillageArena_Garrison.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapStronghold",
+    "path": "Metadata/Terrain/Maps/Stronghold/Tiles/OceanEdge/StrongholdArena_02.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapDeserted",
+    "path": "Metadata/Terrain/Desert/Pillars/Base/Arena/bossroom_02.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapSeepage",
+    "path": "Metadata/Terrain/Maps/Seepage/Tiles/SeepageArenaCenter.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapDecay",
+    "path": "Metadata/Terrain/Woods/GrimTangle/feature/BossArena_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapBloomingField",
+    "path": "Metadata/Terrain/Woods/Features_Cairns/CairnBrecon.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapUniqueCastaway",
+    "path": "Metadata/Terrain/Islands/Tiles/Island/JourneysEnd/BossArena_JNE_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapGreenhouse",
+    "path": "Metadata/Terrain/Maps/Greenhouse/Tiles/Greenhouse_Arena_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapReservoir",
+    "path": "Metadata/Terrain/Maps/Reservoir/Tiles/Reservoir_boss.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapAridPlains",
+    "path": "Metadata/Terrain/Maps/AridPlains/Tiles/Arid_Plains_Bossroom.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapUniqueInitialTower",
+    "path": "Metadata/Terrain/Maps/Mesa/Tiles/PeakArena_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapDeforestation",
+    "path": "Metadata/Terrain/Maps/Deforestation/Tiles/Deforestation_Boss_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapSlash",
+    "path": "Metadata/Terrain/Maps/Slash/Tiles/Slash_boss_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapMothersoul_Male_Quest",
+    "path": "Metadata/Terrain/Maps/Mothersoul/Tiles/Male/Features/Forge/Precursor_Forge.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapMothersoul_Female_Quest",
+    "path": "Metadata/Terrain/Maps/Mothersoul/Tiles/Female/Features/Forge/Precursor_Forge.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapMothersoul_Male",
+    "path": "Metadata/Terrain/Maps/Mothersoul/Tiles/Male/Features/Forge/Precursor_Forge.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapMothersoul_Female",
+    "path": "Metadata/Terrain/Maps/Mothersoul/Tiles/Female/Features/Forge/Precursor_Forge.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapSnowfall",
+    "path": "Metadata/Terrain/Maps/Snowfall/Tiles/Snowfall_boss_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapUberBoss_JadeCitadel",
+    "path": "Metadata/Terrain/Islands/Tiles/BloodFever/Features/ArenaCombined/ArenaCombined_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapSunTemple",
+    "path": "Metadata/Terrain/Dungeon/Ziggurat/ziggurat_outerwall_end_stairsup_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapSunTemple",
+    "path": "Metadata/Terrain/Dungeon/Ziggurat/ziggurat_outerwall_end_stairsup_02.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapSunTemple",
+    "path": "Metadata/Terrain/Maps/SunTemple/ZigguratArena_Flip.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapSwampTower",
+    "path": "Metadata/Terrain/Maps/SwampTower/Tiles/Mid_Exterior/SwampTower_OuterWallEnd_StairsUp_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapSwampTower",
+    "path": "Metadata/Terrain/Maps/SwampTower/Tiles/Lower_Exterior/SwampTower_BasementOuterWall_EndStairsUp_02.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapSwampTower",
+    "path": "Metadata/Terrain/Maps/SwampTower/Tiles/CentrePillar_02.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapAugury",
+    "path": "Metadata/Terrain/Jungle/SnakePit/MapAugury/AuguryArena.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapSanctuary",
+    "path": "Metadata/Terrain/Maps/Sanctuary/Tiles/BossRoomTile.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapPlantation",
+    "path": "Metadata/Terrain/Maps/Plantation/Tiles/Plantaton_Boss_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapNecropolis",
+    "path": "Metadata/Terrain/Maps/Necropolis/Tiles/Boss_ArenaFloor.tdt",
+    "icon": 119
+  },
+  {
+    "area": "MapAlpineRidge",
+    "path": "Metadata/Terrain/Maps/AlpineRidge/tiles/Features/Boss_room_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/AreaTransitions/FallenTreeSlash_out.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/AreaTransitions/FallenTreeWoods_out.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/AreaTransitions/FallenTreeSlash_in.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/AreaTransitions/FallenTreeAreaTransition_out.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/AreaTransitions/Clearfell_OldForest_Transition_01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/Slash/HagWitchArena_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/Slash/HagWitchArena_02.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/Slash/HagWitchArena_03.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/Slash/HagWitchArena_04.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/Slash/HagWitchArena_05.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/Slash/HagWitchArena_06.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G1_2",
+    "path": "Metadata/Terrain/Woods/Slash/HagWitchArena_07.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G1_3",
+    "path": "Metadata/Terrain/Woods/Mudburrow/Curve/curve_Cc_v01_03.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G1_4",
+    "path": "Metadata/Terrain/Woods/AreaTransitions/OldForestToGrimTangle_02_metatile.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G1_4",
+    "path": "Metadata/Terrain/Woods/GrimTangle/areatransitions/GrimtangleTransitionDown_02.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G1_4",
+    "path": "Metadata/Terrain/Woods/AreaTransitions/redvale_transition_02_oldforest.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G1_6",
+    "path": "Metadata/Terrain/Woods/GrimTangle/areatransitions/GrimtangleTransitionUp_02.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G1_7",
+    "path": "Metadata/Terrain/Woods/Graveyard/Feature/mausoleum_01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G1_7",
+    "path": "Metadata/Terrain/Woods/Graveyard/Feature/tomb_02.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G1_7",
+    "path": "Metadata/Terrain/Woods/Graveyard/Feature/tomb_01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G1_7",
+    "path": "Metadata/Terrain/Woods/Graveyard/Feature/GraveyardArena.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G1_8",
+    "path": "Metadata/Terrain/Woods/GraveyardDungeons/Feature/MausoleumBoss_ArenaFloor.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G1_9",
+    "path": "Metadata/Terrain/Woods/GraveyardDungeons/Feature/TombBoss_ArenaFloor.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G1_11",
+    "path": "Metadata/Terrain/Woods/Features_Cairns/CairnBrecon.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G1_11",
+    "path": "Metadata/Terrain/Woods/AreaTransitions/CanopyRoadTransition_01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G1_12",
+    "path": "Metadata/Terrain/Woods/Canopy/Features/CanopyArena.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G1_13_1",
+    "path": "Metadata/Terrain/Woods/Village/RoadFields/Feature/RoadVillage_Areatransition.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G1_13_1",
+    "path": "Metadata/Terrain/Woods/Village/RoadFields/Feature/YurtUna_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G1_13_2",
+    "path": "Metadata/Terrain/Woods/Village/Huts/VillageArena_02.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G1_14",
+    "path": "Metadata/Terrain/Woods/Manor/CourtyardFeatures/Manor_GrandEntrance_Transition_01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G1_15",
+    "path": "Metadata/Terrain/Woods/Manor/Features/Chapel_boss_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G1_15",
+    "path": "Metadata/Terrain/Woods/Manor/Interior/Features/ThickWall_StairsDown_Cc_01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G1_15",
+    "path": "Metadata/Terrain/Woods/Manor/Features/ArenaTop_01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G2_1",
+    "path": "Metadata/Terrain/Desert/TraidingTown/TradingTownRearCart_01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G2_1",
+    "path": "Metadata/Terrain/Desert/UnwalkableDune/DunePlatform/Dune_Platform_Feature_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G2_10_1",
+    "path": "Metadata/Terrain/Desert/Quarry/Features/MiningShaftCrane.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G2_10_2",
+    "path": "Metadata/Terrain/Desert/Foundry/Features/Foundry_Bossroom_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G2_2",
+    "path": "Metadata/Terrain/Desert/CavePath/Features/Thickwall_Cave_Entrance.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G2_2",
+    "path": "Metadata/Terrain/Desert/Maraketh/TraitorsPassage/TraitorsPassage_Arena_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G2_3",
+    "path": "Metadata/Terrain/Desert/Gates/Features/boss_arena.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G2_3",
+    "path": "Metadata/Terrain/Desert/UnwalkableBorder/Dunes/CcMM_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G2_6",
+    "path": "Metadata/Terrain/Desert/UnwalkableDune/Titans/Feature/titan_valley_boss_01.tdt",
+    "icon": 125
+  },
+  {
+    "area": "G2_6",
+    "path": "Metadata/Terrain/Desert/UnwalkableDune/Titans/Feature/TitanQuest02.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G2_6",
+    "path": "Metadata/Terrain/Desert/UnwalkableDune/Titans/Feature/TitanQuest01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G2_6",
+    "path": "Metadata/Terrain/Desert/UnwalkableDune/Titans/Feature/TitanQuest03.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G2_6",
+    "path": "Metadata/Terrain/Desert/UnwalkableDune/Titans/Feature/GrottoExit01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G2_7",
+    "path": "Metadata/Terrain/Desert/CaveTitans/Features/Titan_Arena_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G2_4_1",
+    "path": "Metadata/Terrain/Desert/BuriedCity/Features/Keth_Stairs_RuinEntrance.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G2_4_1",
+    "path": "Metadata/Terrain/Desert/BuriedCity/Features/QueenKabalaRoom_01_meta01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G2_4_2",
+    "path": "Metadata/Terrain/Desert/Maraketh/Features/Thickwall_StairsDown_01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G2_4_3",
+    "path": "Metadata/Terrain/Desert/Maraketh/Features/Thickwall_BossTransition_01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G2_5_1",
+    "path": "Metadata/Terrain/Desert/Badlands/Features/AreaTransition_BadlandsToPits_01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G2_5_2",
+    "path": "Metadata/Terrain/Desert/Badlands/Features/MastodonArena_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G2_8",
+    "path": "Metadata/Terrain/Desert/Pillars/Base/PillarBaseWide_StairsUp_01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G2_9_1",
+    "path": "Metadata/Terrain/Desert/Pillars/Upper/PillarUpper_StairsUp_01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G2_9_2",
+    "path": "Metadata/Terrain/Desert/Pillars/Tops/PillarTopWide_Shrine_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G2_9_2",
+    "path": "Metadata/Terrain/Desert/Pillars/Tops/PillarArena.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G2_12_1",
+    "path": "Metadata/Terrain/Desert/FarudinCarts/SmallCart/SmallCartEnd_St_01_nooverlay.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G2_12_2",
+    "path": "Metadata/Terrain/Desert/FarudinCarts/Features/DreadnoughtArena_03.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G3_1",
+    "path": "Metadata/Terrain/Jungle/SandsweptMarsh/marsh_exit.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G3_3",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/Feature/Jungle_WaterwayAltar_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G3_3",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/AreaTransitions/JungleDepths_to_SnakePit.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G3_3",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/AreaTransitions/JungleToWaterways_01_reverse.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G3_2_1",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/Bog/AreaTransition/EntranceBog_02.tdt",
+    "icon": 125
+  },
+  {
+    "area": "G3_2_1",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/AreaTransitions/JungleDepths_to_ChimeralWetlands.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G3_7",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/Bog/Features/BurningWitchArena.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G3_5",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/AreaTransitions/Observatory_Entrance_01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G3_6_1",
+    "path": "Metadata/Terrain/Dungeon/NextFeatures/dungeon_door_thin_boss.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G3_6_1",
+    "path": "Metadata/Terrain/Dungeon/NextFeatures/Machinarium_Entrance_02.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G3_6_2",
+    "path": "Metadata/Terrain/Dungeon/Machinarium/BossWall01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G3_6_2",
+    "path": "Metadata/Terrain/Jungle/VaalInterior/VaalGenerator/VaalGenerator.tdt",
+    "icon": 125
+  },
+  {
+    "area": "G3_2_2",
+    "path": "Metadata/Terrain/Jungle/JungleExterior/Feature/Jungle_WaterwaysLever_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G3_8",
+    "path": "Metadata/Terrain/Jungle/AreaTransitions/SunkenCityPresent/jungle_pyramid_entrance_atziri_03.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G3_11",
+    "path": "Metadata/Terrain/Jungle/Aggorat/Outerwall/AggoratOuterArena_Present_02.tdt",
+    "icon": 125
+  },
+  {
+    "area": "G3_11",
+    "path": "Metadata/Terrain/Jungle/Aggorat/Features/AggoratArena_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G3_12",
+    "path": "Metadata/Terrain/Dungeon/Ziggurat/ziggurat_outerwall_end_stairsup_02.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G3_12",
+    "path": "Metadata/Terrain/Dungeon/Ziggurat/ziggurat_outerwall_end_stairsup_01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G3_14",
+    "path": "Metadata/Terrain/Jungle/AreaTransitions/SunkenCity/jungle_pyramid_entrance_atziri_01_metatile.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G3_16",
+    "path": "Metadata/Terrain/Jungle/Aggorat/Outerwall/AggoratOuterArena_02.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G3_16",
+    "path": "Metadata/Terrain/Jungle/Aggorat/Features/DoryanisSanctumEntrance_01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G3_17",
+    "path": "Metadata/Terrain/Dungeon/DoryanisSanctum/Features/Doryani_Arena_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G4_1_1",
+    "path": "Metadata/Terrain/Islands/Tiles/Island/Volcano/Goblins/Features/GoblinTownArena_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G4_1_1",
+    "path": "Metadata/Terrain/Islands/Tiles/Island/Volcano/Goblins/Features/GoblinMinesEntrance_01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G4_1_2",
+    "path": "Metadata/Terrain/Islands/Tiles/CoralDungeon/Features/GoblinCaveArena/GoblinCaveArena_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G4_4_1",
+    "path": "Metadata/Terrain/Islands/Tiles/CoralDungeon/Thickwall/CoralSinkhole/Arena/SudokuArena_03.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G4_4_1",
+    "path": "Metadata/Terrain/Islands/Tiles/CoralDungeon/Features/Spiral_Eighths/Sinkhole_Spiral_QuarterHeight_WalkableHalf_01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G4_4_2",
+    "path": "Metadata/Terrain/Islands/Tiles/CoralDungeon/Thickwall/CoralSinkhole/Arena/YamaArena_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G4_2_2",
+    "path": "Metadata/Terrain/Islands/Tiles/Island/JourneysEnd/BossArena_02.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G4_3_2",
+    "path": "Metadata/Terrain/Islands/Tiles/CoralDungeon/Features/SirenDonut_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G4_7",
+    "path": "Metadata/Terrain/Islands/Tiles/Island/ShrikeIsland/ShrikeIslandArena.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G4_3_1",
+    "path": "Metadata/Terrain/Islands/Tiles/TropicalIsland/Features/Shark_Arena_02.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G4_5_1",
+    "path": "Metadata/Terrain/Islands/Tiles/Prison/Features/dungeon_prison_entrance_down_v01_01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "G4_5_1",
+    "path": "Metadata/Terrain/Islands/Tiles/Prison/Features/dungeon_prison_chapel_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G4_5_2",
+    "path": "Metadata/Terrain/Islands/Tiles/Prison/Features/LowerPrison/PrisonerArena01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G4_10",
+    "path": "Metadata/Terrain/Islands/Tiles/TwilightIsland/PrecursorRuins/Arena/BossArena_Forge_PCR_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "G4_11_2",
+    "path": "Metadata/Terrain/Islands/Tiles/BloodFever/Features/ArenaCombined/ArenaCombined_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "P1_2",
+    "path": "Metadata/Terrain/Maps/UniqueMegalith/Tiles/RitualClearing02.tdt",
+    "icon": 119
+  },
+  {
+    "area": "P1_5",
+    "path": "Metadata/Terrain/Interlude/Part1/P1_5/Holten_Prison_Bossroom.tdt",
+    "icon": 119
+  },
+  {
+    "area": "P1_6",
+    "path": "Metadata/Terrain/Maps/Derelict/Tiles/StairsUp_01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "P1_6",
+    "path": "Metadata/Terrain/Maps/Derelict/Tiles/HoltenBossStairsDown_01.tdt",
+    "icon": 122
+  },
+  {
+    "area": "P1_6",
+    "path": "Metadata/Terrain/Maps/Derelict/Tiles/Holton_Bossroom.tdt",
+    "icon": 119
+  },
+  {
+    "area": "P2_1",
+    "path": "Metadata/Terrain/Interlude/Part2/P2_1/forge_entrance.tdt",
+    "icon": 119
+  },
+  {
+    "area": "P2_1",
+    "path": "Metadata/Terrain/Interlude/Part2/P2_1/Salt_Waste_Bossroom.tdt",
+    "icon": 119
+  },
+  {
+    "area": "P2_3",
+    "path": "Metadata/Terrain/Interlude/Part2/P2_3/BossRoomTile.tdt",
+    "icon": 119
+  },
+  {
+    "area": "P2_5",
+    "path": "Metadata/Terrain/Interlude/Part2/Gates/AreaTransitions/GatesEnd_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "P2_6",
+    "path": "Metadata/Terrain/Maps/SevenWaters/Tiles/Feature/Arena_Transition_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "P2_7",
+    "path": "Metadata/Terrain/Interlude/Part2/P2_7/Qimah_bossroom.tdt",
+    "icon": 119
+  },
+  {
+    "area": "P3_2",
+    "path": "Metadata/Terrain/Interlude/Part3/P3_2/KriarVillage_Bossroom.tdt",
+    "icon": 119
+  },
+  {
+    "area": "P3_3",
+    "path": "Metadata/Terrain/Interlude/Part3/P3_3/GlacialTarn_Bossroom.tdt",
+    "icon": 122
+  },
+  {
+    "area": "P3_3",
+    "path": "Metadata/Terrain/Maps/FrozenFalls/Tiles/Cove_01.tdt",
+    "icon": 119
+  },
+  {
+    "area": "P3_6",
+    "path": "Metadata/Terrain/Interlude/Part3/P3_6/Ravine_Bossroom.tdt",
+    "icon": 119
+  },
+  {
+    "area": "P3_7",
+    "path": "Metadata/Terrain/Interlude/Part3/P3_7/BloodVault_Bossroom.tdt",
+    "icon": 119
+  },
+  {
+    "area": "P3_4",
+    "path": "Metadata/Terrain/Interlude/Part3/P3_4/Cave_Bossroom.tdt",
+    "icon": 119
+  }
+]

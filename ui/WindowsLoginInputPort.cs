@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace PartyPilot.Desktop;
 
-internal sealed class WindowsLoginInputPort : ILoginInputPort
+internal sealed class WindowsLoginInputPort : ILoginInputPort, IWarpInputPort
 {
     private readonly LaunchedClient _client;
 
@@ -47,6 +47,15 @@ internal sealed class WindowsLoginInputPort : ILoginInputPort
             !PoeChatInviteService.IsExactForeground(_client)) return false;
         MouseEvent(2, 0, 0, 0, 0);
         MouseEvent(4, 0, 0, 0, 0);
+        return PoeChatInviteService.IsExactForeground(_client);
+    }
+
+    public bool RightClick(int screenX, int screenY)
+    {
+        if (!PoeChatInviteService.IsExactForeground(_client) || !SetCursorPos(screenX, screenY) ||
+            !PoeChatInviteService.IsExactForeground(_client)) return false;
+        MouseEvent(8, 0, 0, 0, 0);
+        MouseEvent(16, 0, 0, 0, 0);
         return PoeChatInviteService.IsExactForeground(_client);
     }
 

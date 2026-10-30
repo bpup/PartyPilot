@@ -31,15 +31,17 @@ type Report struct {
 // FastMotionReport contains measurements only. A nearby ordinary sample does
 // not establish that either local slot belongs to the intended game player.
 type FastMotionReport struct {
-	Frames                int           `json:"frames"`
-	CompleteFrames        int           `json:"completeFrames"`
-	AreaChanges           int           `json:"areaChanges"`
-	SourceTimeRegressions int           `json:"sourceTimeRegressions"`
-	SlotMovementFrames    [2]int        `json:"slotMovementFrames"`
-	OrdinaryMatches       int           `json:"ordinaryMatches"`
-	UnmappedLocalFrames   int           `json:"unmappedLocalFrames"`
-	NearestGapMax         time.Duration `json:"nearestGapMaxNanoseconds"`
-	ObservedWorldErrorMax float64       `json:"observedWorldErrorMax"`
+	Frames                     int           `json:"frames"`
+	CompleteFrames             int           `json:"completeFrames"`
+	AreaChanges                int           `json:"areaChanges"`
+	VectorChanges              int           `json:"vectorChanges"`
+	MissingVectorIdentitySteps int           `json:"missingVectorIdentitySteps"`
+	SourceTimeRegressions      int           `json:"sourceTimeRegressions"`
+	SlotMovementFrames         [2]int        `json:"slotMovementFrames"`
+	OrdinaryMatches            int           `json:"ordinaryMatches"`
+	UnmappedLocalFrames        int           `json:"unmappedLocalFrames"`
+	NearestGapMax              time.Duration `json:"nearestGapMaxNanoseconds"`
+	ObservedWorldErrorMax      float64       `json:"observedWorldErrorMax"`
 }
 
 type ordinaryAnchor struct {
@@ -159,7 +161,7 @@ func (a *Audit) Observe(s telemetry.Sample) {
 func (a *Audit) ObserveFast(f live.OrderedClientFrame) bool {
 	if f.ProcessID <= 0 || f.SeenUTC.IsZero() || f.PlayerOrderReliable ||
 		f.PlayerOrderSource != "unverified_exilecore_local_slot_candidate" ||
-		f.CoordinateSpace != "world" || len(f.Players) > 2 {
+		f.CoordinateSpace != "world" || len(f.Players) > 2 || !finitePlayers(f.Players) {
 		return false
 	}
 	a.fast[f.ProcessID] = append(a.fast[f.ProcessID], f)
@@ -192,12 +194,21 @@ func summarizeFast(frames []live.OrderedClientFrame, anchors []ordinaryAnchor) *
 		r.CompleteFrames++
 		if i > 0 && f.AreaHash == frames[i-1].AreaHash &&
 			!f.SeenUTC.Before(frames[i-1].SeenUTC) && f.TickMS >= frames[i-1].TickMS &&
-			len(frames[i-1].Players) == 2 &&
-			frames[i-1].Players[0].LocalPlayer == 1 && frames[i-1].Players[1].LocalPlayer == 2 {
-			for slot := 0; slot < 2; slot++ {
-				p := frames[i-1].Players[slot]
-				if math.Hypot(f.Players[slot].X-p.X, f.Players[slot].Y-p.Y) > 0 {
-					r.SlotMovementFrames[slot]++
+			completeTwoSlots(frames[i-1]) {
+			previous := frames[i-1]
+			switch {
+			case !hasVectorIdentity(f) || !hasVectorIdentity(previous):
+				r.MissingVectorIdentitySteps++
+			case f.AreaInstanceAddress != previous.AreaInstanceAddress ||
+				f.VectorHeaderAddress != previous.VectorHeaderAddress ||
+				!slices.Equal(f.OrderedAddresses, previous.OrderedAddresses):
+				r.VectorChanges++
+			default:
+				for slot := 0; slot < 2; slot++ {
+					p := previous.Players[slot]
+					if math.Hypot(f.Players[slot].X-p.X, f.Players[slot].Y-p.Y) > 0 {
+						r.SlotMovementFrames[slot]++
+					}
 				}
 			}
 		}

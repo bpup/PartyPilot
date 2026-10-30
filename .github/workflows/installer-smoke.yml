@@ -1,0 +1,114 @@
+name: Installer smoke
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Installer version (for a release build)
+        required: false
+        type: string
+      publish_release:
+        description: Publish the checked installer as a prerelease
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - name: Build one Windows installer
+        shell: pwsh
+        env:
+          BUILD_VERSION: ${{ inputs.release_version || format('0.0.0-ci.{0}', github.run_number) }}
+        run: |
+          python scripts/build_installer.py --version "$env:BUILD_VERSION"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install and uninstall silently
+        shell: pwsh
+        run: |
+          $setup = @(Get-ChildItem installer/out/PartyPilot-Setup-*.exe)
+          if ($setup.Count -ne 1) { throw "Expected one setup executable" }
+          $target = Join-Path $env:RUNNER_TEMP "PartyPilotInstalled"
+          $install = Start-Process -FilePath $setup[0].FullName -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$target"
+          ) -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Installer returned $($install.ExitCode)" }
+          foreach ($file in @(
+            "desktop/PartyPilot.Desktop.exe",
+            "bridge/PartyPilot.Bridge.exe",
+            "probe/PartyPilot.Probe.exe",
+            "PartyPilot-LiveFollow.exe",
+            "PartyPilot-ClientLaunch.exe",
+            "native/PartyPilot.PrivateSlots.dll",
+            "native/PartyPilot.MultiInstance.dll"
+          )) {
+            if (-not (Test-Path (Join-Path $target $file))) { throw "Installed file missing: $file" }
+          }
+          $shortcuts = @(
+            (Join-Path $env:APPDATA "Microsoft/Windows/Start Menu/Programs/PartyPilot/PartyPilot.lnk"),
+            (Join-Path ([Environment]::GetFolderPath("Desktop")) "PartyPilot.lnk")
+          )
+          $shell = New-Object -ComObject WScript.Shell
+          foreach ($shortcut in $shortcuts) {
+            if (-not (Test-Path $shortcut)) { throw "Shortcut missing: $shortcut" }
+            $link = $shell.CreateShortcut($shortcut)
+            if ($link.TargetPath -ne (Join-Path $target "desktop/PartyPilot.Desktop.exe")) {
+              throw "Shortcut points to a different program: $shortcut"
+            }
+          }
+          $uninstall = Join-Path $target "unins000.exe"
+          if (-not (Test-Path $uninstall)) { throw "Uninstaller missing" }
+          $removed = Start-Process -FilePath $uninstall -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          ) -Wait -PassThru
+          if ($removed.ExitCode -ne 0) { throw "Uninstaller returned $($removed.ExitCode)" }
+          if (Test-Path (Join-Path $target "desktop/PartyPilot.Desktop.exe")) { throw "Uninstall left the desktop program" }
+      - name: Save installer for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: PartyPilot-Setup-preview
+          path: installer/out/PartyPilot-Setup-*.exe
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_release == true
+    needs: installer
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: PartyPilot-Setup-preview
+          path: release-asset
+      - name: Publish checked prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.release_version }}
+          TARGET_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_VERSION" == 0.1.0-beta.87 ]]
+          expected="release-asset/PartyPilot-Setup-$RELEASE_VERSION.exe"
+          test -f "$expected"
+          test "$(find release-asset -type f | wc -l)" -eq 1
+          test "$(head -c 2 "$expected")" = MZ
+          gh release create "v$RELEASE_VERSION" "$expected" \
+            --target "$TARGET_SHA" --title "PartyPilot beta.87" \
+            --notes-file .github/release-notes/beta.87.md --prerelease

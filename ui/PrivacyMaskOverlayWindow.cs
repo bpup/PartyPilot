@@ -14,6 +14,7 @@ public sealed class PrivacyMaskOverlayWindow : Window
     private readonly IReadOnlyList<PrivacyMaskBox> _boxes;
     private readonly bool _autoNameplates;
     private readonly int _clientNumber;
+    private readonly bool _renderOnly;
     private readonly PrivacyNameplateTracker _tracker = new();
     private IReadOnlyList<PrivacyMaskBox> _activeBoxes;
     private IReadOnlyList<PrivacyMaskBox> _autoBoxes = [];
@@ -33,12 +34,13 @@ public sealed class PrivacyMaskOverlayWindow : Window
     public event Action? TargetLost;
 
     public PrivacyMaskOverlayWindow(LaunchedClient client, IReadOnlyList<PrivacyMaskBox> boxes,
-        bool autoNameplates = false, int clientNumber = 1)
+        bool autoNameplates = false, int clientNumber = 1, bool renderOnly = false)
     {
         _client = client;
         _boxes = boxes;
         _autoNameplates = autoNameplates;
         _clientNumber = clientNumber;
+        _renderOnly = renderOnly;
         _activeBoxes = boxes;
         Title = $"PartyPilot Privacy · {client.Pid}";
         SystemDecorations = SystemDecorations.None;
@@ -54,7 +56,7 @@ public sealed class PrivacyMaskOverlayWindow : Window
         SizeChanged += (_, _) => Draw();
         Opened += (_, _) =>
         {
-            if (!OperatingSystem.IsWindows()) return;
+            if (!OperatingSystem.IsWindows() || _renderOnly) return;
             EnableClickThrough();
             _timer.Start();
             SyncTarget();

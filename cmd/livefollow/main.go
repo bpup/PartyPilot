@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -25,6 +26,25 @@ import (
 )
 
 type sources map[int]string
+type logStartOffsets map[int]int64
+
+func (offsets *logStartOffsets) String() string { return fmt.Sprint(map[int]int64(*offsets)) }
+func (offsets *logStartOffsets) Set(value string) error {
+	slotText, offsetText, ok := strings.Cut(value, "=")
+	slot, slotErr := strconv.Atoi(slotText)
+	offset, offsetErr := strconv.ParseInt(offsetText, 10, 64)
+	if !ok || slotErr != nil || offsetErr != nil || slot < 1 || slot > 3 || offset < 0 {
+		return errors.New("log start offset must be CLIENT=nonnegative byte offset")
+	}
+	if *offsets == nil {
+		*offsets = make(logStartOffsets)
+	}
+	if _, exists := (*offsets)[slot]; exists {
+		return fmt.Errorf("duplicate log start offset for client %d", slot)
+	}
+	(*offsets)[slot] = offset
+	return nil
+}
 
 type memberNames map[int]string
 
@@ -33,6 +53,114 @@ type followTargets map[int]int
 type stopDistances map[int]float64
 
 type roleBindings []live.RoleBinding
+
+func loadFlaskSupportBindings(path string) ([]live.FlaskSupportBinding, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	var document struct {
+		Bindings []live.FlaskSupportBinding `json:"bindings"`
+	}
+	decoder := json.NewDecoder(file)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&document); err != nil {
+		return nil, err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return nil, errors.New("support file has trailing data")
+	}
+	if len(document.Bindings) == 0 {
+		return nil, errors.New("support file needs at least one binding")
+	}
+	return document.Bindings, nil
+}
+
+func loadFlaskRuleBindings(path string) ([]live.FlaskRuleBinding, error) {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(contents, &raw); err != nil {
+		return nil, err
+	}
+	if len(raw) != 1 || raw["players"] == nil {
+		return nil, errors.New("flask rule file requires only players")
+	}
+	var entries []map[string]json.RawMessage
+	if err := json.Unmarshal(raw["players"], &entries); err != nil || len(entries) == 0 {
+		return nil, errors.New("flask rule file needs player entries")
+	}
+	fields := []string{"player", "life_enabled", "life_trigger", "life_cooldown_ms",
+		"emergency", "life_min_missing", "skip_recovering", "mana_enabled",
+		"mana_trigger", "mana_cooldown_ms", "mana_min_missing",
+		"chaos_inoculation", "combined_defence"}
+	for _, entry := range entries {
+		if len(entry) != len(fields) {
+			return nil, errors.New("flask rule entry has missing or unknown fields")
+		}
+		for _, field := range fields {
+			if entry[field] == nil {
+				return nil, errors.New("flask rule entry has missing fields")
+			}
+		}
+	}
+	var document struct {
+		Players []live.FlaskRuleBinding `json:"players"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(contents))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&document); err != nil {
+		return nil, err
+	}
+	return document.Players, nil
+}
+
+func loadFlaskCustomRules(path string) ([]flask.CustomRule, error) {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(contents, &raw); err != nil {
+		return nil, err
+	}
+	if len(raw) != 1 || raw["rules"] == nil {
+		return nil, errors.New("custom flask file requires only rules")
+	}
+	var entries []map[string]json.RawMessage
+	if err := json.Unmarshal(raw["rules"], &entries); err != nil || entries == nil {
+		return nil, errors.New("custom flask file needs a rules array")
+	}
+	fields := []string{"id", "enabled", "player", "resource", "comparator",
+		"threshold", "cooldown_seconds", "priority", "min_deficit", "dependency",
+		"combat_only", "input"}
+	for _, entry := range entries {
+		if len(entry) != len(fields) {
+			return nil, errors.New("custom flask rule has missing or unknown fields")
+		}
+		for _, field := range fields {
+			if entry[field] == nil {
+				return nil, errors.New("custom flask rule has missing fields")
+			}
+		}
+	}
+	var document struct {
+		Rules []flask.CustomRule `json:"rules"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(contents))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&document); err != nil {
+		return nil, err
+	}
+	if err := flask.ValidateCustomRules(document.Rules); err != nil {
+		return nil, err
+	}
+	return document.Rules, nil
+}
 
 func parseMirrorBPlayers(value string, roster map[int]int) (map[int]bool, error) {
 	allowed := make(map[int]bool)
@@ -242,9 +370,12 @@ func verifyProcessBindings(roster map[int]int, paths map[int]string) error {
 }
 
 type frame struct {
-	Focused  int                    `json:"focused"`
-	Commands map[int]follow.Command `json:"commands"`
-	Flasks   []flask.Activation     `json:"flasks,omitempty"`
+	Focused          int                    `json:"focused"`
+	ManualWarpToMain bool                   `json:"manual_warp_to_main,omitempty"`
+	Commands         map[int]follow.Command `json:"commands"`
+	Flasks           []flask.Activation     `json:"flasks,omitempty"`
+	Handoffs         []live.HandoffRequest  `json:"handoffs,omitempty"`
+	Positions        []live.PositionWitness `json:"positions,omitempty"`
 }
 
 type menuInput struct {
@@ -254,6 +385,7 @@ type menuInput struct {
 	LeftX        float64 `json:"left_x"`
 	LeftY        float64 `json:"left_y"`
 	BDown        bool    `json:"b_down"`
+	AttackActive *bool   `json:"attack_active"`
 	Blocked      bool    `json:"blocked"`
 	ObservedAtMS int64   `json:"observed_at_unix_ms"`
 	Err          error   `json:"-"`
@@ -266,7 +398,8 @@ func readMenuInput(reader io.Reader, output chan<- menuInput) {
 		var input menuInput
 		if err := json.Unmarshal(scanner.Bytes(), &input); err != nil ||
 			(input.Type != "menu_guard" && input.Type != "manual_focus" &&
-				input.Type != "follow_pause" && input.Type != "main_input") {
+				input.Type != "follow_pause" && input.Type != "main_input" &&
+				input.Type != "warp_main") {
 			output <- menuInput{Err: errors.New("invalid live control command")}
 			return
 		}
@@ -293,7 +426,7 @@ func applyMenuInput(session *live.FlaskSession, engine *live.Engine, input <-cha
 			}
 			switch command.Type {
 			case "main_input":
-				if command.ObservedAtMS <= 0 {
+				if command.ObservedAtMS <= 0 || command.AttackActive == nil {
 					return errors.New("invalid main input control")
 				}
 				observedAt := time.UnixMilli(command.ObservedAtMS).UTC()
@@ -306,9 +439,16 @@ func applyMenuInput(session *live.FlaskSession, engine *live.Engine, input <-cha
 				if !engine.ObserveMainInput(live.MainInput{
 					Slot: command.Slot, LeftX: command.LeftX, LeftY: command.LeftY,
 					BDown: command.BDown, Blocked: command.Blocked,
-					ObservedAt: observedAt,
+					AttackActive: *command.AttackActive,
+					ObservedAt:   observedAt,
 				}, now) {
 					return errors.New("invalid main input control")
+				}
+				if session != nil {
+					if err := session.ObserveMainAttack(command.Slot, observedAt,
+						*command.AttackActive && !command.Blocked); err != nil {
+						return err
+					}
 				}
 			case "menu_guard":
 				if session == nil {
@@ -327,6 +467,14 @@ func applyMenuInput(session *live.FlaskSession, engine *live.Engine, input <-cha
 					return errors.New("invalid follow pause control")
 				}
 				engine.SetFollowPaused(command.State == "paused")
+			case "warp_main":
+				if !allowFollowPause || command.Slot != 0 ||
+					(command.State != "start" && command.State != "cancel") {
+					return errors.New("invalid manual warp control")
+				}
+				if err := engine.SetManualWarpToMain(command.State == "start"); err != nil {
+					return err
+				}
 			default:
 				return errors.New("invalid live control command")
 			}
@@ -336,8 +484,34 @@ func applyMenuInput(session *live.FlaskSession, engine *live.Engine, input <-cha
 	}
 }
 
-func run(address string, roster map[int]int, paths map[int]string, leader int, engine *live.Engine,
-	flasks *live.FlaskSession, menuInput <-chan menuInput, ordered, allowFollowPause bool) error {
+// In ordered mode only a client with exactly one bound role may consume this
+// ordinary sensor sample. ObserveSample enforces that process-to-role mapping.
+func decodeStandaloneSample(data []byte) (telemetry.Sample, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return telemetry.Sample{}, err
+	}
+	if fields == nil {
+		return telemetry.Sample{}, telemetry.ErrInvalidSample
+	}
+	for field := range fields {
+		if strings.EqualFold(field, "Kind") || strings.EqualFold(field, "Players") ||
+			strings.EqualFold(field, "PlayerOrderReliable") {
+			return telemetry.Sample{}, telemetry.ErrInvalidSample
+		}
+	}
+	for _, field := range []string{"ProcessId", "SeenUtc", "TickMs", "CoordinateSpace", "X", "Y", "Z"} {
+		if _, exists := fields[field]; !exists {
+			return telemetry.Sample{}, telemetry.ErrInvalidSample
+		}
+	}
+	return telemetry.Decode(data)
+}
+
+func run(address string, roster map[int]int, paths map[int]string, offsets logStartOffsets,
+	leader int, engine *live.Engine,
+	flasks *live.FlaskSession, menuInput <-chan menuInput, ordered, allowFollowPause bool,
+	output io.Writer) error {
 	endpoint, err := net.ResolveUDPAddr("udp", address)
 	if err != nil || endpoint.IP == nil || !endpoint.IP.IsLoopback() {
 		return errors.New("listen address must be loopback")
@@ -353,8 +527,19 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 	}
 	sort.Ints(slots)
 	tails := make(map[int]*arealog.Tail, len(slots))
+	for client := range offsets {
+		if roster[client] == 0 {
+			return fmt.Errorf("log start offset has no bound client %d", client)
+		}
+	}
 	for _, slot := range slots {
-		tail, err := arealog.OpenTail(paths[slot])
+		var tail *arealog.Tail
+		var err error
+		if offset, recorded := offsets[slot]; recorded {
+			tail, err = arealog.OpenTailFrom(paths[slot], offset)
+		} else {
+			tail, err = arealog.OpenTail(paths[slot])
+		}
 		if err != nil {
 			for _, opened := range tails {
 				opened.Close()
@@ -369,7 +554,14 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 		}
 	}()
 	data := make([]byte, 64*1024)
-	encoder := json.NewEncoder(os.Stdout)
+	encoder := json.NewEncoder(output)
+	readWait := 100 * time.Millisecond
+	if ordered {
+		// Re-evaluate ordered positions and publish neutral commands promptly
+		// when a source frame expires; the probe's own cadence is independent.
+		readWait = 20 * time.Millisecond
+	}
+	var nextSourceCheck time.Time
 	fail := func(reason string, err error) error {
 		engine.Stop(reason)
 		_ = encoder.Encode(frame{Focused: engine.Leader(), Commands: engine.Step(time.Now().UTC())})
@@ -380,7 +572,7 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 			return fail("menu guard input failed", err)
 		}
 		var activations []flask.Activation
-		_ = conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		_ = conn.SetReadDeadline(time.Now().Add(readWait))
 		count, _, err := conn.ReadFromUDP(data)
 		if err == nil {
 			if ordered {
@@ -392,6 +584,14 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 						activations, err = flasks.ObserveOrderedVitals(vitalFrame, receivedAt)
 						if err != nil {
 							return fail("ordered flask decision failed", err)
+						}
+					}
+				} else if sample, sampleErr := decodeStandaloneSample(data[:count]); sampleErr == nil {
+					sample.ReceivedAt = receivedAt
+					if engine.ObserveSample(sample) && flasks != nil {
+						activations, err = flasks.ObserveSample(sample, receivedAt)
+						if err != nil {
+							return fail("standalone flask decision failed", err)
 						}
 					}
 				}
@@ -407,29 +607,45 @@ func run(address string, roster map[int]int, paths map[int]string, leader int, e
 		} else if timeout, ok := err.(net.Error); !ok || !timeout.Timeout() {
 			return fail("sensor read failed", err)
 		}
-		var pathErr error
-		if ordered {
-			pathErr = arealog.ValidateClientPaths(paths)
-		} else {
-			pathErr = arealog.ValidatePaths(paths)
-		}
-		if err := pathErr; err != nil {
-			return fail("log source changed", err)
-		}
-		if err := verifyProcessBindings(roster, paths); err != nil {
-			return fail("process/log binding changed", err)
-		}
 		now := time.Now().UTC()
-		for _, slot := range slots {
-			lines, err := tails[slot].Poll()
-			if err != nil {
-				return fail("log read failed", fmt.Errorf("slot %d log: %w", slot, err))
+		if !ordered || !now.Before(nextSourceCheck) {
+			var pathErr error
+			if ordered {
+				pathErr = arealog.ValidateClientPaths(paths)
+			} else {
+				pathErr = arealog.ValidatePaths(paths)
 			}
-			for _, line := range lines {
-				engine.ObserveClientLogLine(roster[slot], line, now)
+			if err := pathErr; err != nil {
+				return fail("log source changed", err)
 			}
+			if err := verifyProcessBindings(roster, paths); err != nil {
+				return fail("process/log binding changed", err)
+			}
+			for _, slot := range slots {
+				previousRotations := tails[slot].Rotations()
+				lines, err := tails[slot].Poll()
+				if err != nil {
+					return fail("log read failed", fmt.Errorf("slot %d log: %w", slot, err))
+				}
+				if tails[slot].Rotations() != previousRotations {
+					engine.InvalidateClientArea(roster[slot])
+					activations = nil
+				}
+				for _, line := range lines {
+					engine.ObserveClientLogLine(roster[slot], line, now)
+				}
+			}
+			nextSourceCheck = now.Add(100 * time.Millisecond)
 		}
-		if err := encoder.Encode(frame{Focused: engine.Leader(), Commands: engine.Step(now), Flasks: activations}); err != nil {
+		commands := engine.Step(now)
+		handoffs := engine.CrossAreaRequests(now)
+		if engine.ManualWarpToMain() {
+			handoffs = engine.WarpToMainRequests(now)
+		}
+		if err := encoder.Encode(frame{Focused: engine.Leader(),
+			ManualWarpToMain: engine.ManualWarpToMain(), Commands: commands,
+			Flasks: activations, Handoffs: handoffs,
+			Positions: engine.CurrentPositions(now)}); err != nil {
 			return err
 		}
 	}
@@ -442,7 +658,7 @@ func main() {
 	stop := flag.Float64("stop", -1, "stop distance")
 	catchup := flag.Float64("catchup", -1, "catch-up distance")
 	maxAge := flag.Duration("max-age", 0, "maximum sensor age")
-	logAge := flag.Duration("log-max-age", 0, "maximum area-log signal age")
+	logAge := flag.Duration("log-max-age", 0, "maximum time to first confirm area log with a fresh sensor hash")
 	leaderName := flag.String("leader-name", "", "configured character name of the followed leader, for departure detection")
 	lastFocusedLeads := flag.Bool("last-focused-leads", false, "use manually focused player as the current follow MAIN")
 	classicSprintCatchUp := flag.Bool("classic-sprint-catchup", false,
@@ -456,8 +672,15 @@ func main() {
 	classicCollisionDodge := flag.Bool("classic-collision-dodge", false,
 		"opt into terrain-backed classic sprint collision recovery")
 	autoFlask := flag.Bool("auto-flask", false, "enable life and mana flask decisions for explicitly bound clients")
+	flaskSupportFile := flag.String("flask-support-file", "", "explicit Drinker support rules in a JSON file; requires -auto-flask")
+	flaskRulesFile := flag.String("flask-rules-file", "", "explicit per-player life and mana rules in a JSON file; requires -auto-flask")
+	flaskCustomFile := flag.String("flask-custom-file", "", "explicit custom recovery rules in a JSON file; requires -auto-flask")
 	allowFollowPause := flag.Bool("allow-follow-pause", false, "accept explicit pause/resume controls on stdin")
 	acceptMainInput := flag.Bool("accept-main-input", false, "accept bound main-controller samples without enabling mirror output")
+	mirrorAttackDirection := flag.Bool("mirror-attack-direction", false,
+		"mirror the main controller's attack direction during safe follow")
+	disableCatchUpPriority := flag.Bool("disable-catch-up-priority", false,
+		"allow attack direction to override catch-up movement")
 	closeRangeMirror := flag.Bool("close-range-mirror", false, "enable optional per-follower close-range stick mirror")
 	closeMirrorDuration := flag.Duration("close-mirror-duration", 400*time.Millisecond, "close-range stick burst duration")
 	mirrorBPlayers := flag.String("mirror-b-players", "all", "roster slots allowed to mirror B; all, none, or comma-separated slots")
@@ -467,14 +690,32 @@ func main() {
 	var targets followTargets
 	var playerStops stopDistances
 	var bindings roleBindings
+	var offsets logStartOffsets
 	flag.Var(&bindings, "role-bind", "ROLE:CLIENT:LOCAL:PID; ordered input only, repeat for every role")
 	flag.Var(&logs, "log", "SLOT=Client.txt path")
 	flag.Var(&exes, "exe", "SLOT=game executable path")
+	flag.Var(&offsets, "log-start-offset", "CLIENT=pre-launch Client.txt byte offset; started clients only")
 	flag.Var(&terrainBindings, "terrain-binding", "SLOT=JSON path with explicit capture and live instance mapping")
 	flag.Var(&names, "member-name", "SLOT=confirmed character name for departure detection")
 	flag.Var(&targets, "follow-target", "SLOT=TARGET; 0 means Current MAIN")
 	flag.Var(&playerStops, "stop-player", "SLOT=VALUE; individual stop distance from 0 to 200")
 	flag.Parse()
+	if *flaskSupportFile != "" && !*autoFlask {
+		fmt.Fprintln(os.Stderr, "flask support requires -auto-flask")
+		os.Exit(2)
+	}
+	if *flaskRulesFile != "" && !*autoFlask {
+		fmt.Fprintln(os.Stderr, "flask rules require -auto-flask")
+		os.Exit(2)
+	}
+	if *flaskCustomFile != "" && !*autoFlask {
+		fmt.Fprintln(os.Stderr, "custom recovery rules require -auto-flask")
+		os.Exit(2)
+	}
+	if *mirrorAttackDirection && !*acceptMainInput {
+		fmt.Fprintln(os.Stderr, "attack direction requires main-controller input")
+		os.Exit(2)
+	}
 	if *aggressiveBlinkCatchUp && *classicSprintCatchUp ||
 		*aggressiveBlinkCatchUp && (*aggressiveRetryDelay < 500 || *aggressiveRetryDelay > 1500) {
 		fmt.Fprintln(os.Stderr, "aggressive sprint requires normal sprint and a retry delay from 500 to 1500 ms")
@@ -552,6 +793,8 @@ func main() {
 	}
 	engine.SetLastFocusedLeads(*lastFocusedLeads)
 	engine.SetAcceptMainInput(*acceptMainInput)
+	engine.SetMirrorAttackDirection(*mirrorAttackDirection,
+		!*disableSprintCatchUp && !*disableCatchUpPriority)
 	if *closeRangeMirror {
 		if !*acceptMainInput {
 			fmt.Fprintln(os.Stderr, "close-range mirror requires main input")
@@ -588,11 +831,44 @@ func main() {
 		if *orderedInput {
 			flaskSession, err = live.NewOrderedFlaskSession(engine, *maxAge)
 		} else {
-			flaskSession, err = live.NewFlaskSession(roster, *maxAge)
+			flaskSession, err = live.NewFlaskSession(engine, *maxAge)
 		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
+		}
+		if *flaskSupportFile != "" {
+			bindingRules, readErr := loadFlaskSupportBindings(*flaskSupportFile)
+			if readErr != nil {
+				fmt.Fprintln(os.Stderr, readErr)
+				os.Exit(2)
+			}
+			if err := flaskSession.ConfigureSupport(bindingRules); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+		}
+		if *flaskRulesFile != "" {
+			ownRules, readErr := loadFlaskRuleBindings(*flaskRulesFile)
+			if readErr != nil {
+				fmt.Fprintln(os.Stderr, readErr)
+				os.Exit(2)
+			}
+			if err := flaskSession.ConfigureRules(ownRules); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+		}
+		if *flaskCustomFile != "" {
+			customRules, readErr := loadFlaskCustomRules(*flaskCustomFile)
+			if readErr != nil {
+				fmt.Fprintln(os.Stderr, readErr)
+				os.Exit(2)
+			}
+			if err := flaskSession.ConfigureCustomRules(customRules); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
 		}
 	}
 	if *autoFlask || *lastFocusedLeads || *allowFollowPause || *acceptMainInput {
@@ -601,8 +877,8 @@ func main() {
 		go readMenuInput(os.Stdin, commands)
 	}
 	fmt.Fprintln(os.Stderr, "Live follow decision stream; Windows controller and PoE2 behavior remain unverified.")
-	if err := run(*address, roster, paths, *leader, engine, flaskSession, menuCommands,
-		*orderedInput, *allowFollowPause); err != nil {
+	if err := run(*address, roster, paths, offsets, *leader, engine, flaskSession, menuCommands,
+		*orderedInput, *allowFollowPause, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

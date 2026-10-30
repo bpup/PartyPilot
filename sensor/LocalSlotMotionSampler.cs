@@ -13,12 +13,22 @@ public static class LocalSlotMotionSampler
         Func<long, int, byte[]?> read, Func<long, string?> readMissingPath,
         Func<bool> sameAreaAndPlayer,
         float observedX, float observedY, float observedZ, DateTime seenUtc,
-        Func<long, Func<long, int, byte[]?>, RawRenderPositionReader.Position?>? readPosition = null)
+        Func<long, Func<long, int, byte[]?>, RawRenderPositionReader.Position?>? readPosition = null,
+        long ingameStateAddress = 0, int? verifiedPositionOffset = null)
     {
         if (seenUtc == default || !sameAreaAndPlayer() ||
             !LocalSlotCandidateScanner.Revalidate(candidate,
-                observedLocalAddress, visiblePaths, read, readMissingPath)) return null;
-        readPosition ??= RawRenderPositionReader.Read;
+                observedLocalAddress, visiblePaths, read, readMissingPath,
+                ingameStateAddress)) return null;
+        var positionOffset = readPosition is null
+            ? RawRenderPositionReader.SelectObservedOffset(observedLocalAddress, read,
+                observedX, observedY, observedZ)
+            : verifiedPositionOffset;
+        if (positionOffset is not null and not
+            (RawRenderPositionReader.DefaultWorldPositionOffset or
+                RawRenderPositionReader.GameHelperWorldPositionOffset)) return null;
+        readPosition ??= (entity, reader) => RawRenderPositionReader.Read(entity, reader,
+            positionOffset ?? RawRenderPositionReader.DefaultWorldPositionOffset);
         var positions = new RawRenderPositionReader.Position?[candidate.OrderedAddresses.Length];
         var comparisons = new RawRenderPositionReader.LocalComparison?[positions.Length];
         RawRenderPositionReader.LocalComparison? observedComparison = null;
@@ -40,10 +50,11 @@ public static class LocalSlotMotionSampler
         }
         if (!sameAreaAndPlayer() ||
             !LocalSlotCandidateScanner.Revalidate(candidate, observedLocalAddress,
-                visiblePaths, read, readMissingPath)) return null;
+                visiblePaths, read, readMissingPath, ingameStateAddress)) return null;
         return candidate with
         {
             RawPositions = positions,
+            RawPositionOffset = positionOffset,
             RawPositionsSeenUtc = seenUtc,
             ObservedLocalPositionComparison = observedComparison,
             VisiblePositionComparisons = comparisons

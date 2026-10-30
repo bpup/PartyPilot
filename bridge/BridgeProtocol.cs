@@ -4,15 +4,36 @@ using PartyPilot.Common;
 namespace PartyPilot.Bridge;
 
 internal readonly record struct BridgeCommand(int Slot, short X, short Y, bool Active,
-    bool EligibleForManualMovement, bool SprintDown, bool SuppressMirroredB);
+    bool EligibleForManualMovement, bool SprintDown, bool SuppressMirroredB,
+    bool CatchUpPriority = false);
 internal readonly record struct PairingControl(string Type, int Slot, int Pid, long WindowHandle);
 internal readonly record struct FlaskCommand(int Slot, string Resource);
+internal readonly record struct RecoveryActionCommand(int Slot, string Input);
+internal readonly record struct AutoCastCommand(int Slot, string Input);
 internal readonly record struct AutoPartyControl(string Type, int Slot, ushort Buttons, int HoldMilliseconds);
 internal readonly record struct CombatControl(string Type, int Slot, PadReport Pulse, int HoldMilliseconds);
 internal readonly record struct HybridKeyControl(int VirtualKey, bool Down);
 
 internal static class BridgeProtocol
 {
+    public static bool TryParseWarpToMainSubscription(string line, out bool enabled)
+    {
+        enabled = false;
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || root.EnumerateObject().Count() != 2 ||
+                !root.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String ||
+                type.GetString() != "warp_to_main_subscription" ||
+                !root.TryGetProperty("enabled", out var value) ||
+                value.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return false;
+            enabled = value.GetBoolean();
+            return true;
+        }
+        catch (JsonException) { return false; }
+    }
+
     public static bool TryParseMainInputSubscription(string line, out bool enabled)
     {
         enabled = false;
@@ -94,6 +115,14 @@ internal static class BridgeProtocol
                 !root.TryGetProperty("hold_ms", out var hold) ||
                 !hold.TryGetInt32(out var duration) || duration is < 45 or > 160)
                 return false;
+            var hasRightX = root.TryGetProperty("right_x", out var rightX);
+            var hasRightY = root.TryGetProperty("right_y", out var rightY);
+            if (hasRightX != hasRightY) return false;
+            if (hasRightX)
+            {
+                if (!rightX.TryGetInt16(out var x) || !rightY.TryGetInt16(out var y)) return false;
+                pulse = pulse with { RightX = x, RightY = y };
+            }
             command = new CombatControl(name, value, pulse, duration);
             return true;
         }
@@ -137,7 +166,7 @@ internal static class BridgeProtocol
     internal static bool ValidCombatPulse(PadReport pulse)
     {
         const ushort allowed = 0xF30F;
-        if (pulse.LeftX != 0 || pulse.LeftY != 0 || pulse.RightX != 0 || pulse.RightY != 0 ||
+        if (pulse.LeftX != 0 || pulse.LeftY != 0 ||
             (pulse.Buttons & ~allowed) != 0 ||
             System.Numerics.BitOperations.PopCount((uint)pulse.Buttons) > 1 ||
             pulse.LeftTrigger is not (0 or 255) || pulse.RightTrigger is not (0 or 255) ||
@@ -179,7 +208,9 @@ internal static class BridgeProtocol
     internal static bool ValidAutoPartyPulse(ushort buttons, int duration) => buttons switch
     {
         0x0010 => duration is 80 or 100,
-        0x0004 or 0x1000 => duration == 80,
+        0x0004 => duration == 80,
+        0x0002 => duration == 80,
+        0x1000 => duration is 60 or 80,
         0x2000 => duration == 60,
         _ => false
     };
@@ -200,6 +231,58 @@ internal static class BridgeProtocol
                 resource.GetString() is not ("life" or "mana"))
                 return false;
             command = new FlaskCommand(value, resource.GetString()!);
+            return true;
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    public static bool IsRecoveryInput(string? input) => input is
+        "X" or "Y" or "LB" or "RB" or "LT" or "RT" or "D-pad Up" or "D-pad Down";
+
+    public static bool IsAutoCastInput(string? input) => input is
+        "D-pad Up" or "D-pad Down" or "A" or "B" or "X" or "Y" or "LB" or "RB";
+
+    public static bool TryParseAutoCast(string line, out AutoCastCommand command)
+    {
+        command = default;
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || root.EnumerateObject().Count() != 3 ||
+                !root.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String ||
+                type.GetString() != "auto_cast" ||
+                !root.TryGetProperty("slot", out var slot) || !slot.TryGetInt32(out var value) ||
+                value is < 1 or > 6 ||
+                !root.TryGetProperty("input", out var input) || input.ValueKind != JsonValueKind.String ||
+                !IsAutoCastInput(input.GetString())) return false;
+            command = new AutoCastCommand(value, input.GetString()!);
+            return true;
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    public static bool TryParseRecoveryAction(string line, out RecoveryActionCommand command)
+    {
+        command = default;
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String ||
+                type.GetString() != "recovery_action" ||
+                !root.TryGetProperty("slot", out var slot) || !slot.TryGetInt32(out var value) ||
+                value is < 1 or > 6 ||
+                !root.TryGetProperty("input", out var input) || input.ValueKind != JsonValueKind.String ||
+                !IsRecoveryInput(input.GetString())) return false;
+            command = new RecoveryActionCommand(value, input.GetString()!);
             return true;
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException)
@@ -289,6 +372,13 @@ internal static class BridgeProtocol
                 sprintDown = sprintValue.GetBoolean();
             }
             if (sprintDown && state != "catching_up") return false;
+            var catchUpPriority = false;
+            if (root.TryGetProperty("catch_up_priority", out var priorityValue))
+            {
+                if (priorityValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return false;
+                catchUpPriority = priorityValue.GetBoolean();
+            }
+            if (catchUpPriority && state != "catching_up") return false;
             var mirrorMovement = false;
             if (root.TryGetProperty("mirror_movement", out var mirrorValue))
             {
@@ -296,6 +386,13 @@ internal static class BridgeProtocol
                 mirrorMovement = mirrorValue.GetBoolean();
             }
             if (mirrorMovement && state != "holding") return false;
+            var attackDirection = false;
+            if (root.TryGetProperty("attack_direction", out var attackValue))
+            {
+                if (attackValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return false;
+                attackDirection = attackValue.GetBoolean();
+            }
+            if (attackDirection && (state == "waiting" || mirrorMovement || sprintDown)) return false;
             var suppressMirroredB = false;
             if (root.TryGetProperty("suppress_mirrored_b", out var suppressValue))
             {
@@ -311,23 +408,25 @@ internal static class BridgeProtocol
             }
             if (mirrorIdle)
             {
-                if (state is not ("following" or "catching_up") || sprintDown || mirrorMovement ||
+                if (state is not ("following" or "catching_up") || sprintDown || mirrorMovement || attackDirection ||
                     !root.TryGetProperty("x", out var idleX) || !idleX.TryGetDouble(out var x) || x != 0 ||
                     !root.TryGetProperty("y", out var idleY) || !idleY.TryGetDouble(out var y) || y != 0)
                     return false;
-                command = new BridgeCommand(slot, 0, 0, false, manualEligible, false, suppressMirroredB);
+                command = new BridgeCommand(slot, 0, 0, false, manualEligible, false,
+                    suppressMirroredB, catchUpPriority);
                 return true;
             }
             if (state is "waiting" or "holding")
             {
                 if (state == "waiting" && manualEligible) return false;
-                if (mirrorMovement) return TryParseMovement(root, slot, manualEligible, false,
-                    suppressMirroredB, out command);
+                if (mirrorMovement || attackDirection) return TryParseMovement(root, slot, manualEligible, false,
+                    suppressMirroredB, catchUpPriority, out command);
                 command = new BridgeCommand(slot, 0, 0, false, manualEligible, false, suppressMirroredB);
                 return true;
             }
             if (state is not ("following" or "catching_up")) return false;
-            return TryParseMovement(root, slot, manualEligible, sprintDown, suppressMirroredB, out command);
+            return TryParseMovement(root, slot, manualEligible, sprintDown, suppressMirroredB,
+                catchUpPriority, out command);
         }
         catch (JsonException)
         {
@@ -336,7 +435,7 @@ internal static class BridgeProtocol
     }
 
     private static bool TryParseMovement(JsonElement root, int slot, bool manualEligible,
-        bool sprintDown, bool suppressMirroredB, out BridgeCommand command)
+        bool sprintDown, bool suppressMirroredB, bool catchUpPriority, out BridgeCommand command)
     {
         command = default;
         if (!root.TryGetProperty("x", out var xElement) ||
@@ -354,7 +453,7 @@ internal static class BridgeProtocol
                 slot,
                 (short)Math.Clamp(Math.Round(x * 32767), short.MinValue, short.MaxValue),
                 (short)Math.Clamp(Math.Round(y * 32767), short.MinValue, short.MaxValue),
-                true, manualEligible, sprintDown, suppressMirroredB);
+                true, manualEligible, sprintDown, suppressMirroredB, catchUpPriority);
             return true;
     }
 }

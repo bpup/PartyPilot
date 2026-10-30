@@ -1,5 +1,15 @@
 # 同窗口双角色位置与身份核对
 
+## 实机分段运动取证（只读）
+
+在同一窗口两个角色均进入同一区域后，同时录制 `PartyPilot-SensorLog.exe` 和 `PartyPilot-OrderedMotionLog.exe` 的 JSONL 输出。记录开始后，先让 P1 单独移动，再停下；随后让 P2 单独移动，其他角色保持不动。记下两段相对**该进程第一条快速位置帧**的秒数，例如 P1 为 5–15 秒、P2 为 20–30 秒，然后运行：
+
+```powershell
+.\release\PartyPilot-SlotAudit.exe -input sensorlog.jsonl -fast-input orderedmotionlog.jsonl -p1-only 5:15 -p2-only 20:30 > slot-audit.json
+```
+
+结果中的 `controlledMovement` 按进程列出两段各自的完整帧数、同区域连续步数和两个候选槽位的世界坐标累计移动距离。先核对进程、区域、完整帧、换区与时间倒退；再比较 P1 独动时槽位 1、P2 独动时槽位 2 是否分别移动。它只提供可复核的观测数据，不会自动判定身份，也不会让未验证的双角色报文进入实时跟随。不要在日志中附带账号密码。
+
 ## 事实：所提供 0.6.17 的静态实现
 
 `memory-probe/MultiPilotMemoryProbe.dll` 中的 `PlayerSlotVectorResolver` 从目标进程的本地玩家向量取得有序实体指针，并核对指针、角色实体路径及完整的 1–2 槽位序列。`Poe2Coop.Services/MemoryReaderService.cs` 只在 `playerOrderReliable` 成立时发布用于控制的有序玩家位置；单纯枚举到两个玩家实体或看见角色名字，不等于确认了 P1/P2 本地槽位。
@@ -12,7 +22,7 @@
 
 该选项现在还输出 ExileCore2 公开的 `IngameState.Data.Address`、`GameController.Player.Address`，以及各可见玩家实体的 `Address`/`Path`。地址以十六进制字符串传输，避免 64 位整数在其他 JSON 工具中丢失精度；接收端会拒绝格式错误或与已标记当前角色不一致的地址。地址只用于同窗口实机取证，未被解释为本地槽位，未进入自动跟随决策。当前没有证据证明 ExileCore2 的 `IngameState.Data.Address` 与目标探针的 `areaInstance` 是同一基址。
 
-另一个默认关闭的 `DiagnoseLocalSlotCandidates` 选项每秒只读扫描一次：以 ExileCore2 的上述数据地址为实验基址，在所提供版本静态公开默认结构偏移 1408/2552、向量偏移 72 的 ±128 字节内寻找 1–2 项指针向量。它只接纳路径可验证为角色、包含当前角色且顺序无冲突的候选；路径可来自当帧可见实体，也可在原始内存中读取。结果明确标为 `single_slot_candidate` / `two_slot_candidate`，而不是可靠 P1/P2。偏移来自静态默认值，目标运行时配置可能不同；实验基址与目标 `areaInstance` 的关系也未经实机证明。合成内存测试覆盖有序双角色、冲突向量、未观察实体、非角色路径及过长向量。该诊断不会改变跟随或手柄输入。
+另一个默认关闭的 `DiagnoseLocalSlotCandidates` 选项每秒只读扫描一次：以 ExileCore2 的上述数据地址为实验基址，在所提供版本静态公开默认结构偏移 1408/2552、向量偏移 72 的 ±128 字节内寻找 1–2 项指针向量。它只接纳路径可验证为角色且顺序无冲突的候选；路径可来自当帧可见实体，也可在原始内存中读取。结果明确标为 `single_slot_candidate` / `two_slot_candidate`，而不是可靠 P1/P2。偏移来自静态默认值，目标运行时配置可能不同；实验基址与目标 `areaInstance` 的关系也未经实机证明。合成内存测试覆盖有序双角色、冲突向量、未观察实体、非角色路径及过长向量。该诊断不会改变跟随或手柄输入。
 
 候选扫描已有对可见集合外角色读取原始路径的回退。现在连可见集合中的路径无效时也会尝试原始路径，并记录选中向量的结构/字段偏移，以及由可见路径或原始路径验证的槽位数量。`PartyPilot-SlotAudit` 的 `rawPathFrames` 统计完整帧中使用了原始路径的次数。目标探针的 `EntityPathCache` 实际通过 `ServerInventoryReader.ReadEntityPath` 读取路径，并按实体 ID 缓存；独立版尚未复制其完整区域实体列表和缓存生命周期，也没有实机证据证明偏移及路径一致。
 
@@ -20,13 +30,19 @@
 
 进一步反查目标 `NoddPilot.Offsets.Reading.AreaEntityListReader.TryResolveAreaInstance`，可见其先在游戏状态对象加上 `InGameStateAreaInstanceOffset` 读取指针；该偏移的公开静态默认值是 656。诊断现在也从 ExileCore2 的 `IngameState.Address + 656` 只读取得第二个实验区域基址，与 `IngameState.Data.Address` 分别扫描、去重并比较。输出包含状态指针解析出的区域地址、两种基址是否相等、实际产生候选的区域地址；两种基址若给出相互冲突的角色顺序，结果为 `conflicting_candidates`。目标运行时可能启用了不同偏移，当前没有 PoE2 实机证据证明两种基址任何一个等于目标的真实 `areaInstance`；即便候选相同，也不会自动绑定 P2。
 
+继续核对当前用于编译插件的 `work/exilecore2-ref/ExileCore2.dll`：其 `ExileCore2.PoEMemory.MemoryObjects.IngameState.get_Data` 方法体在 IL 中仅有 `ldarg.0; ret`，既没有读取 `WorldDataOffset`，也没有读取 `IngameState.Address + 656`。同一程序集反编译出的 `UpdateData` 也没有可追溯的区域指针赋值。这份参考程序集的静态方法体不能建立两个区域基址的等价关系，更不能证明游戏运行时的真实地址；下一步必须用 Windows/PoE2 录制到的同帧地址和换区行为核对。现有候选身份状态保持不变。
+
+缓存候选现在记录选中向量所属的区域基址。如果该基址来自 `IngameState.Address + 656` 指针，位置读取前后、技能绑定诊断和物品 owner 关联重验时也会重读该指针；即使旧向量仍可读，只要它已不再指向候选区域，就丢弃旧候选。接收端只接受属于已扫描区域之一的选中基址。合成内存检查覆盖指针换区而旧向量未释放的情形；这只收紧诊断缓存，不把静态偏移或 P1/P2 身份提升为实机可信。
+
 原始物品卡片诊断在两项开关同时开启时，可把 owner 与上面的**新鲜有序候选**精确比对，并仅输出 `unverified_vector_order_candidate` 的本地 1/2 槽位编号。还要求 owner 同时等于唯一可见玩家实体地址；关闭候选扫描、状态地址变化、候选冲突或地址不符时不输出。所提供版本的 `PlayerSlotVectorResolver` 会从区域实体列表逐一读取角色路径，并记录向量头地址供后续重验；独立版现在也记录所选候选向量头，物品卡片关联前重读向量头、顺序和角色路径，变化时丢弃缓存候选。这里仍使用 ExileCore2 当前可见实体及静态默认的原始路径读取，尚未取得等价的完整区域实体列表，故候选不能升级为可靠槽位或驱动输入。
 
-静态反编译所提供的 `NoddPilot.Offsets.dll` 可见：`MonsterEntityReader.TryReadWorldPosition` 先按名称解析实体的 `Render` 组件，再从该组件读取三个 float；`EntityMapOffsets.Default` 的位置偏移为 312，世界坐标除以 10.869565 得到网格坐标。独立版现仅在已找到 1–2 个有序角色候选时，按这套公开默认偏移尝试只读组件链，并在读完后重验槽位向量；输出 `RawPositions`、`RawPositionsSeenUtc` 与 `RenderComponentAddress` 作为最多缓存一秒的候选诊断。合成内存检查覆盖组件归属与无效坐标。目标版可加载不同的运行时偏移；目前没有实机数据证明这些地址或坐标正确，也没有证据证明它们与 ExileCore2 的当前角色坐标语义一致。`RawPositions` 不参与实时跟随、角色绑定或手柄输入。
+静态反编译所提供的 `NoddPilot.Offsets.dll` 可见：`MonsterEntityReader.TryReadWorldPosition` 先按名称解析实体的 `Render` 组件，再从该组件读取三个 float；`EntityMapOffsets.Default` 列出位置偏移 312 和另一项 `RenderCurrentWorldPositionOffsetGameHelper=184`，世界坐标除以 10.869565 得到网格坐标。另从安装目录的 `memory-probe/MultiPilotMemoryProbe.dll` 反编译确认，其 `ProbeSession.ReadMotionPlayer` 调用 `MonsterEntityReader.TryReadWorldPosition`，所提供的 `GameBuildOffsetOverrides` 已知游戏构建覆写未改变 Render 世界位置偏移，因此这份探针在所列配置中使用默认 312。独立版仅在已找到 1–2 个有序角色候选时尝试只读组件链，并在读完后重验槽位向量。现在同时检查本地角色的两个静态偏移：312 与 ExileCore2 `Render.Pos` 世界 XY 完全一致时优先选 312；仅 312 不匹配且 184 匹配时选 184；两者均不匹配时不发送实验控制帧。诊断输出 `RawPositionOffset`。合成内存检查覆盖组件归属、无效坐标、替代偏移命中及双命中默认偏移优先。目标版可加载不同的运行时偏移；目前没有实机数据证明这两个偏移在当前游戏版本中正确，也没有证据证明它们与 ExileCore2 当前角色坐标语义一致。
 
 现在全量候选搜索仍最多每秒一次，但缓存向量会在每次 10Hz 传感器发送前后各重验一次，并重读两名候选的原始位置；向量、路径或顺序在采样期间变化就清空该帧候选，下一帧重新搜索。`RawPositionsSeenUtc` 随实际重读更新，合成内存检查覆盖连续帧位置变化和采样中途角色调序。这仍是只读候选诊断，不会发布 `ordered_client` 控制报文。
 
 新增默认关闭的 `DiagnoseFastOrderedMotion`，须同时开启 `DiagnoseLocalSlotCandidates`。传感器在 `Render` 回调中以 20 毫秒为最短间隔重验已缓存向量、重读候选位置，并向独立的本机 UDP 端口 47620 输出目标形状的 `ordered_client` **诊断报文**；实际频率受渲染回调频率限制。报文强制 `PlayerOrderReliable=false` 和固定的未验证来源，无完整位置时输出空 `Players`；区域/角色身份或向量在读取中变化则跳过该帧。`PartyPilot-OrderedMotionLog.exe` 只记录这种未验证报文为 JSONL，拒绝看似可靠或来源不符的报文。该端口与实时控制端口隔离，不能用作自动跟随输入。尚无 Windows/PoE2 录制，也没有证据把候选槽位认定为可靠 P1/P2。
+
+快速诊断帧现在还携带候选区域实例地址、向量头地址和有序角色实体地址。`SlotAudit` 在 `fastMotion` 与 `controlledMovement` 中分别报告同一区域内的向量变更、向量身份缺失；这些相邻帧不会贡献逐槽移动次数或受控路程。它能指出采集链在操作期间换源，仍不能单凭地址稳定证明角色身份正确。
 
 新增 `PartyPilot-SlotAudit.exe -input sensorlog.jsonl` 离线核对工具，读取 `PartyPilot-SensorLog.exe` 保存的逐行 JSON。报告按进程统计候选状态、完整位置帧、当前角色对 ExileCore2 坐标的世界/网格距离最大值、同区域顺序变化、换区、源时间倒退及每槽坐标变化次数。它只呈现观测量，不给出“可靠”裁决，也不产生控制报文。Windows 实测时应分别录制角色静止、P1 单独移动、P2 单独移动、两人移动、切区和重进游戏的片段，并人工核对游戏画面与报告；录制文件含角色和进程信息，不要公开上传原始文件。
 
@@ -42,9 +58,21 @@ ExileCore2 参考程序集的 `Render.Pos` 暴露三维向量，但反编译代�
 
 同一进程的两名角色现可由**同一条**已按进程绑定的 `Client.txt` 区域生成记录更新；较旧的记录不会只覆盖其中一名角色。该客户端的本地离队或队伍解散记录也会停止整个跟随会话。实时命令行现有的单角色客户端布局改用这条日志解析入口，合成原始日志行测试已通过。
 
-实时命令行还新增须显式开启的 `-experimental-ordered-input`：每名角色用 `-role-bind ROLE:CLIENT:LOCAL:PID` 绑定，`-log`/`-exe` 按客户端编号提供，每个客户端只需一份日志。该模式分开接收完整的 `ordered_client` 快速位置报文和 `ordered_vitals` 慢速资源报文；普通传感器报文及 `LocalSlotCandidates` 不能进入此入口。资源报文只更新资源，不会替换位置；不完整的当前资源帧会撤销旧资源而保留位置。单客户端双角色的本机合成 UDP/日志检查观察到“等待 → 追赶 → 顺序失效后等待”，以及位置跟随、资源补充、死亡停机的独立报文链路。报文里的 `PlayerOrderReliable` 仍是发送方声明，不构成可信数据源证明；当前没有可用的生产端，桌面也没有启用该模式，Windows/PoE2 行为未验证。
+实时命令行还新增须显式开启的 `-experimental-ordered-input`：每名角色用 `-role-bind ROLE:CLIENT:LOCAL:PID` 绑定，`-log`/`-exe` 按客户端编号提供，每个客户端只需一份日志。该模式分开接收双角色客户端完整的 `ordered_client` 快速位置报文和 `ordered_vitals` 慢速资源报文；只有绑定一名角色的客户端可使用普通位置报文，`LocalSlotCandidates` 不能进入此入口。资源报文只更新资源，不会替换位置；不完整的当前资源帧会撤销旧资源而保留位置。单客户端双角色的本机合成 UDP/日志检查观察到“等待 → 追赶 → 顺序失效后等待”，以及位置跟随、资源补充、死亡停机的独立报文链路。报文里的 `PlayerOrderReliable` 仍是发送方声明，不构成可信数据源证明。现在有默认关闭的 ExileCore2 实验生产端：须同时开启 `DiagnoseLocalSlotCandidates` 与 `ExperimentalOrderedFollow`，并满足候选向量位于游戏状态指针解析的区域、该区域只有一组一致候选、当前角色在向量中及同帧两槽原始位置完整等条件，才向实时端口发送实验有序帧；状态指针区域与 ExileCore2 数据地址可不同。条件丢失时发送撤销帧。桌面已能启动 4、5、6 人的有序输入模式；5 人混合布局的单角色客户端继续使用普通位置包，双角色客户端使用显式实验帧。Windows/PoE2 的角色顺序和移动效果未验证。
+
+再次对照所提供 0.6.17 的 `PlayerSlotVectorResolver.Resolve` 与 `ProbeSession.CaptureMotion`：目标探针从其独立解析的 `AreaInstance` 搜索本地角色向量，读取完整的有序角色位置后才把 `playerOrderReliable` 置为 true。PartyPilot 仍从 ExileCore2 的候选区域基址附近扫描向量；普通快速诊断帧固定为 `PlayerOrderReliable=false`，并发送到与实时跟随分开的端口。新增的独立实验编码器只在上述严格条件成立时，用另一个明确标识的来源向实时端口发帧，绝不把普通诊断来源改写为 true。实时接收端现进一步要求该实验来源带非零区域哈希、可解析的区域/向量地址，以及与角色数相同且互不重复的有序角色地址；缺少或重复时撤销当前双角色位置，不能沿用旧方向。此检查只排除不完整身份报文，不证明地址与游戏角色的对应关系。两条地址链尚未通过真实游戏同帧数据证明等价，所以实验开关默认关闭，不能把这条链称为已验证生产输入。下一项必需证据仍是 Windows/PoE2 的同帧区域地址、两槽角色地址与画面动作对照。
+
+实验编码器还要求诊断中的 `RawPositionOffset` 为核对后的 312 或 184，且当前角色原始世界 XY 与 ExileCore2 `Render.Pos` 的 XY 比对距离为零，才会发送可控制位置；位置差距非零时不发送控制帧。这是为了拒绝明显不一致的静态偏移读取，不是目标软件已证实的容差规则。若真实游戏更新时两个读取时刻不同，可能出现拒绝有效帧的情况；必须用同一角色的实机距离分布再校准，不能宣称此门槛已验证可用。
 
 显式开启 `-auto-flask` 后，慢速资源帧可按本地 1/2 槽分别输出 P1–P6 的药剂请求。每名角色的菜单状态初始为未知，须由控制输入明确报告可操作；资源帧还须新鲜、完整，并与当前角色位置、进程日志区域和非零区域哈希相符。合成测试覆盖同窗口 P2、第三客户端 P6、重放/过期报文、缺少区域或位置以及哈希不一致时的拦截。请求尚未经过桌面双角色路由或 Windows/PoE2 的实际手柄验证。
+
+桌面的纯决策帧解析器现在接受 5 人混合布局和 `6-balanced` 的多角色帧：要求当前 MAIN 之外分别有四条或五条角色命令，并按布局定义的手柄槽位输出；合成检查覆盖 P2 追赶优先、P6 成为 MAIN 后旧槽位转换，以及缺失 P6 命令拒绝。实时桌面已接入 4–6 人实验布局；此解析能力和合成检查仍不能证明双角色位置来源或真实游戏内跟随效果。
+
+实验双角色快速读取若已识别游戏进程，但同帧区域/角色身份变化或读取抛错，现在向实时接收端发送不可靠位置帧以撤销该进程旧方向；此前异常分支会静默跳过发送，旧样本需等到接收端过期才失效。改动已用固定版本的 ExileCore2 参考程序集编译并通过传感器离线检查；Windows/PoE2 中的实际撤销时延仍待实测。
+
+实验控制帧发出后，传感器会记录该进程；关闭插件总开关、关闭本地槽位诊断或关闭实验跟随，以及当前角色或 Render 组件消失时，会向实时接收端发送同进程的不可靠位置帧，撤销旧方向。切换到另一个进程前也先撤销原进程；发送失败时保留待撤销进程并在后续 Render 回调重试。这是代码路径和构建检查，实际游戏中的撤销时延仍待测量。
+
+实时接收端现在在同一地图生成周期内固定双角色实体顺序，发现调序就停止跟随；收到该客户端更新的 `Client.txt` 区域生成记录后，会清除旧绑定并允许下一帧重新建立顺序。这样即使游戏复用区域地址和哈希，也不会把上一轮地图的地址固定到新一轮。合成检查覆盖旧周期调序停止、新周期复用地址后恢复追赶、以及新周期再次调序停止。目标探针会在换区或约五秒后重新解析向量；独立版仍需实机确认日志生成时刻、角色地址复用及 P1/P2 真正的输入方向。
 
 ## 待确认
 

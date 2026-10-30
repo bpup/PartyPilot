@@ -13,14 +13,17 @@ import (
 // World is an explicit replay input, not a projection of the current sensor.
 // Pointer booleans force the caller to provide each safety signal.
 type World struct {
-	Timestamp       time.Time      `json:"timestamp"`
-	AreaInstance    string         `json:"areaInstance"`
-	DataAgeMS       *int           `json:"dataAgeMs"`
-	SafeZone        *bool          `json:"safeZone"`
-	EmergencyActive *bool          `json:"emergencyActive"`
-	UI              UI             `json:"ui"`
-	Players         map[int]Player `json:"players"`
-	Monsters        []Monster      `json:"monsters"`
+	Timestamp        time.Time               `json:"timestamp"`
+	AreaInstance     string                  `json:"areaInstance"`
+	AreaID           string                  `json:"areaId,omitempty"`
+	AreaLabel        string                  `json:"areaLabel,omitempty"`
+	DataAgeMS        *int                    `json:"dataAgeMs"`
+	SafeZone         *bool                   `json:"safeZone"`
+	EmergencyActive  *bool                   `json:"emergencyActive"`
+	UI               UI                      `json:"ui"`
+	Players          map[int]Player          `json:"players"`
+	Monsters         []Monster               `json:"monsters"`
+	ActiveExecutions map[int]ActiveExecution `json:"activeExecutions,omitempty"`
 }
 
 type UI struct {
@@ -33,6 +36,7 @@ type UI struct {
 }
 
 type Player struct {
+	Position          *Point   `json:"position,omitempty"`
 	Alive             *bool    `json:"alive"`
 	Loading           *bool    `json:"loading"`
 	ActiveCombo       *bool    `json:"activeCombo"`
@@ -77,8 +81,14 @@ type Plan struct {
 	Behavior          string `json:"behavior,omitempty"`
 	ComboID           string `json:"comboId,omitempty"`
 	TargetID          string `json:"targetId,omitempty"`
+	Aim               *Aim   `json:"aim,omitempty"`
 	Reason            string `json:"reason,omitempty"`
 	ScheduledOffsetMS *int   `json:"scheduledOffsetMs,omitempty"`
+}
+
+type Aim struct {
+	RightX int16 `json:"rightX"`
+	RightY int16 `json:"rightY"`
 }
 
 func (w World) Validate() error {
@@ -89,12 +99,24 @@ func (w World) Validate() error {
 		w.UI.ChatOpen == nil || w.Players == nil || w.Monsters == nil {
 		return errors.New("world safety or area evidence is incomplete")
 	}
+	if !*w.SafeZone && IsKnownSafeZone(w.AreaID, w.AreaLabel) {
+		return errors.New("world declares combat safety in a known safe zone")
+	}
 	for id, player := range w.Players {
 		if id < 1 || id > 6 || player.Alive == nil || player.Loading == nil || player.ActiveCombo == nil ||
+			player.Position != nil && (!finite(float64(player.Position.X)) || !finite(float64(player.Position.Y))) ||
 			player.DistanceFromMainM == nil || !finite(*player.DistanceFromMainM) || *player.DistanceFromMainM < 0 ||
 			player.HealthPercent != nil && (!finite(*player.HealthPercent) ||
 				*player.HealthPercent < 0 || *player.HealthPercent > 100) {
 			return fmt.Errorf("player %d evidence is invalid", id)
+		}
+	}
+	for player, active := range w.ActiveExecutions {
+		if player < 1 || player > 6 || strings.TrimSpace(active.EncounterID) == "" ||
+			strings.TrimSpace(active.ComboID) == "" ||
+			(active.Behavior != "pack" && active.Behavior != "rare" &&
+				active.Behavior != "boss" && active.Behavior != "emergency") {
+			return fmt.Errorf("active execution for P%d is invalid", player)
 		}
 	}
 	seen := make(map[string]bool, len(w.Monsters))
@@ -177,7 +199,8 @@ func EvaluateEncounter(profile Profile, world World, encounter *Encounter) ([]Pl
 			} else if encounter.hasTag("rare-present") || encounter.hasTag("dangerous") {
 				behavior = "rare"
 			}
-			plan.Behavior, plan.ComboID = chooseBehavior(role, behavior, world.Monsters, *player.ActiveCombo)
+			plan.Behavior, plan.ComboID, plan.Reason = chooseBehavior(role, behavior,
+				world.Monsters, *player.ActiveCombo, *player.DistanceFromMainM)
 			if plan.ComboID == "" {
 				plan.Status = "waiting_no_eligible_encounter"
 			} else {
@@ -211,7 +234,16 @@ func globalBlock(profile Profile, world World) string {
 	return ""
 }
 
-func chooseBehavior(role Role, preferred string, monsters []Monster, activeCombo bool) (string, string) {
+func chooseBehavior(role Role, preferred string, monsters []Monster, activeCombo bool,
+	distanceFromMain float64) (string, string, string) {
+	if role.Logic.EngageAroundMain {
+		if reason := cullerBlock(role, monsters, activeCombo, distanceFromMain); reason != "" {
+			return "", "", reason
+		}
+	} else if role.Logic.MaximumLeashM > 0 && distanceFromMain > role.Logic.MaximumLeashM {
+		return "", "", fmt.Sprintf("Waiting: too far from MAIN (%.0f of %.0f)",
+			distanceFromMain, role.Logic.MaximumLeashM)
+	}
 	chain := []string{preferred}
 	radius := 60.0
 	minimumPack := 3
@@ -225,18 +257,28 @@ func chooseBehavior(role Role, preferred string, monsters []Monster, activeCombo
 	if preferred == "rare" {
 		chain = []string{"rare", "pack"}
 	}
+	firstReason := ""
 	for _, behavior := range chain {
 		if behavior == "emergency" {
 			// The supplied resolver bypasses enemy eligibility for an enabled
 			// emergency behaviour once an encounter exists.
-			return behavior, role.Behaviors[behavior]
+			return behavior, role.Behaviors[behavior], ""
 		}
 		pack, rare, unique := 0, 0, 0
+		inRange, healthEligible := 0, 0
 		for _, monster := range monsters {
-			distance, ok := monster.DistanceByPlayer[role.Player]
-			if !*monster.Alive || !ok || distance > radius {
+			distance := *monster.DistanceFromMainM
+			if !role.Logic.EngageAroundMain {
+				distance = monster.DistanceByPlayer[role.Player]
+			}
+			if !*monster.Alive || distance > radius || !role.Logic.Allows(monster.Rarity) {
 				continue
 			}
+			inRange++
+			if *monster.HealthPercent > float64(role.Logic.StartHelpingAtHealthPercent) {
+				continue
+			}
+			healthEligible++
 			switch monster.Rarity {
 			case "normal", "magic":
 				pack++
@@ -248,19 +290,93 @@ func chooseBehavior(role Role, preferred string, monsters []Monster, activeCombo
 		}
 		if behavior == "boss" && unique > 0 || behavior == "rare" && rare > 0 ||
 			behavior == "pack" && pack >= minimumPack {
-			return behavior, role.Behaviors[behavior]
+			return behavior, role.Behaviors[behavior], ""
+		}
+		reason := ""
+		if inRange == 0 {
+			reason = "Waiting: no enemies in range"
+		} else if healthEligible == 0 {
+			reason = fmt.Sprintf("Waiting: enemy above %d%%",
+				role.Logic.StartHelpingAtHealthPercent)
+		} else if behavior == "pack" {
+			reason = fmt.Sprintf("Waiting: pack too small (%d of %d)", pack, minimumPack)
+		} else if behavior == "rare" {
+			reason = "Waiting: no Rare in range"
+		} else if behavior == "boss" {
+			reason = "Waiting: no Unique in range"
+		}
+		if firstReason == "" {
+			firstReason = reason
 		}
 	}
-	return "", ""
+	if firstReason == "" {
+		firstReason = "Waiting: no enemies in range"
+	}
+	return "", "", firstReason
+}
+
+// cullerBlock follows the supplied EngageAroundMain pre-check. The later
+// behaviour filter uses distance from MAIN; this check still needs a target
+// reachable from the role's own position.
+func cullerBlock(role Role, monsters []Monster, activeCombo bool, fromMain float64) string {
+	nearest := math.Inf(1)
+	for _, monster := range monsters {
+		if !*monster.Alive || !role.Logic.Allows(monster.Rarity) ||
+			*monster.HealthPercent > float64(role.Logic.StartHelpingAtHealthPercent) {
+			continue
+		}
+		fromSelf := monster.DistanceByPlayer[role.Player]
+		if fromSelf > 120 && *monster.DistanceFromMainM > 50 {
+			continue
+		}
+		nearest = math.Min(nearest, fromSelf)
+	}
+	if math.IsInf(nearest, 1) {
+		return "Waiting: no enemy within Spark reach"
+	}
+	if role.Logic.MaximumLeashM <= 0 {
+		return ""
+	}
+	extra := 0.0
+	baseBand := 70.0
+	if activeCombo {
+		extra = 10
+		baseBand = 100
+	}
+	band := math.Max(role.Logic.MaximumLeashM, baseBand) + extra
+	if fromMain > role.Logic.MaximumLeashM+extra && fromMain > band {
+		return fmt.Sprintf("Waiting: too far from MAIN (%.0f of %.0f)", fromMain, band)
+	}
+	return ""
 }
 
 func validateProfile(profile Profile) error {
 	expected := DefaultProfile()
 	expected.Enabled = profile.Enabled
+	if len(profile.Roles) != len(expected.Roles) {
+		return errors.New("unsupported combat role count")
+	}
+	for index, role := range profile.Roles {
+		if role.Logic.StartHelpingAtHealthPercent < 1 ||
+			role.Logic.StartHelpingAtHealthPercent > 100 ||
+			role.Logic.FullAggressionAtHealthPercent != 10 ||
+			role.Logic.FullAggressionAtHealthPercent > role.Logic.StartHelpingAtHealthPercent ||
+			!finite(role.Logic.MaximumLeashM) || role.Logic.MaximumLeashM < 0 ||
+			role.Logic.MaximumLeashM > 400 ||
+			(role.Logic.TargetLock != "free" && role.Logic.TargetLock != "until-dead" &&
+				role.Logic.TargetLock != "when-invalid") {
+			return fmt.Errorf("invalid role logic for P%d", role.Player)
+		}
+		expected.Roles[index].Logic = role.Logic
+	}
 	if !reflect.DeepEqual(profile, expected) {
-		return errors.New("unsupported combat profile; only supplied 0.6.17 default is implemented")
+		return errors.New("unsupported combat profile; only supplied 0.6.17 defaults and role eligibility are implemented")
 	}
 	return nil
 }
+
+// ValidateProfile accepts only the supplied default profile plus the role
+// eligibility fields implemented by this read-only planner.
+func ValidateProfile(profile Profile) error { return validateProfile(profile) }
 
 func finite(value float64) bool { return !math.IsNaN(value) && !math.IsInf(value, 0) }

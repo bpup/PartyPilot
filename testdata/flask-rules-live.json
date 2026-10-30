@@ -1,0 +1,34 @@
+{
+  "players": [
+    {
+      "player": 1,
+      "life_enabled": true,
+      "life_trigger": 70,
+      "life_cooldown_ms": 200,
+      "emergency": 25,
+      "life_min_missing": 0,
+      "skip_recovering": true,
+      "mana_enabled": true,
+      "mana_trigger": 45,
+      "mana_cooldown_ms": 800,
+      "mana_min_missing": 0,
+      "chaos_inoculation": true,
+      "combined_defence": false
+    },
+    {
+      "player": 2,
+      "life_enabled": true,
+      "life_trigger": 45,
+      "life_cooldown_ms": 400,
+      "emergency": 20,
+      "life_min_missing": 25,
+      "skip_recovering": true,
+      "mana_enabled": true,
+      "mana_trigger": 45,
+      "mana_cooldown_ms": 800,
+      "mana_min_missing": 20,
+      "chaos_inoculation": true,
+      "combined_defence": false
+    }
+  ]
+}

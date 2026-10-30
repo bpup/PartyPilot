@@ -17,12 +17,48 @@ internal static class HybridKeyboardInputTests
             HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:3",
                 "--hybrid-window-map", "1:10:100,2:20:200"], [1, 3], out _))
             throw new Exception("Hybrid player-to-pad or exact window map was accepted ambiguously.");
+        if (HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:2",
+                "--hybrid-window-map", "1:10:100,2:10:200"], [1, 2], out _))
+            throw new Exception("Two-client keyboard mapping accepted two windows from one process.");
         if (!plan.TryGetAutoPartyWindow(1, out var firstWindow) ||
             firstWindow != new HybridGameWindow(10, 100) ||
             !plan.TryGetAutoPartyWindow(3, out var followerWindow) ||
             followerWindow != new HybridGameWindow(20, 200) ||
             plan.TryGetAutoPartyWindow(2, out _))
             throw new Exception("Hybrid Auto Party resolved an unassigned or wrong game window.");
+        if (!HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:2,3:3,4:4",
+                "--hybrid-window-map", "1:10:100,2:10:100,3:20:200,4:20:200"],
+                [1, 2, 3, 4], out var fourClient) ||
+            fourClient?.PlayerPads[2] != 2 ||
+            !fourClient.TryGetAutoPartyWindow(4, out var fourthWindow) ||
+            fourthWindow != new HybridGameWindow(20, 200) ||
+            !HybridBindRequest.ValidPrelaunchPads(["--hybrid-player-pads", "2:2,3:3,4:4"],
+                [1, 2, 3, 4], out _) ||
+            HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:2,3:3,4:4",
+                "--hybrid-window-map", "1:10:100,2:20:200,3:20:200,4:20:200"],
+                [1, 2, 3, 4], out _) ||
+            HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:2,3:3,4:4",
+                "--hybrid-window-map", "1:10:100,2:10:100,3:20:200,4:30:300"],
+                [1, 2, 3, 4], out _))
+            throw new Exception("Four-role keyboard layout did not preserve two exact two-player clients.");
+        if (!HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:2,3:3,4:4,5:5,6:6",
+                "--hybrid-window-map", "1:10:100,2:10:100,3:20:200,4:20:200,5:30:300,6:30:300"],
+                [1, 2, 3, 4], out var sixClient) ||
+            sixClient?.PlayerPads[2] != 2 ||
+            !sixClient.TryGetAutoPartyWindow(6, out var sixthWindow) ||
+            sixthWindow != new HybridGameWindow(30, 300) ||
+            HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:2,3:3,4:4,5:5,6:6",
+                "--hybrid-window-map", "1:10:100,2:20:200,3:20:200,4:20:200,5:30:300,6:30:300"],
+                [1, 2, 3, 4], out _) ||
+            HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:3,3:2,4:4,5:5,6:6",
+                "--hybrid-window-map", "1:10:100,2:10:100,3:20:200,4:20:200,5:30:300,6:30:300"],
+                [1, 2, 3, 4], out _) ||
+            HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:2,3:3,4:4,5:5,6:6",
+                "--hybrid-window-map", "1:10:100,2:10:100,3:20:200,4:30:300,5:30:300,6:30:300"],
+                [1, 2, 3, 4], out _) ||
+            !HybridBindRequest.ValidPrelaunchPads(["--hybrid-player-pads", "2:2,3:3,4:4,5:5,6:6"],
+                [1, 2, 3, 4], out _))
+            throw new Exception("Six-role hybrid keyboard layout was not bound to three exact windows.");
         if (!HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:3,3:5",
                 "--hybrid-window-map", "1:10:100,2:20:200,3:30:300"],
                 [1, 2, 3, 4], out var threeClient) ||
@@ -78,6 +114,18 @@ internal static class HybridKeyboardInputTests
                 out var adopted) || adopted ||
             boundThird?.PlayerPads[3] != 5 || boundThirdOptions?.PrivateSlots.SequenceEqual([5]) != true)
             throw new Exception("Prelaunch rejected an exact private Client 3 binding.");
+        var sixBinding = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            type = "bind_hybrid", player_pads = "2:2,3:3,4:4,5:5,6:6",
+            window_map = "1:10:100,2:10:100,3:20:200,4:20:200,5:30:300,6:30:300",
+            client3 = new { pid = 30, window_handle = 300, game_exe = thirdGame, players = "5,6" }
+        });
+        if (!HybridBindRequest.TryParse(sixBinding, [1, 2, 3, 4],
+                [gameA, gameB, thirdGame], out var boundSix, out var sixPrivate,
+                out var adoptedSix) || adoptedSix ||
+            boundSix?.PlayerWindows[2] != new HybridGameWindow(10, 100) ||
+            sixPrivate?.PrivateSlots.SequenceEqual([5, 6]) != true)
+            throw new Exception("Prelaunch rejected exact three-client, six-role keyboard binding.");
         var transferred = thirdBinding.Replace("\"client3\":", "\"adopt_private_client3\":true,\"client3\":");
         if (!HybridBindRequest.TryParse(transferred, [1, 2, 3, 4],
                 [gameA, gameB, thirdGame], out _, out _, out var transferredFlag) ||
@@ -386,6 +434,42 @@ internal static class HybridKeyboardInputTests
         privateRouter.ApplyHybridKey(0x45, true, true);
         if (privateP5.Report.Buttons != 0x1000 || privateP6.Report.Buttons != 0x1000)
             throw new Exception("Normal MAIN input did not reach both Client 3 followers.");
+
+        var sixPads = Enumerable.Range(1, 6).ToDictionary(slot => slot, _ => new FakePad());
+        var sixRouter = new BridgeRouter(sixPads.ToDictionary(entry => entry.Key,
+            entry => (IPadOutput)entry.Value));
+        if (!sixRouter.ConfigureHybridKeyboard(Enumerable.Range(2, 5)
+                .ToDictionary(player => player, player => player)) ||
+            !sixRouter.EnableHybridMainFollowMirror())
+            throw new Exception("Six-role keyboard layout rejected the five follower routes.");
+        sixRouter.SetHybridForeground(true);
+        foreach (var slot in Enumerable.Range(2, 5))
+        {
+            if (!sixRouter.ApplyLine($"{{\"slot\":{slot},\"state\":\"following\",\"x\":1,\"y\":0}}", now) ||
+                sixPads[slot].X != 32767)
+                throw new Exception($"P{slot} follow command did not reach its own output.");
+        }
+        if (sixPads[1].Report != default)
+            throw new Exception("Native P1 placeholder received follower movement.");
+        sixRouter.ApplyHybridKey(0x71, true, true);
+        sixRouter.ApplyHybridKey(0x57, true, true);
+        if (sixRouter.HybridFocusedPlayer != 2 || sixPads[2].Y != 32767 ||
+            sixPads.Where(entry => entry.Key != 2).Any(entry => entry.Value.Report != default))
+            throw new Exception("P2 manual keyboard focus did not isolate all other clients.");
+        sixRouter.ApplyHybridKey(0x57, false, true);
+        sixRouter.ApplyHybridKey(0x75, true, true);
+        sixRouter.ApplyHybridKey(0x57, true, true);
+        if (sixRouter.HybridFocusedPlayer != 6 || sixPads[6].Y != 32767 ||
+            sixPads.Where(entry => entry.Key != 6).Any(entry => entry.Value.Report != default))
+            throw new Exception("P6 manual keyboard focus leaked to another client.");
+        sixRouter.SetHybridForeground(false);
+        if (sixPads.Values.Any(pad => pad.Report != default))
+            throw new Exception("Six-role keyboard outputs survived game focus loss.");
+        sixRouter.ApplyHybridKey(0x57, false, true);
+        sixRouter.ApplyHybridKey(0x70, true, true);
+        if (sixRouter.HybridFocusedPlayer != 1 ||
+            sixPads.Values.Any(pad => pad.Report != default))
+            throw new Exception("Returning to P1 resumed stale six-role automation.");
 
         var menuState = new HybridKeyboardState([2]);
         menuState.Handle(0x71, true, true);

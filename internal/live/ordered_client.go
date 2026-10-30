@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,9 +22,9 @@ type RoleBinding struct {
 	ProcessID   int
 }
 
-// OrderedClientFrame is a future input boundary for an independently verified
-// local-player vector. The current ExileCore2 candidate scan does not produce
-// this frame and must not be promoted into it without game validation.
+// OrderedClientFrame is the explicit input boundary for local-player vectors.
+// A producer's reliability flag is a claim; the experimental static-vector
+// producer still needs game validation before it can establish correct roles.
 type OrderedClientFrame struct {
 	ProcessID           int                  `json:"ProcessId"`
 	SeenUTC             time.Time            `json:"SeenUtc"`
@@ -31,6 +32,9 @@ type OrderedClientFrame struct {
 	TickMS              int64                `json:"TickMs"`
 	AreaName            string               `json:"AreaName"`
 	AreaHash            uint32               `json:"AreaHash"`
+	AreaInstanceAddress string               `json:"AreaInstanceAddress"`
+	VectorHeaderAddress string               `json:"VectorHeaderAddress"`
+	OrderedAddresses    []string             `json:"OrderedAddresses"`
 	CoordinateSpace     string               `json:"CoordinateSpace"`
 	PlayerOrderReliable bool                 `json:"PlayerOrderReliable"`
 	PlayerOrderSource   string               `json:"PlayerOrderSource"`
@@ -48,6 +52,65 @@ type OrderedLocalPlayer struct {
 	ManaMax         *float64 `json:"ManaMax"`
 	EnergyShield    *float64 `json:"EnergyShield"`
 	EnergyShieldMax *float64 `json:"EnergyShieldMax"`
+}
+
+const unverifiedExileCoreSlotSource = "unverified_exilecore_local_slot_candidate"
+const experimentalStaticVectorSource = "experimental_static_vector_0.6.17"
+const experimentalUnknownBuildVectorSource = "experimental_unknown_build_vector_0.6.17"
+
+func isStaticCandidateSource(source string) bool {
+	return source == experimentalStaticVectorSource || source == experimentalUnknownBuildVectorSource
+}
+
+type orderedIdentity struct {
+	areaHash    uint32
+	areaAddress string
+	addresses   []string
+}
+
+func (identity orderedIdentity) matches(frame OrderedClientFrame) bool {
+	if identity.areaHash != frame.AreaHash ||
+		identity.areaAddress != frame.AreaInstanceAddress ||
+		len(identity.addresses) != len(frame.OrderedAddresses) {
+		return false
+	}
+	for index, address := range identity.addresses {
+		if address != frame.OrderedAddresses[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func validStaticVectorPointer(value string) bool {
+	if !strings.HasPrefix(value, "0x") || len(value) <= 2 {
+		return false
+	}
+	address, err := strconv.ParseUint(value[2:], 16, 64)
+	return err == nil && address >= 0x10000 && address < 0x7FFF_FFFF_FFFF
+}
+
+func validStaticVectorIdentity(frame OrderedClientFrame, roles []RoleBinding) bool {
+	if !isStaticCandidateSource(frame.PlayerOrderSource) {
+		return true
+	}
+	if frame.AreaHash == 0 || !validStaticVectorPointer(frame.AreaInstanceAddress) ||
+		!validStaticVectorPointer(frame.VectorHeaderAddress) ||
+		len(frame.OrderedAddresses) != len(roles) {
+		return false
+	}
+	seen := make(map[uint64]bool, len(frame.OrderedAddresses))
+	for _, value := range frame.OrderedAddresses {
+		if !validStaticVectorPointer(value) {
+			return false
+		}
+		address, _ := strconv.ParseUint(value[2:], 16, 64)
+		if seen[address] {
+			return false
+		}
+		seen[address] = true
+	}
+	return true
 }
 
 // DecodeOrderedClient is an explicit, opt-in transport boundary. The wire
@@ -83,10 +146,21 @@ func (e *Engine) ObserveOrderedClient(frame OrderedClientFrame) bool {
 	}
 	if !frame.PlayerOrderReliable ||
 		strings.TrimSpace(frame.PlayerOrderSource) == "" ||
+		strings.EqualFold(strings.TrimSpace(frame.PlayerOrderSource), unverifiedExileCoreSlotSource) ||
+		!validStaticVectorIdentity(frame, roles) ||
 		len(frame.Players) != len(roles) || frame.CoordinateSpace != "world" ||
 		frame.SeenUTC.IsZero() || frame.ReceivedAt.IsZero() || frame.TickMS <= 0 {
 		e.invalidateOrderedIfCurrent(roles, frame)
 		return false
+	}
+	if isStaticCandidateSource(frame.PlayerOrderSource) {
+		if pinned, exists := e.orderedIdentities[frame.ProcessID]; exists &&
+			pinned.areaHash == frame.AreaHash &&
+			pinned.areaAddress == frame.AreaInstanceAddress &&
+			!pinned.matches(frame) {
+			e.invalidateOrderedIfCurrent(roles, frame)
+			return false
+		}
 	}
 	byLocal := make(map[int]OrderedLocalPlayer, len(frame.Players))
 	for _, player := range frame.Players {
@@ -126,6 +200,12 @@ func (e *Engine) ObserveOrderedClient(frame OrderedClientFrame) bool {
 	}
 	for _, role := range roles {
 		e.storeSample(role.Slot, updates[role.Slot])
+	}
+	if isStaticCandidateSource(frame.PlayerOrderSource) {
+		e.orderedIdentities[frame.ProcessID] = orderedIdentity{
+			areaHash: frame.AreaHash, areaAddress: frame.AreaInstanceAddress,
+			addresses: append([]string(nil), frame.OrderedAddresses...),
+		}
 	}
 	return true
 }

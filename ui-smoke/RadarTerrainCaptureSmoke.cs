@@ -1,0 +1,295 @@
+using System.Security.Cryptography;
+using System.Text.Json;
+using Avalonia.Controls;
+using Avalonia.Headless;
+using Avalonia.LogicalTree;
+using PartyPilot.Desktop;
+
+internal static class RadarTerrainCaptureSmoke
+{
+    internal static void Run()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "partypilot-radar-terrain-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var appearancePath = Path.Combine(directory, "appearance.json");
+            var appearanceStore = new RadarAppearancePreferenceStore(appearancePath);
+            if (appearanceStore.Load() != (true, RadarAppearanceSettings.Default) ||
+                RadarAppearanceSettings.TryParse("101", "26", "6", out _) ||
+                RadarAppearanceSettings.TryParse("58", "-1", "6", out _) ||
+                !RadarAppearanceSettings.TryParse("70", "0", "0", out var clearStyle) ||
+                !appearanceStore.Save(clearStyle) ||
+                appearanceStore.Load() != (true, clearStyle))
+                throw new Exception("Radar appearance range or saved settings changed.");
+            File.WriteAllText(appearancePath, "[]");
+            if (appearanceStore.Load().Success)
+                throw new Exception("Invalid radar appearance settings were accepted.");
+            var dataPath = Path.Combine(directory, "capture.packed");
+            var metadataPath = Path.Combine(directory, "capture.json");
+            var data = Enumerable.Repeat((byte)0x11, 4096).ToArray();
+            data[0] = 0x10;
+            File.WriteAllBytes(dataPath, data);
+            string Metadata(string patch) => JsonSerializer.Serialize(new
+            {
+                Status = "candidate_capture_only",
+                ProcessId = 123,
+                AreaHash = "42",
+                AreaAddress = "0xABCDEF",
+                Anchor = "ingame_data_address",
+                PackedStart = "0x100000",
+                RawGridX = 3.0,
+                RawGridY = 3.0,
+                SeenUtc = DateTime.UtcNow,
+                Width = 128,
+                Height = 64,
+                BytesPerRow = 64,
+                PackedBytes = 4096,
+                PatchX = 0,
+                PatchY = 0,
+                PatchRows = new[] { patch },
+                Sha256 = Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant(),
+                DataFile = "capture.packed",
+                GeneratedRoomStatus = "candidate_rooms_observed",
+                GeneratedRoomAreaAddress = "0xABCDEF",
+                GeneratedRoomAnchor = "ingame_data_address",
+                GeneratedRooms = new[]
+                {
+                    new { Path = "Metadata/Terrain/Gallows/Act1/1_6/Rooms/boss_1.arm",
+                        Category = "boss", Label = "Boss arena", GridX = 11.5, GridY = 11.5,
+                        Left = 0, Top = 0, Right = 1, Bottom = 1 }
+                },
+                TerrainPlacementStatus = "candidate_placements_observed",
+                TerrainPlacementAreaAddress = "0xABCDEF",
+                TerrainPlacementAnchor = "ingame_data_address",
+                TerrainPlacements = new[]
+                {
+                    new { Path = "Metadata/Terrain/Gallows/Act3/Objects/MachinariumGeneratorButton",
+                        Category = "quest", Label = "Soul Core Generator",
+                        GridX = 11.5, GridY = 11.5, TileX = 0, TileY = 0 }
+                },
+                QuestTileStatus = "candidate_tiles_observed",
+                QuestTileAreaId = "G1_8",
+                QuestTileAreaAddress = "0xABCDEF",
+                QuestTileAnchor = "ingame_data_address",
+                QuestTiles = new[]
+                {
+                    new { Path = "Metadata/Terrain/Woods/GraveyardDungeons/Feature/MausoleumBoss_ArenaFloor.tdt",
+                        Category = "campaign", Label = "MausoleumBoss_ArenaFloor",
+                        GridX = 11.5, GridY = 11.5, TileX = 0, TileY = 0,
+                        RotationX = (int?)0, RotationY = (int?)0, RotationSwap = (bool?)false,
+                        AdjustmentX = 0, AdjustmentY = 0 }
+                }
+            });
+            File.WriteAllText(metadataPath, Metadata("01"));
+            if (!RadarTerrainCapture.TryLoad(metadataPath, out var capture) || capture is null ||
+                capture.ProcessId != 123 || capture.AreaHash != 42 ||
+                capture.Width != 128 || capture.Height != 64 ||
+                capture.Rooms.Count != 3 ||
+                capture.Rooms[0] is not { Category: "boss", Label: "Boss arena" } ||
+                capture.Rooms[1] is not { Category: "quest", Label: "Soul Core Generator" } ||
+                capture.Rooms[2] is not { Category: "campaign", Label: "MausoleumBoss_ArenaFloor" } ||
+                capture.Walkable(0, 0) || !capture.Walkable(1, 0))
+                throw new Exception("Radar rejected a valid bounded terrain capture or decoded nibble order incorrectly.");
+            var matching = new RadarFrame(123, DateTime.UtcNow, 42, "0xABCDEF", 30, 30, [])
+                { GridX = 3, GridY = 3 };
+            if (!capture.Matches(matching) || capture.Matches(matching with { AreaHash = 43 }) ||
+                capture.Matches(matching with { GridX = 128 }) ||
+                capture.Matches(matching with { AreaAddress = "0xABCDE0" }) ||
+                capture.Matches(matching with { SeenUtc = capture.SeenUtc.AddSeconds(-1) }))
+                throw new Exception("Radar terrain accepted a different area, stale frame, or invalid grid coordinate.");
+            var projected = RadarTerrainRaster.Render(capture,
+                matching with { GridX = 1, GridY = 0 }, 64, 64, 8);
+            if (projected[(32 * 64 + 26) * 4 + 3] != 0 ||
+                projected[(27 * 64 + 32) * 4 + 3] != 80 ||
+                projected[(63 * 64) * 4 + 3] != 0)
+                throw new Exception($"Radar terrain preview lost blocked, walkable, or outside-map pixels: " +
+                    $"blocked={projected[(32 * 64 + 26) * 4 + 3]}, " +
+                    $"walkable={projected[(27 * 64 + 32) * 4 + 3]}, " +
+                    $"outside={projected[(63 * 64) * 4 + 3]}.");
+            var smoothedPixels = 0;
+            for (var y = 0; y < 64; y++)
+            for (var x = 0; x < 64; x++)
+            {
+                var alpha = projected[(y * 64 + x) * 4 + 3];
+                if (alpha > 80)
+                    throw new Exception($"Radar terrain exceeded configured edge opacity at ({x},{y}).");
+                if (alpha is > 0 and < 80 and not 21) smoothedPixels++;
+            }
+            if (smoothedPixels == 0)
+                throw new Exception("Radar terrain lost the target-style smoothed edge transition.");
+            var interior = RadarTerrainRaster.Render(capture, matching, 1, 1, 1);
+            if (!interior.SequenceEqual(new byte[] { 5, 4, 3, 21 }))
+                throw new Exception("Radar terrain interior did not use the target's default fill colour and opacity.");
+            if (RadarTerrainRaster.Render(capture, matching, 1, 1, 1, clearStyle)[3] != 0 ||
+                RadarTerrainRaster.Render(capture,
+                    matching with { GridX = 1, GridY = 0 }, 1, 1, 1, clearStyle)[3] != 0)
+                throw new Exception("Zero terrain layer opacity did not clear the map fill and border.");
+            var diagonal = RadarTerrainRaster.Render(capture,
+                matching with { GridX = 1, GridY = 1 }, 1, 1, 1);
+            if (diagonal[3] is <= 0 or > 80)
+                throw new Exception("Chamfer-smoothed diagonal terrain left the configured opacity range.");
+            var wideData = Enumerable.Repeat((byte)0x11, 1201 * 4).ToArray();
+            var wideDataPath = Path.Combine(directory, "wide.packed");
+            var wideMetadataPath = Path.Combine(directory, "wide.json");
+            File.WriteAllBytes(wideDataPath, wideData);
+            File.WriteAllText(wideMetadataPath, JsonSerializer.Serialize(new
+            {
+                Status = "candidate_capture_only", ProcessId = 123, AreaHash = "42",
+                AreaAddress = "0xABCDEF", Anchor = "ingame_data_address",
+                PackedStart = "0x100000", RawGridX = 1200.0, RawGridY = 2.0,
+                SeenUtc = DateTime.UtcNow, Width = 2402, Height = 4,
+                BytesPerRow = 1201, PackedBytes = wideData.Length,
+                PatchX = 0, PatchY = 0, PatchRows = new[] { "11" },
+                Sha256 = Convert.ToHexString(SHA256.HashData(wideData)).ToLowerInvariant(),
+                DataFile = "wide.packed"
+            }));
+            if (!RadarTerrainCapture.TryLoad(wideMetadataPath, out var wideCapture) ||
+                wideCapture is null)
+                throw new Exception("Wide candidate terrain failed to load for downsample check.");
+            var wideFrame = matching with { GridX = 1200, GridY = 2,
+                SeenUtc = DateTime.UtcNow };
+            var widePixels = RadarTerrainRaster.Render(wideCapture, wideFrame, 64, 64, 8);
+            if (widePixels.Length != 64 * 64 * 4 ||
+                !widePixels.Where((_, index) => index % 4 == 3).Any(alpha => alpha > 0))
+                throw new Exception("Wide candidate terrain lost all map pixels after downsampling.");
+            var autoDirectory = Path.Combine(directory, "auto");
+            Directory.CreateDirectory(autoDirectory);
+            var catalog = new RadarTerrainCatalog(autoDirectory);
+            var scanAt = DateTime.UtcNow;
+            if (catalog.FindMatching(matching, scanAt) is not null)
+                throw new Exception("Radar found terrain before the sensor captured it.");
+            File.Copy(dataPath, Path.Combine(autoDirectory, "capture.packed"));
+            File.Copy(metadataPath, Path.Combine(autoDirectory, "terrain-123-test.json"));
+            if (catalog.FindMatching(matching, scanAt.AddSeconds(1)) is not null ||
+                catalog.FindMatching(matching, scanAt.AddSeconds(3)) is not { } discovered ||
+                !discovered.Matches(matching))
+                throw new Exception("Radar did not discover a new matching capture.");
+            File.WriteAllText(Path.Combine(autoDirectory, "terrain-123-next.json"),
+                Metadata("01").Replace("\"AreaHash\":\"42\"", "\"AreaHash\":\"43\""));
+            var nextAreaFrame = matching with { AreaHash = 43, SeenUtc = DateTime.UtcNow };
+            if (catalog.FindMatching(nextAreaFrame, scanAt.AddSeconds(3).AddMilliseconds(100))
+                    is not { } nextArea || !nextArea.Matches(nextAreaFrame) ||
+                catalog.FindMatching(matching, scanAt.AddSeconds(3).AddMilliseconds(200))
+                    is not { } returned || !returned.Matches(matching))
+                throw new Exception("Radar delayed terrain discovery after an area change.");
+            var crowdedDirectory = Path.Combine(directory, "crowded");
+            Directory.CreateDirectory(crowdedDirectory);
+            File.Copy(dataPath, Path.Combine(crowdedDirectory, "capture.packed"));
+            var olderCapture = Path.Combine(crowdedDirectory, "terrain-123-older.json");
+            File.Copy(metadataPath, olderCapture);
+            File.SetLastWriteTimeUtc(olderCapture, DateTime.UtcNow.AddDays(-1));
+            for (var index = 0; index < 128; index++)
+            {
+                var decoy = Path.Combine(crowdedDirectory, $"terrain-123-newer-{index:D3}.json");
+                File.WriteAllText(decoy, "{}");
+                File.SetLastWriteTimeUtc(decoy, DateTime.UtcNow);
+            }
+            var crowdedCatalog = new RadarTerrainCatalog(crowdedDirectory);
+            if (crowdedCatalog.FindMatching(matching, scanAt.AddSeconds(5)) is not null ||
+                crowdedCatalog.FindMatching(matching with { AreaHash = 43 },
+                    scanAt.AddSeconds(7)) is not null ||
+                crowdedCatalog.FindMatching(matching, scanAt.AddSeconds(9)) is not null ||
+                crowdedCatalog.FindMatching(matching, scanAt.AddSeconds(11)) is not { } older ||
+                !older.Matches(matching))
+                throw new Exception("Radar did not resume old captures or restart its scan on area change.");
+            var terrainWindow = new RadarOverlayWindow(new LaunchedClient(123, 1, "C:/Game.exe"),
+                2, new RadarVisibility(), renderOnly: true);
+            terrainWindow.Show();
+            terrainWindow.Apply(matching, discovered);
+            terrainWindow.UpdateLayout();
+            if (!terrainWindow.TerrainVisible ||
+                terrainWindow.GetLogicalDescendants().OfType<Image>().Count() != 1 ||
+                !terrainWindow.GetLogicalDescendants().OfType<TextBlock>()
+                    .Any(label => label.Text == "候选 · 首领区域") ||
+                !terrainWindow.GetLogicalDescendants().OfType<TextBlock>()
+                    .Any(label => label.Text == "候选 · 任务线索 · Soul Core Generator") ||
+                !terrainWindow.GetLogicalDescendants().OfType<TextBlock>()
+                    .Any(label => label.Text == "候选 · 战役地点 · MausoleumBoss_ArenaFloor") ||
+                terrainWindow.CaptureRenderedFrame() is null)
+                throw new Exception("Matching terrain was not drawn behind radar markers.");
+            var firstTerrainImage = terrainWindow.GetLogicalDescendants().OfType<Image>().Single();
+            terrainWindow.Apply(matching with { SeenUtc = matching.SeenUtc.AddMilliseconds(1) },
+                discovered);
+            var repeatedTerrainImage = terrainWindow.GetLogicalDescendants().OfType<Image>().Single();
+            if (!ReferenceEquals(firstTerrainImage.Source, repeatedTerrainImage.Source))
+                throw new Exception("An unchanged player grid regenerated the whole terrain bitmap.");
+            terrainWindow.Apply(matching with { GridX = 4,
+                SeenUtc = matching.SeenUtc.AddMilliseconds(2) }, discovered);
+            var movedTerrainImage = terrainWindow.GetLogicalDescendants().OfType<Image>().Single();
+            if (!ReferenceEquals(firstTerrainImage.Source, movedTerrainImage.Source) ||
+                !double.IsFinite(Canvas.GetLeft(movedTerrainImage)) ||
+                Math.Abs(Canvas.GetLeft(movedTerrainImage)) < 0.1)
+                throw new Exception("A fast motion frame did not shift the cached terrain projection.");
+            terrainWindow.Apply(matching with { GridX = 4,
+                SeenUtc = matching.SeenUtc.AddMilliseconds(300) }, discovered);
+            var refreshedTerrainImage = terrainWindow.GetLogicalDescendants().OfType<Image>().Single();
+            if (ReferenceEquals(firstTerrainImage.Source, refreshedTerrainImage.Source))
+                throw new Exception("Terrain was not regenerated after the bounded motion refresh.");
+            terrainWindow.Apply(matching with { AreaHash = 43 }, null);
+            if (terrainWindow.TerrainVisible ||
+                terrainWindow.GetLogicalDescendants().OfType<Image>().Any())
+                throw new Exception("Radar drew candidate terrain for a different area.");
+            terrainWindow.Close();
+            var autoMetadataPath = Path.Combine(autoDirectory, "terrain-123-test.json");
+            File.WriteAllText(autoMetadataPath, Metadata("01").Replace(
+                "\"Label\":\"Soul Core Generator\"", "\"Label\":\"Unknown\""));
+            File.SetLastWriteTimeUtc(autoMetadataPath, DateTime.UtcNow.AddSeconds(2));
+            if (catalog.FindMatching(matching, scanAt.AddSeconds(6)) is not null)
+                throw new Exception("Radar retained cached room markers after metadata changed.");
+            File.WriteAllText(metadataPath, Metadata("01").Replace("\"Category\":\"boss\"",
+                "\"Category\":\"quest\""));
+            if (RadarTerrainCapture.TryLoad(metadataPath, out _))
+                throw new Exception("Radar accepted a generated-room category that disagrees with its path.");
+            File.WriteAllText(metadataPath, Metadata("01").Replace("\"GridX\":11.5",
+                "\"GridX\":12.5"));
+            if (RadarTerrainCapture.TryLoad(metadataPath, out _))
+                throw new Exception("Radar accepted a generated-room coordinate outside its tile center.");
+            File.WriteAllText(metadataPath, Metadata("01").Replace("\"Label\":\"Soul Core Generator\"",
+                "\"Label\":\"Unknown\""));
+            if (RadarTerrainCapture.TryLoad(metadataPath, out _))
+                throw new Exception("Radar accepted a terrain placement label that disagrees with its path.");
+            File.WriteAllText(metadataPath, Metadata("01").Replace("\"QuestTileAreaId\":\"G1_8\"",
+                "\"QuestTileAreaId\":\"G1_9\""));
+            if (RadarTerrainCapture.TryLoad(metadataPath, out _))
+                throw new Exception("Radar accepted a tile landmark from another area.");
+            File.WriteAllText(metadataPath, Metadata("01").Replace("\"RotationX\":0",
+                "\"RotationX\":1"));
+            if (RadarTerrainCapture.TryLoad(metadataPath, out _))
+                throw new Exception("Radar accepted a campaign label with the wrong tile rotation.");
+            File.WriteAllText(metadataPath, Metadata("10"));
+            if (RadarTerrainCapture.TryLoad(metadataPath, out _))
+                throw new Exception("Radar accepted terrain whose observed patch disagrees with packed cells.");
+            File.WriteAllText(metadataPath, Metadata("01"));
+            data[1] = 0;
+            File.WriteAllBytes(dataPath, data);
+            if (RadarTerrainCapture.TryLoad(metadataPath, out _))
+                throw new Exception("Radar accepted terrain with a changed packed file.");
+            data = Enumerable.Repeat((byte)0x55, 4096).ToArray();
+            data[32 * 64 + 32] = 0x51; // Cell (64,32) has the target's 1..4 ramp value.
+            File.WriteAllBytes(dataPath, data);
+            File.WriteAllText(metadataPath, Metadata("11"));
+            if (!RadarTerrainCapture.TryLoad(metadataPath, out var clipped) || clipped is null ||
+                !clipped.Renderable(64, 32) || !clipped.Renderable(40, 8) ||
+                !clipped.Renderable(88, 56) || clipped.Renderable(39, 32) ||
+                clipped.Renderable(89, 32) || clipped.Renderable(64, 7))
+                throw new Exception("Radar did not apply the 24-cell ramp bounds to candidate terrain.");
+            data[32 * 64 + 32] = 0x55;
+            File.WriteAllBytes(dataPath, data);
+            File.WriteAllText(metadataPath, Metadata("11"));
+            if (!RadarTerrainCapture.TryLoad(metadataPath, out var unclipped) || unclipped is null ||
+                !unclipped.Renderable(0, 0) || !unclipped.Renderable(127, 63))
+                throw new Exception("Radar clipped terrain without a 1..4 ramp value.");
+            data = Enumerable.Repeat((byte)0xFF, 4096).ToArray();
+            data[0] = 0x11;
+            File.WriteAllBytes(dataPath, data);
+            File.WriteAllText(metadataPath, Metadata("11"));
+            if (RadarTerrainCapture.TryLoad(metadataPath, out _))
+                throw new Exception("Radar accepted a manually bound map with invalid terrain values.");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+}

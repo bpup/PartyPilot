@@ -1,0 +1,157 @@
+name: Windows smoke
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - name: Go tests
+        run: go test ./... -count=1
+      - name: Bridge protocol checks
+        run: dotnet run --project bridge/protocol-tests/ProtocolTests.csproj -c Release
+      - name: Sensor offline checks
+        run: dotnet run --project sensor-tests/PartyPilot.Sensor.Tests.csproj -c Release
+        env:
+          DOTNET_ROLL_FORWARD: Major
+      - name: Standalone probe offline checks
+        run: dotnet run --project probe/PartyPilot.Probe.csproj -c Release -- --self-test
+      - name: Build ExileCore2 sensor plugin
+        shell: pwsh
+        run: |
+          $reference = Join-Path $env:RUNNER_TEMP "exilecore2-reference"
+          New-Item -ItemType Directory -Force -Path $reference | Out-Null
+          $assembly = Join-Path $reference "ExileCore2.dll"
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/exCore2/ExileCore2/435c0b4ed2dc66eb166dcb8b66de6b089c8cbd29/ExileCore2.dll" -OutFile $assembly
+          if ((Get-FileHash $assembly -Algorithm SHA256).Hash -ne "F21CD2F34927ADD94293153D6DDC2B9404420121620D3F31247B230879F4CB1A") { throw "ExileCore2 reference hash differs" }
+          $env:EXILECORE2_DIR = $reference
+          dotnet build sensor/PartyPilot.Sensor.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build Windows input bridge
+        run: dotnet build bridge/PartyPilot.Bridge.csproj -c Release
+      - name: Build and exercise private client 3 input runtime
+        shell: pwsh
+        run: |
+          cmake -S native/private-slot-runtime -B "$env:RUNNER_TEMP/private-slots" -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build "$env:RUNNER_TEMP/private-slots" --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ctest --test-dir "$env:RUNNER_TEMP/private-slots" -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Exercise Client 3 remote input attach
+        shell: pwsh
+        run: |
+          dotnet run --project bridge/protocol-tests/ProtocolTests.csproj -c Release -- --remote-attach-smoke "$env:RUNNER_TEMP/private-slots/bin/Release/PathOfExile_x64.exe" "$env:RUNNER_TEMP/private-slots/bin/Release/PartyPilot.PrivateSlots.dll"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Exercise late multi-client probe discovery
+        shell: pwsh
+        run: |
+          dotnet build probe/PartyPilot.Probe.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $log = Join-Path $env:RUNNER_TEMP "probe-watch.jsonl"
+          $probe = Start-Process "probe/bin/Release/net9.0/PartyPilot.Probe.exe" -ArgumentList "--watch" -RedirectStandardOutput $log -PassThru
+          $targets = @()
+          try {
+            Start-Sleep -Seconds 1
+            $targetPath = Join-Path $env:RUNNER_TEMP "private-slots/bin/Release/PathOfExile_x64.exe"
+            $targets += Start-Process $targetPath -PassThru
+            Start-Sleep -Seconds 1
+            $targets += Start-Process $targetPath -PassThru
+            Start-Sleep -Seconds 4
+            foreach ($target in $targets) { Stop-Process -Id $target.Id -Force }
+            Start-Sleep -Seconds 1
+          } finally {
+            foreach ($target in $targets) { Stop-Process -Id $target.Id -Force -ErrorAction SilentlyContinue }
+            Stop-Process -Id $probe.Id -Force -ErrorAction SilentlyContinue
+          }
+          $frames = @(Get-Content $log | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+          foreach ($target in $targets) {
+            if (-not ($frames | Where-Object { $_.pid -eq $target.Id -and $_.status -eq "anchor_missing" })) {
+              throw "Probe did not discover test process $($target.Id)"
+            }
+            if (-not ($frames | Where-Object { $_.pid -eq $target.Id -and $_.status -eq "game_exited" })) {
+              throw "Probe did not release test process $($target.Id)"
+            }
+          }
+      - name: Exercise three dual-role probe fixtures
+        shell: pwsh
+        run: |
+          cmake -S native/probe-fixture -B "$env:RUNNER_TEMP/probe-fixture" -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build "$env:RUNNER_TEMP/probe-fixture" --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $log = Join-Path $env:RUNNER_TEMP "probe-dual-roles.jsonl"
+          $probe = Start-Process "probe/bin/Release/net9.0/PartyPilot.Probe.exe" -ArgumentList "--watch" -RedirectStandardOutput $log -PassThru
+          $targets = @()
+          try {
+            $targetPath = Join-Path $env:RUNNER_TEMP "probe-fixture/Release/PathOfExile_x64.exe"
+            for ($client = 1; $client -le 3; $client++) {
+              Start-Sleep -Seconds 1
+              $targets += Start-Process $targetPath -PassThru
+            }
+            Start-Sleep -Seconds 11
+            foreach ($target in $targets) { Stop-Process -Id $target.Id -Force }
+            Start-Sleep -Seconds 1
+          } finally {
+            foreach ($target in $targets) { Stop-Process -Id $target.Id -Force -ErrorAction SilentlyContinue }
+            Stop-Process -Id $probe.Id -Force -ErrorAction SilentlyContinue
+          }
+          $frames = @(Get-Content $log | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+          foreach ($target in $targets) {
+            if (-not ($frames | Where-Object { $_.pid -eq $target.Id -and $_.status -eq "anchor_missing" })) {
+              throw "Probe did not wait for fixture $($target.Id) to publish its state"
+            }
+            if (-not ($frames | Where-Object {
+              $_.pid -eq $target.Id -and
+              $_.status -eq "role_position_candidates_unverified_unknown_build" -and
+              $_.roleCandidates.Count -eq 2 -and
+              $_.orderedAddresses.Count -eq 2 -and
+              $_.areaHashCandidate -eq 0x12345678 -and
+              $_.vectorHeaderAddress
+            })) {
+              throw "Probe did not read both fixture roles for process $($target.Id)"
+            }
+            $states = @($frames | Where-Object {
+              $_.pid -eq $target.Id -and
+              $_.status -eq "role_position_candidates_unverified_unknown_build"
+            } | Select-Object -ExpandProperty gameStateAddress -Unique)
+            if ($states.Count -ne 2) {
+              throw "Probe did not follow the updated GameState pointer for process $($target.Id)"
+            }
+            if (-not ($frames | Where-Object { $_.pid -eq $target.Id -and $_.status -eq "game_exited" })) {
+              throw "Probe did not release fixture $($target.Id)"
+            }
+          }
+      - name: Build and exercise multi-instance runtime
+        shell: pwsh
+        run: |
+          cmake -S native/multi-instance-runtime -B "$env:RUNNER_TEMP/multi-instance" -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build "$env:RUNNER_TEMP/multi-instance" --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ctest --test-dir "$env:RUNNER_TEMP/multi-instance" -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Desktop client 3 contract
+        run: dotnet run --project ui-smoke/PartyPilot.Desktop.Smoke.csproj -c Release -- --client3-plan-only
+      - name: Desktop headless checks
+        shell: pwsh
+        run: dotnet run --project ui-smoke/PartyPilot.Desktop.Smoke.csproj -c Release -- "$env:RUNNER_TEMP\PartyPilot-ui-preview.png"
+      - name: Desktop native overlay check
+        run: dotnet run --project ui-native-smoke/PartyPilot.Desktop.NativeSmoke.csproj -c Release
+      - name: Save desktop previews
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-desktop-previews
+          path: ${{ runner.temp }}/PartyPilot-*.png
+          if-no-files-found: error

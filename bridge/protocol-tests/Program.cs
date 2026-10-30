@@ -2,6 +2,12 @@ using PartyPilot.Bridge;
 using PartyPilot.Common;
 using System.Runtime.InteropServices;
 
+if (args.Length == 3 && args[0] == "--remote-attach-smoke")
+{
+    await RemoteAttachSmoke.Run(args[1], args[2]);
+    return;
+}
+
 if (!ControllerStartupCheckRequest.TryParse(["--check-startup", "--device", "HID\\DEVICE",
         "--physical-index", "2", "--game-exe", "C:\\Game\\PathOfExile.exe"], out var startup) ||
     startup?.XInputIndex != 2 || startup.UseWgi || startup.GameExecutables.Length != 1 ||
@@ -23,6 +29,244 @@ if (!ControllerDeviceId.TryReadVidPid(@"HID\VID_1234&PID_ABCD\DEVICE", out var v
     ControllerDeviceId.TryReadVidPid(@"HID\VID_123&PID_ABCD\DEVICE", out _, out _) ||
     ControllerDeviceId.TryReadVidPid("XInput 0", out _, out _))
     throw new Exception("WGI physical source accepted an unbound or invalid VID/PID.");
+var gamingInventoryJson = System.Text.Json.JsonSerializer.Serialize(new[]
+{
+    new { friendlyName = "Bluetooth controller", devices = new[]
+    {
+        new { present = true, gamingDevice = true,
+            deviceInstancePath = @"HID\VID_045E&PID_0B13&IG_00\FIRST",
+            xusbDeviceInstancePath = "", baseContainerDeviceInstancePath = @"BTHLE\DEV_A" },
+        new { present = true, gamingDevice = true,
+            deviceInstancePath = @"HID\VID_045E&PID_0B13&IG_01\SECOND",
+            xusbDeviceInstancePath = "", baseContainerDeviceInstancePath = @"BTHLE\DEV_A" },
+        new { present = false, gamingDevice = true,
+            deviceInstancePath = @"HID\VID_1234&PID_5678\DISCONNECTED",
+            xusbDeviceInstancePath = "", baseContainerDeviceInstancePath = @"BTHLE\DEV_B" },
+        new { present = true, gamingDevice = true,
+            deviceInstancePath = @"HID\VID_045E&PID_028E\VIRTUAL",
+            xusbDeviceInstancePath = "", baseContainerDeviceInstancePath = @"ROOT\VIGEMBUS\0000" },
+        new { present = true, gamingDevice = true,
+            deviceInstancePath = @"HID\VID_045E&PID_028E&IG_00\VIRTUAL_2",
+            xusbDeviceInstancePath = "", baseContainerDeviceInstancePath =
+                @"USB\VID_045E&PID_028E\01" }
+    } }
+});
+var gamingGroups = HidHideGamingInventory.Parse(gamingInventoryJson);
+if (gamingGroups.Count != 1 || gamingGroups[0].Interfaces.Count != 2 ||
+    gamingGroups[0].Key != @"BTHLE\DEV_A" ||
+    gamingGroups[0].Interfaces.Any(item => item.Vendor != 0x045e || item.Product != 0x0b13))
+    throw new Exception("Present Bluetooth HID interfaces were not grouped without a model whitelist.");
+var noVidJson = System.Text.Json.JsonSerializer.Serialize(new[]
+{
+    new { friendlyName = "Unknown controller", devices = new[]
+    {
+        new { present = true, gamingDevice = true,
+            deviceInstancePath = @"BTHLE\NO_VID_PID\DEVICE", xusbDeviceInstancePath = "",
+            baseContainerDeviceInstancePath = @"BTHLE\DEV_C" }
+    } }
+});
+if (HidHideGamingInventory.Parse(noVidJson) is not [{ Interfaces.Count: 1 } unknown] ||
+    unknown.Interfaces[0].Vendor is not null)
+    throw new Exception("A connected controller without a VID/PID was silently discarded.");
+var xusbIdentityJson = System.Text.Json.JsonSerializer.Serialize(new[]
+{
+    new { friendlyName = "Bluetooth controller", devices = new[]
+    {
+        new { present = true, gamingDevice = true,
+            deviceInstancePath = @"BTHLE\CONTROLLER\INPUT",
+            xusbDeviceInstancePath = @"HID\VID_1234&PID_ABCD\INPUT",
+            baseContainerDeviceInstancePath = @"BTHLE\CONTROLLER" }
+    } }
+});
+var xusbIdentityGroups = HidHideGamingInventory.Parse(xusbIdentityJson);
+var xusbCandidate = ControllerCandidateSelection.Select(xusbIdentityGroups,
+    false, [2], _ => true);
+if (xusbIdentityGroups is not [{ Interfaces.Count: 1 } xusbIdentity] ||
+    xusbIdentity.Interfaces[0].Vendor != 0x1234 ||
+    xusbIdentity.Interfaces[0].Product != 0xabcd ||
+    !xusbCandidate.Ready ||
+    xusbCandidate.Device != @"BTHLE\CONTROLLER\INPUT" ||
+    ControllerCandidateSelection.Select(xusbIdentityGroups,
+        true, [], _ => true).Ready)
+    throw new Exception("XUSB-only controller identity was not handled safely.");
+var virtualXusbIdentity = System.Text.Json.JsonSerializer.Serialize(new[]
+{
+    new { friendlyName = "Virtual controller", devices = new[]
+    {
+        new { present = true, gamingDevice = true,
+            deviceInstancePath = @"USB\VIRTUAL\01\INPUT",
+            xusbDeviceInstancePath = @"HID\VID_045E&PID_028E\INPUT",
+            baseContainerDeviceInstancePath = @"USB\VIRTUAL\01" }
+    } }
+});
+if (HidHideGamingInventory.Parse(virtualXusbIdentity).Count != 0)
+    throw new Exception("A known virtual XUSB identity was offered for hiding.");
+try
+{
+    HidHideGamingInventory.Parse("{}");
+    throw new Exception("A malformed HidHide inventory was accepted.");
+}
+catch (InvalidDataException) { }
+var hiddenController = @"HID\VID_1234&PID_ABCD\DEVICE";
+var mappedBridge = HidHidePreflight.NormalizeImagePath(
+    @"C:\Tools\PartyPilot.Bridge.exe",
+    drive => drive == "C:" ? @"\Device\HarddiskVolume3" : null);
+var mappedPrefixed = HidHidePreflight.NormalizeImagePath(
+    @"\??\C:\Tools\PartyPilot.Bridge.exe",
+    drive => drive == "C:" ? @"\Device\HarddiskVolume3" : null);
+if (mappedBridge != @"\Device\HarddiskVolume3\Tools\PartyPilot.Bridge.exe" ||
+    mappedBridge != mappedPrefixed)
+    throw new Exception("HidHide device-form allow-list paths did not match drive paths.");
+if (OperatingSystem.IsWindows() && Environment.ProcessPath is { Length: > 3 } processPath &&
+    processPath[1] == ':' && HidHidePreflight.NormalizeImagePath(processPath) == processPath)
+    throw new Exception("Windows drive path did not resolve to a HidHide device path.");
+var singleController = new GamingControllerGroup(@"USB\ONE", "Controller",
+    [new GamingControllerInterface(hiddenController, @"USB\ONE", "", "Controller",
+        0x1234, 0xabcd)]);
+var controllerSnapshot = new HidHideSnapshot(true, false, [hiddenController],
+    [@"C:\Tools\PartyPilot.Bridge.exe"]);
+var autoController = ControllerAutoDiscovery.Select(controllerSnapshot, [singleController],
+    @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+    false, [2], _ => true, windowsInputVisible: true);
+if (!autoController.Ready || autoController.Device != hiddenController ||
+    autoController.XInputIndex != 2 ||
+    ControllerAutoDiscovery.Select(controllerSnapshot, [singleController],
+        @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+        false, [1, 2], _ => true, windowsInputVisible: true).Ready ||
+    ControllerAutoDiscovery.Select(controllerSnapshot with { Active = false },
+        [singleController],
+        @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+        false, [2], _ => true, windowsInputVisible: true).Ready ||
+    !ControllerAutoDiscovery.Select(controllerSnapshot, [singleController],
+        @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+        true, [], _ => true, windowsInputVisible: true).Ready ||
+    ControllerAutoDiscovery.Select(controllerSnapshot, [singleController],
+        @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+        true, [], _ => false, windowsInputVisible: true).Ready)
+    throw new Exception("Automatic controller selection accepted ambiguous or unisolated input.");
+var connectedButUnhidden = ControllerAutoDiscovery.Select(
+    controllerSnapshot with { HiddenDevices = [] }, [singleController],
+    @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+    true, [], _ => true, windowsInputVisible: true);
+if (connectedButUnhidden.Ready ||
+    !connectedButUnhidden.Message.Contains("已发现手柄", StringComparison.Ordinal) ||
+    !connectedButUnhidden.Message.Contains("尚未完成游戏隔离", StringComparison.Ordinal))
+    throw new Exception("A connected but unhidden controller was reported as missing.");
+var noWindowsInput = ControllerAutoDiscovery.Select(controllerSnapshot, [singleController],
+    @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+    true, [], _ => true, windowsInputVisible: false);
+if (noWindowsInput.Ready ||
+    !noWindowsInput.Message.Contains("PartyPilot 当前读不到", StringComparison.Ordinal))
+    throw new Exception("Controller discovery treated HidHide entries as live input.");
+var bluetoothSnapshot = controllerSnapshot with
+{
+    HiddenDevices = gamingGroups[0].Interfaces.Select(item => item.InstancePath).ToArray()
+};
+var groupedController = ControllerAutoDiscovery.Select(bluetoothSnapshot, gamingGroups,
+    @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+    false, [2], _ => true, windowsInputVisible: true);
+if (!groupedController.Ready || groupedController.XInputIndex != 2 ||
+    groupedController.Device != gamingGroups[0].Interfaces[0].InstancePath)
+    throw new Exception("Two interfaces of one Bluetooth controller were treated as separate pads.");
+var unhiddenInterface = ControllerAutoDiscovery.Select(bluetoothSnapshot with
+    {
+        HiddenDevices = [gamingGroups[0].Interfaces[0].InstancePath]
+    }, gamingGroups, @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+    false, [2], _ => true, windowsInputVisible: true);
+if (unhiddenInterface.Ready || !unhiddenInterface.Message.Contains("尚未完成游戏隔离"))
+    throw new Exception("A partially hidden Bluetooth controller was accepted.");
+var secondController = new GamingControllerGroup(@"USB\SECOND", "Another controller",
+    [new GamingControllerInterface(@"HID\VID_1234&PID_5678\SECOND",
+        @"USB\SECOND", "", "Another controller", 0x1234, 0x5678)]);
+if (ControllerCandidateSelection.Select([gamingGroups[0], secondController],
+        false, [2], _ => true).Ready ||
+    ControllerCandidateSelection.Select([gamingGroups[0]],
+        false, [-1], _ => true).Ready ||
+    ControllerCandidateSelection.Select([gamingGroups[0], secondController],
+        true, [], _ => true).Ready)
+    throw new Exception("Ambiguous physical controller paths were automatically selected.");
+var uniqueWgi = ControllerCandidateSelection.Select([gamingGroups[0], secondController],
+    true, [], path => path == secondController.Interfaces[0].InstancePath);
+if (!uniqueWgi.Ready || uniqueWgi.Device != secondController.Interfaces[0].InstancePath ||
+    uniqueWgi.XInputIndex is not null)
+    throw new Exception("A uniquely readable WGI controller was not selected.");
+var bluetoothCandidate = ControllerCandidateSelection.Select(gamingGroups,
+    false, [2], _ => true);
+if (!HidHideIsolationPlanner.TryCreate(bluetoothSnapshot with
+    {
+        HiddenDevices = [gamingGroups[0].Interfaces[0].InstancePath]
+    }, bluetoothCandidate, @"C:\Tools\PartyPilot.Bridge.exe",
+    [@"C:\Game\PathOfExile.exe"], out var isolationPlan, out _) ||
+    isolationPlan is null || isolationPlan.PathsToHide.Length != 1 ||
+    isolationPlan.PathsToHide[0] != gamingGroups[0].Interfaces[1].InstancePath ||
+    isolationPlan.RegisterBridge || isolationPlan.EnableCloak || isolationPlan.DisableInverse)
+    throw new Exception("Isolation plan did not limit changes to the selected controller.");
+if (HidHideIsolationPlanner.TryCreate(bluetoothSnapshot with
+    {
+        Active = false,
+        HiddenDevices = [@"HID\VID_5678&PID_EF01\OTHER"]
+    }, bluetoothCandidate, @"C:\Tools\PartyPilot.Bridge.exe",
+    [@"C:\Game\PathOfExile.exe"], out _, out _) ||
+    HidHideIsolationPlanner.TryCreate(bluetoothSnapshot with
+    {
+        AllowedApps = [@"C:\Tools\PartyPilot.Bridge.exe",
+            @"\??\C:\Game\PathOfExile.exe"]
+    }, bluetoothCandidate, @"C:\Tools\PartyPilot.Bridge.exe",
+    [@"C:\Game\PathOfExile.exe"], out _, out _))
+    throw new Exception("Isolation plan would change other devices or expose the game.");
+var leaseRoot = Path.Combine(Path.GetTempPath(), "partypilot-lease-test-" + Guid.NewGuid());
+try
+{
+    var leasePath = Path.Combine(leaseRoot, "lease.json");
+    var settings = new FakeHidHideControllerSettings(new HidHideSnapshot(false, false,
+        [], []));
+    var lease = new HidHideControllerLeaseManager(settings, leasePath,
+        (_, _) => true);
+    var acquired = await lease.PrepareAsync(bluetoothCandidate,
+        @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+        int.MaxValue, 1, startWatcher: () => Task.CompletedTask);
+    if (!acquired.Ready || acquired.LeaseId is null ||
+        !settings.State.Active || settings.State.HiddenDevices.Length != 2 ||
+        !HidHidePreflight.IsApplicationAllowed(settings.State,
+            @"C:\Tools\PartyPilot.Bridge.exe") || !File.Exists(leasePath))
+        throw new Exception("New controller isolation was not journaled and verified.");
+    if (await lease.ReleaseAsync(int.MaxValue - 1, 1) || !File.Exists(leasePath))
+        throw new Exception("Another owner released the active controller lease.");
+    settings.Inject(settings.State with
+    {
+        HiddenDevices = [..settings.State.HiddenDevices,
+            @"HID\VID_5678&PID_EF01\OTHER"]
+    });
+    if (await lease.ReleaseAsync(int.MaxValue, 1) || !File.Exists(leasePath) ||
+        !settings.State.Active || settings.State.HiddenDevices.Length != 1)
+        throw new Exception("Lease cleanup changed a separately added hidden device.");
+    settings.Inject(settings.State with { HiddenDevices = [] });
+    var recovering = new HidHideControllerLeaseManager(settings, leasePath,
+        (_, _) => false);
+    if (!await recovering.RecoverStaleAsync() || File.Exists(leasePath) ||
+        settings.State.Active || settings.State.HiddenDevices.Length != 0 ||
+        settings.State.AllowedApps.Length != 0)
+        throw new Exception("A stale controller isolation lease did not restore prior settings.");
+
+    settings.FailOnSecondHide = true;
+    var failed = await lease.PrepareAsync(bluetoothCandidate,
+        @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+        int.MaxValue, 1, startWatcher: () => Task.CompletedTask);
+    if (failed.Ready || File.Exists(leasePath) || settings.State.Active ||
+        settings.State.HiddenDevices.Length != 0 || settings.State.AllowedApps.Length != 0)
+        throw new Exception("A partial HidHide configuration was not rolled back.");
+    var watcherFailed = await lease.PrepareAsync(bluetoothCandidate,
+        @"C:\Tools\PartyPilot.Bridge.exe", [@"C:\Game\PathOfExile.exe"],
+        int.MaxValue, 1, startWatcher: () =>
+            throw new IOException("simulated watcher startup failure"));
+    if (watcherFailed.Ready || File.Exists(leasePath) || settings.State.Active ||
+        settings.State.HiddenDevices.Length != 0 || settings.State.AllowedApps.Length != 0)
+        throw new Exception("Isolation changed state without a recovery watcher.");
+}
+finally
+{
+    if (Directory.Exists(leaseRoot)) Directory.Delete(leaseRoot, true);
+}
 if (WgiIdentitySelection.SelectClaimedIndex(["physical", "virtual-1", "virtual-2"], "physical") != 0 ||
     WgiIdentitySelection.SelectClaimedIndex(["virtual-1", "physical", "virtual-2"], "physical") != 1 ||
     WgiIdentitySelection.SelectClaimedIndex(["virtual-1", "virtual-2"], "physical") != -1 ||
@@ -60,6 +304,9 @@ PrivateSlotPublisherTests.Run();
 Client3FocusRoutingTests.Run();
 Client3InputPublisherTests.Run();
 Client3PadOutputsTests.Run();
+ProcessLocalPadOutputsTests.Run();
+ProcessLocalBindingPlanTests.Run();
+PrivateClientPrepareRequestTests.Run();
 PrivateClient3CommandRouterTests.Run();
 if (!Client3RuntimeAttach.IsKnownGameExecutable(@"C:\PoE2\PathOfExile_x64Steam.exe") ||
     Client3RuntimeAttach.IsKnownGameExecutable(@"C:\Other\notepad.exe") ||
@@ -98,6 +345,16 @@ if (!BridgeProtocol.TryParseMainInputSubscription(
     BridgeProtocol.TryParseMainInputSubscription(
         "{\"type\":\"main_input_subscription\",\"enabled\":true,\"slot\":1}", out _))
     throw new Exception("Main input subscription accepted an ambiguous bridge command.");
+if (!BridgeProtocol.TryParseWarpToMainSubscription(
+        "{\"type\":\"warp_to_main_subscription\",\"enabled\":true}", out var warpEnabled) ||
+    !warpEnabled ||
+    !BridgeProtocol.TryParseWarpToMainSubscription(
+        "{\"type\":\"warp_to_main_subscription\",\"enabled\":false}", out warpEnabled) ||
+    warpEnabled || BridgeProtocol.TryParseWarpToMainSubscription(
+        "{\"type\":\"warp_to_main_subscription\",\"enabled\":1}", out _) ||
+    BridgeProtocol.TryParseWarpToMainSubscription(
+        "{\"type\":\"warp_to_main_subscription\",\"enabled\":true,\"slot\":1}", out _))
+    throw new Exception("Warp to MAIN subscription accepted an ambiguous bridge command.");
 if (!BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"catching_up\",\"x\":1,\"y\":0,\"sprint_down\":true}", out var sprintCommand) ||
     !sprintCommand.SprintDown ||
     BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0,\"sprint_down\":true}", out _) ||
@@ -140,6 +397,18 @@ if (!BridgeProtocol.TryParseFlask("{\"type\":\"flask\",\"slot\":3,\"resource\":\
     BridgeProtocol.TryParseFlask("{\"type\":\"flask\",\"slot\":7,\"resource\":\"life\"}", out _) ||
     BridgeProtocol.TryParseFlask("{\"type\":\"flask\",\"slot\":3,\"resource\":\"skill\"}", out _))
     throw new Exception("Automatic flask command validation failed.");
+if (!BridgeProtocol.TryParseRecoveryAction("{\"type\":\"recovery_action\",\"slot\":3,\"input\":\"X\"}", out var recoveryCommand) ||
+    recoveryCommand != new RecoveryActionCommand(3, "X") ||
+    BridgeProtocol.TryParseRecoveryAction("{\"type\":\"recovery_action\",\"slot\":3,\"input\":\"A\"}", out _) ||
+    BridgeProtocol.TryParseRecoveryAction("{\"type\":\"recovery_action\",\"slot\":7,\"input\":\"X\"}", out _) ||
+    BridgeProtocol.TryParseRecoveryAction("{\"type\":\"recovery_action\",\"slot\":3,\"input\":\"D-pad Left\"}", out _))
+    throw new Exception("Custom recovery input command validation failed.");
+if (!BridgeProtocol.TryParseAutoCast("{\"type\":\"auto_cast\",\"slot\":3,\"input\":\"A\"}", out var autoCastCommand) ||
+    autoCastCommand != new AutoCastCommand(3, "A") ||
+    BridgeProtocol.TryParseAutoCast("{\"type\":\"auto_cast\",\"slot\":3,\"input\":\"LT\"}", out _) ||
+    BridgeProtocol.TryParseAutoCast("{\"type\":\"auto_cast\",\"slot\":7,\"input\":\"Y\"}", out _) ||
+    BridgeProtocol.TryParseAutoCast("{\"type\":\"auto_cast\",\"slot\":3,\"input\":\"A\",\"extra\":true}", out _))
+    throw new Exception("Automatic cast command validation failed.");
 if (!BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_begin\"}", out var beginParty) ||
     beginParty.Type != "auto_party_begin" ||
     !BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":5,\"buttons\":4096,\"hold_ms\":80}", out var pulseParty) ||
@@ -149,7 +418,9 @@ if (!BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_begin\"}", out var
     !BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_end\"}", out _) ||
     BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":7,\"buttons\":4096,\"hold_ms\":80}", out _) ||
     BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":2,\"buttons\":4096,\"hold_ms\":1000}", out _) ||
-    BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":2,\"buttons\":4096,\"hold_ms\":60}", out _) ||
+    !BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":2,\"buttons\":4096,\"hold_ms\":60}", out _) ||
+    !BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":2,\"buttons\":2,\"hold_ms\":80}", out _) ||
+    BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":2,\"buttons\":4096,\"hold_ms\":100}", out _) ||
     BridgeProtocol.TryParseAutoParty("{\"type\":\"auto_party_pulse\",\"slot\":2,\"buttons\":16384,\"hold_ms\":80}", out _))
     throw new Exception("Auto Party menu command validation failed.");
 if (!BridgeSlots.TryParse(["--slots", "3,2"], out var slots) ||
@@ -182,24 +453,26 @@ if (!FocusPadMap.TryParse(["--focus-pad-map", "1:1,2:3,3:5,4:6"],
     FocusPadMap.TryParse(["--focus-pad-map", "1:1,2:3,3:6"], [1, 3], [5], out _) ||
     FocusPadMap.TryParse(["--focus-pad-map", "1:1,2:3,4:5"], [1, 3], [5], out _))
     throw new Exception("Composite focus map accepted an omitted or unassigned private slot.");
+var client3GamePath = Path.Combine(Path.GetTempPath(), "PathOfExile_x64.exe");
+var firstGamePath = Path.Combine(Path.GetTempPath(), "first.exe");
+var secondGamePath = Path.Combine(Path.GetTempPath(), "second.exe");
+var unrelatedGamePath = Path.Combine(Path.GetTempPath(), "unrelated.exe");
 if (!CompositeClient3Options.TryParse([], out var absentClient3) || absentClient3 is not null ||
     !CompositeClient3Options.TryParse(["--client3-pid", "123", "--client3-window-handle", "456",
-        "--client3-game-exe", "/tmp/PathOfExile_x64.exe", "--client3-players", "5,6"],
+        "--client3-game-exe", client3GamePath, "--client3-players", "5,6"],
         out var compositeOptions) || compositeOptions is not { IncludeP6: true, Pid: 123,
             WindowHandle: 456 } ||
     CompositeClient3Options.TryParse(["--client3-pid", "123"], out _) ||
     CompositeClient3Options.TryParse(["--client3-pid", "123", "--client3-pid", "456",
         "--client3-window-handle", "456", "--client3-game-exe",
-        "/tmp/PathOfExile_x64.exe", "--client3-players", "5"], out _) ||
+        client3GamePath, "--client3-players", "5"], out _) ||
     CompositeClient3Options.TryParse(["--client3-pid", "123", "--client3-window-handle", "456",
-        "--client3-game-exe", "/tmp/PathOfExile_x64.exe", "--client3-players", "6"], out _))
+        "--client3-game-exe", client3GamePath, "--client3-players", "6"], out _))
     throw new Exception("Composite Client 3 binding arguments were accepted ambiguously.");
 if (compositeOptions is not { } boundClient3 ||
-    !boundClient3.MatchesThirdGamePath(["/tmp/first.exe", "/tmp/second.exe",
-        "/tmp/PathOfExile_x64.exe"]) ||
-    boundClient3.MatchesThirdGamePath(["/tmp/PathOfExile_x64.exe"]) ||
-    boundClient3.MatchesThirdGamePath(["/tmp/first.exe", "/tmp/second.exe",
-        "/tmp/unrelated.exe"]) ||
+    !boundClient3.MatchesThirdGamePath([firstGamePath, secondGamePath, client3GamePath]) ||
+    boundClient3.MatchesThirdGamePath([client3GamePath]) ||
+    boundClient3.MatchesThirdGamePath([firstGamePath, secondGamePath, unrelatedGamePath]) ||
     !boundClient3.MatchesPairingTarget(new PairingControl("arm_pairing", 5, 123, 456)) ||
     !boundClient3.MatchesPairingTarget(new PairingControl("arm_pairing", 6, 123, 456)) ||
     boundClient3.MatchesPairingTarget(new PairingControl("arm_pairing", 5, 999, 456)) ||
@@ -260,6 +533,11 @@ var sprintRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
 if (!sprintRouter.ConfigurePhysical(1)) throw new Exception("Sprint focus setup failed.");
 sprintRouter.SetPhysical(default, now);
 var sprintLine = "{\"slot\":2,\"state\":\"catching_up\",\"x\":1,\"y\":0,\"sprint_down\":true}";
+if (!BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"holding\",\"x\":0,\"y\":1,\"attack_direction\":true}",
+        out var holdingAttack) || !holdingAttack.Active || holdingAttack.Y != 32767 ||
+    BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"waiting\",\"attack_direction\":true}", out _) ||
+    BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"holding\",\"x\":0,\"y\":1,\"attack_direction\":true,\"mirror_movement\":true}", out _))
+    throw new Exception("Attack direction command was not constrained to valid follower movement.");
 if (!sprintRouter.ApplyLine(sprintLine, now) || sprintFollower.Report.Buttons != 0x2000)
     throw new Exception("Catch-up did not press the follower sprint button.");
 if (!sprintRouter.ApplyLine("{\"slot\":2,\"state\":\"holding\"}", now.AddMilliseconds(100)) ||
@@ -289,6 +567,32 @@ if (mirroredMain.Report.Buttons != 0xD010 || mirroredFollower.Report.Buttons != 
     mirroredFollower.Report.LeftTrigger != 42 || mirroredFollower.Report.RightTrigger != 80 ||
     mirroredFollower.Report.LeftX != 32767)
     throw new Exception("Default follower mirror lost buttons, triggers, movement, or leaked Start.");
+if (!mirroredRouter.ApplyLine("{\"slot\":2,\"state\":\"catching_up\",\"x\":1,\"y\":0,\"catch_up_priority\":true}", now) ||
+    BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"holding\",\"catch_up_priority\":true}", out _) ||
+    BridgeProtocol.TryParse("{\"slot\":2,\"state\":\"catching_up\",\"x\":1,\"y\":0,\"catch_up_priority\":\"yes\"}", out _))
+    throw new Exception("Catch-up priority command was not constrained to an active catch-up state.");
+mirroredRouter.SetPhysical(new XInputGamepad
+    { Buttons = 0xD310, LeftTrigger = 42, RightTrigger = 80 }, now);
+if (mirroredMain.Report.Buttons != 0xD310 || mirroredFollower.Report.Buttons != 0x1000 ||
+    mirroredFollower.Report.LeftTrigger != 0 || mirroredFollower.Report.RightTrigger != 0)
+    throw new Exception("Catch-up priority did not pause mirrored casts and triggers.");
+mirroredRouter.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", now);
+if (mirroredFollower.Report.Buttons != 0xD300 ||
+    mirroredFollower.Report.LeftTrigger != 42 || mirroredFollower.Report.RightTrigger != 80)
+    throw new Exception("Catch-up priority did not release after catch-up ended.");
+var manualPriorityFollower = new FakePad();
+var manualPriorityRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
+    { [1] = new FakePad(), [2] = manualPriorityFollower });
+if (!manualPriorityRouter.ConfigurePhysical(1, rightStickFollowerOverride: true) ||
+    !manualPriorityRouter.ApplyLine("{\"slot\":2,\"state\":\"catching_up\",\"x\":1,\"y\":0,\"manual_override_eligible\":true,\"catch_up_priority\":true}", now))
+    throw new Exception("Manual catch-up priority test could not arm the follower.");
+manualPriorityRouter.SetPhysical(new XInputGamepad
+    { Buttons = 0xD310, LeftTrigger = 42, RightTrigger = 80, RightX = 10000 }, now);
+manualPriorityRouter.SetFollowerMirrorEnabled(true);
+if (manualPriorityFollower.Report.Buttons != 0xD300 ||
+    manualPriorityFollower.Report.LeftTrigger != 42 || manualPriorityFollower.Report.RightTrigger != 80 ||
+    manualPriorityFollower.Report.LeftX != 10000)
+    throw new Exception("Manual right-stick override remained suppressed by catch-up priority.");
 mirroredRouter.SetPhysical(new XInputGamepad { Buttons = 0x2000 }, now);
 Thread.Sleep(180); // The target arbiter guarantees at least 125 ms for the initial B press.
 if (!mirroredRouter.ApplyLine("{\"slot\":2,\"state\":\"holding\",\"suppress_mirrored_b\":true}",
@@ -428,6 +732,69 @@ if (privateFlaskPad.Report != default ||
 privateFlaskRouter.PhysicalDisconnected();
 if (privateFlaskPad.Report != default)
     throw new Exception("P5 private flask output survived disconnect.");
+var recoveryPad = new FakePad();
+var recoveryRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
+    { [1] = new FakePad(), [3] = recoveryPad });
+if (!recoveryRouter.ConfigurePhysical(1, focusPads: new Dictionary<int, int>
+        { [1] = 1, [2] = 3 }))
+    throw new Exception("Custom recovery test focus mapping was rejected.");
+recoveryRouter.SetPhysical(default, now.AddSeconds(5));
+foreach (var (input, button, leftTrigger, rightTrigger) in new (string, ushort, byte, byte)[]
+{
+    ("X", 0x4000, 0, 0), ("Y", 0x8000, 0, 0),
+    ("LB", 0x0100, 0, 0), ("RB", 0x0200, 0, 0),
+    ("LT", 0, 255, 0), ("RT", 0, 0, 255),
+    ("D-pad Up", 0x0001, 0, 0), ("D-pad Down", 0x0002, 0, 0)
+})
+{
+    var pulseAt = now.AddSeconds(5).AddMilliseconds(200 * (Array.IndexOf(
+        new[] { "X", "Y", "LB", "RB", "LT", "RT", "D-pad Up", "D-pad Down" }, input) + 1));
+    if (!recoveryRouter.PulseRecoveryAction(3, input, pulseAt) ||
+        recoveryPad.Report.Buttons != button ||
+        recoveryPad.Report.LeftTrigger != leftTrigger ||
+        recoveryPad.Report.RightTrigger != rightTrigger)
+        throw new Exception($"Custom recovery input {input} did not reach its assigned pad.");
+    recoveryRouter.Tick(pulseAt.AddMilliseconds(120));
+    if (recoveryPad.Report != default)
+        throw new Exception($"Custom recovery input {input} did not release after 120 ms.");
+}
+if (recoveryRouter.PulseRecoveryAction(3, "A", now.AddSeconds(7)) ||
+    recoveryRouter.PulseRecoveryAction(4, "X", now.AddSeconds(7)))
+    throw new Exception("Unsupported custom recovery input or unbound pad was accepted.");
+foreach (var (input, button) in new (string, ushort)[]
+{
+    ("D-pad Up", 0x0001), ("D-pad Down", 0x0002), ("A", 0x1000), ("B", 0x2000),
+    ("X", 0x4000), ("Y", 0x8000), ("LB", 0x0100), ("RB", 0x0200)
+})
+{
+    var pulseAt = now.AddSeconds(7).AddMilliseconds(200 * (Array.IndexOf(
+        new[] { "D-pad Up", "D-pad Down", "A", "B", "X", "Y", "LB", "RB" }, input) + 1));
+    if (!recoveryRouter.PulseAutoCast(3, input, pulseAt) ||
+        recoveryPad.Report.Buttons != button)
+        throw new Exception($"Automatic cast {input} did not reach its assigned pad.");
+    recoveryRouter.Tick(pulseAt.AddMilliseconds(120));
+    if (recoveryPad.Report != default)
+        throw new Exception($"Automatic cast {input} did not release after 120 ms.");
+}
+if (recoveryRouter.PulseAutoCast(3, "LT", now.AddSeconds(9)) ||
+    recoveryRouter.PulseAutoCast(4, "A", now.AddSeconds(9)))
+    throw new Exception("Automatic cast accepted an unsupported input or unbound pad.");
+if (!recoveryRouter.PulseRecoveryAction(3, "X", now.AddSeconds(7)))
+    throw new Exception("Custom recovery pulse setup failed.");
+if (!recoveryRouter.PulseAutoCast(3, "B", now.AddSeconds(7)))
+    throw new Exception("Automatic cast pulse setup failed.");
+recoveryRouter.SetMenuGuardActive(true);
+if (recoveryPad.Report != default ||
+    recoveryRouter.PulseRecoveryAction(3, "X", now.AddSeconds(7).AddMilliseconds(20)) ||
+    recoveryRouter.PulseAutoCast(3, "B", now.AddSeconds(7).AddMilliseconds(20)))
+    throw new Exception("Custom recovery or automatic cast input escaped the menu guard.");
+recoveryRouter.SetMenuGuardActive(false);
+if (recoveryPad.Report != default)
+    throw new Exception("Custom recovery input resumed after menu dismissal.");
+recoveryRouter.PhysicalDisconnected();
+if (recoveryPad.Report != default ||
+    recoveryRouter.PulseRecoveryAction(3, "X", now.AddSeconds(8)))
+    throw new Exception("Custom recovery input survived physical disconnect.");
 if (!router.ApplyLine("{\"type\":\"focus\",\"slot\":3}", now) ||
     pad3.Report.Buttons != 0x1000 || pad2.Report.Buttons != 0)
     throw new Exception("Focus did not move physical input.");
@@ -436,9 +803,11 @@ if (pad3.Report != default || pad2.Report != default)
     throw new Exception("Disconnect did not neutralize focused pad.");
 if (router.ApplyLine("{\"type\":\"focus\",\"slot\":6}", now) || pad3.Report != default)
     throw new Exception("Unassigned focus was not rejected safely.");
-if (!BridgeProtocol.TryParseCombat("{\"type\":\"combat_pulse\",\"slot\":2,\"input\":\"LT+X\",\"hold_ms\":85}",
+if (!BridgeProtocol.TryParseCombat("{\"type\":\"combat_pulse\",\"slot\":2,\"input\":\"LT+X\",\"hold_ms\":85,\"right_x\":32767,\"right_y\":0}",
         out var combatCommand) || combatCommand.Pulse.Buttons != 0x4000 ||
-    combatCommand.Pulse.LeftTrigger != 255 ||
+    combatCommand.Pulse.LeftTrigger != 255 || combatCommand.Pulse.RightX != 32767 ||
+    BridgeProtocol.TryParseCombat("{\"type\":\"combat_pulse\",\"slot\":2,\"input\":\"X\",\"hold_ms\":85,\"right_x\":100}", out _) ||
+    BridgeProtocol.TryParseCombat("{\"type\":\"combat_pulse\",\"slot\":2,\"input\":\"X\",\"hold_ms\":85,\"right_x\":40000,\"right_y\":0}", out _) ||
     BridgeProtocol.TryParseCombat("{\"type\":\"combat_pulse\",\"slot\":2,\"input\":\"L3\",\"hold_ms\":85}", out _) ||
     BridgeProtocol.TryParseCombat("{\"type\":\"combat_pulse\",\"slot\":2,\"input\":\"X\",\"hold_ms\":161}", out _) ||
     BridgeProtocol.TryParseCombat("{\"type\":\"combat_pulse\",\"slot\":7,\"input\":\"X\",\"hold_ms\":85}", out _))
@@ -458,18 +827,23 @@ if (!combatRouter.BeginCombat(2, now) || combatRouter.BeginCombat(2, now.AddMill
     combatRouter.PulseCombat(2, new PadReport(0x4000, 0, 0, 100, 0, 0, 0),
         85, now.AddMilliseconds(1)) ||
     !combatRouter.PulseCombat(2, combatCommand.Pulse, 85, now.AddMilliseconds(1)) ||
-    combatPad2.Report.Buttons != 0x4000 || combatPad2.Report.LeftTrigger != 255 ||
+    combatPad2.Report.Buttons != 0 || combatPad2.Report.LeftTrigger != 255 ||
+    combatPad2.Report.RightX != 32767 ||
     combatPad2.X != 0 || combatPad1.Report.Buttons != 0x1000 ||
     combatRouter.PulseCombat(2, combatCommand.Pulse, 85, now.AddMilliseconds(2)))
     throw new Exception("Combat lease failed to isolate one follower skill pulse.");
-combatRouter.Tick(now.AddMilliseconds(87));
+combatRouter.Tick(now.AddMilliseconds(46));
+if (combatPad2.Report.Buttons != 0x4000 || combatPad2.Report.LeftTrigger != 255 ||
+    combatPad2.Report.RightX != 32767)
+    throw new Exception("LT chord did not press the skill after the 45 ms trigger lead.");
+combatRouter.Tick(now.AddMilliseconds(132));
 if (combatPad2.X != 32767 || combatPad2.Report.Buttons != 0)
     throw new Exception("Combat pulse did not release back to follower movement.");
-if (!combatRouter.PulseCombat(2, combatCommand.Pulse, 85, now.AddMilliseconds(100)))
+if (!combatRouter.PulseCombat(2, combatCommand.Pulse, 85, now.AddMilliseconds(140)))
     throw new Exception("A held combat lease did not accept its next pulse.");
 combatRouter.SetMenuGuardActive(true);
 if (combatPad2.Report != default ||
-    combatRouter.PulseCombat(2, combatCommand.Pulse, 85, now.AddMilliseconds(101)))
+    combatRouter.PulseCombat(2, combatCommand.Pulse, 85, now.AddMilliseconds(141)))
     throw new Exception("Menu guard failed to release combat ownership.");
 combatRouter.SetMenuGuardActive(false);
 if (!combatRouter.BeginCombat(2, now.AddMilliseconds(200)) ||
@@ -541,6 +915,23 @@ if (!partyRouter.BeginAutoParty(now.AddSeconds(21)) ||
     partyRouter.ApplyLine("{\"type\":\"auto_party_pulse\",\"slot\":2,\"buttons\":16384,\"hold_ms\":80}", now.AddSeconds(21)) ||
     partyRouter.AutoPartyActive || partyPad2.Report != default)
     throw new Exception("Malformed input survived Auto Party exclusive ownership.");
+var thirdMenuPad = new FakePad();
+var thirdMenuRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
+{
+    [1] = new FakePad(), [3] = new FakePad(), [4] = new FakePad(),
+    [5] = thirdMenuPad, [6] = new FakePad()
+});
+if (!thirdMenuRouter.ConfigurePhysical(1) || !thirdMenuRouter.BeginAutoParty(now) ||
+    !thirdMenuRouter.PulseAutoParty(5, 0x0002, 80, now.AddMilliseconds(1)) ||
+    thirdMenuPad.Report.Buttons != 0x0002)
+    throw new Exception("Client 3 menu navigation did not reach the private P5 output.");
+thirdMenuRouter.Tick(now.AddMilliseconds(82));
+if (!thirdMenuRouter.PulseAutoParty(5, 0x1000, 60, now.AddMilliseconds(83)) ||
+    thirdMenuPad.Report.Buttons != 0x1000)
+    throw new Exception("Client 3 warp confirmation did not reach the private P5 output.");
+thirdMenuRouter.EndAutoParty();
+if (thirdMenuPad.Report != default)
+    throw new Exception("Client 3 menu input remained held after controller ownership ended.");
 var pairingSignals = new PairingSignalTracker();
 if (pairingSignals.Observe(false, 2) != 0 ||
     pairingSignals.Observe(true, 2) != 0 ||
@@ -710,6 +1101,19 @@ hotkeyRouter.ApplyLine("{\"type\":\"focus\",\"slot\":2}", now);
 hotkeyRouter.ApplyLine("{\"type\":\"focus\",\"slot\":1}", now);
 if (pad2ForHotkey.X != 32767)
     throw new Exception("External MAIN focus did not resume ordinary follower routing.");
+var doubleTapMain = new FakePad();
+var doubleTapFollower = new FakePad();
+var doubleTapRouter = new BridgeRouter(new Dictionary<int, IPadOutput>
+    { [1] = doubleTapMain, [2] = doubleTapFollower });
+if (!doubleTapRouter.ConfigurePhysical(1) ||
+    !doubleTapRouter.ApplyLine("{\"slot\":2,\"state\":\"following\",\"x\":1,\"y\":0}", now))
+    throw new Exception("Double press follow setup failed.");
+doubleTapRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080 }, now);
+doubleTapRouter.SetPhysical(default, now.AddMilliseconds(60));
+doubleTapRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080 }, now.AddMilliseconds(180));
+if (doubleTapRouter.FocusedSlot != 1 || doubleTapFollower.X != 32767 ||
+    doubleTapRouter.LastManualFocusSlot != 2)
+    throw new Exception("A second R3 press did not resume P2 follow inside switch debounce.");
 var splitMain = new FakePad();
 var splitFollower = new FakePad();
 var splitRouter = new BridgeRouter(new Dictionary<int, IPadOutput> { [1] = splitMain, [3] = splitFollower });
@@ -752,23 +1156,85 @@ thirdRouter.SetPhysical(new XInputGamepad { Buttons = 0x0040, LeftTrigger = 180,
 if (thirdRouter.FocusedSlot != 4 || thirdThird.X != 432 || thirdThird.Report.LeftTrigger != 0 ||
     thirdMain.Report != default)
     throw new Exception("LT+L3 did not promote P1 focus to logical P3 without waiting for debounce.");
+var priorityPads = new Dictionary<int, IPadOutput>
+    { [1] = new FakePad(), [3] = new FakePad(), [4] = new FakePad() };
+var priorityRouter = new BridgeRouter(priorityPads);
+priorityRouter.ConfigurePhysical(1, focusPads: new Dictionary<int, int>
+    { [1] = 1, [2] = 3, [3] = 4 });
+priorityRouter.SetPhysical(new XInputGamepad
+    { Buttons = 0x0040 | 0x0080, LeftTrigger = 180 }, now);
+if (priorityRouter.FocusedSlot != 4 || priorityRouter.LastManualFocusSlot != 4)
+    throw new Exception("The unique LT+L3 focus chord lost to a simultaneous lower-priority R3 edge.");
 var fourthPads = Enumerable.Range(1, 4).ToDictionary(slot => slot, _ => new FakePad());
 var fourthRouter = new BridgeRouter(fourthPads.ToDictionary(entry => entry.Key,
     entry => (IPadOutput)entry.Value));
 if (!fourthRouter.ConfigurePhysical(1,
         focusPads: new Dictionary<int, int> { [1] = 1, [2] = 2, [3] = 3, [4] = 4 }))
     throw new Exception("Four-player focus mapping was rejected.");
-fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080, LeftTrigger = 180, LeftX = 602 }, now);
+fourthRouter.SetPhysical(new XInputGamepad
+    { Buttons = 0x0040 | 0x0080, LeftTrigger = 180 }, now);
+if (fourthRouter.FocusedSlot != 1)
+    throw new Exception("Two equally ranked focus chords selected an arbitrary player.");
+fourthRouter.SetPhysical(default, now.AddMilliseconds(10));
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080, LeftTrigger = 180, LeftX = 602 },
+    now.AddMilliseconds(20));
 if (fourthRouter.FocusedSlot != 4 || fourthPads[4].X != 602 ||
     fourthPads[4].Report.LeftTrigger != 0 ||
     fourthPads.Take(3).Any(entry => entry.Value.Report != default))
     throw new Exception("LT+R3 did not isolate the fourth public pad.");
-fourthRouter.SetPhysical(default, now.AddMilliseconds(10));
+fourthRouter.SetPhysical(default, now.AddMilliseconds(30));
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0040, LeftTrigger = 180, LeftX = 603 },
+    now.AddMilliseconds(100));
+if (fourthRouter.FocusedSlot != 3 || fourthPads[3].X != 603 || fourthPads[4].Report != default)
+    throw new Exception("Focused P4 did not immediately switch to P3 with LT+L3.");
+fourthRouter.SetPhysical(default, now.AddMilliseconds(110));
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0080, LeftTrigger = 180, LeftX = 604 },
+    now.AddMilliseconds(180));
+if (fourthRouter.FocusedSlot != 4 || fourthPads[4].X != 604 || fourthPads[3].Report != default)
+    throw new Exception("Focused P3 did not immediately switch to P4 with LT+R3.");
+fourthRouter.SetPhysical(default, now.AddMilliseconds(190));
 fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0001, LeftTrigger = 180 },
     now.AddMilliseconds(400));
 if (fourthRouter.FocusedSlot != 4 || fourthPads[4].Report.Buttons != 0x0001 ||
     fourthPads[4].Report.LeftTrigger != 180)
     throw new Exception("Four-player mode suppressed an unassigned LT+D-pad action.");
+fourthRouter.SetWarpToMainShortcutEnabled(true);
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0008, LeftTrigger = 180 },
+    now.AddMilliseconds(500));
+if (!fourthRouter.WarpToMainPressed || fourthPads[4].Report.Buttons != 0 ||
+    fourthPads[4].Report.LeftTrigger != 0)
+    throw new Exception("LT+D-pad Right did not trigger and suppress the manual warp chord.");
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0008, LeftTrigger = 180 },
+    now.AddMilliseconds(510));
+if (fourthRouter.WarpToMainPressed)
+    throw new Exception("Held manual warp chord triggered repeatedly.");
+fourthRouter.SetPhysical(default, now.AddMilliseconds(520));
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0008, LeftTrigger = 180 },
+    now.AddMilliseconds(530));
+if (!fourthRouter.WarpToMainPressed)
+    throw new Exception("Released manual warp chord could not trigger cancellation.");
+if (!fourthRouter.BeginAutoParty(now.AddMilliseconds(535)))
+    throw new Exception("Manual warp input could not acquire bridge menu ownership.");
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0008, LeftTrigger = 180 },
+    now.AddMilliseconds(536));
+if (fourthRouter.WarpToMainPressed)
+    throw new Exception("Bridge menu ownership repeated a held manual warp chord.");
+fourthRouter.SetPhysical(default, now.AddMilliseconds(537));
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0008, LeftTrigger = 180 },
+    now.AddMilliseconds(538));
+if (!fourthRouter.WarpToMainPressed)
+    throw new Exception("Manual warp could not be cancelled while bridge menus owned the pads.");
+fourthRouter.EndAutoParty();
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0008, LeftTrigger = 180 },
+    now.AddMilliseconds(539));
+if (fourthRouter.WarpToMainPressed)
+    throw new Exception("Ending bridge menu ownership repeated a held warp chord.");
+fourthRouter.SetWarpToMainShortcutEnabled(false);
+fourthRouter.SetPhysical(new XInputGamepad { Buttons = 0x0008, LeftTrigger = 180 },
+    now.AddMilliseconds(540));
+if (fourthRouter.WarpToMainPressed || fourthPads[4].Report.Buttons != 0x0008 ||
+    fourthPads[4].Report.LeftTrigger != 180)
+    throw new Exception("Inactive manual warp shortcut captured game input.");
 var sixPads = Enumerable.Range(1, 6).ToDictionary(slot => slot, _ => new FakePad());
 var sixRouter = new BridgeRouter(sixPads.ToDictionary(entry => entry.Key,
     entry => (IPadOutput)entry.Value));
@@ -860,4 +1326,44 @@ internal sealed class FakePad : IPadOutput
     public short X => Report.LeftX;
     public short Y => Report.LeftY;
     public void SetReport(PadReport report) => Report = report;
+}
+
+internal sealed class FakeHidHideControllerSettings(HidHideSnapshot initial)
+    : IHidHideControllerSettings
+{
+    internal HidHideSnapshot State { get; private set; } = initial;
+    private bool _failOnSecondHide;
+    internal bool FailOnSecondHide
+    {
+        get => _failOnSecondHide;
+        set { _failOnSecondHide = value; _hideCount = 0; }
+    }
+    private int _hideCount;
+
+    public HidHideSnapshot Read() => State;
+
+    internal void Inject(HidHideSnapshot state) => State = state;
+
+    public Task ApplyAsync(string command, string? argument,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (command == "--dev-hide" && FailOnSecondHide && ++_hideCount == 2)
+            throw new IOException("simulated second interface failure");
+        State = command switch
+        {
+            "--app-reg" => State with { AllowedApps = [..State.AllowedApps, argument!] },
+            "--app-unreg" => State with { AllowedApps = State.AllowedApps.Where(path =>
+                !string.Equals(path, argument, StringComparison.OrdinalIgnoreCase)).ToArray() },
+            "--dev-hide" => State with { HiddenDevices = [..State.HiddenDevices, argument!] },
+            "--dev-unhide" => State with { HiddenDevices = State.HiddenDevices.Where(path =>
+                !string.Equals(path, argument, StringComparison.OrdinalIgnoreCase)).ToArray() },
+            "--cloak-on" => State with { Active = true },
+            "--cloak-off" => State with { Active = false },
+            "--inv-off" => State with { Inverse = false },
+            "--inv-on" => State with { Inverse = true },
+            _ => throw new InvalidOperationException("Unexpected HidHide operation: " + command)
+        };
+        return Task.CompletedTask;
+    }
 }

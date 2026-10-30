@@ -11,7 +11,7 @@ func testWorld() World {
 	players := make(map[int]Player)
 	for number := 1; number <= 6; number++ {
 		players[number] = Player{Alive: ptr(true), Loading: ptr(false), ActiveCombo: ptr(false),
-			DistanceFromMainM: ptr(0.0), HealthPercent: ptr(100.0)}
+			Position: &Point{X: 0, Y: 0}, DistanceFromMainM: ptr(0.0), HealthPercent: ptr(100.0)}
 	}
 	monster := func(id, rarity string) Monster {
 		distance := make(map[int]float64)
@@ -90,6 +90,120 @@ func TestEmergencyDoesNotRequireAnEnemyNearTheRole(t *testing.T) {
 	if err != nil || plans[1].Status != "planned_only" || plans[1].Behavior != "emergency" ||
 		plans[1].ComboID != "companion-recovery" {
 		t.Fatalf("emergency recovery should survive an out-of-range role: %+v, %v", plans, err)
+	}
+}
+
+func TestRoleEligibilityFollowsSuppliedResolver(t *testing.T) {
+	profile := DefaultProfile()
+	profile.Enabled = true
+	world := testWorld()
+	encounter := &Encounter{ID: "enc-1", State: "active", Tags: []string{"pack"}}
+	role := &profile.Roles[1]
+	player := world.Players[2]
+	player.DistanceFromMainM = ptr(25.0)
+	world.Players[2] = player
+	role.Logic.MaximumLeashM = 20
+	plans, err := EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[1].Status != "waiting_no_eligible_encounter" ||
+		plans[1].Reason != "Waiting: too far from MAIN (25 of 20)" {
+		t.Fatalf("role leash was ignored: %+v, %v", plans, err)
+	}
+	world.EmergencyActive = ptr(true)
+	plans, err = EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[1].ComboID != "" {
+		t.Fatalf("emergency bypassed the role leash: %+v, %v", plans, err)
+	}
+	world.EmergencyActive = ptr(false)
+	player.DistanceFromMainM = ptr(10.0)
+	world.Players[2] = player
+	role.Logic.StartHelpingAtHealthPercent = 50
+	plans, err = EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[1].Reason != "Waiting: enemy above 50%" || plans[1].ComboID != "" {
+		t.Fatalf("target health gate was ignored: %+v, %v", plans, err)
+	}
+	for index := range world.Monsters {
+		world.Monsters[index].HealthPercent = ptr(40.0)
+	}
+	plans, err = EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[1].ComboID != "companion-rally-clear" {
+		t.Fatalf("qualifying target health did not restore planning: %+v, %v", plans, err)
+	}
+	role.Logic.AttackNormal = false
+	role.Logic.AttackMagic = false
+	plans, err = EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[1].Reason != "Waiting: no enemies in range" || plans[1].ComboID != "" {
+		t.Fatalf("rarity exclusions were ignored: %+v, %v", plans, err)
+	}
+	world.Monsters[0].Rarity = "rare"
+	encounter.Tags = []string{"rare-present"}
+	plans, err = EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[1].ComboID != "companion-rally-rare" {
+		t.Fatalf("allowed rare did not restore planning: %+v, %v", plans, err)
+	}
+	role.Logic.MaximumLeashM = -1
+	if _, err := EvaluateEncounter(profile, world, encounter); err == nil {
+		t.Fatal("negative role leash was accepted")
+	}
+	role.Logic.MaximumLeashM = 401
+	if _, err := EvaluateEncounter(profile, world, encounter); err == nil {
+		t.Fatal("leash above the supplied profile maximum was accepted")
+	}
+	role.Logic.MaximumLeashM = 0
+	role.Logic.StartHelpingAtHealthPercent = 5
+	if _, err := EvaluateEncounter(profile, world, encounter); err == nil {
+		t.Fatal("help threshold below full aggression was accepted")
+	}
+}
+
+func TestEngageAroundMainUsesCullerGate(t *testing.T) {
+	profile := DefaultProfile()
+	profile.Enabled = true
+	profile.Roles[1].Logic.EngageAroundMain = true
+	world := testWorld()
+	encounter := &Encounter{ID: "enc-1", State: "active", Tags: []string{"pack"}}
+	for index := range world.Monsters {
+		world.Monsters[index].DistanceByPlayer[2] = 130
+	}
+	plans, err := EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[1].ComboID != "companion-rally-clear" {
+		t.Fatalf("MAIN-centred pack with a reachable culler target was lost: %+v, %v", plans, err)
+	}
+	for index := range world.Monsters {
+		world.Monsters[index].DistanceFromMainM = ptr(51.0)
+	}
+	plans, err = EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[1].Reason != "Waiting: no enemy within Spark reach" {
+		t.Fatalf("unreachable culler target was accepted: %+v, %v", plans, err)
+	}
+	world.EmergencyActive = ptr(true)
+	plans, err = EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[1].ComboID != "" ||
+		plans[1].Reason != "Waiting: no enemy within Spark reach" {
+		t.Fatalf("emergency skipped the culler pre-check: %+v, %v", plans, err)
+	}
+	world.EmergencyActive = ptr(false)
+	for index := range world.Monsters {
+		world.Monsters[index].DistanceFromMainM = ptr(20.0)
+	}
+	profile.Roles[1].Logic.MaximumLeashM = 10
+	player := world.Players[2]
+	player.DistanceFromMainM = ptr(80.0)
+	world.Players[2] = player
+	plans, err = EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[1].Reason != "Waiting: too far from MAIN (80 of 70)" {
+		t.Fatalf("idle culler band was ignored: %+v, %v", plans, err)
+	}
+	player.ActiveCombo = ptr(true)
+	world.Players[2] = player
+	plans, err = EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[1].ComboID != "companion-rally-clear" {
+		t.Fatalf("running culler band did not retain a combo: %+v, %v", plans, err)
+	}
+	player.DistanceFromMainM = ptr(115.0)
+	world.Players[2] = player
+	plans, err = EvaluateEncounter(profile, world, encounter)
+	if err != nil || plans[1].Reason != "Waiting: too far from MAIN (115 of 110)" {
+		t.Fatalf("running culler band overrun was accepted: %+v, %v", plans, err)
 	}
 }
 

@@ -38,7 +38,7 @@ func TestOrderedFlasksRouteEachLocalRoleWithMenuGuard(t *testing.T) {
 				{LocalPlayer: 1, Life: floatPtr(100), LifeMax: floatPtr(100),
 					Mana: floatPtr(100), ManaMax: floatPtr(100)},
 				{LocalPlayer: 2, Life: floatPtr(20), LifeMax: floatPtr(100),
-					Mana: floatPtr(100), ManaMax: floatPtr(100)},
+					Mana: floatPtr(0), ManaMax: floatPtr(0)},
 			}}
 	}
 	if !engine.ObserveOrderedVitals(frame(start)) {

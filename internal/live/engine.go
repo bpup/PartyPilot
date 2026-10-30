@@ -19,33 +19,38 @@ import (
 // Engine joins one read-only sensor and one independent log per game client.
 // Its output is a movement decision; it does not establish game input mapping.
 type Engine struct {
-	coordinator         *party.Coordinator
-	leader              int
-	baseLeader          int
-	lastFocusedLeads    bool
-	logAge              time.Duration
-	sampleAge           time.Duration
-	pidToSlot           map[int]int
-	pidToRoles          map[int][]RoleBinding
-	slotToPID           map[int]int
-	slots               []int
-	samples             map[int]telemetry.Sample
-	vitals              map[int]telemetry.Sample
-	strictVitals        map[int]bool
-	areas               map[int]arealog.Signal
-	terrains            map[int]boundTerrain
-	terrainStable       map[int]terrainStability
-	leaderName          string
-	memberNames         map[int]string
-	stopped             string
-	followPaused        bool
-	mainInput           MainInput
-	mainInputValid      bool
-	acceptMainInput     bool
-	closeMirrorEnabled  bool
-	closeMirrorDuration time.Duration
-	closeMirrors        map[int]*follow.CloseMirror
-	closeMirrorBAllowed map[int]bool
+	coordinator           *party.Coordinator
+	leader                int
+	baseLeader            int
+	lastFocusedLeads      bool
+	logAge                time.Duration
+	sampleAge             time.Duration
+	pidToSlot             map[int]int
+	pidToRoles            map[int][]RoleBinding
+	orderedIdentities     map[int]orderedIdentity
+	slotToPID             map[int]int
+	slots                 []int
+	samples               map[int]telemetry.Sample
+	vitals                map[int]telemetry.Sample
+	strictVitals          map[int]bool
+	areas                 map[int]arealog.Signal
+	areaHashes            map[int]uint32
+	terrains              map[int]boundTerrain
+	terrainStable         map[int]terrainStability
+	leaderName            string
+	memberNames           map[int]string
+	stopped               string
+	followPaused          bool
+	manualWarpToMain      bool
+	mainInput             MainInput
+	mainInputValid        bool
+	acceptMainInput       bool
+	closeMirrorEnabled    bool
+	closeMirrorDuration   time.Duration
+	closeMirrors          map[int]*follow.CloseMirror
+	closeMirrorBAllowed   map[int]bool
+	mirrorAttackDirection bool
+	catchUpPriority       bool
 }
 
 // SetFollowPaused temporarily releases movement without discarding process,
@@ -53,11 +58,22 @@ type Engine struct {
 func (e *Engine) SetFollowPaused(paused bool) {
 	e.followPaused = paused
 	if paused {
+		e.manualWarpToMain = false
 		e.mainInputValid = false
 		e.resetCloseMirrors()
 	}
 }
 func (e *Engine) FollowPaused() bool { return e.followPaused }
+
+func (e *Engine) SetManualWarpToMain(active bool) error {
+	if active && (e.followPaused || e.stopped != "") {
+		return fmt.Errorf("manual warp requires an active follow session")
+	}
+	e.manualWarpToMain = active
+	return nil
+}
+
+func (e *Engine) ManualWarpToMain() bool { return e.manualWarpToMain }
 
 // Target 0.6.17 uses grid coordinates for follow distances. Its distributed
 // core maps grid deltas to world deltas with this factor. Render.Pos from the
@@ -184,6 +200,28 @@ func (e *Engine) ObserveClientLogLine(processID int, line string, observedAt tim
 	}
 }
 
+// A replaced or truncated Client.txt can no longer prove the prior area's
+// identity. The next complete generation and fresh positions must rebind it.
+func (e *Engine) InvalidateClientArea(processID int) bool {
+	roles := e.pidToRoles[processID]
+	if len(roles) == 0 {
+		return false
+	}
+	for _, role := range roles {
+		delete(e.areas, role.Slot)
+		delete(e.areaHashes, role.Slot)
+		delete(e.samples, role.Slot)
+		delete(e.vitals, role.Slot)
+		delete(e.strictVitals, role.Slot)
+		delete(e.terrainStable, role.Slot)
+	}
+	delete(e.orderedIdentities, processID)
+	e.mainInputValid = false
+	e.coordinator.ResetFollow()
+	e.resetCloseMirrors()
+	return true
+}
+
 func New(roster map[int]int, leader int, config follow.Config, logAge time.Duration) (*Engine, error) {
 	if len(roster) < 2 || len(roster) > 3 || logAge <= 0 {
 		return nil, fmt.Errorf("live sensor supports 2–3 clients with positive log age")
@@ -257,10 +295,11 @@ func NewWithBindings(bindings []RoleBinding, leader int, config follow.Config,
 	}
 	return &Engine{coordinator: coordinator, leader: leader, baseLeader: leader,
 		logAge: logAge, sampleAge: config.MaxAge, memberNames: make(map[int]string),
-		pidToSlot: pidToSlot, pidToRoles: pidToRoles, slotToPID: slotToPID,
+		pidToSlot: pidToSlot, pidToRoles: pidToRoles,
+		orderedIdentities: make(map[int]orderedIdentity), slotToPID: slotToPID,
 		slots: slots, samples: make(map[int]telemetry.Sample),
 		vitals: make(map[int]telemetry.Sample), strictVitals: make(map[int]bool),
-		areas: make(map[int]arealog.Signal)}, nil
+		areas: make(map[int]arealog.Signal), areaHashes: make(map[int]uint32)}, nil
 }
 
 func (e *Engine) ObserveSample(sample telemetry.Sample) bool {
@@ -312,9 +351,13 @@ func (e *Engine) ObserveArea(signal arealog.Signal) bool {
 		(signal.ObservedAt.After(previous.ObservedAt) ||
 			!strings.EqualFold(previous.AreaID, signal.AreaID) || previous.Seed != signal.Seed) {
 		e.coordinator.ResetFollow()
+		// A new log generation permits a fresh ordered vector even if the game
+		// reuses the same area address and hash. In-generation reorder still stops.
+		delete(e.orderedIdentities, e.slotToPID[signal.Slot])
 		delete(e.terrainStable, signal.Slot)
 		delete(e.vitals, signal.Slot)
 		delete(e.strictVitals, signal.Slot)
+		delete(e.areaHashes, signal.Slot)
 	}
 	e.areas[signal.Slot] = signal
 	return true
@@ -376,7 +419,7 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 			delete(e.terrainStable, slot)
 			continue
 		}
-		if area.Origin != "live" || area.ObservedAt.After(now) || now.Sub(area.ObservedAt) > e.logAge {
+		if !e.areaCurrent(slot, sample, area, now) {
 			delete(e.terrainStable, slot)
 			continue
 		}
@@ -486,9 +529,49 @@ func (e *Engine) Step(now time.Time) map[int]follow.Command {
 			command.ManualOverrideEligible = true
 		}
 		command = e.applyCloseMirror(slot, command, now, positions, terrains)
+		if command.State == follow.Holding || command.State == follow.Following ||
+			command.State == follow.CatchingUp {
+			if input, ok := e.CurrentMainInput(now); ok && !input.Blocked && input.AttackActive {
+				if !(command.State == follow.CatchingUp && e.catchUpPriority) {
+					command.SprintDown = false
+					if e.mirrorAttackDirection {
+						length := math.Hypot(input.LeftX, input.LeftY)
+						if length*length > 0.03 {
+							command.X, command.Y = input.LeftX/length, input.LeftY/length
+							command.Reason = "Attack direction"
+							command.AttackDirection = true
+							command.MirrorMovement = false
+							command.MirrorIdle = false
+						}
+					}
+				}
+			}
+		}
 		commands[slot] = command
 	}
 	return commands
+}
+
+// The log generation identifies the current area until a newer generation.
+// The configured log age limits its first confirmation, not the time a party
+// may spend in one map. A changed sensor area hash then waits for a new log.
+func (e *Engine) areaCurrent(slot int, motion telemetry.Sample, area arealog.Signal,
+	now time.Time) bool {
+	if area.Origin != "live" || area.ObservedAt.After(now) ||
+		motion.SeenUTC.Before(area.ObservedAt) || motion.SeenUTC.After(now) ||
+		motion.ReceivedAt.After(now) || now.Sub(motion.ReceivedAt) > e.sampleAge {
+		return false
+	}
+	if pinned, confirmed := e.areaHashes[slot]; confirmed {
+		return motion.AreaHash != 0 && motion.AreaHash == pinned
+	}
+	if now.Sub(area.ObservedAt) > e.logAge {
+		return false
+	}
+	if motion.AreaHash != 0 {
+		e.areaHashes[slot] = motion.AreaHash
+	}
+	return true
 }
 
 func (e *Engine) currentLife(slot int, motion telemetry.Sample, area arealog.Signal,
@@ -504,6 +587,37 @@ func (e *Engine) currentLife(slot int, motion telemetry.Sample, area arealog.Sig
 	return vital.Life
 }
 
+// flaskActionReady binds a separate-client resource reading to a fresh
+// process, motion frame and live area generation before it can request input.
+func (e *Engine) flaskActionReady(slot int, now time.Time) bool {
+	if e.stopped != "" {
+		return false
+	}
+	motion, hasMotion := e.samples[slot]
+	vital, hasVital := e.vitals[slot]
+	area, hasArea := e.areas[slot]
+	if !hasMotion || !hasVital || !hasArea ||
+		!e.areaCurrent(slot, motion, area, now) ||
+		vital.SeenUTC.Before(area.ObservedAt) || vital.SeenUTC.After(now) ||
+		vital.ReceivedAt.After(now) || now.Sub(vital.ReceivedAt) > e.sampleAge ||
+		motion.AreaHash == 0 || vital.AreaHash == 0 ||
+		motion.AreaHash != vital.AreaHash || vital.Life == nil || *vital.Life <= 0 {
+		return false
+	}
+	return true
+}
+
+func (e *Engine) flaskSupportPairReady(drinker, target int, now time.Time) bool {
+	if drinker == target || !e.flaskActionReady(drinker, now) ||
+		!e.flaskActionReady(target, now) {
+		return false
+	}
+	drinkerArea := e.areas[drinker]
+	targetArea := e.areas[target]
+	return strings.EqualFold(drinkerArea.AreaID, targetArea.AreaID) &&
+		drinkerArea.Seed == targetArea.Seed
+}
+
 // orderedVitalActionReady requires a fresh, area-bound motion and resource
 // observation for every local role before a slow frame can request input.
 func (e *Engine) orderedVitalActionReady(processID int, now time.Time) bool {
@@ -515,10 +629,8 @@ func (e *Engine) orderedVitalActionReady(processID int, now time.Time) bool {
 		motion, hasMotion := e.samples[role.Slot]
 		vital, hasVital := e.vitals[role.Slot]
 		area, hasArea := e.areas[role.Slot]
-		if !hasMotion || !hasVital || !hasArea || area.Origin != "live" ||
-			area.ObservedAt.After(now) || now.Sub(area.ObservedAt) > e.logAge ||
-			motion.SeenUTC.Before(area.ObservedAt) || motion.SeenUTC.After(now) ||
-			motion.ReceivedAt.After(now) || now.Sub(motion.ReceivedAt) > e.sampleAge ||
+		if !hasMotion || !hasVital || !hasArea ||
+			!e.areaCurrent(role.Slot, motion, area, now) ||
 			vital.SeenUTC.Before(area.ObservedAt) || vital.SeenUTC.After(now) ||
 			vital.ReceivedAt.After(now) || now.Sub(vital.ReceivedAt) > e.sampleAge ||
 			motion.AreaHash == 0 || vital.AreaHash == 0 ||

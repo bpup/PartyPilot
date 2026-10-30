@@ -24,6 +24,47 @@ internal static class ControllerLaunchPreflightSmoke
                     "--game-exe", "/game/PathOfExile.exe", "--game-exe", "/second/PathOfExile.exe"
                 }))
                 throw new Exception("Desktop did not bind the selected physical input to every game executable before launch.");
+            await File.WriteAllTextAsync(executable,
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" + arguments + "'\n" +
+                "printf '%s\\n' '{\"controller_ready\":true,\"device_instance\":\"HID\\\\VID_1234&PID_ABCD\\\\PAD\",\"physical_index\":2,\"message\":\"已自动找到手柄。\"}'\n");
+            File.SetUnixFileMode(executable, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            var automatic = await ControllerLaunchPreflight.DiscoverAsync(executable,
+                ["/game/PathOfExile.exe", "/second/PathOfExile.exe"], false,
+                prepareIsolation: false);
+            actual = await File.ReadAllLinesAsync(arguments);
+            using var owner = System.Diagnostics.Process.GetCurrentProcess();
+            if (!automatic.Ready || automatic.Device != @"HID\VID_1234&PID_ABCD\PAD" ||
+                automatic.PhysicalIndex != 2 || automatic.UseWgi || !actual.SequenceEqual(new[]
+                {
+                    "--discover-controller", "--owner-pid", Environment.ProcessId.ToString(),
+                    "--owner-start", owner.StartTime.ToUniversalTime().Ticks.ToString(),
+                    "--game-exe", "/game/PathOfExile.exe",
+                    "--game-exe", "/second/PathOfExile.exe"
+                }) || ControllerLaunchPreflight.ParseDiscovery(0,
+                    "{\"controller_ready\":true,\"device_instance\":\"HID\",\"physical_index\":null,\"message\":\"ok\"}",
+                    "", false).Ready)
+                throw new Exception($"Desktop controller discovery failed: {automatic}; args={string.Join(',', actual)}");
+
+            var calls = Path.Combine(root, "discovery-calls");
+            await File.WriteAllTextAsync(executable,
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + calls + "'\n" +
+                "case \" $* \" in\n" +
+                "  *' --physical-wgi '*) printf '%s\\n' '{\"controller_ready\":true,\"device_instance\":\"HID\\\\VID_1234&PID_ABCD\\\\PAD\",\"physical_index\":null,\"message\":\"ok\"}' ;;\n" +
+                "  *) printf '%s\\n' '{\"controller_ready\":false,\"message\":\"XInput has no readable slot\"}' ;;\n" +
+                "esac\n");
+            File.SetUnixFileMode(executable, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            var bluetooth = await ControllerLaunchPreflight.DiscoverAsync(executable,
+                ["/game/PathOfExile.exe"], false, prepareIsolation: true);
+            var attempts = await File.ReadAllLinesAsync(calls);
+            if (!bluetooth.Ready || !bluetooth.UseWgi || bluetooth.PhysicalIndex is not null ||
+                attempts.Length != 3 ||
+                !attempts[0].StartsWith("--probe-controller ", StringComparison.Ordinal) ||
+                attempts[0].Contains("--physical-wgi", StringComparison.Ordinal) ||
+                !attempts[1].StartsWith("--probe-controller ", StringComparison.Ordinal) ||
+                !attempts[1].Contains("--physical-wgi", StringComparison.Ordinal) ||
+                !attempts[2].StartsWith("--prepare-controller ", StringComparison.Ordinal) ||
+                !attempts[2].Contains("--physical-wgi", StringComparison.Ordinal))
+                throw new Exception($"Bluetooth WGI fallback did not select one source before preparing isolation: {bluetooth}; attempts={string.Join(" | ", attempts)}");
         }
         finally
         {

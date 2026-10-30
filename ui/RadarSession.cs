@@ -10,24 +10,44 @@ internal sealed class RadarSession : IAsyncDisposable
     private readonly UdpClient _receiver;
     private readonly CancellationTokenSource _cancellation = new();
     private readonly Dictionary<int, RadarOverlayWindow> _windows;
+    private readonly Dictionary<int, RadarLandmarkCache> _landmarks = new();
+    private readonly Dictionary<int, RadarFrame> _lastFullFrames = new();
+    private readonly Dictionary<int, RadarMotionFrame> _renderedMotion = new();
+    private readonly Dictionary<int, RadarMotionMailbox> _motionMailboxes = new();
+    private readonly Dictionary<int, RadarTerrainCapture?> _lastTerrains = new();
     private readonly Dictionary<int, nint> _gameHandles;
     private readonly RadarVisibility _visibility;
+    private readonly Dictionary<int, RadarTerrainCapture>? _manualTerrains;
+    private readonly RadarTerrainCatalog? _terrainCatalog;
     private readonly DispatcherTimer _hotkeyTimer = new() { Interval = TimeSpan.FromMilliseconds(25) };
     private RadarHotkeyBinding _hotkey;
+    private RadarRegisteredHotkey? _registeredHotkey;
     private readonly Task _receiveTask;
     private bool _disposed;
 
     public event Action<string>? Ended;
-    public event Action<int, int>? FrameReceived;
+    public event Action<int, int, bool>? FrameReceived;
+    internal event Action<RadarFrame>? FrameObserved;
 
     private RadarSession(UdpClient receiver, Dictionary<int, RadarOverlayWindow> windows,
-        Dictionary<int, nint> gameHandles, RadarHotkeyBinding hotkey, RadarVisibility visibility)
+        Dictionary<int, nint> gameHandles, RadarHotkeyBinding hotkey, RadarVisibility visibility,
+        IReadOnlyDictionary<int, RadarTerrainCapture>? manualTerrains,
+        RadarTerrainCatalog? terrainCatalog)
     {
         _receiver = receiver;
         _windows = windows;
+        foreach (var pid in windows.Keys)
+        {
+            _landmarks.Add(pid, new RadarLandmarkCache());
+            _motionMailboxes.Add(pid, new RadarMotionMailbox());
+        }
         _gameHandles = gameHandles;
-        _hotkey = hotkey;
         _visibility = visibility;
+        _hotkey = hotkey;
+        _registeredHotkey = RadarRegisteredHotkey.TryStart(hotkey,
+            () => Dispatcher.UIThread.Post(OnRegisteredHotkey));
+        _manualTerrains = manualTerrains is null ? null : new(manualTerrains);
+        _terrainCatalog = terrainCatalog;
         foreach (var window in windows.Values) window.TargetLost += OnTargetLost;
         _hotkeyTimer.Tick += OnHotkeyTimer;
         _hotkeyTimer.Start();
@@ -37,13 +57,30 @@ internal sealed class RadarSession : IAsyncDisposable
     internal void SetHotkey(RadarHotkeyBinding hotkey)
     {
         if (hotkey.VirtualKey == 0) throw new ArgumentException("Radar hotkey is invalid.");
+        _registeredHotkey?.Dispose();
         _hotkey = hotkey;
         _visibility.Observe(false, false);
+        _registeredHotkey = RadarRegisteredHotkey.TryStart(hotkey,
+            () => Dispatcher.UIThread.Post(OnRegisteredHotkey));
+    }
+
+    internal void SetAppearance(RadarAppearanceSettings appearance)
+    {
+        foreach (var window in _windows.Values) window.SetAppearance(appearance);
+    }
+
+    private void OnRegisteredHotkey()
+    {
+        if (_disposed) return;
+        var foreground = GetForegroundWindow();
+        _visibility.ObserveRegisteredPress(_windows.Any(item =>
+            !item.Value.TargetIsLost && _gameHandles[item.Key] == foreground));
     }
 
     private void OnHotkeyTimer(object? sender, EventArgs args)
     {
         if (_disposed) return;
+        if (_registeredHotkey is not null) return;
         var foreground = GetForegroundWindow();
         var gameForeground = _windows.Any(item => !item.Value.TargetIsLost &&
             _gameHandles[item.Key] == foreground);
@@ -52,7 +89,9 @@ internal sealed class RadarSession : IAsyncDisposable
     }
 
     public static RadarSession Start(IReadOnlyList<LaunchedClient> clients, double scale,
-        RadarHotkeyBinding hotkey)
+        RadarHotkeyBinding hotkey, IReadOnlyDictionary<int, RadarTerrainCapture>? terrains = null,
+        RadarTerrainCatalog? terrainCatalog = null,
+        RadarAppearanceSettings? appearance = null)
     {
         if (!OperatingSystem.IsWindows() || clients.Count is < 1 or > 3 ||
             clients.Any(client => client.Pid <= 0 || client.WindowHandle == 0) ||
@@ -68,12 +107,15 @@ internal sealed class RadarSession : IAsyncDisposable
         {
             foreach (var client in clients)
             {
-                var window = new RadarOverlayWindow(client, scale, visibility);
+                RadarTerrainCapture? terrain = null;
+                if (terrains is not null) terrains.TryGetValue(client.Pid, out terrain);
+                var window = new RadarOverlayWindow(client, scale, visibility, terrain,
+                    appearance: appearance);
                 windows.Add(client.Pid, window);
             }
             session = new RadarSession(receiver, windows,
                 clients.ToDictionary(client => client.Pid, client => (nint)client.WindowHandle),
-                hotkey, visibility);
+                hotkey, visibility, terrains, terrainCatalog);
             foreach (var window in windows.Values) window.Show();
             if (windows.Values.Any(window => window.TargetIsLost))
                 throw new InvalidOperationException("A bound game window disappeared before radar startup completed.");
@@ -93,6 +135,8 @@ internal sealed class RadarSession : IAsyncDisposable
 
     private async Task ReceiveLoopAsync()
     {
+        var lastQueuedFull = new Dictionary<int, DateTime>();
+        var lastQueuedMotion = new Dictionary<int, DateTime>();
         try
         {
             while (!_cancellation.IsCancellationRequested)
@@ -101,13 +145,60 @@ internal sealed class RadarSession : IAsyncDisposable
                 if (!IPAddress.IsLoopback(packet.RemoteEndPoint.Address) || packet.Buffer.Length > 65507) continue;
                 foreach (var (pid, window) in _windows)
                 {
-                    if (!RadarFrames.TryParse(packet.Buffer, pid, DateTime.UtcNow, out var frame) || frame == null)
-                        continue;
+                    if (RadarFrames.TryParse(packet.Buffer, pid, DateTime.UtcNow, out var frame) &&
+                        frame != null)
+                    {
+                        if (lastQueuedFull.TryGetValue(pid, out var previous) && frame.SeenUtc <= previous)
+                            break;
+                        lastQueuedFull[pid] = frame.SeenUtc;
+                        RadarTerrainCapture? terrain = null;
+                        if (_manualTerrains is not null && _manualTerrains.TryGetValue(pid, out var manual) &&
+                            manual.Matches(frame))
+                        {
+                            if (manual.MetadataUnchanged()) terrain = manual;
+                            else if (RadarTerrainCapture.TryLoad(manual.MetadataPath, out var refreshed) &&
+                                     refreshed?.Matches(frame) == true)
+                            {
+                                _manualTerrains[pid] = refreshed;
+                                terrain = refreshed;
+                            }
+                        }
+                        terrain ??= _terrainCatalog?.FindMatching(frame, DateTime.UtcNow);
+                        Dispatcher.UIThread.Post(() =>
+                        {
+                            if (_disposed) return;
+                            if (!_landmarks[pid].TryApply(frame, out var enriched) || enriched is null)
+                                return;
+                            _lastFullFrames[pid] = enriched;
+                            _lastTerrains[pid] = terrain;
+                            _renderedMotion.TryGetValue(pid, out var lastMotion);
+                            var display = OverlayLatestMotion(enriched, lastMotion);
+                            window.Apply(display, terrain);
+                            FrameObserved?.Invoke(display);
+                            FrameReceived?.Invoke(pid, display.Markers.Count, window.TerrainVisible);
+                        });
+                        break;
+                    }
+                    if (!RadarMotionFrame.TryParse(packet.Buffer, pid, DateTime.UtcNow,
+                            out var motion) || motion is null) continue;
+                    if (lastQueuedMotion.TryGetValue(pid, out var last) && motion.SeenUtc <= last)
+                        break;
+                    lastQueuedMotion[pid] = motion.SeenUtc;
+                    var mailbox = _motionMailboxes[pid];
+                    if (!mailbox.Offer(motion)) break;
                     Dispatcher.UIThread.Post(() =>
                     {
-                        if (_disposed) return;
-                        window.Apply(frame);
-                        FrameReceived?.Invoke(pid, frame.Markers.Count);
+                        var latest = mailbox.TakeLatest();
+                        if (latest is null) return;
+                        if (_disposed || !_lastFullFrames.TryGetValue(pid, out var full) ||
+                            !latest.TryApply(full, out var moved) || moved is null)
+                            return;
+                        _renderedMotion[pid] = latest;
+                        _lastTerrains.TryGetValue(pid, out var terrain);
+                        if (terrain != null && !terrain.MetadataUnchanged()) terrain = null;
+                        window.ApplyMotion(moved, terrain);
+                        FrameObserved?.Invoke(moved);
+                        FrameReceived?.Invoke(pid, moved.Markers.Count, window.TerrainVisible);
                     });
                     break;
                 }
@@ -121,12 +212,17 @@ internal sealed class RadarSession : IAsyncDisposable
         }
     }
 
+    internal static RadarFrame OverlayLatestMotion(RadarFrame full, RadarMotionFrame? motion) =>
+        motion is not null && motion.TryApply(full, out var moved) && moved is not null
+            ? moved : full;
+
     private void OnTargetLost() => Ended?.Invoke("绑定的游戏窗口已消失或进程身份发生变化。");
 
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
         _disposed = true;
+        _registeredHotkey?.Dispose();
         _hotkeyTimer.Stop();
         _hotkeyTimer.Tick -= OnHotkeyTimer;
         _cancellation.Cancel();

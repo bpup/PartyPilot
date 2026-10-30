@@ -2,6 +2,7 @@ package follow
 
 import (
 	"math"
+	"strings"
 	"time"
 
 	"partypilot/internal/navigation"
@@ -36,6 +37,7 @@ type Command struct {
 	MirrorMovement         bool    `json:"mirror_movement,omitempty"`
 	SuppressMirroredB      bool    `json:"suppress_mirrored_b,omitempty"`
 	MirrorIdle             bool    `json:"mirror_idle,omitempty"`
+	AttackDirection        bool    `json:"attack_direction,omitempty"`
 }
 
 type Config struct {
@@ -201,7 +203,7 @@ func (e *Engine) StepWithTerrainCloseFollow(now time.Time, leader, follower Posi
 	if !leader.Valid || !follower.Valid {
 		return wait("missing position")
 	}
-	if leader.Area == "" || follower.Area == "" || leader.Area != follower.Area {
+	if leader.Area == "" || follower.Area == "" || !strings.EqualFold(leader.Area, follower.Area) {
 		return wait("different or unknown instance")
 	}
 	if leader.Seen.After(now) || follower.Seen.After(now) ||
@@ -218,7 +220,7 @@ func (e *Engine) StepWithTerrainCloseFollow(now time.Time, leader, follower Posi
 	if (e.config.RequireTerrain || e.terrainSeen) && terrain == nil {
 		return wait("terrain missing")
 	}
-	if terrain != nil && (!terrain.Valid() || terrain.Area != leader.Area) {
+	if terrain != nil && (!terrain.Valid() || !strings.EqualFold(terrain.Area, leader.Area)) {
 		return wait("terrain unavailable or different instance")
 	}
 	if e.trailBlocked {
@@ -525,7 +527,7 @@ func playerDetour(lx, ly, fx, fy, tx, ty float64) (float64, float64) {
 func (e *Engine) updateTargetTrail(leader, follower Position) bool {
 	current := point{leader.X, leader.Y}
 	jump := false
-	if len(e.trail) > 0 && e.trailArea == leader.Area {
+	if len(e.trail) > 0 && strings.EqualFold(e.trailArea, leader.Area) {
 		delta := math.Hypot(current.x-e.lastLeader.x, current.y-e.lastLeader.y)
 		if delta*delta > 0.01 && leader.Seen.After(e.lastLeaderSampleAt) {
 			e.lastLeaderMotionAt = leader.Seen
@@ -544,7 +546,7 @@ func (e *Engine) updateTargetTrail(leader, follower Position) bool {
 		}
 	}
 	e.lastLeaderSampleAt = leader.Seen
-	if len(e.trail) == 0 || e.trailArea != leader.Area || jump {
+	if len(e.trail) == 0 || !strings.EqualFold(e.trailArea, leader.Area) || jump {
 		dx, dy := leader.X-follower.X, leader.Y-follower.Y
 		length := math.Hypot(dx, dy)
 		e.initialHeading = point{1, 0}

@@ -38,9 +38,19 @@ Require(two.StatePointerAreaAddress == "0x100000" && two.StatePointerMatchesData
 Require(two.CandidateAreaAddresses.SequenceEqual(["0x100000"]),
     "The candidate area address was not reported.");
 Require(two.VectorHeaderAddress == "0x1005C8" &&
+    two.SelectedAreaAddress == "0x100000" &&
     two.ContainsObservedLocal == true &&
-    LocalSlotCandidateScanner.Revalidate(two, local, paths, Read),
+    LocalSlotCandidateScanner.Revalidate(two, local, paths, Read,
+        ingameStateAddress: state),
     "The selected vector header was not revalidated.");
+Require(!LocalSlotCandidateScanner.Revalidate(two, 0x700000, paths, Read,
+        ingameStateAddress: state),
+    "The selected vector remained valid after the observed local player changed.");
+memory[state + 656] = BitConverter.GetBytes(0x900000L);
+Require(!LocalSlotCandidateScanner.Revalidate(two, local, paths, Read,
+        ingameStateAddress: state),
+    "An old vector remained usable after its state-derived area pointer changed.");
+memory[state + 656] = BitConverter.GetBytes(data);
 var vectorStart = BitConverter.ToInt64(memory[data + 1408 + 72], 0);
 var third = 0x700000L;
 paths[third] = "Metadata/Characters/Player";
@@ -64,13 +74,33 @@ RawRenderPositionReader.Position? ReadSyntheticPosition(long entity, Func<long, 
     entity == other ? new(secondWorldX, 40, 5, secondWorldX / 10.869565f,
         40 / 10.869565f, "0x600000") : null;
 var motion = LocalSlotMotionSampler.Capture(two, local, paths, visiblePositions, Read,
-    _ => null, () => true, 10, 20, 5, motionSeen, ReadSyntheticPosition);
+    _ => null, () => true, 10, 20, 5, motionSeen, ReadSyntheticPosition, state,
+    verifiedPositionOffset: RawRenderPositionReader.DefaultWorldPositionOffset);
 Require(motion?.RawPositions is { Length: 2 } &&
     motion.RawPositions[1]?.WorldX == 30 &&
+    motion.RawPositionOffset == 312 &&
     motion.RawPositionsSeenUtc == motionSeen &&
     motion.ObservedLocalPositionComparison?.WorldXYDistance == 0 &&
     motion.VisiblePositionComparisons?[1]?.WorldXYDistance == 0,
     "A complete revalidated diagnostic position frame was not captured.");
+var mismatchedMotion = LocalSlotMotionSampler.Capture(two, local, paths, visiblePositions, Read,
+    _ => null, () => true, 11, 20, 5, motionSeen, ReadSyntheticPosition, state,
+    verifiedPositionOffset: RawRenderPositionReader.DefaultWorldPositionOffset);
+Require(mismatchedMotion?.ObservedLocalPositionComparison?.WorldXYDistance == 1 &&
+    FastOrderedCandidateFrame.TryEncodeExperimentalControl(
+        101, 42, "TestArea", mismatchedMotion, motionSeen, motionSeen.Ticks) is null,
+    "A diagnostic with a mismatched observed local position reached experimental follow.");
+RawRenderPositionReader.Position? SwitchPointerDuringRead(long entity,
+    Func<long, int, byte[]?> read)
+{
+    memory[state + 656] = BitConverter.GetBytes(0x900000L);
+    return ReadSyntheticPosition(entity, read);
+}
+Require(LocalSlotMotionSampler.Capture(two, local, paths, visiblePositions, Read,
+        _ => null, () => true, 10, 20, 5, motionSeen,
+        SwitchPointerDuringRead, state) == null,
+    "A frame survived an area pointer change during position capture.");
+memory[state + 656] = BitConverter.GetBytes(data);
 using (var fast = System.Text.Json.JsonDocument.Parse(FastOrderedCandidateFrame.Encode(
     101, 42, "TestArea", motion, motionSeen, motionSeen.Ticks)))
 {
@@ -78,13 +108,49 @@ using (var fast = System.Text.Json.JsonDocument.Parse(FastOrderedCandidateFrame.
     Require(root.GetProperty("Kind").GetString() == "ordered_client" &&
         !root.GetProperty("PlayerOrderReliable").GetBoolean() &&
         root.GetProperty("PlayerOrderSource").GetString() == FastOrderedCandidateFrame.Source &&
+        root.GetProperty("AreaInstanceAddress").GetString() == "0x100000" &&
+        root.GetProperty("VectorHeaderAddress").GetString() == "0x1005C8" &&
+        root.GetProperty("OrderedAddresses").EnumerateArray().Select(item => item.GetString())
+            .SequenceEqual(["0x200000", "0x300000"]) &&
         root.GetProperty("Players").GetArrayLength() == 2 &&
         root.GetProperty("Players")[1].GetProperty("X").GetSingle() == 30,
         "Fast candidate packet promoted an unverified order or lost P2 motion.");
 }
+var experimental = FastOrderedCandidateFrame.TryEncodeExperimentalControl(
+    101, 42, "TestArea", motion, motionSeen, motionSeen.Ticks);
+Require(experimental is not null, "Complete two-slot source was not exposed for opt-in testing.");
+using (var control = System.Text.Json.JsonDocument.Parse(experimental!))
+    Require(control.RootElement.GetProperty("PlayerOrderReliable").GetBoolean() &&
+        control.RootElement.GetProperty("PlayerOrderSource").GetString() ==
+            FastOrderedCandidateFrame.ExperimentalControlSource &&
+        control.RootElement.GetProperty("Players").GetArrayLength() == 2,
+        "Experimental control frame lost ordered local positions.");
+foreach (var invalid in new[]
+{
+    motion! with { SelectedAreaAddress = "0x900000" },
+    motion! with { StatePointerAreaAddress = "0x900000" },
+    motion! with { ContainsObservedLocal = false },
+    motion! with { RawPositions = [motion!.RawPositions![0], null] },
+    motion! with { RawPositions = [motion!.RawPositions![0],
+        motion.RawPositions[1]! with { WorldX = float.NaN }] },
+    motion! with { ObservedLocalPositionComparison = null },
+    motion! with { RawPositionOffset = null },
+    motion! with { ObservedLocalPositionComparison =
+        motion.ObservedLocalPositionComparison! with { WorldXYDistance = 1 } }
+})
+    Require(FastOrderedCandidateFrame.TryEncodeExperimentalControl(
+        101, 42, "TestArea", invalid, motionSeen, motionSeen.Ticks) is null,
+        "An incomplete or mismatched candidate reached experimental control.");
+Require(FastOrderedCandidateFrame.TryEncodeExperimentalControl(
+    101, 42, "TestArea", motion, motionSeen.AddMilliseconds(20), motionSeen.Ticks) is null,
+    "A stale position capture reached experimental control.");
+Require(FastOrderedCandidateFrame.TryEncodeExperimentalControl(
+    101, 0, "TestArea", motion, motionSeen, motionSeen.Ticks) is null,
+    "An unknown area reached experimental control.");
 using (var fast = System.Text.Json.JsonDocument.Parse(FastOrderedCandidateFrame.Encode(
     101, 42, "TestArea", null, motionSeen, motionSeen.Ticks)))
     Require(!fast.RootElement.GetProperty("PlayerOrderReliable").GetBoolean() &&
+        fast.RootElement.GetProperty("OrderedAddresses").GetArrayLength() == 0 &&
         fast.RootElement.GetProperty("Players").GetArrayLength() == 0,
         "Missing local slots produced a trusted or partial fast frame.");
 secondWorldX = 35;
@@ -184,21 +250,79 @@ memory[state + 656] = BitConverter.GetBytes(alternativeArea);
 AddVector(alternativeArea + 1408 + 72, local, other);
 var divergent = LocalSlotCandidateScanner.Scan(state, data, local, paths, Read);
 Require(divergent.Status == "two_slot_candidate" && divergent.StatePointerAreaAddress == "0x900000" &&
+    divergent.SelectedAreaAddress == "0x900000" &&
     divergent.StatePointerMatchesDataAddress == false &&
     divergent.CandidateAreaAddresses.SequenceEqual(["0x900000"]),
     "A distinct state-derived area candidate was lost or mislabeled.");
+var divergentMotion = LocalSlotMotionSampler.Capture(divergent, local, paths,
+    visiblePositions, Read, _ => null, () => true, 10, 20, 5,
+    motionSeen, ReadSyntheticPosition, state,
+    verifiedPositionOffset: RawRenderPositionReader.DefaultWorldPositionOffset);
+Require(divergentMotion is not null &&
+    FastOrderedCandidateFrame.TryEncodeExperimentalControl(101, 42, "TestArea",
+        divergentMotion, motionSeen, motionSeen.Ticks) is not null,
+    "A state-pointer area candidate was rejected only because ExileCore2 Data used another address.");
+memory[state + 656] = BitConverter.GetBytes(0xA00000L);
+Require(!LocalSlotCandidateScanner.Revalidate(divergent, local, paths, Read,
+        ingameStateAddress: state),
+    "A divergent state-derived candidate survived an area pointer change.");
+memory[state + 656] = BitConverter.GetBytes(alternativeArea);
 AddVector(data + 1408 + 72, other, local);
 var crossAreaConflict = LocalSlotCandidateScanner.Scan(state, data, local, paths, Read);
 Require(crossAreaConflict.Status == "conflicting_candidates" &&
     crossAreaConflict.CandidateAreaAddresses.SequenceEqual(["0x100000", "0x900000"]),
     "Conflicting orders from different area anchors were accepted.");
 TestRawRenderPositionReader();
+var targetableBytes = new Dictionary<long, byte[]> { [0x500000 + 86] = [1] };
+byte[]? ReadTargetable(long address, int size) =>
+    targetableBytes.TryGetValue(address, out var value) && value.Length == size ? value : null;
+Require(TargetableQuestStateProbe.Read(0x500000, ReadTargetable) == true,
+    "The target build's observed task-state byte was missed.");
+targetableBytes[0x500000 + 86] = [0];
+Require(TargetableQuestStateProbe.Read(0x500000, ReadTargetable) == false,
+    "An observed zero task-state byte became a candidate.");
+targetableBytes[0x500000 + 86] = [2];
+Require(TargetableQuestStateProbe.Read(0x500000, ReadTargetable) == null &&
+    TargetableQuestStateProbe.Read(0x500001, ReadTargetable) == null &&
+    TargetableQuestStateProbe.Read(0, ReadTargetable) == null &&
+    RadarClassifier.CanProbeQuestState("Metadata/Quest/MainCampaignObjective") &&
+    !RadarClassifier.CanProbeQuestState("Metadata/MiscellaneousObjects/OrdinaryProp") &&
+    !RadarClassifier.CanProbeQuestState("Metadata/Items/QuestItems/Test") &&
+    !RadarClassifier.CanProbeQuestState("Metadata/Monsters/Test") &&
+    RadarClassifier.QuestStateCandidateLabel("Metadata/Quest/MainCampaignObjective") ==
+        "Main Campaign Objective",
+    "Unknown task-state data or unrelated paths became task candidates.");
 TestTerrainDiagnostic();
 TestPackedTerrainProbe();
+TestGeneratedRoomProbe();
+TestTerrainPlacementProbe();
+TestQuestTileProbe();
 TestSkillBindTable();
 SkillBindSourceScannerTests.Run();
+AreaEntityMapSnapshotReaderTests.Run();
+AreaEntityMapLocatorTests.Run();
+DormantNavigationSurveyTests.Run();
 Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
+    PartyPilot.RadarDestinationName.Accept(" Mausoleum of the Praetor ") == "Mausoleum of the Praetor" &&
+    PartyPilot.RadarDestinationName.Accept("AreaTransition_Animate") == null &&
+    PartyPilot.RadarDestinationName.Accept("Data/Balance/WorldAreas.dat") == null &&
     RadarClassifier.Category("Metadata/MiscellaneousObjects/Waypoint") == "waypoint" &&
+    RadarClassifier.Category("Metadata/Effects/QuestMarker") == "quest" &&
+    RadarClassifier.Category("Metadata/Terrain/Gallows/Act3/Objects/MachinariumGeneratorButton") == "quest" &&
+    RadarClassifier.QuestLabel("Metadata/Terrain/Gallows/Act3/Objects/MachinariumGeneratorButton") == "Soul Core Generator" &&
+    RadarClassifier.Category("Metadata/Monsters/HyenaMonster/Objects/BossRoomMinimapIcon") == "boss" &&
+    RadarClassifier.BossLabel("Metadata/Monsters/HyenaMonster/Objects/BossRoomMinimapIcon") == "Rathbreaker" &&
+    RadarClassifier.QuestLabel("Metadata/Items/QuestItems/FinalLetter") == "Final Letter (Skill Points)" &&
+    RadarClassifier.QuestLabel("Metadata/Monsters/KingInTheMists") == "The King in the Mists (Spirit)" &&
+    RadarClassifier.QuestLabel("Metadata/Monsters/KabalaConstrictor") == "Kabala (Skill Points)" &&
+    RadarClassifier.QuestLabel("Metadata/Monsters/MightySilverfist") == "Mighty Silverfist (Skill Points)" &&
+    RadarClassifier.QuestLabel("Metadata/Monsters/Ignagduk") == "Ignagduk (Spirit)" &&
+    RadarClassifier.QuestLabel("Metadata/Monsters/YamaTheWhite") == "Yama the White (Skill Points)" &&
+    RadarClassifier.QuestLabel("Metadata/Monsters/Oswin") == "Oswin (Skill Points)" &&
+    RadarClassifier.QuestLabel("Metadata/Monsters/Akthi") == "Akthi and Anundr (Skill Points)" &&
+    RadarClassifier.QuestLabel("Metadata/Monsters/Lythara") == "Lythara (Spirit)" &&
+    RadarClassifier.QuestLabel("Metadata/Monsters/AbominableYeti") == "Abominable Yeti (Skill Points)" &&
+    RadarClassifier.Category("Metadata/Effects/PermanentEffect") == null &&
     RadarClassifier.Category("Metadata/Effects/PortalFlash") == null &&
     RadarClassifier.Category("Metadata/Items/ChestPiece") == null &&
     RadarClassifier.Category("Metadata/Monsters/PortalGuardian") == "monster" &&
@@ -211,7 +335,22 @@ Require(RadarClassifier.Category("Metadata/Monsters/Beast") == "monster" &&
     RadarClassifier.Category("Metadata/Characters/Player") == null &&
     RadarClassifier.IsWorldItemWrapperPath("Metadata/MiscellaneousObjects/WorldItem@123") &&
     !RadarClassifier.IsWorldItemWrapperPath("Metadata/Items/Weapons/Sword") &&
-    RadarClassifier.IsNavigation("waypoint") && !RadarClassifier.IsNavigation("monster"),
+    RadarClassifier.IsQuestItemPath("Metadata/Items/QuestItems/Gallows/Act2/SuicideNote") &&
+    RadarClassifier.QuestItemLabel("Metadata/Items/QuestItems/Gallows/Act2/SuicideNote", "Final Letter") ==
+        "Final Letter (Skill Points)" &&
+    RadarClassifier.QuestItemLabel("Metadata/Items/QuestItems/Gallows/Act4/FutureCampaignRelic", "Future Campaign Relic") ==
+        "Future Campaign Relic" &&
+    !RadarClassifier.IsQuestItemPath("Metadata/Items/Weapons/Sword") &&
+    !RadarClassifier.IsQuestItemPath("Metadata/Items/QuestItemsFake/SuicideNote") &&
+    RadarClassifier.IsNavigation("waypoint") && RadarClassifier.IsNavigation("quest") &&
+    RadarClassifier.IsNavigation("boss") && RadarClassifier.IsNavigation("essence") &&
+    RadarClassifier.Category("Metadata/MiscellaneousObjects/Monolith") == "essence" &&
+    RadarClassifier.Category("Metadata/Terrain/LeagueEssence/EssenceCrystal") == "essence" &&
+    RadarClassifier.Category("Metadata/Effects/EssenceCrystal") == null &&
+    RadarClassifier.DormantQuestLabel("Metadata/Terrain/Gallows/Act1/Objects/QuestChestBase") == "任务目标" &&
+    RadarClassifier.DormantQuestLabel("Metadata/Terrain/Gallows/Act1/Objects/OrdinaryInertProp") == null &&
+    RadarClassifier.DormantQuestLabel("Metadata/Items/QuestItems/GenericSideQuest") == null &&
+    !RadarClassifier.IsNavigation("monster"),
     "Path-only radar categories admitted unsupported entities or lost navigation markers.");
 
 void TestSkillBindTable()
@@ -289,11 +428,78 @@ void TestRawRenderPositionReader()
         Math.Abs(position.GridY - 20) < 0.001 && position.WorldZ == 5 &&
         position.RenderComponentAddress == "0x1060000",
         "Default-offset Render position candidate was not read.");
+    const long targetable = 0x1070000;
+    const long targetableName = 0x1080000;
+    raw[lookup + 40] = BitConverter.GetBytes(names)
+        .Concat(BitConverter.GetBytes(names + 32))
+        .Concat(BitConverter.GetBytes(names + 32)).ToArray();
+    raw[names + 16] = BitConverter.GetBytes(targetableName)
+        .Concat(BitConverter.GetBytes(1)).Concat(new byte[4]).ToArray();
+    raw[targetableName] = System.Text.Encoding.ASCII.GetBytes("Targetable\0")
+        .Concat(new byte[53]).ToArray();
+    raw[entity + 16] = BitConverter.GetBytes(components)
+        .Concat(BitConverter.GetBytes(components + 16)).ToArray();
+    raw[components + 8] = BitConverter.GetBytes(targetable);
+    raw[targetable + 8] = BitConverter.GetBytes(entity);
+    raw[targetable + 86] = [1];
+    Require(RawTargetableReader.MeetsQuestState(entity, ReadRaw) == true &&
+        RawEntityComponentReader.Find(entity, "Render", ReadRaw) == render &&
+        RawEntityComponentReader.Find(entity, "Targetable", ReadRaw) == targetable,
+        "Named Targetable component did not bind to the observed entity.");
+    raw[targetable + 86] = [0];
+    Require(RawTargetableReader.MeetsQuestState(entity, ReadRaw) == false,
+        "A zero Targetable quest byte became active.");
+    raw[targetable + 86] = [1];
+    raw[targetable + 8] = BitConverter.GetBytes(entity + 8);
+    Require(RawTargetableReader.MeetsQuestState(entity, ReadRaw) == null,
+        "A Targetable component owned by another entity was accepted.");
+    raw[targetable + 8] = BitConverter.GetBytes(entity);
+    const long iconComponent = 0x1090000;
+    const long iconComponentName = 0x10A0000;
+    const long iconData = 0x10B0000;
+    const long iconText = 0x10C0000;
+    raw[lookup + 40] = BitConverter.GetBytes(names)
+        .Concat(BitConverter.GetBytes(names + 48))
+        .Concat(BitConverter.GetBytes(names + 48)).ToArray();
+    raw[names + 32] = BitConverter.GetBytes(iconComponentName)
+        .Concat(BitConverter.GetBytes(2)).Concat(new byte[4]).ToArray();
+    raw[iconComponentName] = System.Text.Encoding.ASCII.GetBytes("MinimapIcon\0")
+        .Concat(new byte[52]).ToArray();
+    raw[entity + 16] = BitConverter.GetBytes(components)
+        .Concat(BitConverter.GetBytes(components + 24)).ToArray();
+    raw[components + 16] = BitConverter.GetBytes(iconComponent);
+    raw[iconComponent + 8] = BitConverter.GetBytes(entity);
+    raw[iconComponent + 32] = BitConverter.GetBytes(iconData);
+    raw[iconData + 16] = BitConverter.GetBytes(iconText);
+    var validIcon = System.Text.Encoding.Unicode.GetBytes("VaalKeyGemMedium\0");
+    raw[iconText] = validIcon.Concat(new byte[96 - validIcon.Length]).ToArray();
+    Require(RawMinimapIconReader.Read(entity, ReadRaw) == "VaalKeyGemMedium" &&
+        RadarClassifier.QuestIconLabel("VaalKeyGemMedium") == "Medium Soul Core" &&
+        RadarClassifier.QuestIconLabel("GenericQuestIcon") == null,
+        "Named quest MinimapIcon was not read as a bounded identifier.");
+    raw[iconComponent + 8] = BitConverter.GetBytes(entity + 8);
+    Require(RawMinimapIconReader.Read(entity, ReadRaw) == null,
+        "An icon component owned by another entity was accepted.");
+    raw[iconComponent + 8] = BitConverter.GetBytes(entity);
     var comparison = RawRenderPositionReader.CompareLocal(position!, 10, 20, 5);
     Require(comparison != null && comparison.GridXYDistance < 0.001 &&
         comparison.WorldXYDistance > 200 &&
         RawRenderPositionReader.CompareLocal(position!, float.NaN, 20, 5) == null,
         "Independent local Render position was not compared in both candidate scales.");
+    Require(RawRenderPositionReader.SelectObservedOffset(entity, ReadRaw,
+        108.69565f, 217.3913f, 5) == 312,
+        "The default Render position offset was not uniquely selected.");
+    raw[render + 184] = BitConverter.GetBytes(10f)
+        .Concat(BitConverter.GetBytes(20f)).Concat(BitConverter.GetBytes(5f)).ToArray();
+    Require(RawRenderPositionReader.SelectObservedOffset(entity, ReadRaw, 10, 20, 5) == 184 &&
+        RawRenderPositionReader.Read(entity, ReadRaw, 184)?.WorldX == 10,
+        "The alternate static Render offset was not selected by the observed local player.");
+    raw[render + 312] = raw[render + 184];
+    Require(RawRenderPositionReader.SelectObservedOffset(entity, ReadRaw, 10, 20, 5) == 312,
+        "Matching Render layouts did not prefer the supplied probe's active default offset.");
+    raw[render + 312] = BitConverter.GetBytes(108.69565f)
+        .Concat(BitConverter.GetBytes(217.3913f))
+        .Concat(BitConverter.GetBytes(5f)).ToArray();
     raw[render + 8] = BitConverter.GetBytes(entity + 8);
     Require(RawRenderPositionReader.Read(entity, ReadRaw) == null,
         "Render component with a different owner was accepted.");
@@ -344,12 +550,43 @@ void TestPackedTerrainProbe()
     Require(result.Status == "candidate_patch_observed" && result.Candidate is { } candidate &&
         candidate.Width == 92 && candidate.Height == 92 && candidate.BytesPerRow == 46 &&
         candidate.PatchX == 6 && candidate.PatchY == 16 &&
-        candidate.PatchRows[4] == "111101111" && candidate.SampledNibbles == 8192,
+        candidate.PatchRows[4] == "111101111" && candidate.SampledNibbles == packed.Length * 2,
         "Packed terrain candidate dimensions, nibble order or local patch changed.");
     Require(PackedTerrainProbe.Scan(area, 100, 20, Read).Status == "no_candidate" &&
         PackedTerrainProbe.Scan(0, 10, 20, Read).Status == "missing_anchor_or_grid" &&
         PackedTerrainProbe.Scan(area, float.NaN, 20, Read).Status == "missing_anchor_or_grid",
         "Invalid packed terrain candidate was accepted.");
+    var largeHeader = (byte[])header.Clone();
+    const long largeStart = 0x400000;
+    var largePacked = Enumerable.Repeat((byte)0xFF, 92 * 184).ToArray();
+    Array.Fill(largePacked, (byte)0x11, 0, 4096);
+    BitConverter.GetBytes(8L).CopyTo(largeHeader, tuple);
+    BitConverter.GetBytes(8L).CopyTo(largeHeader, tuple + 8);
+    BitConverter.GetBytes(largeStart).CopyTo(largeHeader, tuple + 184);
+    BitConverter.GetBytes(largeStart + largePacked.Length).CopyTo(largeHeader, tuple + 192);
+    BitConverter.GetBytes(92).CopyTo(largeHeader, tuple + 184 + 24);
+    byte[]? ReadLarge(long address, int size) =>
+        address == area && size == largeHeader.Length ? largeHeader :
+        address >= largeStart && address + size <= largeStart + largePacked.Length
+            ? largePacked.AsSpan((int)(address - largeStart), size).ToArray() : null;
+    Require(PackedTerrainProbe.Scan(area, 10, 20, ReadLarge).Status == "no_candidate",
+        "A valid 4 KiB prefix hid invalid values in the target's 16 KiB sample.");
+    byte[]? ReadShortHeader(long address, int size) =>
+        address == area ? size <= 1024 ? header.AsSpan(0, 1024).ToArray() : null :
+        Read(address, size);
+    Require(PackedTerrainProbe.Scan(area, 10, 20, ReadShortHeader).Status ==
+        "candidate_patch_observed", "A readable 1 KiB area header was rejected.");
+    var lateHeader = new byte[1024];
+    const int lateTuple = 760;
+    BitConverter.GetBytes(4L).CopyTo(lateHeader, lateTuple);
+    BitConverter.GetBytes(4L).CopyTo(lateHeader, lateTuple + 8);
+    BitConverter.GetBytes(packedStart).CopyTo(lateHeader, lateTuple + 184);
+    BitConverter.GetBytes(packedStart + packed.Length).CopyTo(lateHeader, lateTuple + 192);
+    BitConverter.GetBytes(bytesPerRow).CopyTo(lateHeader, lateTuple + 184 + 24);
+    byte[]? ReadLateHeader(long address, int size) =>
+        address == area ? size <= 1024 ? lateHeader : null : Read(address, size);
+    Require(PackedTerrainProbe.Scan(area, 10, 20, ReadLateHeader).Status ==
+        "candidate_patch_observed", "A candidate near the end of a partial area header was skipped.");
     var anchored = PackedTerrainProbe.ScanAnchors([
         new("state_pointer_static_656", 0),
         new("ingame_data_address", area)
@@ -358,14 +595,31 @@ void TestPackedTerrainProbe()
         "A unique area anchor was not identified.");
     Require(anchored.Source is { Start: packedStart, BytesPerRow: bytesPerRow, Rows: rows },
         "The unique candidate lost its packed memory range.");
+    Require(anchored.Layout is { Area: area, TerrainOffset: tuple - 24, TilesX: 4, TilesY: 4 },
+        "The unique candidate lost its placement tile layout.");
     var captureDirectory = Path.Combine(Path.GetTempPath(), "partypilot-terrain-test-" + Guid.NewGuid());
     var capturePosition = new RawRenderPositionReader.Position(108.69565f, 217.3913f,
         5, 10, 20, "0x123456");
     try
     {
+        var generatedRooms = new GeneratedRoomProbe.Result("candidate_rooms_observed", 1, 2,
+            1, false, [], 1, false,
+            [new GeneratedRoomProbe.Anchor("Metadata/Terrain/Gallows/Act1/1_6/Rooms/boss_1.arm",
+                "boss", "Boss arena", 11.5, 11.5, 0, 0, 1, 1)]);
+        var terrainPlacements = new TerrainPlacementProbe.Result("candidate_placements_observed",
+            16, 1, 1, 1, false,
+            [new TerrainPlacementProbe.Anchor("Metadata/MiscellaneousObjects/Checkpoint",
+                "checkpoint", "Checkpoint", 11.5, 11.5, 0, 0)]);
+        var questTiles = new QuestTileProbe.Result("candidate_tiles_observed", "G1_8",
+            16, 1, 1, false,
+            [new QuestTileProbe.Anchor(
+                "Metadata/Terrain/Woods/GraveyardDungeons/Feature/MausoleumBoss_ArenaFloor.tdt",
+                "campaign", "MausoleumBoss_ArenaFloor", 11.5, 11.5, 0, 0,
+                0, 0, false)]);
         var capture = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate!,
             capturePosition, 108.69565f, 217.3913f, Read, () => true, captureDirectory,
-            123, "test-area", anchored.Candidate!.AreaAddress, anchored.Candidate.Anchor, DateTime.UtcNow);
+            123, "test-area", anchored.Candidate!.AreaAddress, anchored.Candidate.Anchor,
+            DateTime.UtcNow, generatedRooms, terrainPlacements, questTiles);
         Require(capture.Status == "captured_local" && capture.DataFile != null &&
             File.ReadAllBytes(capture.DataFile).SequenceEqual(packed) &&
             File.Exists(Path.ChangeExtension(capture.DataFile, ".json")),
@@ -374,9 +628,51 @@ void TestPackedTerrainProbe()
             File.ReadAllText(Path.ChangeExtension(capture.DataFile!, ".json")));
         Require(metadata.RootElement.GetProperty("RawGridX").GetSingle() == 10 &&
             metadata.RootElement.GetProperty("PatchRows").GetArrayLength() == 9 &&
+            metadata.RootElement.GetProperty("GeneratedRooms").GetArrayLength() == 1 &&
+            metadata.RootElement.GetProperty("TerrainPlacements").GetArrayLength() == 1 &&
+            metadata.RootElement.GetProperty("QuestTiles").GetArrayLength() == 1 &&
+            metadata.RootElement.GetProperty("GeneratedRoomAreaAddress").GetString() ==
+                anchored.Candidate.AreaAddress &&
             metadata.RootElement.GetProperty("Sha256").GetString() ==
                 Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(packed)).ToLowerInvariant(),
             "The capture lost position, patch or file integrity evidence.");
+        var rawOnly = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate!,
+            capturePosition, null, null, Read, () => true, captureDirectory,
+            123, "123", anchored.Candidate.AreaAddress, anchored.Candidate.Anchor,
+            DateTime.UtcNow);
+        Require(rawOnly.Status == "captured_local" && rawOnly.DataFile != null,
+            "The standalone probe could not save raw terrain without a second position source.");
+        var rawOnlyMetadata = Path.ChangeExtension(rawOnly.DataFile!, ".json");
+        using (var rawOnlyJson = System.Text.Json.JsonDocument.Parse(
+                   File.ReadAllText(rawOnlyMetadata)))
+            Require(rawOnlyJson.RootElement.GetProperty("ObservedWorldX").ValueKind ==
+                    System.Text.Json.JsonValueKind.Null &&
+                    rawOnlyJson.RootElement.GetProperty("ObservedWorldY").ValueKind ==
+                    System.Text.Json.JsonValueKind.Null,
+                "Standalone capture invented an independent position observation.");
+        File.Delete(rawOnly.DataFile!);
+        File.Delete(rawOnlyMetadata);
+        var metadataFile = Path.ChangeExtension(capture.DataFile!, ".json");
+        var withoutMarkers = System.Text.Json.Nodes.JsonNode.Parse(
+            File.ReadAllText(metadataFile))!.AsObject();
+        withoutMarkers["GeneratedRooms"] = null;
+        withoutMarkers["TerrainPlacements"] = null;
+        withoutMarkers["QuestTiles"] = null;
+        File.WriteAllText(metadataFile, withoutMarkers.ToJsonString());
+        Require(PackedTerrainCapture.UpdateAnchors(capture.DataFile!, 123, "test-area",
+            anchored.Candidate.AreaAddress, anchored.Candidate.Anchor,
+            generatedRooms, terrainPlacements, questTiles, () => true) == "markers_updated" &&
+            System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(metadataFile))!
+                ["TerrainPlacements"]!.AsArray().Count == 1 &&
+            System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(metadataFile))!
+                ["QuestTiles"]!.AsArray().Count == 1 &&
+            PackedTerrainCapture.UpdateAnchors(capture.DataFile!, 123, "test-area",
+                anchored.Candidate.AreaAddress, anchored.Candidate.Anchor,
+                generatedRooms, terrainPlacements, questTiles, () => true) == "already_captured" &&
+            PackedTerrainCapture.UpdateAnchors(capture.DataFile!, 123, "test-area",
+                anchored.Candidate.AreaAddress, anchored.Candidate.Anchor,
+                generatedRooms, terrainPlacements, questTiles, () => false) == "area_changed_before_update",
+            "Later-ready room or placement markers did not update the same capture safely.");
         byte[]? ShortRead(long address, int size) =>
             address == packedStart ? new byte[size - 1] : Read(address, size);
         var failed = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate,
@@ -410,6 +706,21 @@ void TestPackedTerrainProbe()
         Require(mismatch.Status == "patch_mismatch" &&
             Directory.GetFiles(captureDirectory, "*.packed").Length == 1,
             "A full-map export inconsistent with the observed patch was retained.");
+        var invalidPacked = Enumerable.Repeat((byte)0xFF, packed.Length).ToArray();
+        for (var y = anchored.Candidate.PatchY;
+            y < anchored.Candidate.PatchY + anchored.Candidate.PatchRows.Length; y++)
+            Array.Copy(packed, y * bytesPerRow + anchored.Candidate.PatchX / 2,
+                invalidPacked, y * bytesPerRow + anchored.Candidate.PatchX / 2, 5);
+        byte[]? ReadInvalid(long address, int size) =>
+            address >= packedStart && address + size <= packedStart + invalidPacked.Length
+                ? invalidPacked.AsSpan((int)(address - packedStart), size).ToArray()
+                : Read(address, size);
+        var outOfRange = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate,
+            capturePosition, 108.69565f, 217.3913f, ReadInvalid, () => true, captureDirectory,
+            123, "test-area", anchored.Candidate.AreaAddress, anchored.Candidate.Anchor, DateTime.UtcNow);
+        Require(outOfRange.Status == "out_of_range_nibbles" &&
+            Directory.GetFiles(captureDirectory, "*.packed").Length == 1,
+            "A full-map export with invalid terrain values was retained.");
         var areaChecks = 0;
         var areaChanged = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate,
             capturePosition, 108.69565f, 217.3913f, Read,
@@ -457,6 +768,282 @@ void TestPackedTerrainProbe()
             : Read(address, size);
     Require(PackedTerrainProbe.Scan(area, 10, 20, ReadAmbiguous).Status == "ambiguous_candidates",
         "Two plausible memory layouts were silently selected.");
+}
+void TestGeneratedRoomProbe()
+{
+    const long area = 0x100000;
+    const long graphsAddress = 0x200000;
+    const long roomsAddress = 0x300000;
+    const long assetAddress = 0x400000;
+    const long pathAddress = 0x500000;
+    var vector = new byte[24];
+    BitConverter.GetBytes(graphsAddress).CopyTo(vector, 0);
+    BitConverter.GetBytes(graphsAddress + 152).CopyTo(vector, 8);
+    BitConverter.GetBytes(graphsAddress + 152).CopyTo(vector, 16);
+    var graphs = new byte[152];
+    BitConverter.GetBytes(roomsAddress).CopyTo(graphs, 88);
+    BitConverter.GetBytes(roomsAddress + 112).CopyTo(graphs, 96);
+    BitConverter.GetBytes(roomsAddress + 112).CopyTo(graphs, 104);
+    var rooms = new byte[112];
+    BitConverter.GetBytes(assetAddress).CopyTo(rooms, 0);
+    BitConverter.GetBytes(1).CopyTo(rooms, 8);
+    BitConverter.GetBytes(1).CopyTo(rooms, 12);
+    BitConverter.GetBytes(2).CopyTo(rooms, 16);
+    BitConverter.GetBytes(3).CopyTo(rooms, 20);
+    BitConverter.GetBytes(assetAddress).CopyTo(rooms, 56);
+    BitConverter.GetBytes(999).CopyTo(rooms, 56 + 16); // outside the observed grid
+    var asset = new byte[16];
+    BitConverter.GetBytes(pathAddress).CopyTo(asset, 8);
+    var path = new byte[512];
+    System.Text.Encoding.Unicode.GetBytes("Metadata/Terrain/Gallows/Act1/Rooms/boss_1.arm")
+        .CopyTo(path, 0);
+    var segments = new Dictionary<long, byte[]>
+    {
+        [area + 1216] = vector, [graphsAddress] = graphs,
+        [roomsAddress] = rooms, [assetAddress] = asset, [pathAddress] = path
+    };
+    byte[]? Read(long address, int size) => segments.TryGetValue(address, out var bytes) &&
+        bytes.Length == size ? bytes : null;
+    var result = GeneratedRoomProbe.Scan(area, 92, 92, Read);
+    Require(result.Status == "candidate_rooms_observed" && result.Graphs == 1 &&
+        result.RoomsChecked == 2 && result.ValidPaths == 1 && !result.SamplesTruncated &&
+        result.Samples is [{ Left: 1, Top: 1, Right: 2, Bottom: 3 }] &&
+        result.MatchedAnchors == 1 && !result.AnchorsTruncated &&
+        result.Anchors is [{ Category: "boss", Label: "Boss arena", GridX: 34.5, GridY: 46 }] &&
+        result.Samples[0].Path.EndsWith("boss_1.arm", StringComparison.Ordinal),
+        "Generated-room candidate path or bounded tile rectangle changed.");
+    Require(GeneratedRoomProbe.Scan(area, 92, 92, (_, _) => null).Status ==
+        "graph_vector_unreadable", "An unreadable room graph was accepted.");
+    const int largeRoomCount = 4096;
+    var largeRooms = new byte[largeRoomCount * 56];
+    var finalRoom = largeRooms.Length - 56;
+    BitConverter.GetBytes(assetAddress).CopyTo(largeRooms, finalRoom);
+    BitConverter.GetBytes(1).CopyTo(largeRooms, finalRoom + 8);
+    BitConverter.GetBytes(1).CopyTo(largeRooms, finalRoom + 12);
+    BitConverter.GetBytes(2).CopyTo(largeRooms, finalRoom + 16);
+    BitConverter.GetBytes(3).CopyTo(largeRooms, finalRoom + 20);
+    BitConverter.GetBytes(roomsAddress + largeRooms.Length).CopyTo(graphs, 96);
+    BitConverter.GetBytes(roomsAddress + largeRooms.Length).CopyTo(graphs, 104);
+    byte[]? ReadLarge(long address, int size)
+    {
+        if (address >= roomsAddress && size <= 64 * 1024 &&
+            address + size <= roomsAddress + largeRooms.Length)
+            return largeRooms.AsSpan((int)(address - roomsAddress), size).ToArray();
+        return Read(address, size);
+    }
+    var largeResult = GeneratedRoomProbe.Scan(area, 92, 92, ReadLarge);
+    Require(largeResult.Status == "candidate_rooms_observed" &&
+        largeResult.RoomsChecked == largeRoomCount &&
+        largeResult.MatchedAnchors == 1 && !largeResult.AnchorsTruncated &&
+        largeResult.Anchors is [{ Category: "boss", GridX: 34.5, GridY: 46 }],
+        "A full generated-room graph lost its final anchor under bounded reads.");
+    BitConverter.GetBytes(graphsAddress + 151).CopyTo(vector, 8);
+    Require(GeneratedRoomProbe.Scan(area, 92, 92, Read).Status == "not_ready",
+        "A partial graph record was accepted.");
+    Require(GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act1/1_13/Rooms/Unique/blacksmith.arm") ==
+            new GeneratedRoomClassifier.Marker("quest", "Blacksmith") &&
+        GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act2/2_8/Rooms/Unique/unique_01.arm") ==
+            new GeneratedRoomClassifier.Marker("quest", "Final Letter (Skill Points)") &&
+        GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act2/2_8/Rooms/Unique/exit_01.arm") ==
+            new GeneratedRoomClassifier.Marker("transition", "Path of Mourning") &&
+        GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act2/2_10_1/Rooms/Unique/entrance_foundry_1.arm") ==
+            new GeneratedRoomClassifier.Marker("transition", "Mawdun Mine · Rudja") &&
+        GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act3/3_3/Rooms/exit_SnakePit_01.arm") ==
+            new GeneratedRoomClassifier.Marker("transition", "Venom Crypts") &&
+        GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act2/2_10_1/Rooms/Cavern/checkpoint_cc_01.arm") ==
+            new GeneratedRoomClassifier.Marker("checkpoint", "Checkpoint") &&
+        GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act1/1_15/Rooms/Unique/stairs_up_1.arm") ==
+            new GeneratedRoomClassifier.Marker("transition", "Stairs up") &&
+        GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act3/3_3/Rooms/exit_FloodedDepths_02.arm") ==
+            new GeneratedRoomClassifier.Marker("transition", "Area exit · Flooded Depths") &&
+        GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act3/3_3/Rooms/exit_SnakePit_OneWay_01.arm") == null &&
+        GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act1/1_15/Rooms/Fill/stairs_decorative_1.arm") == null &&
+        GeneratedRoomClassifier.Classify("Metadata/Terrain/Gallows/Act1/1_6/Rooms/crossroads_1.arm") == null,
+        "Generated-room marker rules admitted an unsupported room or lost a named anchor.");
+}
+void TestTerrainPlacementProbe()
+{
+    const long area = 0x100000;
+    const long tilesAddress = 0x200000;
+    const long placementsAddress = 0x300000;
+    const long wrapperAddress = 0x400000;
+    const long entityAddress = 0x500000;
+    const long detailsAddress = 0x600000;
+    const long textAddress = 0x700000;
+    const string path = "Metadata/MiscellaneousObjects/Checkpoint";
+    var header = new byte[72];
+    BitConverter.GetBytes(tilesAddress).CopyTo(header, 40);
+    BitConverter.GetBytes(tilesAddress + 16 * 56).CopyTo(header, 48);
+    var records = new byte[16 * 56];
+    BitConverter.GetBytes(placementsAddress).CopyTo(records, 16);
+    BitConverter.GetBytes(placementsAddress + 16).CopyTo(records, 24);
+    var placements = new byte[16];
+    BitConverter.GetBytes(wrapperAddress).CopyTo(placements, 0);
+    var wrapper = new byte[16];
+    BitConverter.GetBytes(entityAddress).CopyTo(wrapper, 8);
+    var details = new byte[32];
+    BitConverter.GetBytes(textAddress).CopyTo(details, 0);
+    BitConverter.GetBytes((long)path.Length).CopyTo(details, 16);
+    BitConverter.GetBytes((long)path.Length).CopyTo(details, 24);
+    var memory = new Dictionary<long, byte[]>
+    {
+        [area + 232] = header, [tilesAddress] = records,
+        [placementsAddress] = placements, [wrapperAddress] = wrapper,
+        [entityAddress + 8] = BitConverter.GetBytes(detailsAddress),
+        [detailsAddress + 8] = details,
+        [textAddress] = System.Text.Encoding.Unicode.GetBytes(path)
+    };
+    byte[]? Read(long address, int length) => memory.TryGetValue(address, out var bytes) &&
+        bytes.Length == length ? bytes : null;
+    var layout = new PackedTerrainProbe.AreaLayout(area, 232, 4, 4);
+    var result = TerrainPlacementProbe.Scan(layout, 92, 92, Read);
+    Require(result.Status == "candidate_placements_observed" && !result.Truncated &&
+        result.TilesChecked == 16 && result.ReferencesChecked == 1 &&
+        result.ValidPaths == 1 && result.MatchedAnchors == 1 &&
+        result.Anchors is [{ Category: "checkpoint", Label: "Checkpoint",
+            GridX: 11.5, GridY: 11.5, TileX: 0, TileY: 0 }],
+        "Dormant placement path or tile center changed.");
+    Require(TerrainPlacementProbe.Scan(layout, 92, 92, (_, _) => null).Status ==
+        "header_unreadable" &&
+        TerrainPlacementProbe.Scan(layout with { TilesX = 513 }, 92, 92, Read).Status ==
+        "invalid_layout", "An unreadable or oversized placement layout was accepted.");
+    Require(TerrainPlacementClassifier.Classify(
+            "Metadata/Monsters/HyenaMonster/Objects/BossRoomMinimapIcon") ==
+            new GeneratedRoomClassifier.Marker("boss", "Rathbreaker") &&
+        TerrainPlacementClassifier.Classify(
+            "Metadata/Terrain/Gallows/Act3/Objects/MachinariumGeneratorButton") ==
+            new GeneratedRoomClassifier.Marker("quest", "Soul Core Generator") &&
+        TerrainPlacementClassifier.Classify("Metadata/Terrain/Gallows/Act3/Objects/VaalKeyGemMedium2") ==
+            new GeneratedRoomClassifier.Marker("quest", "Medium Soul Core") &&
+        TerrainPlacementClassifier.Classify("Metadata/League/Breach/BreachInitiator") ==
+            new GeneratedRoomClassifier.Marker("league", "Breach") &&
+        TerrainPlacementClassifier.Classify("Metadata/League/Abyss/AbyssStartNode") ==
+            new GeneratedRoomClassifier.Marker("league", "Abyss") &&
+        TerrainPlacementClassifier.Classify("Metadata/Terrain/Gallows/Leagues/StoneCircle/Objects/RuneRock_Controller") ==
+            new GeneratedRoomClassifier.Marker("league", "Runed Monolith") &&
+        TerrainPlacementClassifier.Classify("Metadata/MiscellaneousObjects/Monolith") ==
+            new GeneratedRoomClassifier.Marker("league", "Essence") &&
+        TerrainPlacementClassifier.Classify("Metadata/MiscellaneousObjects/MiniMonolith") == null,
+        "Dormant placement marker rules lost explicit paths or admitted a decorative object.");
+}
+void TestQuestTileProbe()
+{
+    const long state = 0x100000;
+    const long area = 0x200000;
+    const long row = 0x300000;
+    const long areaText = 0x400000;
+    const long tiles = 0x500000;
+    const long asset = 0x600000;
+    const long tileText = 0x700000;
+    const string tilePath = "Metadata/Terrain/Woods/GraveyardDungeons/Feature/MausoleumBoss_ArenaFloor.tdt";
+    var idBytes = new byte[200];
+    System.Text.Encoding.Unicode.GetBytes("G1_8").CopyTo(idBytes, 0);
+    var pathBytes = new byte[512];
+    System.Text.Encoding.Unicode.GetBytes(tilePath).CopyTo(pathBytes, 0);
+    var header = new byte[72];
+    BitConverter.GetBytes(tiles).CopyTo(header, 40);
+    BitConverter.GetBytes(tiles + 16 * 56).CopyTo(header, 48);
+    var records = new byte[16 * 56];
+    BitConverter.GetBytes(asset).CopyTo(records, 8);
+    BitConverter.GetBytes(asset).CopyTo(records, 56 + 8);
+    var assetHeader = new byte[16];
+    BitConverter.GetBytes(tileText).CopyTo(assetHeader, 8);
+    var memory = new Dictionary<long, byte[]>
+    {
+        [state + 656] = BitConverter.GetBytes(area),
+        [area + 152] = BitConverter.GetBytes(row),
+        [row] = BitConverter.GetBytes(areaText),
+        [areaText] = idBytes,
+        [area + 232] = header,
+        [tiles] = records,
+        [asset] = assetHeader,
+        [tileText] = pathBytes
+    };
+    byte[]? Read(long address, int length) =>
+        memory.TryGetValue(address, out var bytes) && bytes.Length == length ? bytes : null;
+    var id = RawAreaIdReader.Read(state, Read);
+    var result = QuestTileProbe.Scan(new PackedTerrainProbe.AreaLayout(area, 232, 4, 4),
+        92, 92, id, Read);
+    Require(QuestTileRules.GenericCount == 192 && QuestTileRules.CampaignCount == 245 &&
+        id == "G1_8" && result is
+        { Status: "candidate_tiles_observed", TilesChecked: 16, NamedTiles: 2,
+            MatchedTiles: 2, Truncated: false,
+            Anchors: [{ Path: tilePath, Category: "campaign", Label: "MausoleumBoss_ArenaFloor",
+                TileX: 0, TileY: 0, GridX: 11.5, GridY: 11.5, RotationX: 0,
+                RotationY: 0, RotationSwap: false },
+                { Path: tilePath, Category: "campaign", TileX: 1, TileY: 0,
+                GridX: 34.5, GridY: 11.5 }] },
+        "The area-bound tile name or representative tile position changed.");
+    const string rotatedPath = "Metadata/Terrain/Woods/AreaTransitions/FallenTreeSlash_in.tdt";
+    Require(QuestTileRules.CampaignClassify("G1_2", rotatedPath, 2, 1, false) ==
+            new GeneratedRoomClassifier.Marker("campaign", "Mud Burrow") &&
+        QuestTileRules.CampaignClassify("G1_2", rotatedPath, 1, 2, true) ==
+            new GeneratedRoomClassifier.Marker("campaign", "Mud Burrow") &&
+        QuestTileRules.CampaignClassify("G1_2", rotatedPath, 1, 2, false) == null &&
+        QuestTileRules.GenericClassify("G1_2", rotatedPath) ==
+            new GeneratedRoomClassifier.Marker("transition", "Campaign exit") &&
+        QuestTileRules.GenericClassify("G1_9", rotatedPath) == null,
+        "Campaign rotation, area isolation or generic fallback rules changed.");
+    Require(QuestTileProbe.Scan(new(area, 232, 4, 4), 92, 92, "G1_9", Read).Status ==
+            "no_matches" &&
+        QuestTileProbe.Scan(new(area, 232, 4, 4), 92, 92, null, Read).Status ==
+            "area_id_unknown" &&
+        QuestTileProbe.Scan(new(area, 232, 4, 4), 92, 92, "G1_8",
+            (address, length) => address == tileText ? null : Read(address, length)).Status ==
+            "tile_paths_incomplete" &&
+        RawAreaIdReader.Read(state, (address, length) =>
+            address == areaText ? new byte[length] : Read(address, length)) == null,
+        "Unknown IDs, wrong areas or incomplete tile paths were accepted.");
+    Array.Clear(records);
+    BitConverter.GetBytes(asset).CopyTo(records, 5 * 56 + 8);
+    BitConverter.GetBytes(asset).CopyTo(records, 6 * 56 + 8);
+    Array.Clear(pathBytes);
+    System.Text.Encoding.Unicode.GetBytes(
+        "Metadata/Terrain/Desert/Gates/Ruins/ruin_ruinwall_Cv_MMMM_01.tdt")
+        .CopyTo(pathBytes, 0);
+    var generic = QuestTileProbe.Scan(new(area, 232, 4, 4), 92, 92, "MapHeadland", Read);
+    Require(generic is { Status: "candidate_tiles_observed", MatchedTiles: 2,
+        Anchors: [{ Category: "boss", Label: "", TileX: 1,
+            TileY: 1, GridX: 34.5, GridY: 34.5 }] },
+        "Repeated generic tiles were not grouped to the representative site.");
+    Array.Clear(records);
+    BitConverter.GetBytes(asset).CopyTo(records, 8);
+    var edge = QuestTileProbe.Scan(new(area, 232, 4, 4), 92, 92, "MapHeadland", Read);
+    Require(edge is { Status: "candidate_tiles_observed",
+        Anchors: [{ Category: "boss", TileX: 0, TileY: 0,
+            GridX: 11.5, GridY: 11.5 }] },
+        "A generic landmark at the top-left map edge was dropped.");
+    Array.Clear(records);
+    BitConverter.GetBytes(asset).CopyTo(records, 8);
+    records[52] = 1;
+    records[53] = 2;
+    records[54] = 1;
+    Array.Clear(pathBytes);
+    System.Text.Encoding.Unicode.GetBytes(rotatedPath).CopyTo(pathBytes, 0);
+    var rotated = QuestTileProbe.Scan(new(area, 232, 4, 4), 92, 92, "G1_2", Read);
+    Require(rotated is { Anchors: [{ Category: "campaign", Label: "Mud Burrow",
+        RotationX: 1, RotationY: 2, RotationSwap: true }] },
+        "A rotated campaign tile did not override its generic exit marker.");
+    const long worldData = 0x800000;
+    const long details = 0x900000;
+    const long vendorRow = 0xA00000;
+    const long vendorText = 0xB00000;
+    var vendorId = new byte[80];
+    System.Text.Encoding.Unicode.GetBytes("G1_8").CopyTo(vendorId, 0);
+    memory[state + 776] = BitConverter.GetBytes(worldData);
+    memory[worldData + 152] = BitConverter.GetBytes(details);
+    memory[details + 144] = BitConverter.GetBytes(vendorRow);
+    memory[vendorRow] = BitConverter.GetBytes(vendorText);
+    memory[vendorText] = vendorId;
+    Require(RawAreaIdReader.Read(state, Read) == "G1_8",
+        "Matching corrected and vendor area IDs were rejected.");
+    Array.Clear(vendorId);
+    System.Text.Encoding.Unicode.GetBytes("G1_9").CopyTo(vendorId, 0);
+    Require(RawAreaIdReader.Read(state, Read) == null,
+        "Conflicting game-build area IDs were accepted.");
+    memory.Remove(state + 656);
+    Require(RawAreaIdReader.Read(state, Read) == "G1_9",
+        "The original vendor-build world-data chain was not read.");
 }
 var largeLoot = Enumerable.Range(1, 96).Select(index => (object)new
 {

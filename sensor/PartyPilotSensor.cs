@@ -17,6 +17,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     private readonly UdpClient _udp = new();
     private DateTime _lastSentUtc;
     private DateTime _lastFastCandidateSentUtc;
+    private int _lastExperimentalOrderedProcessId;
+    private uint _lastExperimentalOrderedAreaHash;
     private DateTime _lastSlotScanUtc;
     private long _lastSlotScanStateAddress;
     private long _lastSlotScanDataAddress;
@@ -31,31 +33,62 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
     private SkillBindSourceScanner.Result? _skillBindSource;
     private string? _skillBindSourceStatus;
     private DateTime _lastRadarSentUtc;
+    private DateTime _lastRadarMotionUtc;
+    private bool _radarStreamHealthy;
+    private DateTime _lastDormantMapScanUtc;
+    private object? _dormantMapObservation;
+    private readonly DormantNavigationSurvey _dormantSurvey = new();
+    private long _dormantMapStateAddress;
+    private long _dormantMapDataAddress;
+    private long _dormantMapLocalAddress;
+    private uint _dormantMapAreaHash;
     private readonly RadarMonsterTracker _monsterTracker = new();
     private uint? _monsterTrackerAreaHash;
     private DateTime _lastCardSentUtc;
     private DateTime _lastTerrainSentUtc;
     private readonly HashSet<string> _capturedTerrainKeys = new();
+    private readonly Dictionary<string, string> _capturedTerrainFiles = new();
     private string? _terrainCaptureEpoch;
+    private string? _generatedRoomProbeKey;
+    private GeneratedRoomProbe.Result? _generatedRoomProbeCached;
+    private string? _placementProbeKey;
+    private TerrainPlacementProbe.Result? _placementProbeCached;
+    private string? _questTileProbeKey;
+    private QuestTileProbe.Result? _questTileProbeCached;
     private string? _cardModulePath;
     private Task<long>? _cardVtableTask;
 
     public override void Render()
     {
+        var now = DateTime.UtcNow;
+        if (!Settings.Enable.Value || !Settings.DiagnoseLocalSlotCandidates.Value ||
+            !Settings.ExperimentalOrderedFollow.Value)
+            RevokeLastExperimentalOrdered(now);
         if (!Settings.Enable.Value)
         {
+            _radarStreamHealthy = false;
             _monsterTracker.Reset();
             _monsterTrackerAreaHash = null;
+            _dormantMapObservation = null;
+            _lastDormantMapScanUtc = default;
+            _dormantSurvey.Reset();
             return;
         }
-        var now = DateTime.UtcNow;
-        if (Settings.DiagnoseLocalSlotCandidates.Value && Settings.DiagnoseFastOrderedMotion.Value &&
+        if (Settings.DiagnoseLocalSlotCandidates.Value &&
+            (Settings.DiagnoseFastOrderedMotion.Value || Settings.ExperimentalOrderedFollow.Value) &&
             now - _lastFastCandidateSentUtc >= TimeSpan.FromMilliseconds(20))
         {
             _lastFastCandidateSentUtc = now;
             EmitFastOrderedCandidate(now);
         }
-        if (now - _lastSentUtc < TimeSpan.FromMilliseconds(100)) return;
+        var fullFrameDue = now - _lastSentUtc >= TimeSpan.FromMilliseconds(100);
+        if (!fullFrameDue && Settings.DiagnoseRadarEntities.Value && _radarStreamHealthy &&
+            now - _lastRadarMotionUtc >= TimeSpan.FromMilliseconds(25))
+        {
+            _lastRadarMotionUtc = now;
+            EmitRadarMotion(now);
+        }
+        if (!fullFrameDue) return;
         _lastSentUtc = now;
 
         var player = GameController.Player;
@@ -149,7 +182,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 if (_slotCandidates is { Status: "single_slot_candidate" or "two_slot_candidate" } candidate)
                     _slotCandidates = LocalSlotMotionSampler.Capture(candidate, localAddress,
                         paths, visiblePositions, ReadCandidate, ReadMissingPath, SameAreaAndPlayer,
-                        render.Pos.X, render.Pos.Y, render.Pos.Z, now);
+                        render.Pos.X, render.Pos.Y, render.Pos.Z, now,
+                        ingameStateAddress: stateAddress);
                 _slotCandidateStatus = _slotCandidates == null ? "scan_failed" : "ok";
             }
             catch
@@ -219,7 +253,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                         catch { return null; }
                     }
                     if (LocalSlotCandidateScanner.Revalidate(candidate, localAddress, paths,
-                            ReadCandidate, address => RawCharacterPathReader.Read(address, ReadCandidate)))
+                            ReadCandidate, address => RawCharacterPathReader.Read(address, ReadCandidate),
+                            GameController.IngameState.Address))
                     {
                         var players = new List<long>();
                         foreach (var address in candidate.OrderedAddresses)
@@ -254,16 +289,117 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         object[]? radarEntities = null;
         string? radarStatus = null;
         DateTime? radarSeenUtc = null;
+        string? radarStateAreaAddress = null;
+        float? radarGridX = null;
+        float? radarGridY = null;
         object? uiObservation = null;
         string? uiObservationStatus = null;
         DateTime? uiObservationSeenUtc = null;
         object? groundHover = null;
         string? groundHoverStatus = null;
+        if (!Settings.DiagnoseDormantAreaMap.Value)
+        {
+            _dormantMapObservation = null;
+            _lastDormantMapScanUtc = default;
+            _dormantSurvey.Reset();
+        }
+        else if (_dormantMapStateAddress != frameStateAddress ||
+                 _dormantMapDataAddress != frameDataAddress ||
+                 _dormantMapLocalAddress != frameLocalAddress ||
+                 _dormantMapAreaHash != frameAreaHash)
+        {
+            _dormantMapObservation = null;
+            _lastDormantMapScanUtc = default;
+            _dormantSurvey.Reset();
+        }
+        if (Settings.DiagnoseDormantAreaMap.Value &&
+            now - _lastDormantMapScanUtc >= TimeSpan.FromSeconds(2))
+        {
+            _lastDormantMapScanUtc = now;
+            _dormantMapStateAddress = frameStateAddress;
+            _dormantMapDataAddress = frameDataAddress;
+            _dormantMapLocalAddress = frameLocalAddress;
+            _dormantMapAreaHash = frameAreaHash;
+            try
+            {
+                byte[]? ReadMap(long address, int size)
+                {
+                    try { return GameController.IngameState.Data.M.ReadMem(address, size); }
+                    catch { return null; }
+                }
+                var map = AreaEntityMapLocator.Locate(frameStateAddress,
+                    player!.Id, frameLocalAddress, ReadMap);
+                if (!SameAreaAndPlayer())
+                {
+                    _dormantSurvey.Reset();
+                    _dormantMapObservation = new { Status = "game_identity_changed" };
+                }
+                else
+                {
+                    var samples = map.Sleeping.Take(16).Select(entry =>
+                    {
+                        string? path = null;
+                        RawRenderPositionReader.Position? position = null;
+                        try
+                        {
+                            path = RawMetadataPathReader.Read(entry.Address, ReadMap);
+                            position = RawRenderPositionReader.Read(entry.Address, ReadMap);
+                        }
+                        catch { /* Keep this diagnostic sample without asserting its contents. */ }
+                        return new
+                        {
+                            EntityId = entry.Id,
+                            Address = FormatAddress(entry.Address),
+                            Path = path,
+                            Position = position
+                        };
+                    }).ToArray();
+                    var navigation = map.Status == "candidate_unverified_build"
+                        ? _dormantSurvey.Capture(
+                            $"{frameProcessId}:{frameStateAddress:X}:{frameDataAddress:X}:" +
+                            $"{frameLocalAddress:X}:{frameAreaHash}:{map.AreaAddress}:{map.EntityListOffset}",
+                            map.Sleeping,
+                            address => RawMetadataPathReader.Read(address, ReadMap),
+                            address => RawRenderPositionReader.Read(address, ReadMap),
+                            render.Pos.X, render.Pos.Y)
+                        : null;
+                    if (navigation == null) _dormantSurvey.Reset();
+                    _dormantMapObservation = new
+                    {
+                        SeenUtc = now,
+                        map.Status,
+                        map.AreaAddress,
+                        map.EntityListOffset,
+                        map.AwakeCount,
+                        SleepingCount = map.Sleeping.Length,
+                        Samples = samples,
+                        LocalPosition = RawRenderPositionReader.Read(frameLocalAddress, ReadMap),
+                        NavigationCandidates = navigation?.NavigationCandidates ?? [],
+                        NavigationBatchScanned = navigation?.BatchScanned ?? 0,
+                        NavigationTotalEntities = navigation?.TotalEntities ?? 0,
+                        NavigationSweepCompleted = navigation?.SweepCompleted ?? false,
+                        NavigationRememberedCount = navigation?.RememberedCount ?? 0,
+                        NavigationOutputTruncated = navigation?.OutputTruncated ?? false
+                    };
+                    if (!SameAreaAndPlayer())
+                    {
+                        _dormantSurvey.Reset();
+                        _dormantMapObservation = new { Status = "game_identity_changed" };
+                    }
+                }
+            }
+            catch
+            {
+                _dormantSurvey.Reset();
+                _dormantMapObservation = new { Status = "scan_failed" };
+            }
+        }
         if (!Settings.DiagnoseRadarEntities.Value && _monsterTrackerAreaHash.HasValue)
         {
             _monsterTracker.Reset();
             _monsterTrackerAreaHash = null;
         }
+        if (!Settings.DiagnoseRadarEntities.Value) _radarStreamHealthy = false;
         if (Settings.DiagnoseRadarEntities.Value && now - _lastRadarSentUtc >= TimeSpan.FromMilliseconds(500))
         {
             _lastRadarSentUtc = now;
@@ -277,13 +413,42 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                     _monsterTrackerAreaHash = areaHash;
                 }
                 radarEntities = ReadRadarEntities(player!.Id, render.Pos.X, render.Pos.Y);
+                if (Settings.DiagnoseTerrain.Value || Settings.DiagnoseDormantAreaMap.Value)
+                {
+                    try
+                    {
+                        byte[]? ReadRadarTerrain(long address, int size)
+                        {
+                            try { return GameController.IngameState.Data.M.ReadMem(address, size); }
+                            catch { return null; }
+                        }
+                        var raw = Settings.DiagnoseTerrain.Value
+                            ? RawRenderPositionReader.Read(frameLocalAddress, ReadRadarTerrain) : null;
+                        if (raw is not null)
+                        {
+                            radarGridX = raw.GridX;
+                            radarGridY = raw.GridY;
+                        }
+                        var pointer = ReadRadarTerrain(frameStateAddress + 656, 8);
+                        if (pointer is { Length: 8 })
+                            radarStateAreaAddress = FormatAddress(BitConverter.ToInt64(pointer));
+                    }
+                    catch
+                    {
+                        radarGridX = null;
+                        radarGridY = null;
+                        radarStateAreaAddress = null;
+                    }
+                }
                 radarStatus = "ok";
+                _radarStreamHealthy = true;
             }
             catch
             {
                 _monsterTracker.Reset();
                 _monsterTrackerAreaHash = null;
                 radarStatus = "scan_failed";
+                _radarStreamHealthy = false;
             }
             uiObservationSeenUtc = now;
             try
@@ -370,7 +535,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                                 }
                                 if (!LocalSlotCandidateScanner.Revalidate(slotCandidate, player?.Address ?? 0,
                                         paths, ReadCandidate,
-                                        address => RawCharacterPathReader.Read(address, ReadCandidate)))
+                                        address => RawCharacterPathReader.Read(address, ReadCandidate),
+                                        GameController.IngameState.Address))
                                     slotCandidate = null;
                             }
                             itemCards = result.Cards.Select(card =>
@@ -403,6 +569,9 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         PackedTerrainProbe.Observation? packedTerrainProbe = null;
         string? packedTerrainStatus = null;
         string? packedTerrainCaptureStatus = null;
+        GeneratedRoomProbe.Result? generatedRoomProbe = null;
+        TerrainPlacementProbe.Result? placementProbe = null;
+        QuestTileProbe.Result? questTileProbe = null;
         if (Settings.DiagnoseTerrain.Value)
         {
             try
@@ -412,12 +581,26 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 if (_terrainCaptureEpoch != epoch)
                 {
                     _capturedTerrainKeys.Clear();
+                    _capturedTerrainFiles.Clear();
+                    _generatedRoomProbeKey = null;
+                    _generatedRoomProbeCached = null;
+                    _placementProbeKey = null;
+                    _placementProbeCached = null;
+                    _questTileProbeKey = null;
+                    _questTileProbeCached = null;
                     _terrainCaptureEpoch = epoch;
                 }
             }
             catch
             {
                 _capturedTerrainKeys.Clear();
+                _capturedTerrainFiles.Clear();
+                _generatedRoomProbeKey = null;
+                _generatedRoomProbeCached = null;
+                _placementProbeKey = null;
+                _placementProbeCached = null;
+                _questTileProbeKey = null;
+                _questTileProbeCached = null;
                 _terrainCaptureEpoch = null;
             }
         }
@@ -460,34 +643,96 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                     var areaHash = $"{GameController.IngameState.Data.CurrentAreaHash}";
                     var processId = GameController.Window.Process.Id;
                     var captureKey = $"{processId}:{areaHash}:{observation.AreaAddress}:{source.Start}:{source.BytesPerRow}:{source.Rows}";
+                    bool AreaStillCurrent()
+                    {
+                        if ($"{GameController.IngameState.Data.CurrentAreaHash}" != areaHash ||
+                            GameController.IngameState.Address != stateAddress)
+                            return false;
+                        long currentAddress;
+                        if (observation.Anchor == "state_pointer_static_656")
+                        {
+                            var pointer = ReadTerrain(stateAddress + 656, 8);
+                            currentAddress = pointer is { Length: 8 } ? BitConverter.ToInt64(pointer) : 0;
+                        }
+                        else currentAddress = GameController.IngameState.Data.Address;
+                        return currentAddress > 0 &&
+                            $"0x{currentAddress:X}".Equals(observation.AreaAddress,
+                                StringComparison.OrdinalIgnoreCase);
+                    }
+                    if (AreaStillCurrent() && long.TryParse(observation.AreaAddress.AsSpan(2),
+                            System.Globalization.NumberStyles.HexNumber,
+                            System.Globalization.CultureInfo.InvariantCulture, out var roomArea))
+                    {
+                        var roomResult = _generatedRoomProbeKey == captureKey &&
+                            _generatedRoomProbeCached is { } cachedRooms
+                            ? cachedRooms : GeneratedRoomProbe.Scan(roomArea, observation.Width,
+                                observation.Height, ReadTerrain);
+                        if (AreaStillCurrent())
+                        {
+                            generatedRoomProbe = roomResult;
+                            if (roomResult is { Status: "candidate_rooms_observed", AnchorsTruncated: false })
+                            {
+                                _generatedRoomProbeKey = captureKey;
+                                _generatedRoomProbeCached = roomResult;
+                            }
+                        }
+                    }
+                    if (AreaStillCurrent() && result.Layout is { } layout)
+                    {
+                        var placementResult = _placementProbeKey == captureKey &&
+                            _placementProbeCached is { } cachedPlacements
+                            ? cachedPlacements : TerrainPlacementProbe.Scan(layout,
+                                observation.Width, observation.Height, ReadTerrain);
+                        if (AreaStillCurrent())
+                        {
+                            placementProbe = placementResult;
+                            if (placementResult is { Status: "candidate_placements_observed", Truncated: false })
+                            {
+                                _placementProbeKey = captureKey;
+                                _placementProbeCached = placementResult;
+                            }
+                        }
+                        var areaId = RawAreaIdReader.Read(stateAddress, ReadTerrain);
+                        var tileKey = $"{captureKey}:{areaId}";
+                        var tileResult = _questTileProbeKey == tileKey &&
+                            _questTileProbeCached is { } cachedTiles
+                            ? cachedTiles : QuestTileProbe.Scan(layout,
+                                observation.Width, observation.Height, areaId, ReadTerrain);
+                        if (AreaStillCurrent())
+                        {
+                            questTileProbe = tileResult;
+                            if (tileResult is { Status: "candidate_tiles_observed" or "no_matches",
+                                    Truncated: false })
+                            {
+                                _questTileProbeKey = tileKey;
+                                _questTileProbeCached = tileResult;
+                            }
+                        }
+                    }
                     if (_capturedTerrainKeys.Contains(captureKey))
-                        packedTerrainCaptureStatus = "already_captured";
+                    {
+                        packedTerrainCaptureStatus = _capturedTerrainFiles.TryGetValue(
+                            captureKey, out var existingFile)
+                            ? PackedTerrainCapture.UpdateAnchors(existingFile, processId,
+                                areaHash, observation.AreaAddress, observation.Anchor,
+                                generatedRoomProbe, placementProbe, questTileProbe, AreaStillCurrent)
+                            : "already_captured";
+                    }
                     else
                     {
                         var directory = Path.Combine(Environment.GetFolderPath(
                             Environment.SpecialFolder.LocalApplicationData), "PartyPilot", "terrain");
-                        bool AreaStillCurrent()
-                        {
-                            if ($"{GameController.IngameState.Data.CurrentAreaHash}" != areaHash ||
-                                GameController.IngameState.Address != stateAddress)
-                                return false;
-                            long currentAddress;
-                            if (observation.Anchor == "state_pointer_static_656")
-                            {
-                                var pointer = ReadTerrain(stateAddress + 656, 8);
-                                currentAddress = pointer is { Length: 8 } ? BitConverter.ToInt64(pointer) : 0;
-                            }
-                            else currentAddress = GameController.IngameState.Data.Address;
-                            return currentAddress > 0 &&
-                                $"0x{currentAddress:X}".Equals(observation.AreaAddress,
-                                    StringComparison.OrdinalIgnoreCase);
-                        }
                         var capture = PackedTerrainCapture.Save(source, observation,
                             positionCandidate!, render.Pos.X, render.Pos.Y, ReadTerrain,
                             AreaStillCurrent, directory,
-                            processId, areaHash, observation.AreaAddress, observation.Anchor, now);
+                            processId, areaHash, observation.AreaAddress, observation.Anchor, now,
+                            generatedRoomProbe, placementProbe, questTileProbe);
                         packedTerrainCaptureStatus = capture.Status;
-                        if (capture.Status == "captured_local") _capturedTerrainKeys.Add(captureKey);
+                        if (capture.Status == "captured_local" && capture.DataFile != null)
+                        {
+                            _capturedTerrainKeys.Add(captureKey);
+                            _capturedTerrainFiles[captureKey] = capture.DataFile;
+                        }
                     }
                 }
             }
@@ -503,6 +748,31 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             _slotCandidateStatus = "scan_failed";
             return;
         }
+        object? areaSafety = null;
+        string? observedAreaName = null;
+        var areaSafetyStatus = "unavailable";
+        try
+        {
+            var area = GameController.Area.CurrentArea;
+            if (area != null)
+            {
+                if (area.Hash == frameAreaHash)
+                {
+                    observedAreaName = area.Name;
+                    areaSafety = new
+                    {
+                        Hash = area.Hash,
+                        Town = area.IsTown,
+                        Hideout = area.IsHideout,
+                        Peaceful = area.IsPeaceful
+                    };
+                    areaSafetyStatus = "observed";
+                }
+                else areaSafetyStatus = "area_mismatch";
+            }
+        }
+        catch { areaSafetyStatus = "unavailable"; }
+        if (!SameAreaAndPlayer()) return;
         var position = render.Pos;
         var sourceTickMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         // AreaName is diagnostic only. It does not identify a specific instance.
@@ -511,16 +781,27 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             ProcessId = GameController.Window.Process.Id,
             SeenUtc = now,
             TickMs = sourceTickMs,
-            AreaName = GameController.Area.CurrentArea?.Name,
-            AreaHash = GameController.IngameState.Data.CurrentAreaHash,
+            AreaName = observedAreaName,
+            AreaHash = frameAreaHash,
+            RadarAreaAddress = radarSeenUtc.HasValue ? FormatAddress(frameDataAddress) : null,
+            RadarStateAreaAddress = radarStateAreaAddress,
+            RadarGridX = radarGridX,
+            RadarGridY = radarGridY,
+            AreaSafety = areaSafety,
+            AreaSafetyStatus = areaSafetyStatus,
+            AreaSafetySeenUtc = now,
             CoordinateSpace = "world",
             X = position.X,
             Y = position.Y,
             Z = position.Z,
             Life = vitals?.CurHP,
             LifeMax = vitals?.MaxHP,
+            LifeReservedFlat = vitals?.ReservedFlatHP,
+            LifeReservedPercent = vitals?.ReservedPercentHP,
             Mana = vitals?.CurMana,
             ManaMax = vitals?.MaxMana,
+            ManaReservedFlat = vitals?.ReservedFlatMana,
+            ManaReservedPercent = vitals?.ReservedPercentMana,
             EnergyShield = vitals?.CurES,
             EnergyShieldMax = vitals?.MaxES,
             IngameDataAddress = ingameDataAddress,
@@ -532,6 +813,7 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             SkillBindSourceSeenUtc = Settings.DiagnoseLocalSlotCandidates.Value &&
                 _skillBindSource != null ? _lastSkillBindScanUtc : (DateTime?)null,
             RadarEntities = radarEntities,
+            DormantAreaMap = Settings.DiagnoseDormantAreaMap.Value ? _dormantMapObservation : null,
             RadarStatus = radarStatus,
             RadarSeenUtc = radarSeenUtc,
             UiObservation = uiObservation,
@@ -548,6 +830,38 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             PackedTerrainProbe = packedTerrainProbe,
             PackedTerrainStatus = packedTerrainStatus,
             PackedTerrainCaptureStatus = packedTerrainCaptureStatus,
+            GeneratedRoomProbe = generatedRoomProbe is null ? null : new
+            {
+                generatedRoomProbe.Status,
+                generatedRoomProbe.Graphs,
+                generatedRoomProbe.RoomsChecked,
+                generatedRoomProbe.ValidPaths,
+                generatedRoomProbe.SamplesTruncated,
+                SamplesOmitted = Math.Max(0, generatedRoomProbe.Samples.Length - 4),
+                Samples = generatedRoomProbe.Samples.Take(4),
+                generatedRoomProbe.MatchedAnchors,
+                generatedRoomProbe.AnchorsTruncated,
+                AnchorsOmitted = Math.Max(0, generatedRoomProbe.Anchors.Length - 8),
+                Anchors = generatedRoomProbe.Anchors.Take(8)
+            },
+            TerrainPlacementProbe = placementProbe is null ? null : new
+            {
+                placementProbe.Status,
+                placementProbe.TilesChecked,
+                placementProbe.ReferencesChecked,
+                placementProbe.ValidPaths,
+                placementProbe.MatchedAnchors,
+                placementProbe.Truncated
+            },
+            QuestTileProbe = questTileProbe is null ? null : new
+            {
+                questTileProbe.Status,
+                questTileProbe.AreaId,
+                questTileProbe.TilesChecked,
+                questTileProbe.NamedTiles,
+                questTileProbe.MatchedTiles,
+                questTileProbe.Truncated
+            },
             VisiblePlayers = visiblePlayers,
             VisiblePlayersStatus = visiblePlayersStatus
         });
@@ -574,6 +888,11 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             _udp.Send(pairing, pairing.Length, PairingReceiver);
         }
         if (radarSeenUtc.HasValue) _udp.Send(bytes, bytes.Length, RadarReceiver);
+        if (Settings.DiagnoseRadarEntities.Value && _radarStreamHealthy && frameAreaHash != 0)
+        {
+            _lastRadarMotionUtc = now;
+            EmitRadarMotion(now);
+        }
         var privacyPulse = JsonSerializer.SerializeToUtf8Bytes(new
         {
             ProcessId = GameController.Window.Process.Id,
@@ -583,20 +902,92 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
         _udp.Send(privacyPulse, privacyPulse.Length, PrivacyReceiver);
     }
 
-    private void EmitFastOrderedCandidate(DateTime seenUtc)
+    private void EmitRadarMotion(DateTime seenUtc)
     {
         try
         {
             var player = GameController.Player;
             var render = player?.GetComponent<Render>();
-            if (player is null || render == null) return;
+            if (render is null || player is null) return;
+            var stateAddress = GameController.IngameState.Address;
+            var areaAddress = GameController.IngameState.Data.Address;
+            var areaHash = GameController.IngameState.Data.CurrentAreaHash;
+            var playerAddress = player.Address;
+            var processId = GameController.Window.Process.Id;
+            if (stateAddress <= 0 || areaAddress <= 0 || playerAddress <= 0 ||
+                areaHash == 0 || processId <= 0) return;
+            var position = render.Pos;
+            if (!float.IsFinite(position.X) || !float.IsFinite(position.Y)) return;
+
+            double? gridX = null;
+            double? gridY = null;
+            string? stateAreaAddress = null;
+            if (Settings.DiagnoseTerrain.Value || Settings.DiagnoseDormantAreaMap.Value)
+            {
+                byte[]? Read(long address, int size)
+                {
+                    try { return GameController.IngameState.Data.M.ReadMem(address, size); }
+                    catch { return null; }
+                }
+                var raw = RawRenderPositionReader.Read(playerAddress, Read);
+                if (raw is null) return;
+                gridX = raw.GridX;
+                gridY = raw.GridY;
+                var pointer = Read(stateAddress + 656, 8);
+                if (pointer is not { Length: 8 }) return;
+                stateAreaAddress = FormatAddress(BitConverter.ToInt64(pointer));
+                if (stateAreaAddress is null) return;
+            }
+            if (GameController.IngameState.Address != stateAddress ||
+                GameController.IngameState.Data.Address != areaAddress ||
+                GameController.IngameState.Data.CurrentAreaHash != areaHash ||
+                GameController.Player?.Address != playerAddress ||
+                GameController.Window.Process.Id != processId) return;
+            var motion = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                Kind = "radar_motion",
+                ProcessId = processId,
+                SeenUtc = seenUtc,
+                AreaHash = areaHash,
+                RadarAreaAddress = FormatAddress(areaAddress),
+                RadarStateAreaAddress = stateAreaAddress,
+                X = position.X,
+                Y = position.Y,
+                RadarGridX = gridX,
+                RadarGridY = gridY
+            });
+            _udp.Send(motion, motion.Length, RadarReceiver);
+        }
+        catch { }
+    }
+
+    private void EmitFastOrderedCandidate(DateTime seenUtc)
+    {
+        var processId = 0;
+        uint areaHash = 0;
+        try
+        {
+            var player = GameController.Player;
+            var render = player?.GetComponent<Render>();
+            if (player is null || render == null)
+            {
+                RevokeLastExperimentalOrdered(seenUtc);
+                return;
+            }
             var data = GameController.IngameState.Data;
             var stateAddress = GameController.IngameState.Address;
             var areaAddress = data.Address;
             var localAddress = player.Address;
-            var areaHash = data.CurrentAreaHash;
-            var processId = GameController.Window.Process.Id;
-            if (localAddress <= 0 || processId <= 0) return;
+            areaHash = data.CurrentAreaHash;
+            processId = GameController.Window.Process.Id;
+            if (localAddress <= 0 || processId <= 0)
+            {
+                RevokeLastExperimentalOrdered(seenUtc);
+                return;
+            }
+            if (_lastExperimentalOrderedProcessId > 0 &&
+                _lastExperimentalOrderedProcessId != processId &&
+                !RevokeLastExperimentalOrdered(seenUtc)) return;
             bool SameIdentity()
             {
                 try
@@ -624,21 +1015,80 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 var localPath = player.Path;
                 var paths = new Dictionary<long, string>();
                 if (!string.IsNullOrWhiteSpace(localPath)) paths[localAddress] = localPath;
+                var observedPosition = render.Pos;
                 captured = LocalSlotMotionSampler.Capture(candidate, localAddress, paths,
                     new Dictionary<long, (float X, float Y, float Z)>(),
                     ReadCandidate, address => RawCharacterPathReader.Read(address, ReadCandidate),
-                    SameIdentity, render.Pos.X, render.Pos.Y, render.Pos.Z, seenUtc);
-                if (captured == null) return; // Identity or vector changed during capture.
+                    SameIdentity, observedPosition.X, observedPosition.Y, observedPosition.Z, seenUtc,
+                    ingameStateAddress: stateAddress);
+                // A failed revalidation must revoke a previously accepted ordered frame.
             }
-            if (!SameIdentity()) return;
+            if (!SameIdentity())
+            {
+                EmitFastOrderedInvalidation(processId, areaHash, seenUtc);
+                return;
+            }
             var bytes = FastOrderedCandidateFrame.Encode(processId, areaHash,
                 GameController.Area.CurrentArea?.Name, captured, seenUtc,
                 DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-            _udp.Send(bytes, bytes.Length, FastCandidateReceiver);
+            if (Settings.DiagnoseFastOrderedMotion.Value)
+                _udp.Send(bytes, bytes.Length, FastCandidateReceiver);
+            if (Settings.ExperimentalOrderedFollow.Value)
+            {
+                var control = FastOrderedCandidateFrame.TryEncodeExperimentalControl(
+                    processId, areaHash, GameController.Area.CurrentArea?.Name, captured,
+                    seenUtc, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                var packet = control ?? bytes;
+                _udp.Send(packet, packet.Length, Receiver);
+                _lastExperimentalOrderedProcessId = control is null ? 0 : processId;
+                _lastExperimentalOrderedAreaHash = control is null ? 0 : areaHash;
+            }
         }
         catch
         {
-            // The experimental stream must not interrupt the normal sensor.
+            // Once a PID is known, revoke its prior ordered positions instead
+            // of leaving the last movement active until sample expiry.
+            EmitFastOrderedInvalidation(processId, areaHash, seenUtc);
+            if (processId <= 0) RevokeLastExperimentalOrdered(seenUtc);
+        }
+    }
+
+    private void EmitFastOrderedInvalidation(int processId, uint areaHash, DateTime seenUtc)
+    {
+        if (processId <= 0 || seenUtc == default || !Settings.ExperimentalOrderedFollow.Value) return;
+        try
+        {
+            var bytes = FastOrderedCandidateFrame.Encode(processId, areaHash, null,
+                null, seenUtc, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            _udp.Send(bytes, bytes.Length, Receiver);
+            if (_lastExperimentalOrderedProcessId == processId)
+            {
+                _lastExperimentalOrderedProcessId = 0;
+                _lastExperimentalOrderedAreaHash = 0;
+            }
+        }
+        catch
+        {
+            // Failure reporting must not interrupt ExileCore's render callback.
+        }
+    }
+
+    private bool RevokeLastExperimentalOrdered(DateTime seenUtc)
+    {
+        if (_lastExperimentalOrderedProcessId <= 0) return true;
+        try
+        {
+            var bytes = FastOrderedCandidateFrame.Encode(
+                _lastExperimentalOrderedProcessId, _lastExperimentalOrderedAreaHash,
+                null, null, seenUtc, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            _udp.Send(bytes, bytes.Length, Receiver);
+            _lastExperimentalOrderedProcessId = 0;
+            _lastExperimentalOrderedAreaHash = 0;
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -790,8 +1240,62 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                     // An unreadable wrapper must not become an asserted loot marker.
                 }
             }
-            var category = lootName != null ? "loot" : isPlayer ? "player" : RadarClassifier.Category(path);
+            var questItem = lootName != null && RadarClassifier.IsQuestItemPath(itemPath);
+            var category = questItem ? "quest" : lootName != null ? "loot" :
+                isPlayer ? "player" : RadarClassifier.Category(path);
+            var questStateCandidate = false;
+            if (category == null && RadarClassifier.CanProbeQuestState(path))
+            {
+                try
+                {
+                    var targetable = entity.GetComponent<Targetable>();
+                    if (targetable != null)
+                    {
+                        byte[]? ReadQuestByte(long address, int size)
+                        {
+                            try { return GameController.IngameState.Data.M.ReadMem(address, size); }
+                            catch { return null; }
+                        }
+                        questStateCandidate = TargetableQuestStateProbe.Read(targetable.Address,
+                            ReadQuestByte) == true &&
+                            Encoding.UTF8.GetByteCount(RadarClassifier.QuestStateCandidateLabel(path)) <= 96;
+                        if (questStateCandidate) category = "quest";
+                    }
+                }
+                catch
+                {
+                    // A failed build-specific probe never creates a quest marker.
+                }
+            }
             if (category == null) continue;
+            bool? navigationIsValid = null;
+            bool? navigationIsTargetable = null;
+            if (category is "transition" or "waypoint" or "checkpoint" or "portal")
+            {
+                try
+                {
+                    navigationIsValid = entity.IsValid;
+                    navigationIsTargetable = entity.IsTargetable;
+                }
+                catch
+                {
+                    // Unknown component state must not become a positive interaction signal.
+                }
+            }
+            string? destinationName = null;
+            if (category is "transition" or "portal")
+            {
+                try
+                {
+                    destinationName = PartyPilot.RadarDestinationName.Accept(category == "transition"
+                        ? entity.GetComponent<AreaTransition>()?.WorldArea?.Name
+                        : entity.GetComponent<Portal>()?.Area?.Name);
+                }
+                catch
+                {
+                    // Keep the location marker when destination metadata is unreadable.
+                }
+            }
             bool? monsterComponentPresent = null;
             int? monsterLifeCurrent = null;
             int? monsterLifeMaximum = null;
@@ -799,7 +1303,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
             bool? entityIsAlive = null;
             bool? entityIsHostile = null;
             bool? trackedAliveCandidate = null;
-            if (category == "monster")
+            if (category == "monster" || category == "quest" &&
+                path.StartsWith("Metadata/Monsters/", StringComparison.OrdinalIgnoreCase))
             {
                 try
                 {
@@ -836,10 +1341,14 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 EntityId = entity.Id,
                 Category = category,
                 Path = path,
-                Label = lootName ?? (isPlayer ? playerName : null),
+                Label = questStateCandidate ? RadarClassifier.QuestStateCandidateLabel(path) :
+                    questItem ? RadarClassifier.QuestItemLabel(itemPath!, lootName!) :
+                    destinationName ?? lootName ?? (isPlayer ? playerName : category == "quest" ? RadarClassifier.QuestLabel(path) :
+                    category == "boss" ? RadarClassifier.BossLabel(path) : null),
+                QuestStateCandidate = questStateCandidate,
                 ItemPath = itemPath,
-                Stack = lootStack,
-                Rarity = lootRarity,
+                Stack = questItem ? null : lootStack,
+                Rarity = questItem ? null : lootRarity,
                 MonsterComponentPresent = monsterComponentPresent,
                 MonsterLifeCurrent = monsterLifeCurrent,
                 MonsterLifeMaximum = monsterLifeMaximum,
@@ -847,6 +1356,8 @@ public sealed class PartyPilotSensor : BaseSettingsPlugin<SensorSettings>
                 EntityIsAlive = entityIsAlive,
                 EntityIsHostile = entityIsHostile,
                 TrackedAliveCandidate = trackedAliveCandidate,
+                NavigationIsValid = navigationIsValid,
+                NavigationIsTargetable = navigationIsTargetable,
                 X = pos.X,
                 Y = pos.Y,
                 Z = pos.Z

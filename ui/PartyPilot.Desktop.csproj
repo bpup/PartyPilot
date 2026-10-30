@@ -12,6 +12,13 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../common/HybridBindingConfig.cs" Link="HybridBindingConfig.cs" />
+    <EmbeddedResource Include="../data/campaign-landmarks-0.6.17.json" LogicalName="PartyPilot.CampaignLandmarks" />
+    <EmbeddedResource Include="../data/quest-tile-rules-0.6.17.json" LogicalName="PartyPilot.QuestTileRules" />
     <Compile Include="../common/FollowerMirrorConfig.cs" Link="FollowerMirrorConfig.cs" />
+    <Compile Include="../common/PackedTerrainValueProfile.cs" Link="PackedTerrainValueProfile.cs" />
+    <Compile Include="../common/RadarDestinationName.cs" Link="RadarDestinationName.cs" />
+    <Compile Include="../sensor/GeneratedRoomClassifier.cs" Link="GeneratedRoomClassifier.cs" />
+    <Compile Include="../sensor/TerrainPlacementClassifier.cs" Link="TerrainPlacementClassifier.cs" />
+    <Compile Include="../sensor/QuestTileRules.cs" Link="QuestTileRules.cs" />
   </ItemGroup>
 </Project>

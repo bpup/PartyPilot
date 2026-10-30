@@ -11,6 +11,11 @@
     <Compile Include="../BridgeProtocol.cs" Link="BridgeProtocol.cs" />
     <Compile Include="../BridgeSlots.cs" Link="BridgeSlots.cs" />
     <Compile Include="../ControllerDeviceId.cs" Link="ControllerDeviceId.cs" />
+    <Compile Include="../ControllerCandidateSelection.cs" Link="ControllerCandidateSelection.cs" />
+    <Compile Include="../HidHideGamingInventory.cs" Link="HidHideGamingInventory.cs" />
+    <Compile Include="../HidHideIsolationPlan.cs" Link="HidHideIsolationPlan.cs" />
+    <Compile Include="../HidHideControllerLease.cs" Link="HidHideControllerLease.cs" />
+    <Compile Include="../ControllerAutoDiscovery.cs" Link="ControllerAutoDiscovery.cs" />
     <Compile Include="../PublicSlotGuard.cs" Link="PublicSlotGuard.cs" />
     <Compile Include="../WgiIdentitySelection.cs" Link="WgiIdentitySelection.cs" />
     <Compile Include="../FocusPadMap.cs" Link="FocusPadMap.cs" />
@@ -23,9 +28,13 @@
     <Compile Include="../Client3FocusRouting.cs" Link="Client3FocusRouting.cs" />
     <Compile Include="../Client3InputPublisher.cs" Link="Client3InputPublisher.cs" />
     <Compile Include="../Client3PadOutputs.cs" Link="Client3PadOutputs.cs" />
+    <Compile Include="../ProcessLocalPadOutputs.cs" Link="ProcessLocalPadOutputs.cs" />
+    <Compile Include="../ProcessLocalBindingPlan.cs" Link="ProcessLocalBindingPlan.cs" />
+    <Compile Include="../ProcessLocalRuntimeBindings.cs" Link="ProcessLocalRuntimeBindings.cs" />
     <Compile Include="../CompositeClient3Options.cs" Link="CompositeClient3Options.cs" />
     <Compile Include="../Client3RuntimeAttach.cs" Link="Client3RuntimeAttach.cs" />
     <Compile Include="../Client3AttachRequest.cs" Link="Client3AttachRequest.cs" />
+    <Compile Include="../PrivateClientPrepareRequest.cs" Link="PrivateClientPrepareRequest.cs" />
     <Compile Include="../PrivateClient3CommandRouter.cs" Link="PrivateClient3CommandRouter.cs" />
     <Compile Include="../ForegroundWindowProbe.cs" Link="ForegroundWindowProbe.cs" />
     <Compile Include="../PrivateSlotFrame.cs" Link="PrivateSlotFrame.cs" />

@@ -17,6 +17,7 @@ internal sealed class Client3RuntimeAttach : IDisposable, IClient3PadOutput
     private const uint WaitTimeout = 258;
     private static readonly TimeSpan ReadyTimeout = TimeSpan.FromSeconds(35);
     private static readonly TimeSpan LoadedTimeout = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan PreviousMappingReleaseTimeout = TimeSpan.FromSeconds(3);
     private readonly Process _process;
     private readonly Client3InputPublisher _publisher;
 
@@ -108,8 +109,8 @@ internal sealed class Client3RuntimeAttach : IDisposable, IClient3PadOutput
             if (!File.Exists(runtime))
                 throw new FileNotFoundException("PartyPilot private-slot runtime is missing.", runtime);
             // The supplied 0.6.17 DLL's XInput hook reads local 0/1 as P5/P6.
-            publisher = Client3InputPublisher.OpenForProcess(process, includeP6,
-                p5LocalIndex: 0, p6LocalIndex: includeP6 ? 1 : null);
+            publisher = await OpenPublisherAfterPreviousReleaseAsync(process, includeP6,
+                cancellationToken);
             Inject(process, runtime, cancellationToken, verifyModule: !preResume);
             var deadline = Stopwatch.StartNew();
             while (deadline.Elapsed < (preResume ? LoadedTimeout : ReadyTimeout))
@@ -132,6 +133,29 @@ internal sealed class Client3RuntimeAttach : IDisposable, IClient3PadOutput
             publisher?.Dispose();
             process.Dispose();
             throw;
+        }
+    }
+
+    private static async Task<Client3InputPublisher> OpenPublisherAfterPreviousReleaseAsync(
+        Process process, bool includeP6, CancellationToken cancellationToken)
+    {
+        var elapsed = Stopwatch.StartNew();
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (process.HasExited)
+                throw new InvalidOperationException("Client 3 exited before private input setup.");
+            try
+            {
+                return Client3InputPublisher.OpenForProcess(process, includeP6,
+                    p5LocalIndex: 0, p6LocalIndex: includeP6 ? 1 : null);
+            }
+            catch (IOException) when (elapsed.Elapsed < PreviousMappingReleaseTimeout)
+            {
+                // A stopped runtime releases its named views on its 100 ms
+                // worker tick. A second attach must not collide with them.
+                await Task.Delay(50, cancellationToken);
+            }
         }
     }
 

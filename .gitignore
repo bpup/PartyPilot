@@ -4,6 +4,8 @@ bridge/protocol-tests/bin/
 bridge/protocol-tests/obj/
 sensor/bin/
 sensor/obj/
+probe/bin/
+probe/obj/
 sensor-tests/bin/
 sensor-tests/obj/
 skillbind/bin/
@@ -12,7 +14,11 @@ ui/bin/
 ui/obj/
 ui-smoke/bin/
 ui-smoke/obj/
+ui-native-smoke/bin/
+ui-native-smoke/obj/
 release/
+installer/out/
+scripts/__pycache__/
 native/private-slot-runtime/.build/
 native/multi-instance-runtime/.build/
 PartyPilot.exe

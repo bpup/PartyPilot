@@ -18,6 +18,9 @@ internal static class RadarHotkeySmoke
             modified.IsDown(key => key is 120 or 0x11) ||
             modified.IsDown(key => key is 120 or 0x11 or 0x10 or 0x12))
             throw new Exception("Radar hotkey parser or modifier matching changed.");
+        if (!RadarRegisteredHotkey.UsesPassThroughPolling(tab) ||
+            RadarRegisteredHotkey.UsesPassThroughPolling(modified))
+            throw new Exception("The game's Tab map key must remain pass-through.");
 
         var folder = Path.Combine(Path.GetTempPath(), "partypilot-radar-key-" + Guid.NewGuid().ToString("N"));
         var path = Path.Combine(folder, "key.json");
@@ -34,15 +37,25 @@ internal static class RadarHotkeySmoke
         finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
 
         var visibility = new RadarVisibility();
+        if (visibility.Enabled) throw new Exception("Radar opened before Tab was pressed.");
         visibility.Observe(true, true);
         visibility.Observe(true, true);
-        if (visibility.Enabled) throw new Exception("Shared radar shortcut repeated while held.");
+        if (!visibility.Enabled) throw new Exception("Tab did not open radar or repeated while held.");
         visibility.Observe(false, false);
         visibility.Observe(true, true);
-        if (!visibility.Enabled) throw new Exception("A later game window could not restore radar.");
+        if (visibility.Enabled) throw new Exception("A later Tab press did not hide radar.");
         visibility.Observe(false, true);
         visibility.Observe(true, true);
-        if (!visibility.Enabled)
+        if (visibility.Enabled)
             throw new Exception("A held shortcut retoggled radar after leaving and reentering the game.");
+
+        var registered = new RadarVisibility();
+        registered.ObserveRegisteredPress(false);
+        if (registered.Enabled)
+            throw new Exception("A registered shortcut outside the game opened radar.");
+        registered.ObserveRegisteredPress(true);
+        registered.ObserveRegisteredPress(true);
+        if (registered.Enabled)
+            throw new Exception("Two separate registered Tab presses did not toggle radar twice.");
     }
 }

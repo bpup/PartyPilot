@@ -7,9 +7,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../common/PackedTerrainValueProfile.cs" Link="PackedTerrainValueProfile.cs" />
+    <Compile Include="../common/RadarDestinationName.cs" Link="RadarDestinationName.cs" />
     <Reference Include="ExileCore2">
       <HintPath>$(EXILECORE2_DIR)/ExileCore2.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <EmbeddedResource Include="../data/campaign-landmarks-0.6.17.json" LogicalName="PartyPilot.CampaignLandmarks" />
+    <EmbeddedResource Include="../data/quest-tile-rules-0.6.17.json" LogicalName="PartyPilot.QuestTileRules" />
   </ItemGroup>
 </Project>

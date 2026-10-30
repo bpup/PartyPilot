@@ -59,6 +59,9 @@ internal sealed class BridgeRouter
     private short _manualY;
     private ushort _previousButtons;
     private byte _previousLeftTrigger;
+    private bool _warpToMainShortcutEnabled;
+    private bool _warpToMainWasPressed;
+    public bool WarpToMainPressed { get; private set; }
     private bool _autoPartyActive;
     private DateTime _autoPartyExpiresUtc;
     private int _autoPartySlot;
@@ -72,8 +75,10 @@ internal sealed class BridgeRouter
             nowUtc.Kind != DateTimeKind.Utc || route.CombatLeaseUntilUtc > nowUtc) return false;
         route.CombatLeaseUntilUtc = nowUtc.AddSeconds(10);
         route.CombatPulseUntilUtc = default;
+        route.CombatChordFullAtUtc = default;
         route.CombatPulse = default;
         route.LifeUntilUtc = route.ManaUntilUtc = DateTime.MinValue;
+        route.RecoveryUntilUtc.Clear();
         ResetEngageDodgeForSlot(slot);
         Render(slot, route);
         return true;
@@ -88,7 +93,9 @@ internal sealed class BridgeRouter
             !BridgeProtocol.ValidCombatPulse(pulse) ||
             route.CombatPulseUntilUtc > nowUtc) return false;
         route.CombatPulse = pulse;
-        route.CombatPulseUntilUtc = nowUtc.AddMilliseconds(holdMilliseconds);
+        var chord = pulse.LeftTrigger == 255 && pulse.Buttons != 0;
+        route.CombatChordFullAtUtc = chord ? nowUtc.AddMilliseconds(45) : default;
+        route.CombatPulseUntilUtc = nowUtc.AddMilliseconds(holdMilliseconds + (chord ? 45 : 0));
         route.CombatLeaseUntilUtc = nowUtc.AddSeconds(10);
         ResetEngageDodgeForSlot(slot);
         Render(slot, route);
@@ -100,11 +107,19 @@ internal sealed class BridgeRouter
         if (!_routes.TryGetValue(slot, out var route)) return;
         route.CombatLeaseUntilUtc = default;
         route.CombatPulseUntilUtc = default;
+        route.CombatChordFullAtUtc = default;
         route.CombatPulse = default;
         Render(slot, route);
     }
 
     public int FocusedSlot => _physicalMode ? _focusedSlot : 0;
+    public void SetWarpToMainShortcutEnabled(bool enabled)
+    {
+        _warpToMainShortcutEnabled = enabled && _physicalMode;
+        _warpToMainWasPressed = _warpToMainShortcutEnabled &&
+            (_physicalReport.Buttons & 0x0008) != 0 && _physicalReport.LeftTrigger > 30;
+        WarpToMainPressed = false;
+    }
     public int LastManualFocusSlot => _physicalMode ? _lastManualFocusSlot : 0;
     public bool AutoPartyActive => _autoPartyActive;
     public int AutoPartySlot => _autoPartySlot;
@@ -266,6 +281,7 @@ internal sealed class BridgeRouter
         route.Active = command.Active;
         route.EligibleForManualMovement = command.EligibleForManualMovement;
         route.SuppressMirroredB = command.SuppressMirroredB;
+        route.CatchUpPriority = command.CatchUpPriority;
         route.LastUpdateUtc = nowUtc;
         Render(command.Slot, route);
         return true;
@@ -274,7 +290,12 @@ internal sealed class BridgeRouter
     public void SetPhysical(XInputGamepad gamepad, DateTime? observedAtUtc = null,
         bool allowDirectRightStick = true)
     {
+        WarpToMainPressed = false;
         if (!_physicalMode) return;
+        var warpChord = _warpToMainShortcutEnabled &&
+            (gamepad.Buttons & 0x0008) != 0 && gamepad.LeftTrigger > 30;
+        WarpToMainPressed = warpChord && !_warpToMainWasPressed;
+        _warpToMainWasPressed = warpChord;
         if (_autoPartyActive) return;
         const ushort leftThumb = 0x0040;
         const ushort rightThumb = 0x0080;
@@ -302,16 +323,36 @@ internal sealed class BridgeRouter
             (!previousUp || !previousLeftTrigger);
         var sixthEdge = leftTrigger && _focusPads.ContainsKey(6) && down &&
             (!previousDown || !previousLeftTrigger);
-        var edgeCount = (leftEdge ? 1 : 0) + (rightEdge ? 1 : 0) +
-            (fifthEdge ? 1 : 0) + (sixthEdge ? 1 : 0);
-        var pressedRole = edgeCount == 1
-            ? fifthEdge ? 5 : sixthEdge ? 6 : leftEdge ? leftRole : rightRole : 0;
-        var promoteChord = (pressedRole is 3 or 4 &&
-            _isolatedSlot == (_focusPads.TryGetValue(pressedRole - 2, out var prefixPad) ? prefixPad : -1) &&
-            (pressedRole == 3 ? previousLeft : previousRight) && !previousLeftTrigger) ||
-            (pressedRole is 5 or 6 && _isolatedSlot != 0);
+        var pressedRole = 0;
+        var highestParts = 0;
+        var tied = false;
+        void Consider(bool edge, int role)
+        {
+            if (!edge) return;
+            var parts = role >= 3 ? 2 : 1;
+            if (parts > highestParts)
+            {
+                pressedRole = role;
+                highestParts = parts;
+                tied = false;
+            }
+            else if (parts == highestParts) tied = true;
+        }
+        Consider(leftEdge, leftRole);
+        Consider(rightEdge, rightRole);
+        Consider(fifthEdge, 5);
+        Consider(sixthEdge, 6);
+        if (tied) pressedRole = 0;
+        // While one player has manual focus, the reserved P3–P6 chords can
+        // immediately switch to another player. Repeating the active chord
+        // still needs a release edge before returning to shared control.
+        var promoteChord = pressedRole is >= 3 and <= 6 && _isolatedSlot != 0;
+        // A second edge on the already focused role returns to shared follow
+        // even inside the normal 350 ms switch debounce.
         if (pressedRole != 0 && _focusPads.TryGetValue(pressedRole, out var pressedSlot) &&
-            (promoteChord || nowUtc - _lastFocusToggleUtc >= TimeSpan.FromMilliseconds(350)))
+            (promoteChord ||
+             pressedSlot == _isolatedSlot && nowUtc > _lastFocusToggleUtc ||
+             nowUtc - _lastFocusToggleUtc >= TimeSpan.FromMilliseconds(350)))
         {
             _lastManualFocusSlot = pressedSlot;
             if (_lastFocusedLeads && _mainSlot != pressedSlot)
@@ -328,6 +369,11 @@ internal sealed class BridgeRouter
         }
         _previousButtons = gamepad.Buttons;
         _previousLeftTrigger = gamepad.LeftTrigger;
+        if (warpChord)
+        {
+            gamepad.Buttons &= unchecked((ushort)~0x0008);
+            gamepad.LeftTrigger = 0;
+        }
         gamepad.Buttons &= unchecked((ushort)~(leftThumb | rightThumb));
         if (leftTrigger && ((up && _focusPads.ContainsKey(5)) ||
                             (down && _focusPads.ContainsKey(6))))
@@ -385,7 +431,10 @@ internal sealed class BridgeRouter
             _engageDodge.Reset();
             ReleaseCombatAll();
             foreach (var route in _routes.Values)
+            {
                 route.LifeUntilUtc = route.ManaUntilUtc = DateTime.MinValue;
+                route.RecoveryUntilUtc.Clear();
+            }
         }
         RenderAll();
     }
@@ -451,12 +500,43 @@ internal sealed class BridgeRouter
         return true;
     }
 
+    public bool PulseRecoveryAction(int slot, string input, DateTime nowUtc)
+    {
+        if (!_routes.TryGetValue(slot, out var route) || !_physicalMode || !_physicalConnected ||
+            _autoPartyActive || _menuGuardActive || (_isolatedSlot != 0 && slot != _focusedSlot) ||
+            route.CombatLeaseUntilUtc > nowUtc || nowUtc.Kind != DateTimeKind.Utc ||
+            !BridgeProtocol.IsRecoveryInput(input)) return false;
+        var until = nowUtc.AddMilliseconds(120);
+        if (!route.RecoveryUntilUtc.TryGetValue(input, out var previous) || until > previous)
+            route.RecoveryUntilUtc[input] = until;
+        Render(slot, route);
+        return true;
+    }
+
+    public bool PulseAutoCast(int slot, string input, DateTime nowUtc)
+    {
+        if (!_routes.TryGetValue(slot, out var route) || !_physicalMode || !_physicalConnected ||
+            _autoPartyActive || _menuGuardActive || (_isolatedSlot != 0 && slot != _focusedSlot) ||
+            route.CombatLeaseUntilUtc > nowUtc || nowUtc.Kind != DateTimeKind.Utc ||
+            !BridgeProtocol.IsAutoCastInput(input)) return false;
+        var until = nowUtc.AddMilliseconds(120);
+        if (!route.RecoveryUntilUtc.TryGetValue(input, out var previous) || until > previous)
+            route.RecoveryUntilUtc[input] = until;
+        Render(slot, route);
+        return true;
+    }
+
     public void Tick(DateTime nowUtc)
     {
         _engageDodgeNow = nowUtc.Ticks / TimeSpan.TicksPerMillisecond;
         if (_autoPartyActive)
         {
-            if (nowUtc >= _autoPartyExpiresUtc) { EndAutoParty(); return; }
+            if (nowUtc >= _autoPartyExpiresUtc)
+            {
+                EndAutoParty();
+                RefreshPrivateReports();
+                return;
+            }
             if (_autoPartyButtons != 0 && nowUtc >= _autoPartyButtonsUntilUtc)
             {
                 var slot = _autoPartySlot;
@@ -465,6 +545,7 @@ internal sealed class BridgeRouter
                 _autoPartyButtonsUntilUtc = default;
                 Render(slot, _routes[slot]);
             }
+            RefreshPrivateReports();
             return;
         }
         foreach (var (slot, route) in _routes)
@@ -474,13 +555,20 @@ internal sealed class BridgeRouter
             {
                 route.CombatLeaseUntilUtc = default;
                 route.CombatPulseUntilUtc = default;
+                route.CombatChordFullAtUtc = default;
                 route.CombatPulse = default;
                 expired = true;
             }
             else if (route.CombatPulseUntilUtc != default && nowUtc >= route.CombatPulseUntilUtc)
             {
                 route.CombatPulseUntilUtc = default;
+                route.CombatChordFullAtUtc = default;
                 route.CombatPulse = default;
+                expired = true;
+            }
+            else if (route.CombatChordFullAtUtc != default && nowUtc >= route.CombatChordFullAtUtc)
+            {
+                route.CombatChordFullAtUtc = default;
                 expired = true;
             }
             if (route.LifeUntilUtc != DateTime.MinValue && nowUtc >= route.LifeUntilUtc)
@@ -493,6 +581,12 @@ internal sealed class BridgeRouter
                 route.ManaUntilUtc = DateTime.MinValue;
                 expired = true;
             }
+            foreach (var input in route.RecoveryUntilUtc.Where(entry => nowUtc >= entry.Value)
+                         .Select(entry => entry.Key).ToArray())
+            {
+                route.RecoveryUntilUtc.Remove(input);
+                expired = true;
+            }
             if ((route.Active || route.EligibleForManualMovement) &&
                 nowUtc - route.LastUpdateUtc > TimeSpan.FromMilliseconds(500))
             {
@@ -500,10 +594,22 @@ internal sealed class BridgeRouter
                 route.Active = false;
                 route.EligibleForManualMovement = false;
                 route.SuppressMirroredB = false;
+                route.CatchUpPriority = false;
                 Render(slot, route);
             }
             else if (expired || _engageDodgeEnabled) Render(slot, route);
         }
+        RefreshPrivateReports();
+    }
+
+    // The private XInput reader neutralizes a sample after 80 ms. Keep the
+    // current reports fresh while a direction or button is held unchanged.
+    private void RefreshPrivateReports()
+    {
+        if (_reportBatch is null) return;
+        _reportBatch.BeginBatch();
+        try { _reportBatch.EndBatch(); }
+        catch { _reportBatch.AbortBatch(); throw; }
     }
 
     public void NeutralAll()
@@ -527,6 +633,7 @@ internal sealed class BridgeRouter
         _allowDirectRightStick = false;
         _previousButtons = 0;
         _previousLeftTrigger = 0;
+        WarpToMainPressed = false;
         _reportBatch?.BeginBatch();
         try
         {
@@ -536,8 +643,11 @@ internal sealed class BridgeRouter
                 route.Active = false;
                 route.EligibleForManualMovement = false;
                 route.SuppressMirroredB = false;
+                route.CatchUpPriority = false;
                 route.LifeUntilUtc = route.ManaUntilUtc = DateTime.MinValue;
+                route.RecoveryUntilUtc.Clear();
                 route.CombatLeaseUntilUtc = route.CombatPulseUntilUtc = default;
+                route.CombatChordFullAtUtc = default;
                 route.CombatPulse = default;
                 route.DodgeSprint.Reset();
                 route.Output.SetReport(default);
@@ -586,7 +696,7 @@ internal sealed class BridgeRouter
         if (_physicalMode && slot == _focusedSlot)
         {
             route.DodgeSprint.Reset();
-            route.Output.SetReport(_physicalConnected ? WithFlasks(_physicalReport, route) : default);
+            route.Output.SetReport(_physicalConnected ? WithRecovery(_physicalReport, route) : default);
             return;
         }
         if (_menuGuardActive)
@@ -604,7 +714,9 @@ internal sealed class BridgeRouter
         if (route.CombatPulseUntilUtc != default)
         {
             route.DodgeSprint.Reset();
-            route.Output.SetReport(WithEngageDodge(route.CombatPulse, slot, false));
+            var pulse = route.CombatChordFullAtUtc == default ? route.CombatPulse :
+                route.CombatPulse with { Buttons = 0, RightTrigger = 0 };
+            route.Output.SetReport(WithEngageDodge(pulse, slot, false));
             return;
         }
         if (_rightStickFollowerOverride && _physicalConnected && _isolatedSlot == 0 &&
@@ -612,8 +724,8 @@ internal sealed class BridgeRouter
              (_allowDirectRightStick && slot == _directRightStickSlot)) &&
             (Math.Abs((int)_manualX) > 8000 || Math.Abs((int)_manualY) > 8000))
         {
-            route.Output.SetReport(WithEngageDodge(WithFlasks(WithFollowerMirror(
-                PadReport.FromMovement(_manualX, _manualY), slot, route), route), slot, true));
+            route.Output.SetReport(WithEngageDodge(WithRecovery(WithFollowerMirror(
+                PadReport.FromMovement(_manualX, _manualY), slot, route, allowPriority: false), route), slot, true));
             return;
         }
         var automation = route.Automation;
@@ -624,7 +736,7 @@ internal sealed class BridgeRouter
                     (_hybridKeyboard.MainFollowMirrorButtons & _followerMirror.ButtonsForPlayer(hybridPlayer)))
             };
         route.Output.SetReport(WithEngageDodge(
-            WithFlasks(WithFollowerMirror(automation, slot, route), route), slot,
+            WithRecovery(WithFollowerMirror(automation, slot, route), route), slot,
             route.EligibleForManualMovement || _allowDirectRightStick && slot == _directRightStickSlot));
     }
 
@@ -644,7 +756,8 @@ internal sealed class BridgeRouter
             _engageDodge.ResetPlayer(player);
     }
 
-    private PadReport WithFollowerMirror(PadReport automation, int slot, PadRoute route)
+    private PadReport WithFollowerMirror(PadReport automation, int slot, PadRoute route,
+        bool allowPriority = true)
     {
         if (!_followerMirrorEnabled || !_physicalConnected)
         {
@@ -657,23 +770,45 @@ internal sealed class BridgeRouter
             return automation;
         }
         var input = (ushort)(_physicalReport.Buttons & _followerMirror.ButtonsForPlayer(player));
+        if (allowPriority && route.CatchUpPriority) input &= 0x38FF;
         if (route.SuppressMirroredB) input = (ushort)(input & ~0x2000);
         var buttons = route.DodgeSprint.Resolve(input,
             (automation.Buttons & 0x2000) != 0, DateTime.UtcNow);
         return automation with
         {
             Buttons = (ushort)((automation.Buttons & ~0x2000) | buttons),
-            LeftTrigger = _followerMirror.LeftTriggerForPlayer(player) ? _physicalReport.LeftTrigger : (byte)0,
-            RightTrigger = _followerMirror.RightTriggerForPlayer(player) ? _physicalReport.RightTrigger : (byte)0
+            LeftTrigger = allowPriority && route.CatchUpPriority ? (byte)0 :
+                _followerMirror.LeftTriggerForPlayer(player) ? _physicalReport.LeftTrigger : (byte)0,
+            RightTrigger = allowPriority && route.CatchUpPriority ? (byte)0 :
+                _followerMirror.RightTriggerForPlayer(player) ? _physicalReport.RightTrigger : (byte)0
         };
     }
 
-    private PadReport WithFlasks(PadReport report, PadRoute route)
+    private PadReport WithRecovery(PadReport report, PadRoute route)
     {
         if (_menuGuardActive) return report;
         var buttons = (ushort)((route.LifeUntilUtc != DateTime.MinValue ? 0x0004 : 0) |
                                (route.ManaUntilUtc != DateTime.MinValue ? 0x0008 : 0));
-        return report with { Buttons = (ushort)(report.Buttons | buttons) };
+        var leftTrigger = report.LeftTrigger;
+        var rightTrigger = report.RightTrigger;
+        foreach (var input in route.RecoveryUntilUtc.Keys)
+        {
+            switch (input)
+            {
+                case "A": buttons |= 0x1000; break;
+                case "B": buttons |= 0x2000; break;
+                case "X": buttons |= 0x4000; break;
+                case "Y": buttons |= 0x8000; break;
+                case "LB": buttons |= 0x0100; break;
+                case "RB": buttons |= 0x0200; break;
+                case "D-pad Up": buttons |= 0x0001; break;
+                case "D-pad Down": buttons |= 0x0002; break;
+                case "LT": leftTrigger = byte.MaxValue; break;
+                case "RT": rightTrigger = byte.MaxValue; break;
+            }
+        }
+        return report with { Buttons = (ushort)(report.Buttons | buttons),
+            LeftTrigger = leftTrigger, RightTrigger = rightTrigger };
     }
 
     private void ReleaseCombatAll()
@@ -682,6 +817,7 @@ internal sealed class BridgeRouter
         {
             route.CombatLeaseUntilUtc = default;
             route.CombatPulseUntilUtc = default;
+            route.CombatChordFullAtUtc = default;
             route.CombatPulse = default;
         }
     }
@@ -694,10 +830,13 @@ internal sealed class BridgeRouter
         public bool Active { get; set; }
         public bool EligibleForManualMovement { get; set; }
         public bool SuppressMirroredB { get; set; }
+        public bool CatchUpPriority { get; set; }
         public DateTime LifeUntilUtc { get; set; }
         public DateTime ManaUntilUtc { get; set; }
+        public Dictionary<string, DateTime> RecoveryUntilUtc { get; } = new(StringComparer.Ordinal);
         public DateTime CombatLeaseUntilUtc { get; set; }
         public DateTime CombatPulseUntilUtc { get; set; }
+        public DateTime CombatChordFullAtUtc { get; set; }
         public PadReport CombatPulse { get; set; }
         public DodgeSprintButtonArbiter DodgeSprint { get; } = new();
     }

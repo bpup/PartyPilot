@@ -74,6 +74,86 @@ func TestLiveFollowRequiresKnownWorldCoordinateSpace(t *testing.T) {
 	}
 }
 
+func TestAreaGenerationPersistsWhileSensorHashStaysCurrent(t *testing.T) {
+	start := time.Now().UTC().Truncate(time.Millisecond)
+	engine, err := New(map[int]int{1: 101, 2: 202}, 1,
+		follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10,
+			MaxAge: time.Second}, 100*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	for _, slot := range []int{1, 2} {
+		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
+			ObservedAt: start, Origin: "live"})
+	}
+	feed := func(at time.Time, leaderHash, followerHash uint32) {
+		t.Helper()
+		life := 100.0
+		for _, sample := range []telemetry.Sample{
+			{ProcessID: 101, SeenUTC: at, X: 12, AreaHash: leaderHash, Life: &life},
+			{ProcessID: 202, SeenUTC: at, X: 0, AreaHash: followerHash, Life: &life},
+		} {
+			if !observeGridSample(engine, sample) {
+				t.Fatal("fresh position was rejected")
+			}
+		}
+	}
+	feed(start.Add(10*time.Millisecond), 101, 202)
+	if got := engine.Step(start.Add(10 * time.Millisecond))[2]; got.State != follow.CatchingUp {
+		t.Fatalf("initial area was not confirmed: %+v", got)
+	}
+	feed(start.Add(2*time.Second), 101, 202)
+	if got := engine.Step(start.Add(2 * time.Second))[2]; got.State != follow.CatchingUp {
+		t.Fatalf("unchanged map stopped only because the log aged: %+v", got)
+	}
+	if !engine.flaskActionReady(2, start.Add(2*time.Second)) {
+		t.Fatal("fresh resources stopped only because the area log aged")
+	}
+	feed(start.Add(2100*time.Millisecond), 101, 203)
+	if got := engine.Step(start.Add(2100 * time.Millisecond))[2]; got.State != follow.Waiting {
+		t.Fatalf("changed sensor area hash retained old log identity: %+v", got)
+	}
+	if engine.flaskActionReady(2, start.Add(2100*time.Millisecond)) {
+		t.Fatal("changed sensor area hash retained flask authorization")
+	}
+	for _, slot := range []int{1, 2} {
+		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_5", Seed: 456,
+			ObservedAt: start.Add(2200 * time.Millisecond), Origin: "live"})
+	}
+	feed(start.Add(2210*time.Millisecond), 102, 203)
+	if got := engine.Step(start.Add(2210 * time.Millisecond))[2]; got.State != follow.CatchingUp {
+		t.Fatalf("new area generation did not permit fresh hash: %+v", got)
+	}
+}
+
+func TestAreaGenerationRequiresInitialConfirmationWithinLogWindow(t *testing.T) {
+	start := time.Now().UTC().Truncate(time.Millisecond)
+	engine, err := New(map[int]int{1: 101, 2: 202}, 1,
+		follow.Config{StopDistance: 2, ResumeDistance: 3, CatchUpDistance: 10,
+			MaxAge: time.Second}, 100*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	for _, slot := range []int{1, 2} {
+		engine.ObserveArea(arealog.Signal{Slot: slot, AreaID: "G2_4", Seed: 123,
+			ObservedAt: start, Origin: "live"})
+	}
+	at := start.Add(time.Second)
+	for _, sample := range []telemetry.Sample{
+		{ProcessID: 101, SeenUTC: at, X: 12, AreaHash: 101},
+		{ProcessID: 202, SeenUTC: at, X: 0, AreaHash: 202},
+	} {
+		if !observeGridSample(engine, sample) {
+			t.Fatal("fresh position was rejected")
+		}
+	}
+	if got := engine.Step(at)[2]; got.State != follow.Waiting {
+		t.Fatalf("old unconfirmed area started movement: %+v", got)
+	}
+}
+
 func TestFollowPauseReleasesMovementAndRequiresFreshEvidenceOnResume(t *testing.T) {
 	now := time.Now().UTC()
 	engine, err := New(map[int]int{1: 101, 2: 202}, 1,
