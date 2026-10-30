@@ -38,8 +38,10 @@ jobs:
           $setup = @(Get-ChildItem installer/out/PartyPilot-Setup-*.exe)
           if ($setup.Count -ne 1) { throw "Expected one setup executable" }
           $target = Join-Path $env:RUNNER_TEMP "PartyPilotInstalled"
-          & $setup[0].FullName /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$target"
-          if ($LASTEXITCODE -ne 0) { throw "Installer returned $LASTEXITCODE" }
+          $install = Start-Process -FilePath $setup[0].FullName -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$target"
+          ) -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Installer returned $($install.ExitCode)" }
           foreach ($file in @(
             "desktop/PartyPilot.Desktop.exe",
             "bridge/PartyPilot.Bridge.exe",
@@ -56,8 +58,10 @@ jobs:
           if (-not (Test-Path $shortcut)) { throw "Start menu shortcut missing" }
           $uninstall = Join-Path $target "unins000.exe"
           if (-not (Test-Path $uninstall)) { throw "Uninstaller missing" }
-          & $uninstall /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
-          if ($LASTEXITCODE -ne 0) { throw "Uninstaller returned $LASTEXITCODE" }
+          $removed = Start-Process -FilePath $uninstall -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          ) -Wait -PassThru
+          if ($removed.ExitCode -ne 0) { throw "Uninstaller returned $($removed.ExitCode)" }
           if (Test-Path (Join-Path $target "desktop/PartyPilot.Desktop.exe")) { throw "Uninstall left the desktop program" }
       - name: Save installer for review
         uses: actions/upload-artifact@v4
