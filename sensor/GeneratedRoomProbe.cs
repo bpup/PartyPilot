@@ -11,7 +11,9 @@ internal static class GeneratedRoomProbe
     private const int RoomVectorOffset = 88;
     private const int RoomBytes = 56;
     private const int MaxGraphs = 256;
-    private const int MaxRooms = 4096;
+    private const int MaxRoomsPerGraph = 4096;
+    private const int MaxTotalRooms = 16384;
+    private const int RoomsPerRead = 1024;
     private const int MaxSamples = 32;
     private const int MaxAnchors = 64;
 
@@ -51,16 +53,28 @@ internal static class GeneratedRoomProbe
             var roomStart = BitConverter.ToInt64(graphs, offset);
             var roomEnd = BitConverter.ToInt64(graphs, offset + 8);
             var roomCapacity = BitConverter.ToInt64(graphs, offset + 16);
-            if (!Vector(roomStart, roomEnd, roomCapacity, RoomBytes, MaxRooms)) continue;
+            if (!Vector(roomStart, roomEnd, roomCapacity, RoomBytes, MaxRoomsPerGraph)) continue;
             var count = (int)((roomEnd - roomStart) / RoomBytes);
-            if (checkedRooms + count > MaxRooms)
+            if (checkedRooms + count > MaxTotalRooms)
             {
                 truncated = true;
                 anchorsTruncated = true;
                 break;
             }
-            var records = read(roomStart, count * RoomBytes);
-            if (records == null || records.Length != count * RoomBytes) continue;
+            var records = new byte[count * RoomBytes];
+            var complete = true;
+            for (var first = 0; first < count; first += RoomsPerRead)
+            {
+                var bytes = Math.Min(RoomsPerRead, count - first) * RoomBytes;
+                var chunk = read(roomStart + (long)first * RoomBytes, bytes);
+                if (chunk == null || chunk.Length != bytes)
+                {
+                    complete = false;
+                    break;
+                }
+                Buffer.BlockCopy(chunk, 0, records, first * RoomBytes, bytes);
+            }
+            if (!complete) continue;
             checkedRooms += count;
             for (var room = 0; room < count; room++)
             {

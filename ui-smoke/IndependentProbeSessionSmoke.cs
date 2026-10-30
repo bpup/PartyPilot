@@ -42,6 +42,13 @@ internal static class IndependentProbeSessionSmoke
                     await Task.Delay(100);
                 if (session.HasUnknownBuild(123) || session.HasReadFailure(124) || changes == 0)
                     throw new Exception("Probe build changes did not refresh diagnostics.");
+                var shared = await IndependentProbeSession.StartAsync(executable);
+                if (!ReferenceEquals(session, shared))
+                    throw new Exception("Radar and follow opened duplicate probe processes.");
+                await session.DisposeAsync();
+                if (!shared.IsRunning)
+                    throw new Exception("Releasing one probe owner stopped the other owner.");
+                await shared.DisposeAsync();
             }
             File.WriteAllText(executable, "#!/usr/bin/env python3\n" +
                 "import sys\nprint('probe rejected startup',file=sys.stderr,flush=True)\nsys.exit(3)\n");

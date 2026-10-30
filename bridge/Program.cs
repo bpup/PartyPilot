@@ -6,6 +6,46 @@ using Nefarius.ViGEm.Client.Targets.Xbox360;
 using PartyPilot.Bridge;
 using PartyPilot.Common;
 
+if (args.Length > 0 && args[0] == "--prepare-private-client")
+{
+    if (!PrivateClientPrepareRequest.TryParse(args, out var request))
+    {
+        Console.Error.WriteLine("Usage: PartyPilot.Bridge --prepare-private-client --client 1..3 --pid PID --game-exe ABSOLUTE_POE2_EXE --slots FIRST[,SECOND]");
+        return 2;
+    }
+    try
+    {
+        using var session = await Client3RuntimeAttach.AttachPreResumeAsync(request.Pid,
+            request.GameExecutable, request.IncludeSecond);
+        Console.WriteLine(JsonSerializer.Serialize(new { @event = "private_client_loaded",
+            client = request.Client, pid = request.Pid, slots = request.Slots }));
+        await Console.Out.FlushAsync();
+        var confirmation = await Console.In.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(45));
+        if (confirmation != $"resume {request.Client} {request.Pid}")
+            throw new InvalidOperationException("The bound client was not confirmed as resumed.");
+        await session.WaitReadyAfterResumeAsync();
+        Console.WriteLine(JsonSerializer.Serialize(new { @event = "private_client_ready",
+            client = request.Client, pid = request.Pid, slots = request.Slots,
+            local_indices = request.IncludeSecond ? new[] { 0, 1 } : new[] { 0 } }));
+        await Console.Out.FlushAsync();
+        var handoff = await Console.In.ReadLineAsync();
+        if (handoff != $"handoff {request.Client} {request.Pid}")
+            throw new InvalidOperationException("The bound client's private mapping was not handed off.");
+        session.Relinquish();
+        Console.WriteLine(JsonSerializer.Serialize(new { @event = "private_client_transferred",
+            client = request.Client, pid = request.Pid }));
+        await Console.Out.FlushAsync();
+        return 0;
+    }
+    catch (Exception error) when (error is InvalidOperationException or IOException or
+        System.ComponentModel.Win32Exception or TimeoutException or UnauthorizedAccessException or
+        OperationCanceledException or ArgumentException or NotSupportedException)
+    {
+        Console.Error.WriteLine($"Client {request.Client} pre-resume input failed: {error.Message}");
+        return 1;
+    }
+}
+
 if (args.Length > 0 && args[0] == "--prepare-private-client3")
 {
     if (!Client3AttachRequest.TryParsePreResume(args, out var request))
@@ -169,7 +209,8 @@ if (args.Length > 0 && args[0] == "--check-startup")
     }
 }
 
-if (args.Length > 0 && args[0] is "--prepare-controller" or "--discover-controller")
+if (args.Length > 0 && args[0] is "--prepare-controller" or "--discover-controller" or
+    "--probe-controller")
 {
     if (args.Length < 7 || args[1] != "--owner-pid" ||
         !int.TryParse(args[2], out var ownerPid) || ownerPid <= 0 ||
@@ -201,7 +242,8 @@ if (args.Length > 0 && args[0] is "--prepare-controller" or "--discover-controll
     {
         var found = await ControllerAutoDiscovery.DiscoverAsync(discoveryGamePaths,
             useWgi, ownerPid, ownerStartTicks,
-            prepareIsolation: args[0] == "--prepare-controller");
+            prepareIsolation: args[0] == "--prepare-controller",
+            probeOnly: args[0] == "--probe-controller");
         Console.WriteLine(JsonSerializer.Serialize(new { controller_ready = found.Ready,
             device_instance = found.Device, physical_index = found.XInputIndex,
             message = found.Message }));
@@ -284,7 +326,9 @@ if (args.Length == 4 && args[0] == "--probe-xinput" && args[2] == "--samples" &&
 var hybridMode = args.Contains("--hybrid-keyboard");
 var hybridPrelaunch = args.Contains("--hybrid-prelaunch");
 var adoptPrivateClient3 = args.Contains("--client3-adopt-existing");
-if (!args.Contains("--enable-controller") || !BridgeSlots.TryParse(args, out var slots) ||
+var processLocalMode = args.Contains("--process-local-bindings");
+if (!args.Contains("--enable-controller") ||
+    !BridgeSlots.TryParse(args, out var slots, processLocalMode) ||
     !CompositeClient3Options.TryParse(args, out var client3Options) ||
     !FocusPadMap.TryParse(args, slots, client3Options?.PrivateSlots ?? [], out var focusPads) ||
     (client3Options is not null && focusPads is null && !hybridMode))
@@ -388,6 +432,13 @@ var gamePaths = args.Select((value, index) => (value, index))
     .Where(item => item.value == "--game-exe")
     .Select(item => item.index + 1 < args.Length ? args[item.index + 1] : "")
     .ToArray();
+if (!ProcessLocalBindingPlan.TryParse(args, gamePaths, slots, out var localPlan) ||
+    (processLocalMode && (localPlan is null || client3Options is not null ||
+                          hybridMode || !physicalMode || !protectedPairing)))
+{
+    Console.Error.WriteLine("Process-local bindings require distinct verified game clients in protected physical mode.");
+    return 2;
+}
 HybridKeyboardPlan? hybridPlan = null;
 if (hybridMode && ((!hybridPrelaunch && !HybridKeyboardPlan.TryParse(args, slots, out hybridPlan)) ||
     gamePaths.Length is < 1 or > 3 ||
@@ -494,22 +545,22 @@ try
         Console.Error.WriteLine("The selected physical controller is not connected before virtual pads start.");
         return 2;
     }
-    using var client = new ViGEmClient();
+    using var client = processLocalMode ? null : new ViGEmClient();
     var pads = new Dictionary<int, IXbox360Controller>();
     try
     {
-        foreach (var slot in slots)
+        if (!processLocalMode) foreach (var slot in slots)
         {
-            var controller = client.CreateXbox360Controller();
+            var controller = client!.CreateXbox360Controller();
             controller.Connect();
             pads.Add(slot, controller);
         }
         PhysicalSlotGuard? physicalGuard = null;
         PublicSlotGuard? publicGuard = null;
         var initialIndices = pads.ToDictionary(entry => entry.Key, entry => entry.Value.UserIndex);
-        var indicesValid = wgiMode || hybridMode
+        var indicesValid = processLocalMode || (wgiMode || hybridMode
             ? PublicSlotGuard.TryCreate(initialIndices, out publicGuard)
-            : !physicalMode || PhysicalSlotGuard.TryCreate(physicalIndex, initialIndices, out physicalGuard);
+            : !physicalMode || PhysicalSlotGuard.TryCreate(physicalIndex, initialIndices, out physicalGuard));
         if (!indicesValid)
         {
             Console.Error.WriteLine("Virtual XInput indices are unknown, duplicated, or overlap the physical controller. Controllers stopped.");
@@ -553,11 +604,15 @@ try
                 : await Client3RuntimeAttach.AttachAsync(attach.Pid, attach.WindowHandle,
                     attach.GameExecutable, attach.IncludeP6)
             : null;
+        using var localBindings = localPlan is null
+            ? null : await ProcessLocalRuntimeBindings.AttachAsync(localPlan);
         var privateOutputs = new Client3PadOutputs();
         if (privateClient3 is not null &&
             !privateOutputs.Bind(privateClient3, client3Options!.Value.IncludeP6))
             throw new InvalidOperationException("Client 3 input became unavailable before routing.");
-        Console.Error.WriteLine($"Connected {pads.Count} virtual controller(s).");
+        Console.Error.WriteLine(processLocalMode
+            ? $"Connected {localPlan!.Bindings.Length} process-local input bridge(s)."
+            : $"Connected {pads.Count} virtual controller(s).");
         var outputs = pads.ToDictionary(
             entry => entry.Key,
             entry => (IPadOutput)new ViGEmPadOutput(entry.Value));
@@ -566,7 +621,12 @@ try
             outputs.Add(5, privateOutputs.P5);
             if (client3Options!.Value.IncludeP6) outputs.Add(6, privateOutputs.P6);
         }
-        var router = new BridgeRouter(outputs, privateClient3 is null ? null : privateOutputs);
+        if (localBindings is not null)
+            foreach (var endpoint in localBindings.Outputs.Endpoints)
+                outputs.Add(endpoint.Key, endpoint.Value);
+        IReportBatch? reportBatch = localBindings?.Outputs ??
+            (privateClient3 is null ? null : (IReportBatch)privateOutputs);
+        var router = new BridgeRouter(outputs, reportBatch);
         if (physicalMode && !router.ConfigurePhysical(mainSlot, rightStickFollowerOverride, focusPads,
             directRightStickSlot, lastFocusedLeads, followerMirror,
             engageDodgeEnabled, engageDodgeBinding))
@@ -619,6 +679,13 @@ try
             private_client3_slots = client3Options?.PrivateSlots ?? [],
             private_client3_window_handle = client3Options?.WindowHandle ?? 0,
             private_client3_adopted = adoptPrivateClient3,
+            process_local = localBindings is not null,
+            local_clients = localPlan?.Bindings.Select(binding => new
+            {
+                client = binding.Client, pid = binding.Pid,
+                window_handle = binding.WindowHandle, slots = binding.Slots,
+                adopted = binding.AdoptExisting
+            }).ToArray() ?? [],
             focus_pad_map = focusPads is null ? "" : string.Join(',', focusPads.OrderBy(entry => entry.Key)
                 .Select(entry => $"{entry.Key}:{entry.Value}")) }));
 
@@ -627,6 +694,12 @@ try
         Task<string?> pendingLine = Console.In.ReadLineAsync();
         while (true)
         {
+            if (localBindings is not null && !localBindings.Outputs.IsReady)
+            {
+                router.NeutralAll();
+                Console.Error.WriteLine("One or more process-local input bridges ended.");
+                return 1;
+            }
             if (privateClient3 is not null && !privateOutputs.IsReady)
             {
                 router.NeutralAll();

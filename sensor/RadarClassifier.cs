@@ -103,6 +103,16 @@ public static class RadarClassifier
             path.Contains("/QuestMarkers/", StringComparison.OrdinalIgnoreCase)) return "Quest marker";
         if (path.StartsWith("Metadata/Effects/", StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith("Metadata/Projectiles/", StringComparison.OrdinalIgnoreCase)) return null;
+        return ImportantQuestLabel(path);
+    }
+
+    // The supplied 0.6.17 rules also compare known named quest tokens against
+    // an entity's MinimapIcon identifier. A generic icon is not quest evidence.
+    public static string? QuestIconLabel(string? icon) =>
+        string.IsNullOrWhiteSpace(icon) ? null : ImportantQuestLabel(icon);
+
+    private static string? ImportantQuestLabel(string path)
+    {
         if (path.Contains("MachinariumGeneratorButton", StringComparison.OrdinalIgnoreCase)) return "Soul Core Generator";
         if (path.Contains("VaalKeyGemMedium", StringComparison.OrdinalIgnoreCase)) return "Medium Soul Core";
         if (path.Contains("VaalKeyGem", StringComparison.OrdinalIgnoreCase)) return "Small Soul Core";

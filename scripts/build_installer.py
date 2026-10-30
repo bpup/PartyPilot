@@ -1,7 +1,6 @@
 """Build a single Windows installer from fresh PartyPilot source outputs."""
 
 import argparse
-import json
 import os
 from pathlib import Path
 import re
@@ -19,8 +18,6 @@ PAYLOAD = (
     "PartyPilot-ClientLaunch.exe",
     "native/PartyPilot.PrivateSlots.dll",
     "native/PartyPilot.MultiInstance.dll",
-    "sensor-plugin/PartyPilot.Sensor/PartyPilot.Sensor.dll",
-    "sensor-plugin/PartyPilot.Sensor/PartyPilot.Sensor.deps.json",
 )
 
 
@@ -38,9 +35,6 @@ def validate_payload(root: Path) -> None:
             with path.open("rb") as binary:
                 if binary.read(2) != b"MZ":
                     raise SystemExit(f"Not a Windows PE file: {path}")
-    dependencies = root / "sensor-plugin/PartyPilot.Sensor/PartyPilot.Sensor.deps.json"
-    if not isinstance(json.loads(dependencies.read_text(encoding="utf-8")), dict):
-        raise SystemExit(f"Invalid sensor dependency manifest: {dependencies}")
 
 
 def find_compiler() -> Path:
@@ -61,7 +55,7 @@ def copy_built(source: Path, destination: Path) -> None:
     shutil.copy2(source, destination)
 
 
-def build(stage: Path, work: Path, exilecore_dir: Path) -> None:
+def build(stage: Path, work: Path) -> None:
     for project, folder in (
         ("ui/PartyPilot.Desktop.csproj", "desktop"),
         ("bridge/PartyPilot.Bridge.csproj", "bridge"),
@@ -70,12 +64,6 @@ def build(stage: Path, work: Path, exilecore_dir: Path) -> None:
         run("dotnet", "publish", project, "-c", "Release", "-r", "win-x64",
             "--self-contained", "true", "-p:PublishSingleFile=true",
             "-p:IncludeNativeLibrariesForSelfExtract=true", "-o", str(stage / folder))
-
-    env = {**os.environ, "EXILECORE2_DIR": str(exilecore_dir)}
-    run("dotnet", "build", "sensor/PartyPilot.Sensor.csproj", "-c", "Release", env=env)
-    plugin = ROOT / "sensor/bin/Release/net8.0-windows"
-    for name in ("PartyPilot.Sensor.dll", "PartyPilot.Sensor.deps.json"):
-        copy_built(plugin / name, stage / "sensor-plugin/PartyPilot.Sensor" / name)
 
     go_env = {**os.environ, "GOOS": "windows", "GOARCH": "amd64"}
     for command, name in (
@@ -103,8 +91,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check-payload", type=Path,
                         help="check file layout only; does not verify build freshness")
-    parser.add_argument("--exilecore2-dir", type=Path,
-                        help="directory containing the ExileCore2.dll build reference")
     parser.add_argument("--version", help="installer build version")
     parser.add_argument("--output", type=Path, default=ROOT / "installer/out")
     options = parser.parse_args()
@@ -117,8 +103,6 @@ def main() -> None:
     if not options.version or not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z.-]{0,40}",
                                                options.version):
         parser.error("--version must use letters, numbers, periods or hyphens")
-    if not options.exilecore2_dir or not (options.exilecore2_dir / "ExileCore2.dll").is_file():
-        parser.error("--exilecore2-dir must contain ExileCore2.dll")
     compiler = find_compiler()
     output = options.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -126,7 +110,7 @@ def main() -> None:
         base = Path(temporary)
         stage = base / "payload"
         stage.mkdir()
-        build(stage, base / "build", options.exilecore2_dir.resolve())
+        build(stage, base / "build")
         run(str(compiler), f"-dStageDir={stage}",
             f"-dBuildVersion={options.version}", f"-o{output}",
             str(ROOT / "installer/PartyPilot.iss"))

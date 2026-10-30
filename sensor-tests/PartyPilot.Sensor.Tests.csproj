@@ -13,6 +13,9 @@
     <Compile Include="../sensor/FastOrderedCandidateFrame.cs" Link="FastOrderedCandidateFrame.cs" />
     <Compile Include="../sensor/RawCharacterPathReader.cs" Link="RawCharacterPathReader.cs" />
     <Compile Include="../sensor/RawRenderPositionReader.cs" Link="RawRenderPositionReader.cs" />
+    <Compile Include="../sensor/RawEntityComponentReader.cs" Link="RawEntityComponentReader.cs" />
+    <Compile Include="../sensor/RawTargetableReader.cs" Link="RawTargetableReader.cs" />
+    <Compile Include="../sensor/RawMinimapIconReader.cs" Link="RawMinimapIconReader.cs" />
     <Compile Include="../sensor/RadarClassifier.cs" Link="RadarClassifier.cs" />
     <Compile Include="../sensor/TargetableQuestStateProbe.cs" Link="TargetableQuestStateProbe.cs" />
     <Compile Include="../sensor/RadarPacketBudget.cs" Link="RadarPacketBudget.cs" />

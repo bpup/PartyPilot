@@ -531,7 +531,12 @@ internal sealed class BridgeRouter
         _engageDodgeNow = nowUtc.Ticks / TimeSpan.TicksPerMillisecond;
         if (_autoPartyActive)
         {
-            if (nowUtc >= _autoPartyExpiresUtc) { EndAutoParty(); return; }
+            if (nowUtc >= _autoPartyExpiresUtc)
+            {
+                EndAutoParty();
+                RefreshPrivateReports();
+                return;
+            }
             if (_autoPartyButtons != 0 && nowUtc >= _autoPartyButtonsUntilUtc)
             {
                 var slot = _autoPartySlot;
@@ -540,6 +545,7 @@ internal sealed class BridgeRouter
                 _autoPartyButtonsUntilUtc = default;
                 Render(slot, _routes[slot]);
             }
+            RefreshPrivateReports();
             return;
         }
         foreach (var (slot, route) in _routes)
@@ -593,6 +599,17 @@ internal sealed class BridgeRouter
             }
             else if (expired || _engageDodgeEnabled) Render(slot, route);
         }
+        RefreshPrivateReports();
+    }
+
+    // The private XInput reader neutralizes a sample after 80 ms. Keep the
+    // current reports fresh while a direction or button is held unchanged.
+    private void RefreshPrivateReports()
+    {
+        if (_reportBatch is null) return;
+        _reportBatch.BeginBatch();
+        try { _reportBatch.EndBatch(); }
+        catch { _reportBatch.AbortBatch(); throw; }
     }
 
     public void NeutralAll()

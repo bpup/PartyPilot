@@ -35,6 +35,7 @@ var emitOrdered = args is ["--watch", "--experimental-ordered-udp"];
 watch |= emitOrdered;
 using var orderedUdp = emitOrdered ? new UdpClient() : null;
 var orderedEndpoint = new IPEndPoint(IPAddress.Loopback, 47617);
+var radarEndpoint = new IPEndPoint(IPAddress.Loopback, 47618);
 var sessions = new Dictionary<int, DiagnosticSession>();
 var reportedEmpty = false;
 void Discover()
@@ -100,9 +101,17 @@ try
                     Console.WriteLine(JsonSerializer.Serialize(session.Capture()));
                     if (orderedUdp is not null && session.LastOrderedFrame is { } packet)
                         await orderedUdp.SendAsync(packet, orderedEndpoint);
+                    if (orderedUdp is not null && session.LastRadarFrame is { } radar)
+                        await orderedUdp.SendAsync(radar, radarEndpoint);
+                    if (orderedUdp is not null && session.LastRadarMotionFrame is { } radarMotion)
+                        await orderedUdp.SendAsync(radarMotion, radarEndpoint);
                 }
                 else if (orderedUdp is not null && session.CaptureMotion() is { } motion)
+                {
                     await orderedUdp.SendAsync(motion, orderedEndpoint);
+                    if (session.LastRadarMotionFrame is { } radarMotion)
+                        await orderedUdp.SendAsync(radarMotion, radarEndpoint);
+                }
                 if (session.HasExited)
                 {
                     sessions.Remove(pid);

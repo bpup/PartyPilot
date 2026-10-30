@@ -20,7 +20,7 @@ public sealed record RadarFrame(int ProcessId, DateTime SeenUtc, uint AreaHash, 
 }
 
 public sealed record RadarMotionFrame(int ProcessId, DateTime SeenUtc, uint AreaHash,
-    string AreaAddress, string? StateAreaAddress, double PlayerX, double PlayerY,
+    string? AreaAddress, string? StateAreaAddress, double PlayerX, double PlayerY,
     double? GridX, double? GridY)
 {
     public static bool TryParse(ReadOnlySpan<byte> json, int expectedPid, DateTime nowUtc,
@@ -41,10 +41,13 @@ public sealed record RadarMotionFrame(int ProcessId, DateTime SeenUtc, uint Area
                 !root.TryGetProperty("AreaHash", out var hash) ||
                 !hash.TryGetUInt32(out var areaHash) || areaHash == 0 ||
                 !root.TryGetProperty("RadarAreaAddress", out var address) ||
-                address.GetString() is not { } areaAddress ||
-                !RadarFrames.ValidAddress(areaAddress) ||
+                address.ValueKind is not (JsonValueKind.String or JsonValueKind.Null) ||
+                (address.ValueKind == JsonValueKind.String &&
+                 (address.GetString() is not { } parsedAddress ||
+                  !RadarFrames.ValidAddress(parsedAddress))) ||
                 !TryFinite(root, "X", out var x) || !TryFinite(root, "Y", out var y))
                 return false;
+            var areaAddress = address.ValueKind == JsonValueKind.String ? address.GetString() : null;
             string? stateAddress = null;
             if (root.TryGetProperty("RadarStateAreaAddress", out var state) &&
                 state.ValueKind != JsonValueKind.Null)
@@ -52,6 +55,7 @@ public sealed record RadarMotionFrame(int ProcessId, DateTime SeenUtc, uint Area
                 stateAddress = state.GetString();
                 if (stateAddress == null || !RadarFrames.ValidAddress(stateAddress)) return false;
             }
+            if (areaAddress == null && stateAddress == null) return false;
             double? gridX = null;
             double? gridY = null;
             if (root.TryGetProperty("RadarGridX", out var rawX) &&
@@ -280,7 +284,7 @@ public static class RadarFrames
             area.GetString() != stateAreaAddress ||
             !map.TryGetProperty("EntityListOffset", out var offsetValue) ||
             !offsetValue.TryGetInt32(out var offset) ||
-            offset is not (1752 or 1776 or 2808 or 2896) ||
+            offset is < 1024 or > 3584 || offset % 8 != 0 ||
             !map.TryGetProperty("AwakeCount", out var awakeValue) ||
             !awakeValue.TryGetInt32(out var awakeCount) || awakeCount < 1 ||
             !map.TryGetProperty("SleepingCount", out var sleepingValue) ||
@@ -378,7 +382,10 @@ public sealed class RadarLandmarkCache
     {
         if (_lastSeenUtc != default && frame.SeenUtc < _lastSeenUtc)
             return frame with { Markers = [], DormantCandidates = [] };
-        if (frame.AreaHash == 0 || frame.AreaAddress == null)
+        // The standalone probe knows the state area pointer but has no separate
+        // ExileCore2 data address. Either validated area address scopes landmarks.
+        var areaIdentity = frame.AreaAddress ?? frame.StateAreaAddress;
+        if (frame.AreaHash == 0 || areaIdentity == null)
         {
             _landmarks.Clear();
             _areaHash = 0;
@@ -386,11 +393,11 @@ public sealed class RadarLandmarkCache
             _lastSeenUtc = frame.SeenUtc;
             return frame;
         }
-        if (_areaHash != frame.AreaHash || !string.Equals(_areaAddress, frame.AreaAddress, StringComparison.Ordinal))
+        if (_areaHash != frame.AreaHash || !string.Equals(_areaAddress, areaIdentity, StringComparison.Ordinal))
         {
             _landmarks.Clear();
             _areaHash = frame.AreaHash;
-            _areaAddress = frame.AreaAddress;
+            _areaAddress = areaIdentity;
         }
         _lastSeenUtc = frame.SeenUtc;
         foreach (var marker in frame.Markers)

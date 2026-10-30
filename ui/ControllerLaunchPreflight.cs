@@ -5,16 +5,44 @@ namespace PartyPilot.Desktop;
 
 internal sealed record ControllerLaunchPreflightResult(bool Ready, string Message);
 internal sealed record ControllerAutoSelection(bool Ready, string? Device,
-    int? PhysicalIndex, string Message);
+    int? PhysicalIndex, bool UseWgi, string Message);
 
 internal static class ControllerLaunchPreflight
 {
     internal static async Task<ControllerAutoSelection> DiscoverAsync(string bridgeExecutable,
-        IReadOnlyList<string> gameExecutables, bool useWgi, bool prepareIsolation)
+        IReadOnlyList<string> gameExecutables, bool requireWgi, bool prepareIsolation)
     {
         if (gameExecutables.Count is < 1 or > 3 ||
             gameExecutables.Any(string.IsNullOrWhiteSpace))
-            return new(false, null, null, "请先选择游戏程序路径。");
+            return new(false, null, null, false, "请先选择游戏程序路径。");
+        if (requireWgi)
+            return await DiscoverSourceAsync(bridgeExecutable, gameExecutables,
+                useWgi: true, prepareIsolation, probeOnly: false);
+
+        // A Bluetooth pad may be readable through Windows Gaming Input even
+        // when XInput has no slot. Select the source before acquiring a new
+        // isolation lease.
+        var xinput = await DiscoverSourceAsync(bridgeExecutable, gameExecutables,
+            useWgi: false, prepareIsolation: false, probeOnly: prepareIsolation);
+        if (xinput.Ready)
+            return prepareIsolation
+                ? await DiscoverSourceAsync(bridgeExecutable, gameExecutables,
+                    useWgi: false, prepareIsolation: true, probeOnly: false)
+                : xinput;
+        var wgi = await DiscoverSourceAsync(bridgeExecutable, gameExecutables,
+            useWgi: true, prepareIsolation: false, probeOnly: prepareIsolation);
+        if (wgi.Ready)
+            return prepareIsolation
+                ? await DiscoverSourceAsync(bridgeExecutable, gameExecutables,
+                    useWgi: true, prepareIsolation: true, probeOnly: false)
+                : wgi;
+        return wgi;
+    }
+
+    private static async Task<ControllerAutoSelection> DiscoverSourceAsync(
+        string bridgeExecutable, IReadOnlyList<string> gameExecutables,
+        bool useWgi, bool prepareIsolation, bool probeOnly)
+    {
         var start = new ProcessStartInfo(bridgeExecutable)
         {
             WorkingDirectory = Path.GetDirectoryName(bridgeExecutable)!,
@@ -23,7 +51,7 @@ internal static class ControllerLaunchPreflight
             RedirectStandardError = true,
             CreateNoWindow = true
         };
-        start.ArgumentList.Add(prepareIsolation
+        start.ArgumentList.Add(probeOnly ? "--probe-controller" : prepareIsolation
             ? "--prepare-controller" : "--discover-controller");
         start.ArgumentList.Add("--owner-pid");
         start.ArgumentList.Add(Environment.ProcessId.ToString());
@@ -46,7 +74,7 @@ internal static class ControllerLaunchPreflight
             if (!process.HasExited) process.Kill(entireProcessTree: true);
             await process.WaitForExitAsync();
             var restored = !prepareIsolation || await ReleaseAsync(bridgeExecutable);
-            return new(false, null, null, !prepareIsolation
+            return new(false, null, null, useWgi, !prepareIsolation
                 ? "手柄检测超时，请重试。"
                 : restored ? "手柄准备超时，已撤销本次隔离；请重试。"
                     : "手柄准备超时，隔离恢复未完成；请检查 HidHide 设置。");
@@ -107,7 +135,7 @@ internal static class ControllerLaunchPreflight
             {
                 var detail = message.GetString() ?? "手柄检测未完成。";
                 if (!ready.GetBoolean() || exitCode != 0)
-                    return new(false, null, null, detail);
+                    return new(false, null, null, useWgi, detail);
                 if (!root.TryGetProperty("device_instance", out var device) ||
                     device.ValueKind != JsonValueKind.String ||
                     string.IsNullOrWhiteSpace(device.GetString()) ||
@@ -115,13 +143,14 @@ internal static class ControllerLaunchPreflight
                     useWgi && index.ValueKind != JsonValueKind.Null ||
                     !useWgi && (index.ValueKind != JsonValueKind.Number ||
                         !index.TryGetInt32(out var selected) || selected is < 0 or > 3))
-                    return new(false, null, null, "手柄检测结果不完整，请重试。");
-                return new(true, device.GetString(), useWgi ? null : index.GetInt32(), detail);
+                    return new(false, null, null, useWgi, "手柄检测结果不完整，请重试。");
+                return new(true, device.GetString(), useWgi ? null : index.GetInt32(),
+                    useWgi, detail);
             }
         }
         catch (JsonException) { }
         var fallback = error.Trim();
-        return new(false, null, null, string.IsNullOrEmpty(fallback)
+        return new(false, null, null, useWgi, string.IsNullOrEmpty(fallback)
             ? "手柄检测没有返回有效结果。" : "手柄检测失败：" + fallback[..Math.Min(fallback.Length, 300)]);
     }
 

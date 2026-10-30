@@ -305,6 +305,38 @@ func TestExperimentalOrderedRolesStopOnSameAreaReorder(t *testing.T) {
 	}
 }
 
+func TestUnknownBuildVectorKeepsIdentityChecks(t *testing.T) {
+	now := time.Now().UTC()
+	engine, err := NewWithBindings([]RoleBinding{{1, 1, 1, 101}, {2, 1, 2, 101}},
+		1, follow.Config{StopDistance: 2, ResumeDistance: 3,
+			CatchUpDistance: 10, MaxAge: time.Second}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	if !engine.ObserveClientArea(101, arealog.Signal{AreaID: "G2_4", Seed: 123,
+		ObservedAt: now, Origin: "live"}) {
+		t.Fatal("client area was not applied")
+	}
+	frame := OrderedClientFrame{ProcessID: 101, SeenUTC: now, ReceivedAt: now,
+		TickMS: now.UnixMilli(), AreaHash: 55, AreaInstanceAddress: "0x100000",
+		VectorHeaderAddress: "0x100100", OrderedAddresses: []string{"0x200000", "0x300000"},
+		CoordinateSpace: "world", PlayerOrderReliable: true,
+		PlayerOrderSource: experimentalUnknownBuildVectorSource,
+		Players: []OrderedLocalPlayer{{LocalPlayer: 1, X: 30 * worldPerGridUnit},
+			{LocalPlayer: 2, X: 0}}}
+	if !engine.ObserveOrderedClient(frame) || engine.Step(now)[2].State != follow.CatchingUp {
+		t.Fatal("unique unknown-build vector was not admitted as a candidate")
+	}
+	frame.SeenUTC = now.Add(time.Millisecond)
+	frame.ReceivedAt = frame.SeenUTC
+	frame.TickMS++
+	frame.OrderedAddresses = []string{"0x300000", "0x200000"}
+	if engine.ObserveOrderedClient(frame) || engine.Step(frame.SeenUTC)[2].State != follow.Waiting {
+		t.Fatal("unknown-build role reorder did not stop following")
+	}
+}
+
 func TestUnverifiedSlotCandidateCannotBePromotedByReliableFlag(t *testing.T) {
 	now := time.Now().UTC()
 	engine, err := NewWithBindings([]RoleBinding{{1, 1, 1, 101}, {2, 1, 2, 101}},

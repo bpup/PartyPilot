@@ -8,7 +8,7 @@ namespace PartyPilot.Probe;
 internal static class ProbeOrderedFrame
 {
     internal static byte[]? TryEncode(int processId, DateTime seenUtc, uint? areaHash,
-        long areaInstanceAddress, RoleCandidateResult? roles)
+        long areaInstanceAddress, RoleCandidateResult? roles, bool recognizedBuild = true)
     {
         if (processId <= 0 || seenUtc.Kind != DateTimeKind.Utc || areaHash is null or 0 ||
             !Win32Memory.Plausible(areaInstanceAddress) ||
@@ -44,7 +44,9 @@ internal static class ProbeOrderedFrame
             roles.OrderedAddresses,
             CoordinateSpace = "world",
             PlayerOrderReliable = true,
-            PlayerOrderSource = "experimental_static_vector_0.6.17",
+            PlayerOrderSource = recognizedBuild
+                ? "experimental_static_vector_0.6.17"
+                : "experimental_unknown_build_vector_0.6.17",
             Players = roles.Positions.Select(position => new
             {
                 LocalPlayer = position.Slot,

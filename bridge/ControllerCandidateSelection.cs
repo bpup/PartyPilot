@@ -19,9 +19,12 @@ internal static class ControllerCandidateSelection
         if (!useWgi && (connectedXInput.Count != 1 || connectedXInput[0] is < 0 or > 3 ||
             gamingInventory.Count != 1))
             return Fail("检测到多个手柄或无法对应实体设备；请只连接这次使用的手柄。");
+        // XInput needs the inventory identity, which may come from the XUSB path.
+        // WGI opens by instance path, so it still requires VID/PID in that path.
         var candidates = gamingInventory.SelectMany(group => group.Interfaces
-                .Where(item => ControllerDeviceId.TryReadVidPid(item.InstancePath,
-                        out _, out _) &&
+                .Where(item => item.Vendor.HasValue && item.Product.HasValue &&
+                    (!useWgi || ControllerDeviceId.TryReadVidPid(item.InstancePath,
+                        out _, out _)) &&
                     (!useWgi || readableWgi(item.InstancePath)))
                 .Take(1)
                 .Select(item => (Group: group, Device: item.InstancePath)))

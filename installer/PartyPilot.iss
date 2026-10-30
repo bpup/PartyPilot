@@ -37,8 +37,6 @@ Source: "{#StageDir}\PartyPilot-LiveFollow.exe"; DestDir: "{app}"; Flags: ignore
 Source: "{#StageDir}\PartyPilot-ClientLaunch.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\native\PartyPilot.PrivateSlots.dll"; DestDir: "{app}\native"; Flags: ignoreversion
 Source: "{#StageDir}\native\PartyPilot.MultiInstance.dll"; DestDir: "{app}\native"; Flags: ignoreversion
-Source: "{#StageDir}\sensor-plugin\PartyPilot.Sensor\PartyPilot.Sensor.dll"; DestDir: "{app}\sensor-plugin\PartyPilot.Sensor"; Flags: ignoreversion
-Source: "{#StageDir}\sensor-plugin\PartyPilot.Sensor\PartyPilot.Sensor.deps.json"; DestDir: "{app}\sensor-plugin\PartyPilot.Sensor"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\PartyPilot"; Filename: "{app}\desktop\PartyPilot.Desktop.exe"; WorkingDir: "{app}\desktop"

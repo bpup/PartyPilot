@@ -7,17 +7,24 @@ namespace PartyPilot.Desktop;
 // Owns the optional standalone position producer for a live follow session.
 internal sealed class IndependentProbeSession : IAsyncDisposable
 {
+    private static readonly SemaphoreSlim SharedGate = new(1, 1);
+    private static IndependentProbeSession? _shared;
+    private static int _leases;
+
     private readonly Process _process;
+    private readonly string _executable;
     private readonly Task _output;
     private readonly Task<string> _error;
+    private bool _stopped;
     private readonly ConcurrentDictionary<int, bool> _recognizedBuilds = new();
     private readonly ConcurrentDictionary<int, byte> _readFailures = new();
 
     internal event Action? DiagnosticsChanged;
 
-    private IndependentProbeSession(Process process)
+    private IndependentProbeSession(Process process, string executable)
     {
         _process = process;
+        _executable = executable;
         _output = DrainAsync(process.StandardOutput);
         _error = ReadErrorAsync(process.StandardError);
     }
@@ -45,27 +52,42 @@ internal sealed class IndependentProbeSession : IAsyncDisposable
     {
         if (!Path.IsPathFullyQualified(executable) || !File.Exists(executable))
             throw new FileNotFoundException("独立位置探针不存在。", executable);
-        var start = new ProcessStartInfo(executable)
+        await SharedGate.WaitAsync();
+        try
         {
-            WorkingDirectory = Path.GetDirectoryName(executable)!,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-        start.ArgumentList.Add("--watch");
-        start.ArgumentList.Add("--experimental-ordered-udp");
-        var process = Process.Start(start) ??
-            throw new InvalidOperationException("独立位置探针未能启动。");
-        var session = new IndependentProbeSession(process);
-        await Task.Delay(150);
-        if (process.HasExited)
-        {
-            var detail = await session._error;
-            await session.DisposeAsync();
-            throw new InvalidOperationException("独立位置探针提前退出：" + detail.Trim());
+            if (_shared is { } existing)
+            {
+                if (!existing.IsRunning || !string.Equals(existing._executable, executable,
+                        StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("已启动的独立探针不可复用。");
+                _leases++;
+                return existing;
+            }
+            var start = new ProcessStartInfo(executable)
+            {
+                WorkingDirectory = Path.GetDirectoryName(executable)!,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+            start.ArgumentList.Add("--watch");
+            start.ArgumentList.Add("--experimental-ordered-udp");
+            var process = Process.Start(start) ??
+                throw new InvalidOperationException("独立位置探针未能启动。");
+            var session = new IndependentProbeSession(process, executable);
+            await Task.Delay(150);
+            if (process.HasExited)
+            {
+                var detail = await session._error;
+                await session.StopProcessAsync();
+                throw new InvalidOperationException("独立位置探针提前退出：" + detail.Trim());
+            }
+            _shared = session;
+            _leases = 1;
+            return session;
         }
-        return session;
+        finally { SharedGate.Release(); }
     }
 
     private async Task DrainAsync(StreamReader reader)
@@ -115,9 +137,26 @@ internal sealed class IndependentProbeSession : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        await SharedGate.WaitAsync();
         try
         {
-            if (!_process.HasExited) _process.Kill();
+            if (!ReferenceEquals(_shared, this)) return;
+            if (--_leases > 0) return;
+            _shared = null;
+            _leases = 0;
+            await StopProcessAsync();
+        }
+        finally { SharedGate.Release(); }
+    }
+
+    private async Task StopProcessAsync()
+    {
+        if (_stopped) return;
+        _stopped = true;
+        try
+        {
+            try { if (!_process.HasExited) _process.Kill(); }
+            catch (InvalidOperationException) { /* Process exited between check and kill. */ }
             await _process.WaitForExitAsync();
             await _output;
             await _error;

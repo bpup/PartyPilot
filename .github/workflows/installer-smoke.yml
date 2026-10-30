@@ -19,18 +19,10 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 9.0.x
-      - name: Fetch pinned ExileCore2 build reference
-        shell: pwsh
-        run: |
-          $reference = Join-Path $env:RUNNER_TEMP "exilecore2-reference"
-          New-Item -ItemType Directory -Force -Path $reference | Out-Null
-          $assembly = Join-Path $reference "ExileCore2.dll"
-          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/exCore2/ExileCore2/435c0b4ed2dc66eb166dcb8b66de6b089c8cbd29/ExileCore2.dll" -OutFile $assembly
-          if ((Get-FileHash $assembly -Algorithm SHA256).Hash -ne "F21CD2F34927ADD94293153D6DDC2B9404420121620D3F31247B230879F4CB1A") { throw "ExileCore2 reference hash differs" }
       - name: Build one Windows installer
         shell: pwsh
         run: |
-          python scripts/build_installer.py --exilecore2-dir "$env:RUNNER_TEMP/exilecore2-reference" --version "0.0.0-ci.${{ github.run_number }}"
+          python scripts/build_installer.py --version "0.0.0-ci.${{ github.run_number }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install and uninstall silently
         shell: pwsh
@@ -49,8 +41,7 @@ jobs:
             "PartyPilot-LiveFollow.exe",
             "PartyPilot-ClientLaunch.exe",
             "native/PartyPilot.PrivateSlots.dll",
-            "native/PartyPilot.MultiInstance.dll",
-            "sensor-plugin/PartyPilot.Sensor/PartyPilot.Sensor.dll"
+            "native/PartyPilot.MultiInstance.dll"
           )) {
             if (-not (Test-Path (Join-Path $target $file))) { throw "Installed file missing: $file" }
           }

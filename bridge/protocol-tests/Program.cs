@@ -68,6 +68,39 @@ var noVidJson = System.Text.Json.JsonSerializer.Serialize(new[]
 if (HidHideGamingInventory.Parse(noVidJson) is not [{ Interfaces.Count: 1 } unknown] ||
     unknown.Interfaces[0].Vendor is not null)
     throw new Exception("A connected controller without a VID/PID was silently discarded.");
+var xusbIdentityJson = System.Text.Json.JsonSerializer.Serialize(new[]
+{
+    new { friendlyName = "Bluetooth controller", devices = new[]
+    {
+        new { present = true, gamingDevice = true,
+            deviceInstancePath = @"BTHLE\CONTROLLER\INPUT",
+            xusbDeviceInstancePath = @"HID\VID_1234&PID_ABCD\INPUT",
+            baseContainerDeviceInstancePath = @"BTHLE\CONTROLLER" }
+    } }
+});
+var xusbIdentityGroups = HidHideGamingInventory.Parse(xusbIdentityJson);
+var xusbCandidate = ControllerCandidateSelection.Select(xusbIdentityGroups,
+    false, [2], _ => true);
+if (xusbIdentityGroups is not [{ Interfaces.Count: 1 } xusbIdentity] ||
+    xusbIdentity.Interfaces[0].Vendor != 0x1234 ||
+    xusbIdentity.Interfaces[0].Product != 0xabcd ||
+    !xusbCandidate.Ready ||
+    xusbCandidate.Device != @"BTHLE\CONTROLLER\INPUT" ||
+    ControllerCandidateSelection.Select(xusbIdentityGroups,
+        true, [], _ => true).Ready)
+    throw new Exception("XUSB-only controller identity was not handled safely.");
+var virtualXusbIdentity = System.Text.Json.JsonSerializer.Serialize(new[]
+{
+    new { friendlyName = "Virtual controller", devices = new[]
+    {
+        new { present = true, gamingDevice = true,
+            deviceInstancePath = @"USB\VIRTUAL\01\INPUT",
+            xusbDeviceInstancePath = @"HID\VID_045E&PID_028E\INPUT",
+            baseContainerDeviceInstancePath = @"USB\VIRTUAL\01" }
+    } }
+});
+if (HidHideGamingInventory.Parse(virtualXusbIdentity).Count != 0)
+    throw new Exception("A known virtual XUSB identity was offered for hiding.");
 try
 {
     HidHideGamingInventory.Parse("{}");
@@ -271,6 +304,9 @@ PrivateSlotPublisherTests.Run();
 Client3FocusRoutingTests.Run();
 Client3InputPublisherTests.Run();
 Client3PadOutputsTests.Run();
+ProcessLocalPadOutputsTests.Run();
+ProcessLocalBindingPlanTests.Run();
+PrivateClientPrepareRequestTests.Run();
 PrivateClient3CommandRouterTests.Run();
 if (!Client3RuntimeAttach.IsKnownGameExecutable(@"C:\PoE2\PathOfExile_x64Steam.exe") ||
     Client3RuntimeAttach.IsKnownGameExecutable(@"C:\Other\notepad.exe") ||

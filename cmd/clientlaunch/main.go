@@ -102,6 +102,7 @@ func main() {
 	flag.Var(&pids, "pid", "optional SLOT=PID for -attach; required when clients share one installation")
 	runtime := flag.String("multi-instance-runtime", defaultRuntime, "independent mutex runtime for extra standalone clients from one installation")
 	preResumeClient3 := flag.Bool("pre-resume-client3", false, "wait for Client 3 private input preparation before resuming its standalone process")
+	preResumeClients := flag.String("pre-resume-clients", "", "internal: comma-separated standalone client numbers whose private input must load before resume")
 	check := flag.Bool("check", false, "validate paths and layout without launching")
 	attach := flag.Bool("attach", false, "bind one existing game window to each configured executable")
 	timeout := flag.Duration("timeout", 60*time.Second, "time to wait for each game window")
@@ -125,6 +126,9 @@ func main() {
 	if *preResumeClient3 && (*attach || *check) {
 		fail(errors.New("-pre-resume-client3 requires a game launch"))
 	}
+	if *preResumeClients != "" && (*preResumeClient3 || *attach || *check) {
+		fail(errors.New("-pre-resume-clients requires a game launch and cannot be combined with -pre-resume-client3"))
+	}
 	var validated []string
 	var err error
 	if *attach {
@@ -137,6 +141,10 @@ func main() {
 	}
 	if *preResumeClient3 && len(validated) != 3 {
 		fail(errors.New("-pre-resume-client3 requires exactly three clients"))
+	}
+	selectedPreResume, err := parsePreResumeClients(*preResumeClients, len(validated))
+	if err != nil {
+		fail(err)
 	}
 	if *attach {
 		if err := clientlaunch.ValidateAttachPIDs(validated, pids); err != nil {
@@ -190,7 +198,18 @@ func main() {
 	if *attach {
 		bound, err = clientlaunch.Attach(validated, pids)
 	} else {
-		if *preResumeClient3 {
+		if len(selectedPreResume) != 0 {
+			callbacks := make(map[int]func(int) error, len(selectedPreResume))
+			for _, client := range selectedPreResume {
+				selected := client
+				executable := validated[selected-1]
+				callbacks[selected] = func(pid int) error {
+					return waitForPrivateClientPreparation(selected, pid, executable)
+				}
+			}
+			bound, err = clientlaunch.StartWithPerClientPreResume(validated, uris,
+				*timeout, runtimePath, callbacks)
+		} else if *preResumeClient3 {
 			bound, err = clientlaunch.StartWithPreResume(validated, uris, *timeout,
 				runtimePath, func(pid int) error { return waitForClient3Preparation(pid, validated[2]) })
 		} else {
@@ -249,6 +268,56 @@ func waitForClient3Preparation(pid int, executable string) error {
 		return nil
 	case <-time.After(45 * time.Second):
 		return errors.New("Client 3 private input preparation timed out after 45 seconds")
+	}
+}
+
+func parsePreResumeClients(raw string, count int) ([]int, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	selected := make([]int, 0, count)
+	seen := make(map[int]bool, count)
+	for _, part := range strings.Split(raw, ",") {
+		client, err := strconv.Atoi(part)
+		if err != nil || client < 1 || client > count || seen[client] {
+			return nil, errors.New("-pre-resume-clients requires distinct client numbers in the selected launch")
+		}
+		seen[client] = true
+		selected = append(selected, client)
+	}
+	return selected, nil
+}
+
+func waitForPrivateClientPreparation(client, pid int, executable string) error {
+	if client < 1 || client > 3 || pid <= 0 || executable == "" {
+		return errors.New("invalid private client preparation identity")
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(struct {
+		Event      string `json:"event"`
+		Client     int    `json:"client"`
+		PID        int    `json:"pid"`
+		Executable string `json:"executable"`
+	}{"private_client_pre_resume", client, pid, executable}); err != nil {
+		return fmt.Errorf("announce client %d private input preparation: %w", client, err)
+	}
+	type reply struct {
+		line string
+		err  error
+	}
+	replies := make(chan reply, 1)
+	go func() {
+		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		replies <- reply{line, err}
+	}()
+	select {
+	case response := <-replies:
+		if response.err != nil ||
+			strings.TrimSpace(response.line) != fmt.Sprintf("resume %d %d", client, pid) {
+			return fmt.Errorf("client %d private input preparation was not confirmed", client)
+		}
+		return nil
+	case <-time.After(45 * time.Second):
+		return fmt.Errorf("client %d private input preparation timed out after 45 seconds", client)
 	}
 }
 

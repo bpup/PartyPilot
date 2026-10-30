@@ -92,20 +92,31 @@ internal sealed class BridgeSession : IAsyncDisposable
         bool lastFocusedLeads = false, bool menuGuardEnabled = true,
         FollowerMirrorConfig? followerMirror = null, bool adoptExistingPrivate = false,
         bool engageDodgeEnabled = false, string engageDodgeBinding = "B", bool combatEnabled = false,
-        bool autoCastEnabled = false)
+        bool autoCastEnabled = false, ProcessLocalBridgePlan? processLocalPlan = null)
     {
         if (engageDodgeEnabled && (!rightStickFollowerOverride ||
             !RightStickDodgePreferenceStore.TryNormalizeBinding(engageDodgeBinding, out engageDodgeBinding)))
             throw new ArgumentException("Right-stick dodge needs a known button and follower movement enabled.");
-        var slots = partySlots.Where(item => item.Client != 3).Select(item => item.RuntimePad).ToArray();
-        var privateSlots = partySlots.Where(item => item.Client == 3)
+        var slots = partySlots.Where(item => processLocalPlan is not null || item.Client != 3)
             .Select(item => item.RuntimePad).ToArray();
-        if (slots.Length is < 1 or > 4 || slots.Any(slot => slot is < 1 or > 4) ||
+        var privateSlots = partySlots.Where(item => processLocalPlan is null && item.Client == 3)
+            .Select(item => item.RuntimePad).ToArray();
+        if (slots.Length < 1 || slots.Length > (processLocalPlan is null ? 4 : 6) ||
+            slots.Any(slot => slot < 1 || slot > (processLocalPlan is null ? 4 : 6)) ||
             slots.Distinct().Count() != slots.Length ||
-            (!useWgi && (physicalIndex is < 0 or > 3 || slots.Length > 3)) ||
+            (!useWgi && (physicalIndex is < 0 or > 3 ||
+                         processLocalPlan is null && slots.Length > 3)) ||
             !partySlots.Select(item => item.PartyPlayer).SequenceEqual(Enumerable.Range(1, partySlots.Count)) ||
             string.IsNullOrWhiteSpace(deviceInstance) || gameExecutables.Count is < 1 or > 3 ||
             gameExecutables.Any(string.IsNullOrWhiteSpace) ||
+            (processLocalPlan is not null &&
+             (privatePlan is not null || processLocalPlan.Clients.Length != gameExecutables.Count ||
+              !processLocalPlan.Clients.SelectMany(client => client.Slots).SequenceEqual(slots) ||
+              processLocalPlan.Clients.Where((client, index) =>
+                      client.Client != index + 1 ||
+                      !string.Equals(client.Executable,
+                          Path.GetFullPath(gameExecutables[index]), StringComparison.OrdinalIgnoreCase))
+                  .Any())) ||
             (privatePlan is null && (privateSlots.Length != 0 || adoptExistingPrivate)) ||
             (privatePlan is not null &&
              (!privateSlots.SequenceEqual(privatePlan.IncludePad6 ? [5, 6] : [5]) ||
@@ -159,6 +170,16 @@ internal sealed class BridgeSession : IAsyncDisposable
             }) start.ArgumentList.Add(argument);
             if (adoptExistingPrivate) start.ArgumentList.Add("--client3-adopt-existing");
         }
+        if (processLocalPlan is not null)
+        {
+            start.ArgumentList.Add("--process-local-bindings");
+            start.ArgumentList.Add(processLocalPlan.EncodedBindings);
+            if (processLocalPlan.EncodedAdoptions.Length > 0)
+            {
+                start.ArgumentList.Add("--process-local-adopt");
+                start.ArgumentList.Add(processLocalPlan.EncodedAdoptions);
+            }
+        }
         if (rightStickFollowerOverride) start.ArgumentList.Add("--right-stick-follower-override");
         if (engageDodgeEnabled)
         {
@@ -186,11 +207,13 @@ internal sealed class BridgeSession : IAsyncDisposable
         try
         {
             var readyLine = await process.StandardOutput.ReadLineAsync().WaitAsync(
-                TimeSpan.FromSeconds(privatePlan is null ? 15 : 45));
+                TimeSpan.FromSeconds(processLocalPlan is not null ? 120 :
+                    privatePlan is null ? 15 : 45));
             if (readyLine is null || !IsExpectedReady(readyLine, slots, focusPadMap,
                 rightStickFollowerOverride, directRightStickSlot, autoFlaskEnabled, useWgi, privatePlan,
                 lastFocusedLeads, menuGuardEnabled, followerMirror, adoptExistingPrivate,
-                engageDodgeEnabled, engageDodgeBinding, combatEnabled, autoCastEnabled))
+                engageDodgeEnabled, engageDodgeBinding, combatEnabled, autoCastEnabled,
+                processLocalPlan))
             {
                 throw new InvalidOperationException("Virtual controller bridge did not confirm the requested pad slots.");
             }
@@ -226,6 +249,7 @@ internal sealed class BridgeSession : IAsyncDisposable
         if (!(runtimePads.SequenceEqual([1, 3]) || runtimePads.SequenceEqual([1, 3, 4]) ||
               runtimePads.SequenceEqual([1, 3, 5]) ||
               runtimePads.SequenceEqual([1, 3, 4, 5, 6]) ||
+              runtimePads.SequenceEqual([1, 2, 3, 4]) ||
               runtimePads.SequenceEqual([1, 2, 3, 4, 5, 6])) ||
             gameExecutables.Count != (runtimePads.Max() >= 5 ? 3 : 2) ||
             gameExecutables.Any(path => !Path.IsPathFullyQualified(path) || !File.Exists(path)))
@@ -349,6 +373,7 @@ internal sealed class BridgeSession : IAsyncDisposable
             runtimePads.SequenceEqual([1, 3, 4]) ||
             runtimePads.SequenceEqual([1, 3, 5]) ||
             runtimePads.SequenceEqual([1, 3, 4, 5, 6]) ||
+            runtimePads.SequenceEqual([1, 2, 3, 4]) ||
             runtimePads.SequenceEqual([1, 2, 3, 4, 5, 6]);
         if (!supportedLayout || clients.Count != (runtimePads.Max() >= 5 ? 3 : 2) ||
             !partySlots.Select(slot => slot.PartyPlayer).SequenceEqual(Enumerable.Range(1, partySlots.Count)) ||
@@ -482,7 +507,7 @@ internal sealed class BridgeSession : IAsyncDisposable
         bool menuGuardEnabled = true, FollowerMirrorConfig? followerMirror = null,
         bool adoptExistingPrivate = false, bool engageDodgeEnabled = false,
         string engageDodgeBinding = "B", bool combatEnabled = false,
-        bool autoCastEnabled = false)
+        bool autoCastEnabled = false, ProcessLocalBridgePlan? processLocalPlan = null)
     {
         try
         {
@@ -518,6 +543,9 @@ internal sealed class BridgeSession : IAsyncDisposable
                    focusMap.GetString() == focusPadMap &&
                    root.TryGetProperty("slots", out var selected) &&
                    selected.EnumerateArray().Select(value => value.GetInt32()).SequenceEqual(slots.Order()) &&
+                   (processLocalPlan is null
+                       ? !root.TryGetProperty("process_local", out var local) || !local.GetBoolean()
+                       : processLocalPlan.MatchesReady(root)) &&
                    root.TryGetProperty("private_client3_pid", out var privatePid) &&
                    privatePid.GetInt32() == (privatePlan?.Pid ?? 0) &&
                    root.TryGetProperty("private_client3_window_handle", out var privateWindow) &&

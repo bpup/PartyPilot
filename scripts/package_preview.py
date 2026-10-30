@@ -5,7 +5,7 @@ from subprocess import check_output, run
 from zipfile import ZIP_DEFLATED, ZipFile
 import argparse
 import os
-import shutil
+import xml.etree.ElementTree as ET
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,10 +21,6 @@ REQUIRED = {
     "release/PartyPilot.exe",
     "release/PartyPilot-FpsConfig.exe",
     "release/PartyPilot-ClientLaunch.exe",
-    "release/PartyPilot.Sensor.dll",
-    "release/PartyPilot.Sensor.deps.json",
-    "release/sensor-plugin/PartyPilot.Sensor/PartyPilot.Sensor.dll",
-    "release/sensor-plugin/PartyPilot.Sensor/PartyPilot.Sensor.deps.json",
     "release/PartyPilot-SensorLog.exe",
     "release/PartyPilot-SlotAudit.exe",
     "release/PartyPilot-OrderedMotionLog.exe",
@@ -45,9 +41,6 @@ FOLLOW_BINARIES = {
 
 
 def refresh_binaries() -> None:
-    exilecore = os.environ.get("EXILECORE2_DIR")
-    if not exilecore or not (Path(exilecore) / "ExileCore2.dll").is_file():
-        raise SystemExit("--refresh requires EXILECORE2_DIR with ExileCore2.dll")
     run(["dotnet", "publish", "ui/PartyPilot.Desktop.csproj", "-c", "Release",
          "-r", "win-x64", "--self-contained", "true",
          "-p:PublishSingleFile=true", "-p:IncludeNativeLibrariesForSelfExtract=true",
@@ -60,14 +53,6 @@ def refresh_binaries() -> None:
          "-r", "win-x64", "--self-contained", "true",
          "-p:PublishSingleFile=true", "-p:IncludeNativeLibrariesForSelfExtract=true",
          "-o", "release/probe"], cwd=ROOT, check=True)
-    run(["dotnet", "build", "sensor/PartyPilot.Sensor.csproj", "-c", "Release"],
-        cwd=ROOT, env={**os.environ, "EXILECORE2_DIR": exilecore}, check=True)
-    built = ROOT / "sensor/bin/Release/net8.0-windows"
-    plugin = ROOT / "release/sensor-plugin/PartyPilot.Sensor"
-    plugin.mkdir(parents=True, exist_ok=True)
-    for name in ("PartyPilot.Sensor.dll", "PartyPilot.Sensor.deps.json"):
-        shutil.copy2(built / name, ROOT / "release" / name)
-        shutil.copy2(built / name, plugin / name)
     for output, command in FOLLOW_BINARIES.items():
         run(["go", "build", "-o", output, "./cmd/" + command], cwd=ROOT,
             env={**os.environ, "GOOS": "windows", "GOARCH": "amd64"}, check=True)
@@ -78,6 +63,12 @@ def check_binaries_current() -> None:
         return [path for path in (ROOT / folder).rglob("*.cs")
                 if "obj" not in path.parts and "bin" not in path.parts]
 
+    probe_project = ROOT / "probe/PartyPilot.Probe.csproj"
+    probe_linked = [
+        (probe_project.parent / item.attrib["Include"]).resolve()
+        for item in ET.parse(probe_project).iter()
+        if item.tag in {"Compile", "EmbeddedResource"} and "Include" in item.attrib
+    ]
     shared = [*ROOT.glob("data/*.json"), ROOT / "common/PackedTerrainValueProfile.cs",
               ROOT / "sensor/QuestTileRules.cs",
               ROOT / "sensor/GeneratedRoomClassifier.cs"]
@@ -89,16 +80,7 @@ def check_binaries_current() -> None:
             [*source_files("bridge"), *ROOT.glob("common/*.cs"),
              ROOT / "bridge/PartyPilot.Bridge.csproj"],
         ROOT / "release/probe/PartyPilot.Probe.exe":
-            [*source_files("probe"), ROOT / "probe/PartyPilot.Probe.csproj",
-             ROOT / "sensor/LocalSlotCandidateScanner.cs",
-             ROOT / "sensor/RawCharacterPathReader.cs",
-             ROOT / "sensor/RawRenderPositionReader.cs"],
-        ROOT / "release/PartyPilot.Sensor.dll":
-            [*source_files("sensor"), *shared,
-             ROOT / "sensor/PartyPilot.Sensor.csproj"],
-        ROOT / "release/sensor-plugin/PartyPilot.Sensor/PartyPilot.Sensor.dll":
-            [*source_files("sensor"), *shared,
-             ROOT / "sensor/PartyPilot.Sensor.csproj"]
+            [*source_files("probe"), probe_project, *probe_linked]
     }
     follow_sources = [*ROOT.glob("internal/**/*.go"), ROOT / "go.mod"]
     for output, command in FOLLOW_BINARIES.items():
@@ -109,17 +91,12 @@ def check_binaries_current() -> None:
     if stale:
         raise SystemExit("Preview binaries are older than source: " + ", ".join(stale)
                          + "; rebuild with --refresh")
-    plugin = ROOT / "release/sensor-plugin/PartyPilot.Sensor"
-    for name in ("PartyPilot.Sensor.dll", "PartyPilot.Sensor.deps.json"):
-        if not (ROOT / "release" / name).is_file() or not (plugin / name).is_file() or \
-                (ROOT / "release" / name).read_bytes() != (plugin / name).read_bytes():
-            raise SystemExit("Sensor plugin folder differs from the built release; rebuild with --refresh")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--refresh", action="store_true",
-                        help="rebuild desktop, sensor, and follow binaries before packaging")
+                        help="rebuild desktop, probe, and follow binaries before packaging")
     args = parser.parse_args()
     if args.refresh:
         refresh_binaries()
@@ -135,6 +112,8 @@ def main() -> None:
         if path.is_file()
         and (path.suffix.lower() in {".exe", ".dll", ".pdb"}
              or path.name == "PartyPilot.Sensor.deps.json")
+        and "sensor-plugin" not in path.relative_to(ROOT / "release").parts
+        and not path.name.startswith("PartyPilot.Sensor.")
     }
     missing = [name for name in sorted(REQUIRED) if not (ROOT / name).is_file()]
     if missing:

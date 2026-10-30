@@ -87,7 +87,7 @@ internal static class SelfTest
             "BB8627EB41FEBE3F2BE0AA19ED28E5891D5EBD002EEE4F819DB569EA91203DC2")
             is { IngameStateSlot: 144, AreaInstanceSlot: 656,
                 BaseAreaLevelOffset: 192, MonsterLevelOffset: 188 }, "0.5.5 build profile");
-        Require(KnownGameLayout.ForSha256("unknown") is null, "unknown build refused");
+        Require(KnownGameLayout.ForSha256("unknown") is null, "unknown hash is not recognized");
         var bytesByAddress = new Dictionary<long, byte>();
         void Write(long address, byte[] data)
         {
@@ -194,6 +194,18 @@ internal static class SelfTest
         var packet = ProbeOrderedFrame.TryEncode(101, seenUtc, 0x12345678u,
             0x500000, roleResult);
         Require(packet is not null, "complete probe frame can use the opt-in ordered transport");
+        var unknownSelection = LayoutCandidateResolver.Resolve(0x300000, "unknown", ReadState);
+        var unknownRoles = unknownSelection.Layout is { } selectedLayout
+            ? RoleCandidateDiagnostic.Capture(0x300000, selectedLayout, ReadState, Position)
+            : null;
+        Require(unknownSelection is { ValidLayoutCount: 1, State: not null } &&
+                ProbeOrderedFrame.TryEncode(101, seenUtc, 0x12345678u,
+                    unknownSelection.State!.AreaInstanceAddress, unknownRoles,
+                    recognizedBuild: false) is { } unknownPacket &&
+                JsonDocument.Parse(unknownPacket).RootElement
+                    .GetProperty("PlayerOrderSource").GetString() ==
+                    "experimental_unknown_build_vector_0.6.17",
+            "a unique unknown-build layout can produce an opt-in candidate frame");
         using (var frame = JsonDocument.Parse(packet!))
         {
             var wire = frame.RootElement;
@@ -252,6 +264,216 @@ internal static class SelfTest
         Require(reordered && changedRoleResult is
             { Status: "role_vector_changed", Positions.Length: 0 },
             "vector changed during position read rejected");
+        TestEntityMap();
+    }
+
+    private static void TestEntityMap()
+    {
+        const long area = 0x200000;
+        const long awakeHead = 0x300000;
+        const long awakeNode = 0x400000;
+        const long local = 0x500000;
+        const long sleepingHead = 0x600000;
+        const long sleepingNode = 0x700000;
+        const long dormant = 0x800000;
+        var memory = new Dictionary<long, byte[]>();
+        static byte[] Map(long head, int count) =>
+            BitConverter.GetBytes(head).Concat(BitConverter.GetBytes(count))
+                .Concat(new byte[4]).ToArray();
+        static byte[] Node(long head, uint id, long entity)
+        {
+            var bytes = new byte[48];
+            BitConverter.GetBytes(head).CopyTo(bytes, 0);
+            BitConverter.GetBytes(head).CopyTo(bytes, 16);
+            BitConverter.GetBytes(id).CopyTo(bytes, 32);
+            BitConverter.GetBytes(entity).CopyTo(bytes, 40);
+            return bytes;
+        }
+        memory[area + 1776] = Map(awakeHead, 1);
+        memory[awakeHead + 8] = BitConverter.GetBytes(awakeNode);
+        memory[awakeNode] = Node(awakeHead, 17, local);
+        memory[area + 1776 + 16] = Map(sleepingHead, 1);
+        memory[sleepingHead + 8] = BitConverter.GetBytes(sleepingNode);
+        memory[sleepingNode] = Node(sleepingHead, 18, dormant);
+        byte[]? Read(long address, int size) => memory.TryGetValue(address, out var bytes) &&
+            bytes.Length == size ? bytes.ToArray() : null;
+
+        var found = ProbeEntityMapScanner.Scan(area, local, Read);
+        Require(found.Status == "candidate_unverified_build" &&
+                found.EntityListOffset == 1776 && found.Awake is [{ Id: 17, Address: local }] &&
+                found.Sleeping is [{ Id: 18, Address: dormant }],
+            "local entity selects one stable awake and sleeping map");
+        const long waypoint = 0x900000;
+        var radarMap = found with
+        {
+            Awake = [new(17, local), new(19, waypoint)]
+        };
+        var seenUtc = DateTime.UtcNow;
+        var radar = ProbeRadarPacket.TryEncode(101, seenUtc, 0x12345678u, area,
+            new RolePositionCandidate(1, $"0x{local:X}", 100, 200, 0, 9, 18),
+            radarMap,
+            entity => entity == waypoint ? "Metadata/MiscellaneousObjects/Waypoint" :
+                entity == dormant ? "Metadata/MiscellaneousObjects/Checkpoint" : null,
+            entity => entity == waypoint
+                ? new RawRenderPositionReader.Position(120, 220, 0, 11, 20, "0xA00000")
+                : entity == dormant
+                    ? new RawRenderPositionReader.Position(130, 230, 0, 12, 21, "0xA10000")
+                    : null);
+        Require(radar is not null, "independent awake waypoint can produce radar packet");
+        var radarMotion = ProbeRadarPacket.TryEncodeMotion(101, seenUtc,
+            0x12345678u, area,
+            new RolePositionCandidate(1, $"0x{local:X}", 100, 200, 0, 9, 18));
+        Require(radarMotion is not null, "independent role can produce radar motion");
+        using (var motionDocument = JsonDocument.Parse(radarMotion!))
+        {
+            var motion = motionDocument.RootElement;
+            Require(motion.GetProperty("Kind").GetString() == "radar_motion" &&
+                    motion.GetProperty("RadarAreaAddress").ValueKind == JsonValueKind.Null &&
+                    motion.GetProperty("RadarStateAreaAddress").GetString() == "0x200000" &&
+                    motion.GetProperty("X").GetSingle() == 100,
+                "standalone radar motion retains state-area identity and coordinates");
+        }
+        Require(ProbeRadarPacket.TryEncodeMotion(101, seenUtc, 0x12345678u, area,
+                new RolePositionCandidate(2, $"0x{local:X}", 100, 200, 0, 9, 18)) is null,
+            "non-leading role cannot move the radar center");
+        var terrainOnly = ProbeRadarPacket.TryEncodeTerrainOnly(101, seenUtc,
+            0x12345678u, area,
+            new RolePositionCandidate(1, $"0x{local:X}", 100, 200, 0, 9, 18));
+        Require(terrainOnly is not null, "current terrain can produce a marker-free radar frame");
+        using (var terrainDocument = JsonDocument.Parse(terrainOnly!))
+        {
+            var root = terrainDocument.RootElement;
+            Require(root.GetProperty("ProcessId").GetInt32() == 101 &&
+                    root.GetProperty("AreaHash").GetUInt32() == 0x12345678u &&
+                    root.GetProperty("RadarStateAreaAddress").GetString() == "0x200000" &&
+                    root.GetProperty("RadarGridX").GetSingle() == 9 &&
+                    root.GetProperty("RadarEntities").GetArrayLength() == 0 &&
+                    root.GetProperty("DormantAreaMap").ValueKind == JsonValueKind.Null,
+                "terrain-only frame must retain process and area identity without inventing markers");
+        }
+        Require(ProbeRadarPacket.TryEncodeTerrainOnly(101, seenUtc, 0, area,
+                new RolePositionCandidate(1, $"0x{local:X}", 100, 200, 0, 9, 18)) is null &&
+                ProbeRadarPacket.TryEncodeTerrainOnly(101, seenUtc, 0x12345678u, area,
+                    new RolePositionCandidate(2, $"0x{local:X}", 100, 200, 0, 9, 18)) is null,
+            "terrain-only frame rejects missing area identity and non-leading roles");
+        using (var document = JsonDocument.Parse(radar!))
+        {
+            var root = document.RootElement;
+            Require(root.GetProperty("ProcessId").GetInt32() == 101 &&
+                    root.GetProperty("RadarStatus").GetString() == "ok" &&
+                    root.GetProperty("RadarAreaAddress").ValueKind == JsonValueKind.Null &&
+                    root.GetProperty("RadarStateAreaAddress").GetString() == "0x200000" &&
+                    root.GetProperty("RadarEntities").GetArrayLength() == 1 &&
+                    root.GetProperty("RadarEntities")[0].GetProperty("Category").GetString() ==
+                        "waypoint" &&
+                    root.GetProperty("DormantAreaMap").GetProperty("SleepingCount").GetInt32() == 1 &&
+                    root.GetProperty("DormantAreaMap").GetProperty("NavigationCandidates")
+                        .GetArrayLength() == 1,
+                "radar packet retained the process, area, waypoint and dormant candidate");
+        }
+        var crowdedAwake = Enumerable.Range(100, 2500)
+            .Select(id => new AreaEntityMapSnapshotReader.Entry((uint)id,
+                0xB00000 + id * 8L)).ToArray();
+        var highIdWaypoint = radarMap with
+        {
+            Awake = [new(17, local), .. crowdedAwake,
+                new(1_073_741_824u, waypoint)]
+        };
+        var highIdPacket = ProbeRadarPacket.TryEncode(101, seenUtc, 0x12345678u, area,
+            new RolePositionCandidate(1, $"0x{local:X}", 100, 200, 0, 9, 18),
+            highIdWaypoint,
+            entity => entity == waypoint ? "Metadata/MiscellaneousObjects/Waypoint" : null,
+            entity => entity == waypoint
+                ? new RawRenderPositionReader.Position(120, 220, 0, 11, 20, "0xA00000")
+                : null);
+        Require(highIdPacket is not null, "high-ID waypoint can produce a bounded radar packet");
+        using (var highIdDocument = JsonDocument.Parse(highIdPacket!))
+            Require(highIdDocument.RootElement.GetProperty("RadarEntities").GetArrayLength() == 1 &&
+                    highIdDocument.RootElement.GetProperty("RadarEntities")[0]
+                        .GetProperty("EntityId").GetUInt32() == 1_073_741_824u,
+                "ordinary-ID read limit did not hide the high-ID waypoint");
+        const long quest = 0xA00000;
+        var questMap = found with { Awake = [new(17, local), new(20, quest)], Sleeping = [] };
+        byte[]? QuestPacket(bool? state) => ProbeRadarPacket.TryEncode(101, seenUtc,
+            0x12345678u, area,
+            new RolePositionCandidate(1, $"0x{local:X}", 100, 200, 0, 9, 18),
+            questMap,
+            entity => entity == quest
+                ? "Metadata/Terrain/Gallows/Act1/Objects/QuestChestBase" : null,
+            entity => entity == quest
+                ? new RawRenderPositionReader.Position(140, 240, 0, 13, 22, "0xA10000")
+                : null,
+            entity => entity == quest ? state : null);
+        var activeQuest = QuestPacket(true);
+        var inactiveQuest = QuestPacket(false);
+        Require(activeQuest is not null && inactiveQuest is not null,
+            "quest state probes produced candidate frames");
+        using (var active = JsonDocument.Parse(activeQuest!))
+        using (var inactive = JsonDocument.Parse(inactiveQuest!))
+            Require(active.RootElement.GetProperty("RadarEntities").GetArrayLength() == 1 &&
+                    active.RootElement.GetProperty("RadarEntities")[0]
+                        .GetProperty("QuestStateCandidate").GetBoolean() &&
+                    active.RootElement.GetProperty("RadarEntities")[0]
+                        .GetProperty("Category").GetString() == "quest" &&
+                    inactive.RootElement.GetProperty("RadarEntities").GetArrayLength() == 0,
+                "only a positive Targetable quest byte admits a generic quest object");
+        byte[]? IconPacket(string? icon) => ProbeRadarPacket.TryEncode(101, seenUtc,
+            0x12345678u, area,
+            new RolePositionCandidate(1, $"0x{local:X}", 100, 200, 0, 9, 18),
+            questMap,
+            entity => entity == quest
+                ? "Metadata/Terrain/Gallows/Act1/Objects/UnrelatedProp" : null,
+            entity => entity == quest
+                ? new RawRenderPositionReader.Position(140, 240, 0, 13, 22, "0xA10000")
+                : null,
+            _ => null,
+            entity => entity == quest ? icon : null);
+        var knownIcon = IconPacket("VaalKeyGemMedium");
+        var genericIcon = IconPacket("GenericQuestIcon");
+        Require(knownIcon is not null && genericIcon is not null,
+            "icon candidate frames were produced");
+        using (var known = JsonDocument.Parse(knownIcon!))
+        using (var generic = JsonDocument.Parse(genericIcon!))
+            Require(known.RootElement.GetProperty("RadarEntities")[0]
+                    .GetProperty("Label").GetString() == "Medium Soul Core" &&
+                    !known.RootElement.GetProperty("RadarEntities")[0]
+                        .GetProperty("QuestStateCandidate").GetBoolean() &&
+                    generic.RootElement.GetProperty("RadarEntities").GetArrayLength() == 0,
+                "only a named icon token adds an unconfirmed quest location");
+        Require(ProbeRadarPacket.TryEncode(101, seenUtc, 0x12345678u, area,
+                new RolePositionCandidate(1, $"0x{local:X}", 100, 200, 0, 9, 18),
+                radarMap with { Status = "no_local_match" }, _ => null, _ => null) is null,
+            "unverified entity map cannot emit a radar packet");
+        Require(ProbeEntityMapScanner.Scan(area, local + 8, Read).Status == "no_local_match",
+            "different local entity cannot select a map");
+        memory.Remove(area + 1776 + 16);
+        var awakeOnly = ProbeEntityMapScanner.Scan(area, local, Read);
+        Require(awakeOnly.Status == "candidate_unverified_build" &&
+                awakeOnly.SleepingStatus == "unreadable_map" &&
+                awakeOnly.Awake.Length == 1 && awakeOnly.Sleeping.Length == 0 &&
+                ProbeRadarPacket.TryEncode(101, seenUtc, 0x12345678u, area,
+                    new RolePositionCandidate(1, $"0x{local:X}", 100, 200, 0, 9, 18),
+                    awakeOnly, _ => null, _ => null) is not null,
+            "unreadable sleeping table does not suppress a unique awake map");
+        memory.Remove(area + 1776);
+        memory[area + 2048] = Map(awakeHead, 1);
+        memory[area + 2048 + 16] = Map(sleepingHead, 1);
+        var discovered = ProbeEntityMapScanner.Scan(area, local, Read);
+        Require(discovered.Status == "candidate_unverified_build" &&
+                discovered.EntityListOffset == 2048 &&
+                ProbeEntityMapScanner.Scan(area, local, Read, 2048).EntityListOffset == 2048,
+            "fallback range finds and reuses a stable local-player entity map");
+        memory.Remove(area + 2048);
+        memory.Remove(area + 2048 + 16);
+        memory[area + 1776] = Map(awakeHead, 1);
+        memory[area + 1776 + 16] = Map(sleepingHead, 1);
+        memory[area + 1752] = Map(awakeHead, 1);
+        Require(ProbeEntityMapScanner.Scan(area, local, Read).Status == "ambiguous_local_match",
+            "two local matches cannot select a map");
+        memory.Remove(area + 1752);
+        memory[sleepingNode] = Node(sleepingHead, 17, dormant);
+        Require(ProbeEntityMapScanner.Scan(area, local, Read).Status ==
+                "overlapping_entity_ids", "awake and sleeping IDs cannot overlap");
     }
 
     private static void Require(bool condition, string name)

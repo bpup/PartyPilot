@@ -69,30 +69,38 @@ func Attach(paths []string, selected map[int]int) (Result, error) {
 }
 
 func Start(paths []string, uris map[int]string, timeout time.Duration, runtime string) (Result, error) {
-	return StartWithPreResume(paths, uris, timeout, runtime, nil)
+	return StartWithPerClientPreResume(paths, uris, timeout, runtime, nil)
 }
 
 // StartWithPreResume holds Client 3's standalone primary thread while a caller
 // prepares process-local input. Returning an error closes that suspended process.
 func StartWithPreResume(paths []string, uris map[int]string, timeout time.Duration,
 	runtime string, beforeClient3Resume func(int) error) (Result, error) {
+	var callbacks map[int]func(int) error
+	if beforeClient3Resume != nil {
+		callbacks = map[int]func(int) error{3: beforeClient3Resume}
+	}
+	return StartWithPerClientPreResume(paths, uris, timeout, runtime, callbacks)
+}
+
+// StartWithPerClientPreResume holds each selected standalone client's primary
+// thread until its own process-local input has been prepared. Callback keys are
+// the one-based client numbers used by the launcher and desktop.
+func StartWithPerClientPreResume(paths []string, uris map[int]string, timeout time.Duration,
+	runtime string, beforeResumeByClient map[int]func(int) error) (Result, error) {
 	if _, err := ValidateStart(paths, timeout, runtime); err != nil {
 		return Result{}, err
 	}
 	if err := ValidateURIs(paths, uris); err != nil {
 		return Result{}, err
 	}
-	if beforeClient3Resume != nil && (len(paths) != 3 ||
-		!clientprocess.IsStandaloneGameExecutable(paths[2]) || uris[3] != "") {
-		return Result{}, fmt.Errorf("pre-resume input requires three clients and a standalone Client 3 executable")
+	if err := validatePreResumeClients(paths, uris, beforeResumeByClient); err != nil {
+		return Result{}, err
 	}
 	result := Result{Clients: make([]Client, 0, len(paths))}
 	for index, path := range paths {
 		isolate := NeedsIsolation(paths, index)
-		var beforeResume func(int) error
-		if index == 2 {
-			beforeResume = beforeClient3Resume
-		}
+		beforeResume := beforeResumeByClient[index+1]
 		if isolate || beforeResume != nil {
 			if uris[index+1] != "" {
 				return result, fmt.Errorf("client %d shared standalone installation cannot use a store URI", index+1)

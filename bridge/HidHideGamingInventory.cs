@@ -124,8 +124,10 @@ internal static class HidHideGamingInventory
             return true;
         // An emulated Xbox 360 output can be presented with a USB-looking
         // container. Reject this known ambiguous shape from automatic hiding.
-        return ControllerDeviceId.TryReadVidPid(path, out var vendor, out var product) &&
-            vendor == 0x045e && product == 0x028e &&
+        static bool KnownVirtualId(string value) =>
+            ControllerDeviceId.TryReadVidPid(value, out var vendor, out var product) &&
+            vendor == 0x045e && product == 0x028e;
+        return (KnownVirtualId(path) || KnownVirtualId(xusb)) &&
             (container.EndsWith(@"\01", StringComparison.OrdinalIgnoreCase) ||
              container.EndsWith(@"\02", StringComparison.OrdinalIgnoreCase));
     }

@@ -56,6 +56,11 @@ type OrderedLocalPlayer struct {
 
 const unverifiedExileCoreSlotSource = "unverified_exilecore_local_slot_candidate"
 const experimentalStaticVectorSource = "experimental_static_vector_0.6.17"
+const experimentalUnknownBuildVectorSource = "experimental_unknown_build_vector_0.6.17"
+
+func isStaticCandidateSource(source string) bool {
+	return source == experimentalStaticVectorSource || source == experimentalUnknownBuildVectorSource
+}
 
 type orderedIdentity struct {
 	areaHash    uint32
@@ -86,7 +91,7 @@ func validStaticVectorPointer(value string) bool {
 }
 
 func validStaticVectorIdentity(frame OrderedClientFrame, roles []RoleBinding) bool {
-	if frame.PlayerOrderSource != experimentalStaticVectorSource {
+	if !isStaticCandidateSource(frame.PlayerOrderSource) {
 		return true
 	}
 	if frame.AreaHash == 0 || !validStaticVectorPointer(frame.AreaInstanceAddress) ||
@@ -148,7 +153,7 @@ func (e *Engine) ObserveOrderedClient(frame OrderedClientFrame) bool {
 		e.invalidateOrderedIfCurrent(roles, frame)
 		return false
 	}
-	if frame.PlayerOrderSource == experimentalStaticVectorSource {
+	if isStaticCandidateSource(frame.PlayerOrderSource) {
 		if pinned, exists := e.orderedIdentities[frame.ProcessID]; exists &&
 			pinned.areaHash == frame.AreaHash &&
 			pinned.areaAddress == frame.AreaInstanceAddress &&
@@ -196,7 +201,7 @@ func (e *Engine) ObserveOrderedClient(frame OrderedClientFrame) bool {
 	for _, role := range roles {
 		e.storeSample(role.Slot, updates[role.Slot])
 	}
-	if frame.PlayerOrderSource == experimentalStaticVectorSource {
+	if isStaticCandidateSource(frame.PlayerOrderSource) {
 		e.orderedIdentities[frame.ProcessID] = orderedIdentity{
 			areaHash: frame.AreaHash, areaAddress: frame.AreaInstanceAddress,
 			addresses: append([]string(nil), frame.OrderedAddresses...),

@@ -59,6 +59,7 @@ AutoPartyRecoverySmoke.Run();
 await AutoPartyRecoverySchedulerSmoke.RunAsync();
 await PartyLeaveLogSmoke.RunAsync();
 await ControllerLaunchPreflightSmoke.RunAsync();
+await ProcessLocalBridgePipelineSmoke.RunAsync();
 if (!ControllerLaunchPreflight.Parse(0,
         "{\"startup_preflight_ready\":true,\"isolation_matches\":true,\"physical_source_readable\":true}", "").Ready ||
     ControllerLaunchPreflight.Parse(0,
@@ -390,6 +391,16 @@ if (!RadarFrames.TryParse(radarPayload, 123, DateTime.UtcNow, out var radarFrame
     RadarProjection.TryScale("0", out _) || !RadarProjection.TryScale("2", out var radarScale))
     throw new Exception("Radar frame identity, freshness, or explicit scale validation failed.");
 var radarText = System.Text.Encoding.UTF8.GetString(radarPayload);
+var terrainOnlyText = "{\"ProcessId\":123,\"AreaHash\":42," +
+    "\"RadarAreaAddress\":null,\"RadarStateAreaAddress\":\"0x123456\"," +
+    "\"RadarStatus\":\"ok\",\"RadarSeenUtc\":\"" + DateTime.UtcNow.ToString("O") +
+    "\",\"X\":100,\"Y\":200,\"RadarGridX\":3,\"RadarGridY\":4," +
+    "\"RadarEntities\":[],\"DormantAreaMap\":null}";
+if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(terrainOnlyText), 123,
+        DateTime.UtcNow, out var terrainOnlyFrame) || terrainOnlyFrame is null ||
+    terrainOnlyFrame.Markers.Count != 0 || terrainOnlyFrame.StateAreaAddress != "0x123456" ||
+    terrainOnlyFrame.GridX != 3 || terrainOnlyFrame.GridY != 4)
+    throw new Exception("A terrain-only frame did not reach the overlay with its area and grid identity.");
 var gridRadarText = radarText.Replace("\"AreaHash\":42,",
     "\"AreaHash\":42,\"RadarStateAreaAddress\":\"0x123456\",\"RadarGridX\":3,\"RadarGridY\":4,");
 using var dormantRadarSource = System.Text.Json.JsonDocument.Parse(gridRadarText);
@@ -400,6 +411,10 @@ var dormantRadarText = gridRadarText[..^1] +
 if (!RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(dormantRadarText), 123, DateTime.UtcNow,
         out var dormantRadarFrame) || dormantRadarFrame?.Markers.Count != 5 ||
     dormantRadarFrame.DormantCandidates.Count != 1 ||
+    !RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
+        dormantRadarText.Replace("\"EntityListOffset\":1776", "\"EntityListOffset\":2048")),
+        123, DateTime.UtcNow, out var scannedOffsetFrame) ||
+    scannedOffsetFrame?.DormantCandidates.Count != 1 ||
     RadarOverlayWindow.DisplayLabel(dormantRadarFrame.DormantCandidates[0], true) != "候选 · 传送点" ||
     !RadarFrames.TryParse(System.Text.Encoding.UTF8.GetBytes(
         dormantRadarText.Replace("\"AreaAddress\":\"0x123456\"", "\"AreaAddress\":\"0x123458\"")),
@@ -458,6 +473,15 @@ retained = landmarkCache.Apply(retained with { SeenUtc = retained.SeenUtc.AddMil
 if (retained.Markers.Count != 1 || retained.Markers[0].Category != "waypoint" ||
     landmarkCache.Apply(retained with { AreaHash = 43, SeenUtc = retained.SeenUtc.AddMilliseconds(1), Markers = [] }).Markers.Count != 0)
     throw new Exception("Radar retained transient markers or landmarks after an area change.");
+var standaloneCache = new RadarLandmarkCache();
+var standaloneFrame = radarFrame with { AreaAddress = null, StateAreaAddress = "0x200000" };
+standaloneCache.Apply(standaloneFrame);
+if (standaloneCache.Apply(standaloneFrame with
+        { SeenUtc = standaloneFrame.SeenUtc.AddMilliseconds(1), Markers = [] }).Markers.Count != 1 ||
+    standaloneCache.Apply(standaloneFrame with
+        { SeenUtc = standaloneFrame.SeenUtc.AddMilliseconds(2),
+          StateAreaAddress = "0x300000", Markers = [] }).Markers.Count != 0)
+    throw new Exception("Standalone area pointer did not scope or retire landmarks.");
 var sameHashNewAddress = new RadarLandmarkCache();
 sameHashNewAddress.Apply(radarFrame);
 if (sameHashNewAddress.TryApply(radarFrame with

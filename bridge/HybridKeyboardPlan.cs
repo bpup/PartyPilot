@@ -69,6 +69,7 @@ internal sealed record HybridKeyboardPlan(
             1 => new[] { 2 },
             2 when pads.TryGetValue(3, out var last) && last == 5 => new[] { 3, 5 },
             2 => new[] { 3, 4 },
+            3 => new[] { 2, 3, 4 },
             4 => new[] { 3, 4, 5, 6 },
             5 => new[] { 2, 3, 4, 5, 6 },
             _ => []
@@ -89,9 +90,11 @@ internal sealed record HybridKeyboardPlan(
         if (windows.Count != pads.Count + 1 || !windows.ContainsKey(1)) return false;
         var sameMainClient = windows[1].Pid == windows[2].Pid &&
             windows[1].Handle == windows[2].Handle;
-        if ((pads.Count == 5
-                ? !sameMainClient || Enumerable.Range(2, 5).Any(player => pads[player] != player)
+        if ((pads.Count is 3 or 5
+                ? !sameMainClient || Enumerable.Range(2, pads.Count).Any(player => pads[player] != player)
                 : windows[1].Pid == windows[2].Pid) ||
+            (pads.Count == 3 &&
+             (windows[3] != windows[4] || windows[1].Pid == windows[3].Pid)) ||
             (pads.Count == 5 &&
              (windows[3] != windows[4] || windows[5] != windows[6] ||
               windows[1].Pid == windows[3].Pid || windows[1].Pid == windows[5].Pid ||

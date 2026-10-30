@@ -14,8 +14,8 @@ internal static class RadarMotionSmoke
         {
             StateAreaAddress = "0x123456", GridX = 1, GridY = 2
         };
-        byte[] Packet(int pid = 123, uint areaHash = 42, string area = "0xABCDEF",
-            string stateArea = "0x123456", DateTime? seen = null,
+        byte[] Packet(int pid = 123, uint areaHash = 42, string? area = "0xABCDEF",
+            string? stateArea = "0x123456", DateTime? seen = null,
             double x = 11, double y = 21, double? gridX = 2, double? gridY = 3) =>
             JsonSerializer.SerializeToUtf8Bytes(new
             {
@@ -29,6 +29,14 @@ internal static class RadarMotionSmoke
             moved.PlayerX != 11 || moved.PlayerY != 21 || moved.GridX != 2 ||
             moved.Markers.Count != 1 || moved.SeenUtc != now)
             throw new Exception("Fresh radar motion did not move the full marker frame.");
+        var standaloneFull = full with { AreaAddress = null };
+        if (!RadarMotionFrame.TryParse(Packet(area: null), 123, now,
+                out var standaloneMotion) || standaloneMotion is null ||
+            !standaloneMotion.TryApply(standaloneFull, out var standaloneMoved) ||
+            standaloneMoved?.PlayerX != 11 ||
+            standaloneMotion.TryApply(full, out _) ||
+            RadarMotionFrame.TryParse(Packet(area: null, stateArea: null), 123, now, out _))
+            throw new Exception("Standalone radar motion lost its state-area identity guard.");
         if (RadarMotionFrame.TryParse(Packet(pid: 124), 123, now, out _) ||
             RadarMotionFrame.TryParse(Packet(seen: now.AddSeconds(-3)), 123, now, out _) ||
             RadarMotionFrame.TryParse(System.Text.Encoding.UTF8.GetBytes(

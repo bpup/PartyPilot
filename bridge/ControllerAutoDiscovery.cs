@@ -45,7 +45,7 @@ internal static class ControllerAutoDiscovery
 #if WINDOWS
     internal static async Task<ControllerAutoDiscoveryResult> DiscoverAsync(
         IReadOnlyList<string> gameExecutables, bool useWgi,
-        int ownerPid, long ownerStartTicks, bool prepareIsolation)
+        int ownerPid, long ownerStartTicks, bool prepareIsolation, bool probeOnly = false)
     {
         if (!OperatingSystem.IsWindows()) return Fail("手柄自动检测需要 Windows。");
         var bridge = Environment.ProcessPath;
@@ -83,6 +83,9 @@ internal static class ControllerAutoDiscovery
             connected, ReadableWgi);
         if (!selected.Ready)
             return Fail(selected.Message);
+        if (probeOnly)
+            return new(true, selected.Device, selected.XInputIndex,
+                "已找到可读手柄，尚未检查隔离。");
         var normalizedGames = gameExecutables.Select(Path.GetFullPath).ToArray();
         if (!prepareIsolation)
             return Select(HidHidePreflight.Read(), inventory, bridge, normalizedGames,

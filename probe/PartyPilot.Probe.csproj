@@ -8,6 +8,25 @@
   <ItemGroup>
     <Compile Include="../sensor/LocalSlotCandidateScanner.cs" Link="LocalSlotCandidateScanner.cs" />
     <Compile Include="../sensor/RawCharacterPathReader.cs" Link="RawCharacterPathReader.cs" />
+    <Compile Include="../sensor/RawEntityComponentReader.cs" Link="RawEntityComponentReader.cs" />
     <Compile Include="../sensor/RawRenderPositionReader.cs" Link="RawRenderPositionReader.cs" />
+    <Compile Include="../sensor/AreaEntityMapSnapshotReader.cs" Link="AreaEntityMapSnapshotReader.cs" />
+    <Compile Include="../sensor/RawMetadataPathReader.cs" Link="RawMetadataPathReader.cs" />
+    <Compile Include="../sensor/RawMinimapIconReader.cs" Link="RawMinimapIconReader.cs" />
+    <Compile Include="../sensor/TargetableQuestStateProbe.cs" Link="TargetableQuestStateProbe.cs" />
+    <Compile Include="../sensor/RawTargetableReader.cs" Link="RawTargetableReader.cs" />
+    <Compile Include="../sensor/RadarClassifier.cs" Link="RadarClassifier.cs" />
+    <Compile Include="../common/PackedTerrainValueProfile.cs" Link="PackedTerrainValueProfile.cs" />
+    <Compile Include="../sensor/PackedTerrainProbe.cs" Link="PackedTerrainProbe.cs" />
+    <Compile Include="../sensor/PackedTerrainCapture.cs" Link="PackedTerrainCapture.cs" />
+    <Compile Include="../sensor/GeneratedRoomProbe.cs" Link="GeneratedRoomProbe.cs" />
+    <Compile Include="../sensor/GeneratedRoomClassifier.cs" Link="GeneratedRoomClassifier.cs" />
+    <Compile Include="../sensor/TerrainPlacementProbe.cs" Link="TerrainPlacementProbe.cs" />
+    <Compile Include="../sensor/TerrainPlacementClassifier.cs" Link="TerrainPlacementClassifier.cs" />
+    <Compile Include="../sensor/RawAreaIdReader.cs" Link="RawAreaIdReader.cs" />
+    <Compile Include="../sensor/QuestTileProbe.cs" Link="QuestTileProbe.cs" />
+    <Compile Include="../sensor/QuestTileRules.cs" Link="QuestTileRules.cs" />
+    <EmbeddedResource Include="../data/campaign-landmarks-0.6.17.json" LogicalName="PartyPilot.CampaignLandmarks" />
+    <EmbeddedResource Include="../data/quest-tile-rules-0.6.17.json" LogicalName="PartyPilot.QuestTileRules" />
   </ItemGroup>
 </Project>

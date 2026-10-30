@@ -428,6 +428,59 @@ void TestRawRenderPositionReader()
         Math.Abs(position.GridY - 20) < 0.001 && position.WorldZ == 5 &&
         position.RenderComponentAddress == "0x1060000",
         "Default-offset Render position candidate was not read.");
+    const long targetable = 0x1070000;
+    const long targetableName = 0x1080000;
+    raw[lookup + 40] = BitConverter.GetBytes(names)
+        .Concat(BitConverter.GetBytes(names + 32))
+        .Concat(BitConverter.GetBytes(names + 32)).ToArray();
+    raw[names + 16] = BitConverter.GetBytes(targetableName)
+        .Concat(BitConverter.GetBytes(1)).Concat(new byte[4]).ToArray();
+    raw[targetableName] = System.Text.Encoding.ASCII.GetBytes("Targetable\0")
+        .Concat(new byte[53]).ToArray();
+    raw[entity + 16] = BitConverter.GetBytes(components)
+        .Concat(BitConverter.GetBytes(components + 16)).ToArray();
+    raw[components + 8] = BitConverter.GetBytes(targetable);
+    raw[targetable + 8] = BitConverter.GetBytes(entity);
+    raw[targetable + 86] = [1];
+    Require(RawTargetableReader.MeetsQuestState(entity, ReadRaw) == true &&
+        RawEntityComponentReader.Find(entity, "Render", ReadRaw) == render &&
+        RawEntityComponentReader.Find(entity, "Targetable", ReadRaw) == targetable,
+        "Named Targetable component did not bind to the observed entity.");
+    raw[targetable + 86] = [0];
+    Require(RawTargetableReader.MeetsQuestState(entity, ReadRaw) == false,
+        "A zero Targetable quest byte became active.");
+    raw[targetable + 86] = [1];
+    raw[targetable + 8] = BitConverter.GetBytes(entity + 8);
+    Require(RawTargetableReader.MeetsQuestState(entity, ReadRaw) == null,
+        "A Targetable component owned by another entity was accepted.");
+    raw[targetable + 8] = BitConverter.GetBytes(entity);
+    const long iconComponent = 0x1090000;
+    const long iconComponentName = 0x10A0000;
+    const long iconData = 0x10B0000;
+    const long iconText = 0x10C0000;
+    raw[lookup + 40] = BitConverter.GetBytes(names)
+        .Concat(BitConverter.GetBytes(names + 48))
+        .Concat(BitConverter.GetBytes(names + 48)).ToArray();
+    raw[names + 32] = BitConverter.GetBytes(iconComponentName)
+        .Concat(BitConverter.GetBytes(2)).Concat(new byte[4]).ToArray();
+    raw[iconComponentName] = System.Text.Encoding.ASCII.GetBytes("MinimapIcon\0")
+        .Concat(new byte[52]).ToArray();
+    raw[entity + 16] = BitConverter.GetBytes(components)
+        .Concat(BitConverter.GetBytes(components + 24)).ToArray();
+    raw[components + 16] = BitConverter.GetBytes(iconComponent);
+    raw[iconComponent + 8] = BitConverter.GetBytes(entity);
+    raw[iconComponent + 32] = BitConverter.GetBytes(iconData);
+    raw[iconData + 16] = BitConverter.GetBytes(iconText);
+    var validIcon = System.Text.Encoding.Unicode.GetBytes("VaalKeyGemMedium\0");
+    raw[iconText] = validIcon.Concat(new byte[96 - validIcon.Length]).ToArray();
+    Require(RawMinimapIconReader.Read(entity, ReadRaw) == "VaalKeyGemMedium" &&
+        RadarClassifier.QuestIconLabel("VaalKeyGemMedium") == "Medium Soul Core" &&
+        RadarClassifier.QuestIconLabel("GenericQuestIcon") == null,
+        "Named quest MinimapIcon was not read as a bounded identifier.");
+    raw[iconComponent + 8] = BitConverter.GetBytes(entity + 8);
+    Require(RawMinimapIconReader.Read(entity, ReadRaw) == null,
+        "An icon component owned by another entity was accepted.");
+    raw[iconComponent + 8] = BitConverter.GetBytes(entity);
     var comparison = RawRenderPositionReader.CompareLocal(position!, 10, 20, 5);
     Require(comparison != null && comparison.GridXYDistance < 0.001 &&
         comparison.WorldXYDistance > 200 &&
@@ -583,6 +636,22 @@ void TestPackedTerrainProbe()
             metadata.RootElement.GetProperty("Sha256").GetString() ==
                 Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(packed)).ToLowerInvariant(),
             "The capture lost position, patch or file integrity evidence.");
+        var rawOnly = PackedTerrainCapture.Save(anchored.Source!, anchored.Candidate!,
+            capturePosition, null, null, Read, () => true, captureDirectory,
+            123, "123", anchored.Candidate.AreaAddress, anchored.Candidate.Anchor,
+            DateTime.UtcNow);
+        Require(rawOnly.Status == "captured_local" && rawOnly.DataFile != null,
+            "The standalone probe could not save raw terrain without a second position source.");
+        var rawOnlyMetadata = Path.ChangeExtension(rawOnly.DataFile!, ".json");
+        using (var rawOnlyJson = System.Text.Json.JsonDocument.Parse(
+                   File.ReadAllText(rawOnlyMetadata)))
+            Require(rawOnlyJson.RootElement.GetProperty("ObservedWorldX").ValueKind ==
+                    System.Text.Json.JsonValueKind.Null &&
+                    rawOnlyJson.RootElement.GetProperty("ObservedWorldY").ValueKind ==
+                    System.Text.Json.JsonValueKind.Null,
+                "Standalone capture invented an independent position observation.");
+        File.Delete(rawOnly.DataFile!);
+        File.Delete(rawOnlyMetadata);
         var metadataFile = Path.ChangeExtension(capture.DataFile!, ".json");
         var withoutMarkers = System.Text.Json.Nodes.JsonNode.Parse(
             File.ReadAllText(metadataFile))!.AsObject();
@@ -745,6 +814,29 @@ void TestGeneratedRoomProbe()
         "Generated-room candidate path or bounded tile rectangle changed.");
     Require(GeneratedRoomProbe.Scan(area, 92, 92, (_, _) => null).Status ==
         "graph_vector_unreadable", "An unreadable room graph was accepted.");
+    const int largeRoomCount = 4096;
+    var largeRooms = new byte[largeRoomCount * 56];
+    var finalRoom = largeRooms.Length - 56;
+    BitConverter.GetBytes(assetAddress).CopyTo(largeRooms, finalRoom);
+    BitConverter.GetBytes(1).CopyTo(largeRooms, finalRoom + 8);
+    BitConverter.GetBytes(1).CopyTo(largeRooms, finalRoom + 12);
+    BitConverter.GetBytes(2).CopyTo(largeRooms, finalRoom + 16);
+    BitConverter.GetBytes(3).CopyTo(largeRooms, finalRoom + 20);
+    BitConverter.GetBytes(roomsAddress + largeRooms.Length).CopyTo(graphs, 96);
+    BitConverter.GetBytes(roomsAddress + largeRooms.Length).CopyTo(graphs, 104);
+    byte[]? ReadLarge(long address, int size)
+    {
+        if (address >= roomsAddress && size <= 64 * 1024 &&
+            address + size <= roomsAddress + largeRooms.Length)
+            return largeRooms.AsSpan((int)(address - roomsAddress), size).ToArray();
+        return Read(address, size);
+    }
+    var largeResult = GeneratedRoomProbe.Scan(area, 92, 92, ReadLarge);
+    Require(largeResult.Status == "candidate_rooms_observed" &&
+        largeResult.RoomsChecked == largeRoomCount &&
+        largeResult.MatchedAnchors == 1 && !largeResult.AnchorsTruncated &&
+        largeResult.Anchors is [{ Category: "boss", GridX: 34.5, GridY: 46 }],
+        "A full generated-room graph lost its final anchor under bounded reads.");
     BitConverter.GetBytes(graphsAddress + 151).CopyTo(vector, 8);
     Require(GeneratedRoomProbe.Scan(area, 92, 92, Read).Status == "not_ready",
         "A partial graph record was accepted.");

@@ -9,18 +9,19 @@ internal static class BridgeSlots
         focusPads.TryGetValue(1, out var first) && first == 1 &&
         focusPads.TryGetValue(2, out var second) && second == 2;
 
-    public static bool TryParse(string[] args, out int[] slots)
+    public static bool TryParse(string[] args, out int[] slots, bool processLocal = false)
     {
         slots = [];
         if (args.Count(value => value == "--slots") != 1) return false;
         var index = Array.IndexOf(args, "--slots");
         if (index < 0 || index + 1 >= args.Length) return false;
         var values = args[index + 1].Split(',');
-        if (values.Length is < 1 or > 4) return false;
+        if (values.Length < 1 || values.Length > (processLocal ? 6 : 4)) return false;
         var parsed = new HashSet<int>();
         foreach (var value in values)
         {
-            if (!int.TryParse(value, out var slot) || slot is < 1 or > 4 || !parsed.Add(slot))
+            if (!int.TryParse(value, out var slot) || slot < 1 ||
+                slot > (processLocal ? 6 : 4) || !parsed.Add(slot))
                 return false;
         }
         slots = parsed.OrderBy(value => value).ToArray();

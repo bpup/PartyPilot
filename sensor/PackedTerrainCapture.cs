@@ -85,7 +85,7 @@ internal static class PackedTerrainCapture
 
     internal static Outcome Save(PackedTerrainProbe.PackedSource source,
         PackedTerrainProbe.Observation observation,
-        RawRenderPositionReader.Position position, float observedWorldX, float observedWorldY,
+        RawRenderPositionReader.Position position, float? observedWorldX, float? observedWorldY,
         Func<long, int, byte[]?> read, Func<bool> areaStillCurrent,
         string directory, int processId,
         string areaHash, string areaAddress, string anchor, DateTime seenUtc,
@@ -98,7 +98,9 @@ internal static class PackedTerrainCapture
             length is < 4096 or > MaxBytes || processId <= 0 ||
             observation.Width != source.BytesPerRow * 2 || observation.Height != source.Rows ||
             !float.IsFinite(position.GridX) || !float.IsFinite(position.GridY) ||
-            !float.IsFinite(observedWorldX) || !float.IsFinite(observedWorldY) ||
+            observedWorldX.HasValue != observedWorldY.HasValue ||
+            observedWorldX is { } observedX && !float.IsFinite(observedX) ||
+            observedWorldY is { } observedY && !float.IsFinite(observedY) ||
             position.GridX < 0 || position.GridY < 0 ||
             position.GridX >= observation.Width || position.GridY >= observation.Height ||
             areaStillCurrent == null)

@@ -26,6 +26,21 @@ internal static class HybridKeyboardInputTests
             followerWindow != new HybridGameWindow(20, 200) ||
             plan.TryGetAutoPartyWindow(2, out _))
             throw new Exception("Hybrid Auto Party resolved an unassigned or wrong game window.");
+        if (!HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:2,3:3,4:4",
+                "--hybrid-window-map", "1:10:100,2:10:100,3:20:200,4:20:200"],
+                [1, 2, 3, 4], out var fourClient) ||
+            fourClient?.PlayerPads[2] != 2 ||
+            !fourClient.TryGetAutoPartyWindow(4, out var fourthWindow) ||
+            fourthWindow != new HybridGameWindow(20, 200) ||
+            !HybridBindRequest.ValidPrelaunchPads(["--hybrid-player-pads", "2:2,3:3,4:4"],
+                [1, 2, 3, 4], out _) ||
+            HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:2,3:3,4:4",
+                "--hybrid-window-map", "1:10:100,2:20:200,3:20:200,4:20:200"],
+                [1, 2, 3, 4], out _) ||
+            HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:2,3:3,4:4",
+                "--hybrid-window-map", "1:10:100,2:10:100,3:20:200,4:30:300"],
+                [1, 2, 3, 4], out _))
+            throw new Exception("Four-role keyboard layout did not preserve two exact two-player clients.");
         if (!HybridKeyboardPlan.TryParse(["--hybrid-player-pads", "2:2,3:3,4:4,5:5,6:6",
                 "--hybrid-window-map", "1:10:100,2:10:100,3:20:200,4:20:200,5:30:300,6:30:300"],
                 [1, 2, 3, 4], out var sixClient) ||

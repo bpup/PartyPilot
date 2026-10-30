@@ -28,9 +28,13 @@
     <Compile Include="../Client3FocusRouting.cs" Link="Client3FocusRouting.cs" />
     <Compile Include="../Client3InputPublisher.cs" Link="Client3InputPublisher.cs" />
     <Compile Include="../Client3PadOutputs.cs" Link="Client3PadOutputs.cs" />
+    <Compile Include="../ProcessLocalPadOutputs.cs" Link="ProcessLocalPadOutputs.cs" />
+    <Compile Include="../ProcessLocalBindingPlan.cs" Link="ProcessLocalBindingPlan.cs" />
+    <Compile Include="../ProcessLocalRuntimeBindings.cs" Link="ProcessLocalRuntimeBindings.cs" />
     <Compile Include="../CompositeClient3Options.cs" Link="CompositeClient3Options.cs" />
     <Compile Include="../Client3RuntimeAttach.cs" Link="Client3RuntimeAttach.cs" />
     <Compile Include="../Client3AttachRequest.cs" Link="Client3AttachRequest.cs" />
+    <Compile Include="../PrivateClientPrepareRequest.cs" Link="PrivateClientPrepareRequest.cs" />
     <Compile Include="../PrivateClient3CommandRouter.cs" Link="PrivateClient3CommandRouter.cs" />
     <Compile Include="../ForegroundWindowProbe.cs" Link="ForegroundWindowProbe.cs" />
     <Compile Include="../PrivateSlotFrame.cs" Link="PrivateSlotFrame.cs" />

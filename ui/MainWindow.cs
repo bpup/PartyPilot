@@ -205,6 +205,8 @@ public sealed class MainWindow : Window
     private BridgeSession? _bridge;
     private LiveFollowSession? _follow;
     private RadarSession? _radar;
+    private IndependentProbeSession? _radarProbe;
+    private bool _radarStarting;
     private PrivacyMaskSession? _privacy;
     private PairingGuide? _pairing;
     private PairingInGameWitness? _pairingWitness;
@@ -279,7 +281,7 @@ public sealed class MainWindow : Window
         _hideNames.Click += (_, _) => NamePrivacy.Enabled = !NamePrivacy.Enabled;
         heading.Children.Add(_hideNames);
         content.Children.Add(heading);
-        content.Children.Add(Label("选人数和游戏目录，然后一键启动。", 13, MutedBrush));
+        content.Children.Add(Label("选人数和游戏目录，启动游戏后配对角色。", 13, MutedBrush));
         content.Children.Add(BuildInputStep());
         content.Children.Add(BuildClientStep());
         content.Children.Add(OptionalSection("账号自动填入 · 可选", BuildAccountStep()));
@@ -1005,7 +1007,7 @@ public sealed class MainWindow : Window
 
     private Border BuildFollowStep()
     {
-        var panel = Step("4", "自动跟随与追赶", "角色配对完成、各客户端位置传感器已启用后，点击开始跟随。4–6 人布局仍需在游戏中核对角色身份和方向。");
+        var panel = Step("4", "自动跟随与追赶", "配对角色后点击“开始跟随”。程序须收到每个角色的位置；游戏中的移动效果尚待验证。");
         panel.Children.Add(Label("配对完成后点击“开始跟随”。默认距离与时效可在高级设置中调整。", 12, MutedBrush));
         var advancedStart = panel.Children.Count;
         _followStop.Name = "follow-stop-global";
@@ -1177,7 +1179,7 @@ public sealed class MainWindow : Window
 
     private Border BuildRadarStep()
     {
-        var panel = Step("5", "Tab 地图覆盖层", "首次安装传感器后默认采集地图标记与候选地形；按 Tab 显示。若以前保存过关闭设置，请在对应 ExileCore2 实例中重新开启。地图方向与比例仍需游戏内核对。");
+        var panel = Step("5", "Tab 地图覆盖层", "按 Tab 显示地图。自带读取仍需在游戏中核对；没有有效数据时不会显示地点和地形。");
         panel.Children.Add(Label("雷达显隐快捷键（如 Tab、Ctrl+R、Shift+F9）", 12, MutedBrush));
         var hotkeyRow = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
         _radarHotkeyText.Width = 190;
@@ -1248,13 +1250,13 @@ public sealed class MainWindow : Window
         }
         var actions = new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 12 };
         _startRadar.Content = "启动地图覆盖层";
-        _startRadar.Click += (_, _) => StartRadar();
+        _startRadar.Click += async (_, _) => await StartRadarAsync();
         _stopRadar.Content = "关闭地图覆盖层";
         _stopRadar.Click += async (_, _) => await StopRadarAsync();
         actions.Children.Add(_startRadar);
         actions.Children.Add(_stopRadar);
         panel.Children.Add(actions);
-        _radarStatus.Text = "等待已绑定的游戏窗口；地图比例仍需游戏内核对。";
+        _radarStatus.Text = "等待游戏窗口；没有地图数据时，覆盖层不会显示地点。";
         _radarStatus.Foreground = MutedBrush;
         _radarStatus.TextWrapping = TextWrapping.Wrap;
         panel.Children.Add(_radarStatus);
@@ -1424,7 +1426,7 @@ public sealed class MainWindow : Window
             _pairingStatus.Text = selection.PlayerCount == 1
                 ? "单人模式由 P1 原生键鼠操作；无需准备虚拟手柄。"
                 : HybridTopologySupport.CanBridge(selection)
-                    ? "启动游戏前先建立键鼠虚拟手柄；三客户端各两人布局仍需游戏内验证。"
+                    ? "启动游戏前先建立键鼠虚拟手柄；多客户端双人布局仍需游戏内验证。"
                     : "此布局的键鼠桥接尚未接入。";
         if (_bridge is null && topologyChanged) _autoFlask.IsChecked = selection?.Id is "2-split" or "3-three-singles";
         var count = _selectedTopology?.ClientCount ?? 0;
@@ -1945,9 +1947,9 @@ public sealed class MainWindow : Window
         }
     }
 
-    private void StartRadar()
+    private async Task StartRadarAsync()
     {
-        if (_radar is not null || _busy || _radarStopping || !OperatingSystem.IsWindows() ||
+        if (_radar is not null || _radarStarting || _busy || _radarStopping || !OperatingSystem.IsWindows() ||
             _selectedTopology is null || _launchedClients.Count != _selectedTopology.ClientCount ||
             !RadarProjection.TryScale(_radarScale.Text, out var gridScale) ||
             !RadarAppearanceSettings.TryParse(_radarMapOpacity.Text,
@@ -1957,6 +1959,7 @@ public sealed class MainWindow : Window
             _radarHotkeyStatus.Text = "雷达快捷键与自动组队或暂停跟随冲突；请重新设置。";
             return;
         }
+        _radarStarting = true;
         try
         {
             var captures = new Dictionary<int, RadarTerrainCapture>();
@@ -1972,21 +1975,35 @@ public sealed class MainWindow : Window
             var catalog = _radarAutoTerrain.IsChecked == true
                 ? new RadarTerrainCatalog(RadarTerrainCatalog.SensorDirectory) : null;
             var worldScale = gridScale / RadarProjection.WorldUnitsPerGridUnit;
-            var session = RadarSession.Start(_launchedClients, worldScale, _radarHotkey,
-                captures, catalog, appearance);
-            session.Ended += RadarEnded;
-            session.FrameReceived += RadarFrameReceived;
-            session.FrameObserved += RadarFrameObserved;
-            _radar = session;
-            _radarStatus.Text = captures.Count == 0 && catalog is null
-                ? $"地图覆盖层已启动，按 {_radarHotkey.DisplayText} 显示；等待各游戏进程的只读标记。失焦或样本过期会隐藏标记。"
-                : $"地图覆盖层已启动，按 {_radarHotkey.DisplayText} 显示；候选地形需匹配进程、区域与角色格坐标，游戏内方向待核对。";
+            var probeExecutable = IndependentProbeSession.FindExecutable() ??
+                throw new FileNotFoundException("找不到自带地图探针，请使用完整安装包。");
+            var probe = await IndependentProbeSession.StartAsync(probeExecutable);
+            try
+            {
+                var session = RadarSession.Start(_launchedClients, worldScale, _radarHotkey,
+                    captures, catalog, appearance);
+                session.Ended += RadarEnded;
+                session.FrameReceived += RadarFrameReceived;
+                session.FrameObserved += RadarFrameObserved;
+                _radarProbe = probe;
+                _radar = session;
+            }
+            catch
+            {
+                await probe.DisposeAsync();
+                throw;
+            }
+            _radarStatus.Text = $"覆盖层窗口已打开；按 {_radarHotkey.DisplayText} 显示。收到有效地图数据后才会显示地点和地形。";
         }
         catch (Exception exception)
         {
             _radarStatus.Text = $"雷达未能打开：{exception.Message}";
         }
-        UpdateRadarControls();
+        finally
+        {
+            _radarStarting = false;
+            UpdateRadarControls();
+        }
     }
 
     private async void RadarEnded(string reason)
@@ -2025,8 +2042,19 @@ public sealed class MainWindow : Window
         }
         finally
         {
-            _radarStopping = false;
-            UpdateRadarControls();
+            try
+            {
+                if (_radarProbe is { } probe)
+                {
+                    _radarProbe = null;
+                    await probe.DisposeAsync();
+                }
+            }
+            finally
+            {
+                _radarStopping = false;
+                UpdateRadarControls();
+            }
         }
     }
 
@@ -2620,9 +2648,10 @@ public sealed class MainWindow : Window
     }
 
     private async Task PrepareBridgeAsync(Client3PreResumeSession? pendingPrivate = null,
-        ControllerAutoSelection? prelaunchController = null)
+        ControllerAutoSelection? prelaunchController = null, bool launchBinding = false,
+        IReadOnlyCollection<int>? adoptedLocalClients = null)
     {
-        if ((_busy && pendingPrivate is null) || _bridge is not null ||
+        if ((_busy && pendingPrivate is null && !launchBinding) || _bridge is not null ||
             _selectedTopology is null || !OperatingSystem.IsWindows())
         {
             _pairingStatus.Text = "手柄桥接需要 Windows、已选布局与空闲桥接会话。";
@@ -2641,18 +2670,28 @@ public sealed class MainWindow : Window
             await PrepareHybridBridgeAsync(adoptExistingPrivate: pendingPrivate is not null);
             return;
         }
-        var slots = _selectedTopology.Slots.Where(slot => slot.Client != 3)
+        var processLocal = _selectedTopology.Id is "4-balanced" or "6-balanced";
+        var slots = _selectedTopology.Slots.Where(slot => processLocal || slot.Client != 3)
             .Select(slot => slot.RuntimePad).ToArray();
-        var useWgi = slots.Length == 4;
+        var useWgi = !processLocal && slots.Length == 4;
         PrivateClient3Plan? privatePlan = null;
-        if (_selectedTopology.ClientCount == 3 &&
+        ProcessLocalBridgePlan? localPlan = null;
+        if (processLocal && !ProcessLocalBridgePlan.TryCreate(_selectedTopology,
+                _launchedClients, adoptedLocalClients ?? (pendingPrivate is null ? [] : [3]),
+                out localPlan))
+        {
+            _pairingStatus.Text = "请先核对全部游戏窗口和各客户端的进程身份。";
+            return;
+        }
+        if (!processLocal && _selectedTopology.ClientCount == 3 &&
             !PrivateClient3Plan.TryCreate(_selectedTopology, _launchedClients, out privatePlan))
         {
             _pairingStatus.Text = "请先启动或绑定三个游戏窗口，核对第三客户端的进程与窗口身份。";
             return;
         }
-        if (slots.Length is < 1 or > 4 || slots.Any(slot => slot is < 1 or > 4) ||
-            (slots.Length == 4 && !useWgi))
+        if (slots.Length < 1 || slots.Length > (processLocal ? 6 : 4) ||
+            slots.Any(slot => slot < 1 || slot > (processLocal ? 6 : 4)) ||
+            (slots.Length == 4 && !useWgi && !processLocal))
         {
             _pairingStatus.Text = "当前布局或实体手柄隔离条件不满足桥接要求。";
             return;
@@ -2679,12 +2718,13 @@ public sealed class MainWindow : Window
                 selected.PhysicalIndex ?? 0, selected.Device, gameExecutables,
                 _rightStickFollowerOverride.IsChecked == true,
                 _selectedTopology.Id is "2-split" or "3-three-singles" && _autoFlask.IsChecked == true,
-                useWgi, privatePlan, lastFocusedLeads: _lastFocusedLeads.IsChecked == true,
+                selected.UseWgi, privatePlan, lastFocusedLeads: _lastFocusedLeads.IsChecked == true,
                 menuGuardEnabled: _menuGuard.IsChecked == true, followerMirror: _followerMirror,
-                adoptExistingPrivate: pendingPrivate is not null,
+                adoptExistingPrivate: !processLocal && pendingPrivate is not null,
                 engageDodgeEnabled: _rightStickFollowerOverride.IsChecked == true &&
                     _engageDodge.IsChecked == true,
-                engageDodgeBinding: (string)_engageDodgeBinding.SelectedItem!);
+                engageDodgeBinding: (string)_engageDodgeBinding.SelectedItem!,
+                processLocalPlan: localPlan);
             ActivateBridge(session, _selectedTopology);
         }
         catch (Exception error)
@@ -3377,7 +3417,7 @@ public sealed class MainWindow : Window
         var radarStartedForFollow = false;
         if (enableExperimentalWarp && _radar is null)
         {
-            StartRadar();
+            await StartRadarAsync();
             if (_radar is null)
             {
                 _followStatus.Text = $"实验性跨区追赶需要雷达采样：{_radarStatus.Text}";
@@ -3506,13 +3546,6 @@ public sealed class MainWindow : Window
             _followStatus.Text = "独立探针已退出；跟随者仍在等待位置，自动方向已停止。";
             return;
         }
-        if (_follow?.HasProbeReadFailure == true && frame.PadCommands.Count > 0 &&
-            frame.PadCommands.All(command => command.Status == "waiting") &&
-            frame.PadCommands.Any(command => command.Reason == "missing position"))
-        {
-            _followStatus.Text = "独立探针无法读取至少一个客户端；跟随者仍在等待位置，自动方向已停止。";
-            return;
-        }
         if (_follow?.HasUnknownProbeBuild == true && frame.PadCommands.Count > 0 &&
             frame.PadCommands.All(command => command.Status == "waiting") &&
             frame.PadCommands.Any(command => command.Reason == "missing position"))
@@ -3547,7 +3580,7 @@ public sealed class MainWindow : Window
             ("holding", "Close-range mirror") => "近距离镜像方向已输出；游戏内移动效果待验证。",
             ("holding", "Mirrored dodge / sprint") => "镜像闪避／冲刺方向已输出；游戏内效果待验证。",
             ("holding", _) => "跟随者已停靠，自动方向已停止。",
-            ("waiting", "missing position") => "缺少角色位置样本；请检查独立探针或传感器与进程绑定。自动方向已停止。",
+            ("waiting", "missing position") => "没有收到角色位置；自动移动已停止。",
             ("waiting", "different or unknown instance") => "两端尚无可用的同一区域实例证据；自动方向已停止。",
             ("waiting", "stale position") => "角色位置样本已过期；自动方向已停止。",
             ("waiting", "dead follower") => "传感器报告跟随角色生命值为零；自动与右摇杆方向已停止。",
@@ -3682,6 +3715,13 @@ public sealed class MainWindow : Window
             : "游戏已打开；跟随会话已启动，状态见下方。";
     }
 
+    private static bool IsStandaloneGamePath(string? path)
+    {
+        var name = Path.GetFileNameWithoutExtension(path?.Trim());
+        return string.Equals(name, "PathOfExile", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(name, "PathOfExile_x64", StringComparison.OrdinalIgnoreCase);
+    }
+
     private async Task RunLauncherAsync(ClientAction action)
     {
         if (HybridSelected && _selectedTopology is not null &&
@@ -3693,7 +3733,8 @@ public sealed class MainWindow : Window
         }
         var reusePreparedBridge = action == ClientAction.Start && _bridge is not null &&
             !_pairingHasStarted && _launchedClients.Count == 0 &&
-            _selectedTopology?.ClientCount is 1 or 2;
+            _selectedTopology?.ClientCount is 1 or 2 &&
+            _selectedTopology?.Id is not "4-balanced";
         if (_busy || _pairingHasStarted || (_bridge is not null && !reusePreparedBridge))
         {
             _status.Text = "请先停止手柄桥接，再重新检查、启动或绑定游戏窗口。";
@@ -3723,13 +3764,28 @@ public sealed class MainWindow : Window
             _status.Text = "请先选择人数与角色分布。";
             return;
         }
+        var processLocalTopology = !HybridSelected &&
+            _selectedTopology.Id is ("4-balanced" or "6-balanced");
+        var localPreResumeClients = action == ClientAction.Start && processLocalTopology
+            ? Enumerable.Range(1, _selectedTopology.ClientCount)
+                .Where(client => string.IsNullOrWhiteSpace(_uris[client - 1].Text) &&
+                    IsStandaloneGamePath(_paths[client - 1].Text))
+                .ToArray()
+            : [];
         var client3Name = _selectedTopology.ClientCount == 3
             ? Path.GetFileNameWithoutExtension(_paths[2].Text?.Trim()) : "";
         var prepareClient3BeforeResume = action == ClientAction.Start &&
+            !processLocalTopology &&
             _selectedTopology.ClientCount == 3 && string.IsNullOrWhiteSpace(_uris[2].Text) &&
             (string.Equals(client3Name, "PathOfExile", StringComparison.OrdinalIgnoreCase) ||
              string.Equals(client3Name, "PathOfExile_x64", StringComparison.OrdinalIgnoreCase));
-        if (prepareClient3BeforeResume)
+        if (localPreResumeClients.Length > 0)
+        {
+            startInfo.RedirectStandardInput = true;
+            startInfo.ArgumentList.Add("-pre-resume-clients");
+            startInfo.ArgumentList.Add(string.Join(',', localPreResumeClients));
+        }
+        else if (prepareClient3BeforeResume)
         {
             startInfo.RedirectStandardInput = true;
             startInfo.ArgumentList.Add("-pre-resume-client3");
@@ -3783,6 +3839,7 @@ public sealed class MainWindow : Window
         };
         BridgeSession? prelaunchBridge = null;
         Client3PreResumeSession? pendingPrivate = null;
+        var pendingLocals = new List<PrivateClientPreResumeSession>();
         ControllerAutoSelection? selectedController = null;
         var startRadarAfterBinding = false;
         try
@@ -3831,7 +3888,9 @@ public sealed class MainWindow : Window
                     _status.Text = "找不到 PartyPilot.Bridge.exe，无法完成启动前检查；游戏尚未启动。";
                     return;
                 }
-                var useWgi = _selectedTopology.Slots.Count(slot => slot.Client != 3) == 4;
+                var processLocal = _selectedTopology.Id is "4-balanced" or "6-balanced";
+                var useWgi = !processLocal &&
+                    _selectedTopology.Slots.Count(slot => slot.Client != 3) == 4;
                 var gameExecutables = Enumerable.Range(0, _selectedTopology.ClientCount)
                     .Select(index => _paths[index].Text?.Trim() ?? string.Empty).ToArray();
                 if (_bridge is not null && (!reusePreparedBridge || !_bridge.IsRunning))
@@ -3844,7 +3903,7 @@ public sealed class MainWindow : Window
                     return;
                 }
                 selectedController = selected;
-                if (_selectedTopology.ClientCount <= 2)
+                if (_selectedTopology.ClientCount <= 2 && !processLocal)
                 {
                     if (!_leadershipPreferenceReady || _lastFocusedLeads.IsChecked is not bool)
                     {
@@ -3862,7 +3921,7 @@ public sealed class MainWindow : Window
                             selected.Device, gameExecutables,
                             _rightStickFollowerOverride.IsChecked == true,
                             _selectedTopology.Id is "2-split" or "3-three-singles" && _autoFlask.IsChecked == true,
-                            useWgi, lastFocusedLeads: _lastFocusedLeads.IsChecked == true,
+                            selected.UseWgi, lastFocusedLeads: _lastFocusedLeads.IsChecked == true,
                             menuGuardEnabled: _menuGuard.IsChecked == true, followerMirror: _followerMirror,
                             engageDodgeEnabled: _rightStickFollowerOverride.IsChecked == true &&
                                 _engageDodge.IsChecked == true,
@@ -3897,7 +3956,50 @@ public sealed class MainWindow : Window
             using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("启动器未能启动");
             var error = process.StandardError.ReadToEndAsync();
             Task<string> output;
-            if (prepareClient3BeforeResume)
+            if (localPreResumeClients.Length > 0)
+            {
+                try
+                {
+                    var privateBridge = BridgeSession.FindExecutable() ??
+                        throw new InvalidOperationException("找不到客户端私有输入桥接程序。");
+                    foreach (var client in localPreResumeClients)
+                    {
+                        var notice = await process.StandardOutput.ReadLineAsync()
+                            .WaitAsync(TimeSpan.FromMinutes(3));
+                        var expectedGame = _paths[client - 1].Text?.Trim() ?? "";
+                        if (!PrivateClientPreResumeSession.TryReadLauncherNotice(
+                                notice, client, expectedGame, out var pid))
+                            throw new InvalidOperationException($"启动器没有确认客户端 {client} 的暂停进程身份。");
+                        var slots = _selectedTopology.Slots
+                            .Where(slot => slot.Client == client)
+                            .Select(slot => slot.RuntimePad).ToArray();
+                        var privateSession = await PrivateClientPreResumeSession.StartAsync(
+                            privateBridge, client, pid, expectedGame, slots);
+                        pendingLocals.Add(privateSession);
+                        await process.StandardInput.WriteLineAsync($"resume {client} {pid}");
+                        await process.StandardInput.FlushAsync();
+                        await privateSession.ConfirmResumeAsync();
+                    }
+                    output = process.StandardOutput.ReadToEndAsync();
+                }
+                catch (Exception preparationError)
+                {
+                    try { process.StandardInput.Close(); } catch (InvalidOperationException) { }
+                    try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(50)); }
+                    catch (TimeoutException) { }
+                    if (process.HasExited)
+                    {
+                        var detail = (await process.StandardOutput.ReadToEndAsync()).Trim();
+                        var diagnostic = (await error).Trim();
+                        if (detail.Length > 500) detail = detail[..500];
+                        if (diagnostic.Length > 500) diagnostic = diagnostic[..500];
+                        throw new InvalidOperationException(
+                            $"{preparationError.Message} {detail} {diagnostic}".Trim(), preparationError);
+                    }
+                    throw;
+                }
+            }
+            else if (prepareClient3BeforeResume)
             {
                 try
                 {
@@ -3992,11 +4094,14 @@ public sealed class MainWindow : Window
                         return;
                     }
                 }
-                else if (pendingPrivate is not null)
+                else if (pendingPrivate is not null ||
+                         _selectedTopology.Id is "4-balanced" or "6-balanced")
                 {
-                    await PrepareBridgeAsync(pendingPrivate, selectedController);
+                    await PrepareBridgeAsync(pendingPrivate, selectedController,
+                        launchBinding: true,
+                        adoptedLocalClients: pendingLocals.Select(session => session.Client).ToArray());
                     if (_bridge is null)
-                        throw new InvalidOperationException("第三客户端私有手柄未能接入主桥接：" +
+                        throw new InvalidOperationException("各客户端输入未能接入主桥接：" +
                             _pairingStatus.Text);
                 }
                 if (pendingPrivate is not null)
@@ -4005,6 +4110,11 @@ public sealed class MainWindow : Window
                     await pendingPrivate.DisposeAsync();
                     pendingPrivate = null;
                 }
+                foreach (var privateSession in pendingLocals)
+                    await privateSession.HandoffAsync();
+                foreach (var privateSession in pendingLocals)
+                    await privateSession.DisposeAsync();
+                pendingLocals.Clear();
                 var preparation = await PrepareAutoLoginsAfterBindingAsync(_selectedTopology,
                     _launchedClients.ToArray());
                 if (!string.IsNullOrEmpty(preparation))
@@ -4019,7 +4129,8 @@ public sealed class MainWindow : Window
                 await StopBridgeAsync();
             else if (prelaunchBridge?.IsRunning == true)
                 await prelaunchBridge.DisposeAsync();
-            else if (pendingPrivate is not null && _bridge is not null)
+            else if ((pendingPrivate is not null || pendingLocals.Count > 0) &&
+                     _bridge is not null)
                 await StopBridgeAsync();
             _status.Text = $"启动或绑定失败：{exception.Message}";
         }
@@ -4028,6 +4139,8 @@ public sealed class MainWindow : Window
             try
             {
                 if (pendingPrivate is not null) await pendingPrivate.DisposeAsync();
+                foreach (var privateSession in pendingLocals)
+                    await privateSession.DisposeAsync();
                 if (action == ClientAction.Start && _bridge is null)
                     await ReleaseControllerIsolationAsync();
             }
@@ -4035,7 +4148,7 @@ public sealed class MainWindow : Window
             {
                 _busy = false;
                 UpdateClientRows();
-                if (startRadarAfterBinding) StartRadar();
+                if (startRadarAfterBinding) await StartRadarAsync();
             }
         }
     }
